@@ -2,7 +2,7 @@
 
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL;
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/aging`;
 
 export const getAgingReport = async (params = {}) => {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { createTransaction } from '../services/inventoryService';
+import { t } from '../i18n/i18n';
 
 const TransactionForm = ({ products, onAdd }) => {
   const [form, setForm] = useState({
@@ -15,7 +16,7 @@ const TransactionForm = ({ products, onAdd }) => {
     const quantity = parseInt(form.quantity);
 
     if (!form.productId || isNaN(quantity) || quantity <= 0) {
-      alert('❌ Please select a product and enter a valid quantity (> 0).');
+      alert(t('inventory.invalidQuantity'));
       return;
     }
 
@@ -25,23 +26,23 @@ const TransactionForm = ({ products, onAdd }) => {
       if (onAdd) onAdd();
     } catch (error) {
       console.error('❌ Transaction error:', error);
-      alert('Something went wrong: ' + (error.message || 'Please try again.'));
+      alert(t('alerts.somethingWrong') + ': ' + (error.message || t('alerts.tryAgain')));
     }
   };
 
   return (
     <div className="mt-6 p-4 bg-white rounded shadow">
-      <h3 className="text-lg font-semibold mb-3">➕ New Stock Entry (In / Out)</h3>
+      <h3 className="text-lg font-semibold mb-3">➕ {t('inventory.newStockEntry')}</h3>
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div>
-          <label className="block mb-1">Product:</label>
+          <label className="block mb-1">{t('product')}:</label>
           <select
             value={form.productId}
             onChange={(e) => setForm({ ...form, productId: e.target.value })}
             className="border rounded p-2 w-full"
             required
           >
-            <option value="">Select Product</option>
+            <option value="">{t('inventory.selectProduct')}</option>
             {Array.isArray(products) &&
               products.map((p) => (
                 <option key={p._id} value={p._id}>
@@ -52,19 +53,19 @@ const TransactionForm = ({ products, onAdd }) => {
         </div>
 
         <div>
-          <label className="block mb-1">Type:</label>
+          <label className="block mb-1">{t('type')}:</label>
           <select
             value={form.type}
             onChange={(e) => setForm({ ...form, type: e.target.value })}
             className="border rounded p-2 w-full"
           >
-            <option value="IN">In</option>
-            <option value="OUT">Out</option>
+            <option value="IN">{t('inventory.stockIn')}</option>
+            <option value="OUT">{t('inventory.stockOut')}</option>
           </select>
         </div>
 
         <div>
-          <label className="block mb-1">Quantity:</label>
+          <label className="block mb-1">{t('quantity')}:</label>
           <input
             type="number"
             min="1"
@@ -76,10 +77,10 @@ const TransactionForm = ({ products, onAdd }) => {
         </div>
 
         <div className="md:col-span-2">
-          <label className="block mb-1">Note (optional):</label>
+          <label className="block mb-1">{t('note')}:</label>
           <input
             type="text"
-            placeholder="e.g., Opening stock, damage, etc."
+            placeholder={t('inventory.noteExample')}
             value={form.note}
             onChange={(e) => setForm({ ...form, note: e.target.value })}
             className="border rounded p-2 w-full"
@@ -91,7 +92,7 @@ const TransactionForm = ({ products, onAdd }) => {
             type="submit"
             className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
           >
-            Save
+            {t('save')}
           </button>
         </div>
       </form>

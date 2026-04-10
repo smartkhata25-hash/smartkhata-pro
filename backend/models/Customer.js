@@ -22,11 +22,21 @@ const customerSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    creditLimit: {
+      type: Number,
+      default: 0,
+    },
+
     type: {
       type: String,
       enum: ["regular", "vip", "blocked", "supplier"],
       default: "regular",
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
     openingBalance: {
       type: Number,
       default: 0,
@@ -44,7 +54,7 @@ const customerSchema = new mongoose.Schema(
   },
   {
     timestamps: true, // ✅ Automatically add createdAt & updatedAt
-  }
+  },
 );
 
 module.exports = mongoose.model("Customer", customerSchema); // forcefully register

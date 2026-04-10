@@ -22,13 +22,14 @@ const payBillSchema = new mongoose.Schema(
     },
     paymentType: {
       type: String,
-      enum: ["Cash", "Cheque", "Bank"],
+      enum: ["cash", "online", "cheque"],
       required: true,
     },
+
     account: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: false,
     },
     description: {
       type: String,
@@ -55,7 +56,7 @@ const payBillSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // ✅ (Optional) Add index for text search

@@ -21,42 +21,49 @@ router.delete("/:id", authMiddleware, journalEntryController.deleteEntry);
 router.get(
   "/trial-balance",
   authMiddleware,
-  journalEntryController.getTrialBalance
+  journalEntryController.getTrialBalance,
 );
 
 // ✅ General Ledger Route
 router.get(
   "/ledger/:accountId",
   authMiddleware,
-  journalEntryController.getLedgerByAccount
+  journalEntryController.getLedgerByAccount,
 );
 
 // ✅ Income Statement Route
 router.get(
   "/income-statement",
   authMiddleware,
-  incomeStatementController.getIncomeStatement
+  incomeStatementController.getIncomeStatement,
+);
+
+// ✅ Month vs Month Income Statement Route
+router.get(
+  "/income-statement/month-vs-month",
+  authMiddleware,
+  incomeStatementController.getMonthVsMonthIncome,
 );
 
 // ✅ Dashboard Summary Route
 router.get(
   "/dashboard-summary",
   authMiddleware,
-  dashboardController.getDashboardSummary
+  dashboardController.getDashboardSummary,
 );
 
 // ✅ Monthly Sales Route
 router.get(
   "/dashboard-monthly-sales",
   authMiddleware,
-  dashboardController.getMonthlySales
+  dashboardController.getMonthlySales,
 );
 
 // ✅ Cash Flow Chart Route (corrected to Journal Controller)
 router.get(
   "/dashboard-monthly-cashflow",
   authMiddleware,
-  journalEntryController.getMonthlyCashFlow
+  journalEntryController.getMonthlyCashFlow,
 );
 
 module.exports = router;

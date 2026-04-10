@@ -10,11 +10,13 @@ import { getAccounts } from '../services/accountService';
 import { fetchCustomers, fetchCustomerLedger } from '../services/customerService';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
-import jsPDF from 'jspdf';
+import { t } from '../i18n/i18n';
 
 const ReceivePaymentForm = () => {
   const [customers, setCustomers] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [customerName, setCustomerName] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [customerLedger, setCustomerLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -30,9 +32,23 @@ const ReceivePaymentForm = () => {
     description: '',
     attachment: null,
   });
+  const [printSize, setPrintSize] = useState(localStorage.getItem('receivePrintSize') || 'narrow');
+  const [paymentEntries, setPaymentEntries] = useState([
+    { account: '', amount: '', paymentType: 'Cash' },
+  ]);
 
   const navigate = useNavigate();
   const { id } = useParams();
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -40,18 +56,57 @@ const ReceivePaymentForm = () => {
         const cData = await fetchCustomers();
 
         const aData = await getAccounts();
-        const filteredAccounts = aData.filter(
-          (acc) => acc.category === 'cash' || acc.category === 'bank'
+
+        // ✅ Sirf Receive Payment ke liye valid accounts
+        const paymentAccounts = aData.filter(
+          (acc) =>
+            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
+            !acc.name?.toLowerCase().startsWith('customer:')
         );
 
-        console.log('Filtered Cash/Bank Accounts:', filteredAccounts); // ✅ بہتر جگہ پر log
-
         setCustomers(cData);
-        setAccounts(filteredAccounts);
+        setAccounts(paymentAccounts);
+
+        // ✅🔥 Default HANDCASH select
+        const handCashAccount = paymentAccounts.find(
+          (acc) => acc.name?.toLowerCase() === 'handcash'
+        );
+
+        if (handCashAccount) {
+          setPaymentEntries([
+            {
+              account: handCashAccount._id,
+              amount: '',
+              paymentType: 'Cash',
+            },
+          ]);
+        }
 
         if (id) {
           const existing = await getReceivePaymentById(id);
-          setFormData({ ...existing, attachment: null });
+
+          setFormData({
+            customer: existing.customer,
+            date: existing.date,
+            time: existing.time,
+            paymentType: existing.paymentType || 'Cash',
+            description: existing.description || '',
+            attachment: null,
+          });
+
+          // ✅ IMPORTANT: customer name set for search input
+          setCustomerName(cData.find((c) => c._id === existing.customer)?.name || '');
+
+          setPaymentEntries(
+            existing.paymentEntries && existing.paymentEntries.length > 0
+              ? existing.paymentEntries.map((p) => ({
+                  account: p.account || '',
+                  amount: p.amount || '',
+                  paymentType: p.paymentType || existing.paymentType || 'Cash',
+                }))
+              : [{ account: '', amount: '', paymentType: existing.paymentType || 'Cash' }]
+          );
+
           loadLedger(existing.customer);
         }
       } catch (err) {
@@ -79,11 +134,6 @@ const ReceivePaymentForm = () => {
     }));
   };
 
-  const handleCustomerChange = async (e) => {
-    const customerId = e.target.value;
-    setFormData((prev) => ({ ...prev, customer: customerId }));
-    loadLedger(customerId);
-  };
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     setFormData((prev) => ({ ...prev, attachment: file }));
@@ -101,114 +151,146 @@ const ReceivePaymentForm = () => {
       description: '',
       attachment: null,
     });
+
+    setCustomerName('');
+
+    const handCash = accounts.find((acc) => acc.name?.toLowerCase() === 'handcash');
+
+    setPaymentEntries([
+      {
+        account: handCash?._id || '',
+        amount: '',
+        paymentType: 'Cash',
+      },
+    ]);
+
     setCustomerLedger([]);
+
     setShowPreview(false);
   };
+
+  const handleRevert = async () => {
+    if (!id) {
+      resetForm();
+      return;
+    }
+
+    try {
+      const existing = await getReceivePaymentById(id);
+
+      setFormData({
+        customer: existing.customer,
+        date: existing.date,
+        time: existing.time,
+        paymentType: existing.paymentType || 'Cash',
+        description: existing.description || '',
+        attachment: null,
+      });
+
+      setPaymentEntries(
+        existing.paymentEntries && existing.paymentEntries.length > 0
+          ? existing.paymentEntries.map((p) => ({
+              account: p.account || '',
+              amount: p.amount || '',
+              paymentType: p.paymentType || existing.paymentType || 'Cash',
+            }))
+          : [{ account: '', amount: '', paymentType: existing.paymentType || 'Cash' }]
+      );
+
+      loadLedger(existing.customer);
+    } catch (err) {
+      console.error('Revert error:', err);
+    }
+  };
   const handlePrint = () => {
-    const docContent = `
-      <div>
-        <h2 style="text-align:center;">Receive Payment Invoice</h2>
-        <p><strong>Customer:</strong> ${
-          customers.find((c) => c._id === formData.customer)?.name || '-'
-        }</p>
-        <p><strong>Date:</strong> ${formData.date} ${formData.time}</p>
-        <p><strong>Amount:</strong> ${formData.amount}</p>
-        <p><strong>Payment Type:</strong> ${formData.paymentType}</p>
-        <p><strong>Description:</strong> ${formData.description || '-'}</p>
-      </div>
-    `;
-    const win = window.open('', '', 'width=800,height=600');
-    win.document.write(`<html><head><title>Print</title></head><body>${docContent}</body></html>`);
-    win.document.close();
-    win.print();
+    if (id) {
+      window.open(
+        `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/html?size=${printSize}`,
+        '_blank'
+      );
+      return;
+    }
+
+    const previewData = {
+      ...formData,
+
+      customer: formData.customer,
+
+      customerName: customers.find((c) => c._id === formData.customer)?.name || '',
+
+      customerPhone: customers.find((c) => c._id === formData.customer)?.phone || '',
+
+      paymentEntries: paymentEntries.map((p) => ({
+        ...p,
+        accountName: accounts.find((a) => a._id === p.account)?.name || '',
+      })),
+    };
+    const encoded = encodeURIComponent(JSON.stringify(previewData));
+
+    window.open(
+      `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/preview/html?size=${printSize}&data=${encoded}`,
+      '_blank'
+    );
   };
 
   const handleExportPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text('Receive Payment Invoice', 70, 15);
+    if (id) {
+      window.location.href = `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/pdf?size=${printSize}`;
+      return;
+    }
 
-    doc.setFontSize(12);
-    doc.text(
-      `Customer: ${customers.find((c) => c._id === formData.customer)?.name || '-'}`,
-      14,
-      30
-    );
-    doc.text(`Date: ${formData.date} ${formData.time}`, 14, 38);
-    doc.text(`Amount: ${formData.amount}`, 14, 46);
-    doc.text(`Payment Type: ${formData.paymentType}`, 14, 54);
-    doc.text(`Description: ${formData.description || '-'}`, 14, 62);
+    const previewData = {
+      ...formData,
 
-    doc.save('receive-payment-invoice.pdf');
+      customerName: customers.find((c) => c._id === formData.customer)?.name || '',
+
+      customerPhone: customers.find((c) => c._id === formData.customer)?.phone || '',
+
+      paymentEntries: paymentEntries.map((p) => ({
+        ...p,
+        accountName: accounts.find((a) => a._id === p.account)?.name || '',
+      })),
+    };
+
+    const encoded = encodeURIComponent(JSON.stringify(previewData));
+
+    window.location.href = `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/preview/pdf?size=${printSize}&data=${encoded}`;
   };
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
-    console.log('Account:', formData.account);
-    console.log('Customer:', formData.customer);
 
-    if (!formData.customer || !parseFloat(formData.amount) || !formData.account) {
-      alert('Please fill all required fields.');
+    if (!formData.customer || paymentEntries.length === 0) {
+      alert(t('alerts.addAtLeastOnePayment'));
       return;
     }
 
-    // ⚠️ Advance Payment Warning
     const totalDebit = customerLedger.reduce((sum, e) => sum + (e.debit || 0), 0);
     const totalCredit = customerLedger.reduce((sum, e) => sum + (e.credit || 0), 0);
     const currentBalance = totalDebit - totalCredit;
 
-    if (currentBalance <= 0 && parseFloat(formData.amount) > 0) {
+    const totalAmount = paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    if (currentBalance <= 0 && totalAmount > 0) {
       const ok = window.confirm(
         '⚠️ This customer has no pending balance. This payment will be recorded as advance. Do you want to continue?'
       );
       if (!ok) return;
     }
 
-    const journalEntries = [];
-
-    if (parseFloat(formData.amount) > 0 && formData.account) {
-      const customerObj = customers.find((c) => c._id === formData.customer);
-      const customerAccountId = customerObj?.account;
-
-      console.log('Selected customer object:', customerObj);
-      console.log("Customer's linked accountId:", customerAccountId);
-
-      if (!customerAccountId) {
-        alert('❌ This customer does not have a linked account.');
-        return;
-      }
-
-      journalEntries.push({
-        type: 'debit',
-        account: customerAccountId,
-        amount: parseFloat(formData.amount),
-        narration: `Payment received from customer`,
-      });
-
-      journalEntries.push({
-        type: 'credit',
-        account: formData.account,
-        amount: parseFloat(formData.amount),
-        narration: `Received in ${formData.paymentType}`,
-      });
-    }
-
     const data = new FormData();
     Object.entries(formData).forEach(([key, value]) => {
       if (value !== null) data.append(key, value);
     });
-
-    data.append('createJournal', 'true');
-    data.append('journalEntries', JSON.stringify(journalEntries));
+    data.append('paymentEntries', JSON.stringify(paymentEntries));
 
     try {
       setLoading(true);
       if (id) {
         await updateReceivePayment(id, data);
-        alert('Payment updated successfully.');
+        alert(t('alerts.paymentUpdated'));
       } else {
         await createReceivePayment(data);
-        alert('Payment saved successfully.');
       }
 
       if (type === 'close') {
@@ -217,235 +299,380 @@ const ReceivePaymentForm = () => {
         resetForm();
       }
     } catch (err) {
-      alert('Error: ' + err.message);
+      alert(err.message);
     } finally {
       setLoading(false);
     }
   };
+  const totalDebit = customerLedger.reduce((sum, e) => sum + (e.debit || 0), 0);
+  const totalCredit = customerLedger.reduce((sum, e) => sum + (e.credit || 0), 0);
+
+  const closingBalance =
+    customerLedger.length > 0 ? customerLedger[customerLedger.length - 1].runningBalance || 0 : 0;
 
   return (
-    <form
-      onSubmit={(e) => handleSubmit(e, 'close')}
-      className="p-6 bg-white shadow-md rounded-lg grid grid-cols-1 md:grid-cols-2 gap-4"
-    >
-      <h2 className="text-2xl font-bold md:col-span-2">{id ? 'Edit Payment' : 'New Payment'}</h2>
-
-      <div>
-        <label>Customer:</label>
-        <select
-          name="customer"
-          value={formData.customer}
-          onChange={handleCustomerChange}
-          className="w-full border rounded p-2"
-          required
+    <div className="p-3 md:p-6 bg-gray-50 h-full overflow-auto md:overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* LEFT SIDE - FORM */}
+        <form
+          onSubmit={(e) => handleSubmit(e, 'close')}
+          className="lg:col-span-2 bg-gradient-to-br from-white via-gray-50 to-gray-100 shadow-xl rounded-xl md:rounded-2xl p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-3 border border-gray-200 content-start"
         >
-          <option value="">Select Customer</option>
-          {customers.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          <h2 className="text-xl font-bold md:col-span-2 mb-2">
+            {id ? t('payment.edit') : t('payment.new')}
+          </h2>
 
-      <div>
-        <label>Account:</label>
-        <select
-          name="account"
-          value={formData.account}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-          required
-        >
-          <option value="">Select Account</option>
-          {accounts.map((a) => (
-            <option key={a._id} value={a._id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          {/* CUSTOMER (SEARCH + SUGGESTIONS) */}
+          <div style={{ position: 'relative' }}>
+            <label className="text-xs font-semibold text-gray-600 mb-1 block">
+              {t('customer')}
+            </label>
 
-      <div>
-        <label>Date:</label>
-        <input
-          type="date"
-          name="date"
-          value={formData.date}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        />
-      </div>
+            <input
+              placeholder={t('customer.search')}
+              value={customerName}
+              onChange={(e) => {
+                setCustomerName(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+            />
 
-      <div>
-        <label>Time:</label>
-        <input
-          type="time"
-          name="time"
-          value={formData.time}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        />
-      </div>
+            {showSuggestions && customerName && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 38,
+                  left: 0,
+                  right: 0,
+                  background: '#ffffff',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  zIndex: 50,
+                }}
+              >
+                {customers
+                  .filter((c) => c.name.toLowerCase().includes(customerName.toLowerCase()))
+                  .slice(0, 10)
+                  .map((c) => (
+                    <div
+                      key={c._id}
+                      onClick={() => {
+                        setCustomerName(c.name);
+                        setFormData((prev) => ({ ...prev, customer: c._id }));
+                        setShowSuggestions(false);
+                        loadLedger(c._id);
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #f1f5f9',
+                      }}
+                    >
+                      {c.name}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+          {/* DATE + TIME (MOBILE SAME ROW) */}
+          <div className="grid grid-cols-2 gap-2 md:contents">
+            {/* DATE */}
+            <div>
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">{t('date')}</label>
+              <input
+                type="date"
+                name="date"
+                value={formData.date}
+                onChange={handleChange}
+                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
 
-      <div>
-        <label>Amount:</label>
-        <input
-          type="number"
-          name="amount"
-          value={formData.amount}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-          required
-        />
-      </div>
+            {/* TIME */}
+            <div>
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">{t('time')}</label>
+              <input
+                type="time"
+                name="time"
+                value={formData.time}
+                onChange={handleChange}
+                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          </div>
+          {/* ATTACHMENT */}
+          <div>
+            <label className="text-xs font-semibold text-gray-600 mb-1 block">
+              {t('attachment')}
+            </label>
+            <input
+              type="file"
+              onChange={handleFileChange}
+              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm"
+            />
+          </div>
 
-      <div>
-        <label>Payment Type:</label>
-        <select
-          name="paymentType"
-          value={formData.paymentType}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-        >
-          <option value="cash">Cash</option>
-          <option value="cheque">Cheque</option>
-          <option value="bank">Bank</option>
-        </select>
-      </div>
+          {/* DESCRIPTION */}
+          {formData.attachment && (
+            <div className="md:col-span-2 flex items-center justify-between bg-gray-100 px-3 py-2 rounded-xl">
+              <span
+                onClick={() => setShowPreview(!showPreview)}
+                className="text-blue-600 cursor-pointer text-sm"
+              >
+                {t('preview')}
+              </span>
+              <span
+                onClick={() => {
+                  if (window.confirm(t('alerts.removeAttachment'))) {
+                    setFormData((prev) => ({ ...prev, attachment: null }));
+                    setShowPreview(false);
+                  }
+                }}
+                className="text-red-500 cursor-pointer"
+              >
+                ✕
+              </span>
+            </div>
+          )}
 
-      <div className="md:col-span-2">
-        <label>Description:</label>
-        <textarea
-          name="description"
-          value={formData.description}
-          onChange={handleChange}
-          className="w-full border rounded p-2"
-          rows="2"
-        />
-      </div>
+          {showPreview && formData.attachment && (
+            <div className="md:col-span-2">
+              <iframe
+                src={URL.createObjectURL(formData.attachment)}
+                title="Preview"
+                className="w-full h-64 border rounded-xl"
+              />
+            </div>
+          )}
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold text-gray-600 mb-1 block">
+              {t('description')}
+            </label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleChange}
+              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+              rows="2"
+            />
+          </div>
 
-      <div className="md:col-span-2">
-        <label>Attachment:</label>
-        <input type="file" onChange={handleFileChange} className="w-full border rounded p-2" />
-      </div>
+          {/* PAYMENTS */}
+          <div className="md:col-span-2">
+            <label className="text-sm font-semibold mb-2 block">{t('payment.payments')}</label>
 
-      {formData.attachment && (
-        <div className="md:col-span-2 flex items-center justify-between bg-gray-100 px-3 py-2 rounded">
-          <span
-            onClick={() => setShowPreview(!showPreview)}
-            className="text-blue-700 cursor-pointer underline"
-          >
-            Preview
-          </span>
-          <span
-            onClick={() => {
-              if (window.confirm('Are you sure you want to remove the attachment?')) {
-                setFormData((prev) => ({ ...prev, attachment: null }));
-                setShowPreview(false);
+            {paymentEntries.map((entry, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-12 gap-1 md:gap-2 items-center mb-1 md:mb-2"
+              >
+                <select
+                  className="col-span-5 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500"
+                  value={entry.account}
+                  onChange={(e) =>
+                    setPaymentEntries((prev) =>
+                      prev.map((item, i) =>
+                        i === index ? { ...item, account: e.target.value } : item
+                      )
+                    )
+                  }
+                  required
+                >
+                  <option value="">{t('expense.selectAccount')}</option>
+                  {accounts.map((a) => (
+                    <option key={a._id} value={a._id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm"
+                  value={entry.paymentType || formData.paymentType}
+                  onChange={(e) =>
+                    setPaymentEntries((prev) =>
+                      prev.map((item, i) =>
+                        i === index ? { ...item, paymentType: e.target.value } : item
+                      )
+                    )
+                  }
+                >
+                  <option>{t('payment.cash')}</option>
+                  <option>{t('payment.online')}</option>
+                  <option>{t('payment.cheque')}</option>
+                </select>
+
+                <input
+                  type="number"
+                  placeholder={t('amount')}
+                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm"
+                  value={entry.amount}
+                  onChange={(e) =>
+                    setPaymentEntries((prev) =>
+                      prev.map((item, i) =>
+                        i === index ? { ...item, amount: e.target.value } : item
+                      )
+                    )
+                  }
+                  required
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentEntries((prev) => prev.filter((_, i) => i !== index))}
+                  className="col-span-1 text-red-500 text-sm md:text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={() =>
+                setPaymentEntries((prev) => [
+                  ...prev,
+                  { account: '', amount: '', paymentType: formData.paymentType },
+                ])
               }
-            }}
-            className="text-red-600 font-bold cursor-pointer"
-          >
-            ✕
-          </span>
-        </div>
-      )}
+              className="text-blue-600 text-sm mt-1 font-medium hover:text-blue-800"
+            >
+              + {t('payment.addAnother')}
+            </button>
 
-      {showPreview && formData.attachment && (
-        <div className="md:col-span-2">
-          <iframe
-            src={URL.createObjectURL(formData.attachment)}
-            title="Preview"
-            className="w-full h-64 border rounded"
-          />
-        </div>
-      )}
-      {/* Action Buttons */}
-      <div className="md:col-span-2 flex flex-wrap justify-end items-center gap-3 mt-4">
-        <button
-          type="submit"
-          disabled={loading}
-          className={`bg-green-600 text-white px-4 py-2 rounded ${
-            loading ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-        >
-          {loading ? 'Saving...' : id ? 'Update & Close' : 'Save & Close'}
-        </button>
+            <div className="flex justify-end mt-4">
+              <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
+                <div className="flex justify-between font-semibold text-sm">
+                  <span>{t('total')}</span>
+                  <span>
+                    {paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        <button
-          type="button"
-          onClick={(e) => handleSubmit(e, 'new')}
-          disabled={loading}
-          className={`bg-blue-600 text-white px-4 py-2 rounded ${
-            loading ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-        >
-          {loading ? 'Saving...' : 'Save & New'}
-        </button>
-
-        <button
-          type="button"
-          onClick={resetForm}
-          className="bg-gray-400 text-white px-4 py-2 rounded"
-        >
-          Clear
-        </button>
-
-        {formData.customer && formData.amount && (
-          <>
+          {/* ACTION BUTTONS */}
+          <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
             <button
+              type="submit"
+              disabled={loading}
+              className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                loading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              {id ? t('updateClose') : t('saveClose')}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => handleSubmit(e, 'new')}
+              className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow"
+            >
+              {t('saveNew')}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRevert}
+              className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-3 py-1.5 rounded-xl shadow"
+            >
+              {id ? t('common.revert') : t('clear')}
+            </button>
+
+            <select
+              value={printSize}
+              onChange={(e) => {
+                setPrintSize(e.target.value);
+                localStorage.setItem('receivePrintSize', e.target.value);
+              }}
+              className="border border-gray-200 rounded-xl px-2 py-1 text-sm"
+            >
+              <option value="standard">A4</option>
+              <option value="narrow">A5</option>
+              <option value="thermal">Thermal</option>
+            </select>
+
+            <button
+              type="button"
               onClick={handlePrint}
-              type="button"
-              className="bg-gray-700 text-white px-4 py-2 rounded"
+              className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
             >
-              🖨 Print
+              🖨
             </button>
 
             <button
-              onClick={handleExportPDF}
               type="button"
-              className="bg-red-600 text-white px-4 py-2 rounded"
+              onClick={handleExportPDF}
+              className="bg-gradient-to-r from-red-500 to-red-700 text-white px-3 py-1.5 rounded-xl shadow"
             >
-              ⬇️ PDF
+              PDF
             </button>
-          </>
-        )}
-      </div>
+          </div>
+        </form>
 
-      {/* Ledger Table */}
-      {customerLedger.length > 0 && (
-        <div className="md:col-span-2 border-t pt-4" ref={printRef}>
-          <h3 className="text-lg font-semibold mb-2">Customer Ledger Preview</h3>
-          <table className="w-full text-sm border">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="border p-1">Date</th>
-                <th className="border p-1">Bill No</th>
-                <th className="border p-1">Description</th>
-                <th className="border p-1">Debit</th>
-                <th className="border p-1">Credit</th>
-                <th className="border p-1">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customerLedger.map((e, i) => (
-                <tr key={i}>
-                  <td className="border p-1">{new Date(e.date).toLocaleDateString()}</td>
-                  <td className="border p-1">{e.billNo || '-'}</td>
-                  <td className="border p-1">{e.description || '-'}</td>
-                  <td className="border p-1 text-right">{e.debit?.toFixed(2) || '0.00'}</td>
-                  <td className="border p-1 text-right">{e.credit?.toFixed(2) || '0.00'}</td>
-                  <td className="border p-1 text-right">
-                    {e.runningBalance?.toFixed(2) || '0.00'}
+        {/* RIGHT SIDE - LEDGER */}
+        {!isMobile && (
+          <div
+            ref={printRef}
+            className="lg:col-span-2 bg-white shadow-xl rounded-2xl p-4 h-[calc(100vh-120px)] overflow-y-auto"
+          >
+            <h3 className="text-lg font-semibold mb-3">{t('customer.ledgerPreview')}</h3>
+
+            <table className="w-full text-xs border rounded-xl overflow-hidden">
+              <thead className="sticky top-0 bg-gray-100 z-10">
+                <tr>
+                  <th className="p-2 border">{t('date')}</th>
+                  <th className="p-2 border">{t('billNo')}</th>
+                  <th className="p-2 border">{t('description')}</th>
+                  <th className="p-2 border">{t('debit')}</th>
+                  <th className="p-2 border">{t('credit')}</th>
+                  <th className="p-2 border">{t('balance')}</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {customerLedger.map((e, i) => (
+                  <tr key={i} className="hover:bg-blue-50 even:bg-gray-50 transition">
+                    <td className="p-2 border">{new Date(e.date).toLocaleDateString()}</td>
+                    <td className="p-2 border">{e.billNo || '-'}</td>
+                    <td className="p-2 border">{e.description || '-'}</td>
+                    <td className="p-2 border text-right font-medium text-green-700">
+                      {e.debit?.toFixed(2) || '0.00'}
+                    </td>
+                    <td className="p-2 border text-right font-medium text-red-600">
+                      {e.credit?.toFixed(2) || '0.00'}
+                    </td>
+                    <td className="p-2 border text-right font-bold text-blue-700">
+                      {e.runningBalance?.toFixed(2) || '0.00'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-blue-50 font-semibold">
+                  <td className="p-2 border" colSpan="3">
+                    Total
+                  </td>
+
+                  <td className="p-2 border text-right text-green-700">{totalDebit.toFixed(2)}</td>
+
+                  <td className="p-2 border text-right text-red-600">{totalCredit.toFixed(2)}</td>
+
+                  <td className="p-2 border text-right text-blue-700 font-bold">
+                    {closingBalance.toFixed(2)}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </form>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

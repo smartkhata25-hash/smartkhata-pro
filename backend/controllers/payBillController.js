@@ -3,14 +3,43 @@ const PayBill = require("../models/PayBill");
 const Supplier = require("../models/Supplier");
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { createPaymentEntry } = require("../utils/paymentService");
+
 const fs = require("fs");
 const path = require("path");
+const ALLOWED_PAYMENT_TYPES = ["cash", "online", "cheque"];
 
 // ✅ Create Pay Bill
 exports.createPayBill = async (req, res) => {
   try {
-    const { supplier, date, time, amount, paymentType, account, description } =
+  } catch (e) {
+    console.log("❌ paymentEntries JSON parse error", e);
+  }
+
+  try {
+    const { supplier, date, time, description, paymentType, paymentEntries } =
       req.body;
+    const normalizedPaymentType = paymentType?.toLowerCase();
+
+    const payments = JSON.parse(paymentEntries || "[]");
+    // ✅ Per-payment paymentType validation
+    for (const p of payments) {
+      if (!ALLOWED_PAYMENT_TYPES.includes(p.paymentType?.toLowerCase())) {
+        return res.status(400).json({
+          error: "Invalid payment type in payment entries",
+        });
+      }
+    }
+
+    const totalAmount = payments.reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0,
+    );
+
+    if (totalAmount <= 0) {
+      return res.status(400).json({ error: "Invalid payment amount" });
+    }
+
     const userId = req.user?.id || req.userId;
     if (!userId) return res.status(400).json({ error: "User ID is required." });
 
@@ -31,32 +60,28 @@ exports.createPayBill = async (req, res) => {
       supplier,
       date,
       time,
-      amount: Number(amount),
-      paymentType,
-      account,
+      amount: totalAmount, // ✅
+      paymentType: normalizedPaymentType,
+
       description,
       attachment: attachmentPath,
       userId,
     });
 
-    // ✅ Journal Entry
-    await JournalEntry.create({
-      date,
-      time,
-      description: description || "Pay Bill",
-      createdBy: userId,
-      sourceType: "pay_bill",
-      referenceId: newBill._id,
-      lines: [
-        { account: supplierAccount._id, type: "debit", amount: Number(amount) },
-        { account, type: "credit", amount: Number(amount) },
-      ],
-    });
+    for (const p of payments) {
+      await createPaymentEntry({
+        userId,
+        referenceId: newBill._id,
+        sourceType: "pay_bill",
+        billNo: `PB-${newBill._id.toString().slice(-6)}`,
+        accountId: p.account,
+        counterPartyAccountId: supplierAccount._id,
+        amount: Number(p.amount),
+        paymentType: p.paymentType?.toLowerCase() || "cash",
+        description: description || "Pay Bill",
+      });
+    }
 
-    await recalculateAccountBalance(supplierAccount._id);
-    await recalculateAccountBalance(account);
-
-    console.log("✅ Pay Bill Created:", newBill._id);
     res
       .status(201)
       .json({ message: "Bill created successfully", data: newBill });
@@ -70,12 +95,37 @@ exports.createPayBill = async (req, res) => {
 exports.getAllPayBills = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
     const bills = await PayBill.find({ userId })
       .populate("supplier", "name")
-      .populate("account", "name")
       .sort({ createdAt: -1 });
 
-    res.json(bills);
+    const result = [];
+
+    for (const bill of bills) {
+      const journal = await JournalEntry.findOne({
+        referenceId: bill._id,
+        sourceType: "pay_bill",
+      }).populate("lines.account", "name");
+
+      let paymentMode = "-";
+      let accountName = "-";
+
+      if (journal?.lines?.length) {
+        const creditLine = journal.lines.find((line) => line.type === "credit");
+
+        paymentMode = creditLine?.paymentType || "-";
+        accountName = creditLine?.account?.name || "-";
+      }
+
+      result.push({
+        ...bill.toObject(),
+        paymentMode,
+        accountName,
+      });
+    }
+
+    res.json(result);
   } catch (err) {
     console.error("❌ Get Pay Bills Error:", err);
     res.status(500).json({ error: err.message });
@@ -85,46 +135,103 @@ exports.getAllPayBills = async (req, res) => {
 // ✅ Get One Pay Bill
 exports.getPayBillById = async (req, res) => {
   try {
-    const bill = await PayBill.findById(req.params.id)
-      .populate("supplier", "name phone email")
-      .populate("account", "name");
+    const bill = await PayBill.findById(req.params.id).populate(
+      "supplier",
+      "name phone email",
+    );
 
-    if (!bill) return res.status(404).json({ error: "Record not found" });
-    res.json(bill);
+    if (!bill) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    // 🔍 Journal se payment accounts nikaalna
+    const journal = await JournalEntry.findOne({
+      referenceId: bill._id,
+      sourceType: "pay_bill",
+    });
+
+    let paymentEntries = [];
+
+    if (journal?.lines?.length) {
+      paymentEntries = journal.lines
+        .filter((line) => line.type === "credit")
+        .map((line) => ({
+          account: line.account,
+          amount: line.amount,
+          paymentType: line.paymentType,
+        }));
+    }
+
+    // ✅ Frontend ko complete data
+    res.json({
+      ...bill.toObject(),
+      paymentEntries,
+    });
   } catch (err) {
     console.error("❌ Get Single Bill Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
-
-// ✅ Update Pay Bill
+// ✅ Update Pay Bill (CENTRALIZED PAYMENT SERVICE)
 exports.updatePayBill = async (req, res) => {
   try {
-    const { supplier, date, time, amount, paymentType, account, description } =
+    const { supplier, date, time, description, paymentType, paymentEntries } =
       req.body;
-    const userId = req.user?.id || req.userId;
 
-    console.log("📥 Incoming accountId:", account);
-    console.log("📥 Incoming supplierId:", supplier);
+    const normalizedPaymentType = paymentType?.toLowerCase();
+    const payments = JSON.parse(paymentEntries || "[]");
+
+    if (!ALLOWED_PAYMENT_TYPES.includes(normalizedPaymentType)) {
+      return res.status(400).json({
+        error: "Invalid payment type. Allowed: cash, online, cheque",
+      });
+    }
+
+    const totalAmount = payments.reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0,
+    );
+
+    if (totalAmount <= 0) {
+      return res.status(400).json({ error: "Invalid payment amount" });
+    }
+
+    const userId = req.user?.id || req.userId;
 
     const bill = await PayBill.findOne({ _id: req.params.id, userId });
     if (!bill) return res.status(404).json({ error: "Record not found" });
 
-    const oldSupplier = bill.supplier;
-    const oldAccount = bill.account;
+    // ✅ Safe recalculation helper
+    const safeRecalculate = async (id) => {
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        try {
+          await recalculateAccountBalance(id);
+        } catch (err) {
+          console.warn("⚠️ Error recalculating balance:", err.message);
+        }
+      }
+    };
 
+    // 🔍 Get old supplier account
+    const oldSupplierData = await Supplier.findById(bill.supplier).populate(
+      "account",
+    );
+    const oldSupplierAccountId = oldSupplierData?.account?._id;
+
+    // 🔍 Get new supplier account
     const supplierData = await Supplier.findOne({
       _id: supplier,
       userId,
     }).populate("account");
+
     if (!supplierData || !supplierData.account)
-      return res
-        .status(404)
-        .json({ error: "Supplier or linked account not found" });
+      return res.status(404).json({
+        error: "Supplier or linked account not found",
+      });
 
     const supplierAccount = supplierData.account;
 
-    // ✅ Remove old attachment if new one uploaded
+    // ✅ Remove old attachment if replaced
     if (req.file && bill.attachment) {
       try {
         fs.unlinkSync(path.join(__dirname, "..", bill.attachment));
@@ -137,15 +244,21 @@ exports.updatePayBill = async (req, res) => {
     bill.supplier = supplier;
     bill.date = date;
     bill.time = time;
-    bill.amount = Number(amount);
-    bill.paymentType = paymentType;
-    bill.account = account;
+    bill.amount = totalAmount;
+    bill.paymentType = normalizedPaymentType;
     bill.description = description;
+
     if (req.file) {
       bill.attachment = `uploads/${req.file.filename}`;
     }
 
     await bill.save();
+
+    // 🔍 Fetch old journals before deleting
+    const oldJournals = await JournalEntry.find({
+      referenceId: bill._id,
+      sourceType: "pay_bill",
+    });
 
     // 🧹 Delete old journal entries
     await JournalEntry.deleteMany({
@@ -153,61 +266,72 @@ exports.updatePayBill = async (req, res) => {
       sourceType: "pay_bill",
     });
 
-    // 🔁 Create new journal entry
-    await JournalEntry.create({
-      date,
-      time,
-      description: description || "Pay Bill",
-      createdBy: userId,
-      sourceType: "pay_bill",
-      referenceId: bill._id,
-      lines: [
-        { account: supplierAccount._id, type: "debit", amount: Number(amount) },
-        { account, type: "credit", amount: Number(amount) },
-      ],
-    });
-
-    // ✅ Safe recalculation
-    const safeRecalculate = async (id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
-        try {
-          await recalculateAccountBalance(id);
-        } catch (err) {
-          console.warn("⚠️ Error recalculating balance:", err.message);
-        }
-      } else {
-        console.warn("⚠️ Invalid ObjectId for balance recalculation:", id);
+    // 🔄 Recalculate old accounts (before recreating)
+    for (const entry of oldJournals) {
+      for (const line of entry.lines) {
+        await safeRecalculate(line.account);
       }
-    };
+    }
 
-    await safeRecalculate(oldSupplier);
-    await safeRecalculate(oldAccount);
+    // 🔁 Create new payment entries (MULTIPLE SAFE)
+    for (const p of payments) {
+      await createPaymentEntry({
+        userId,
+        referenceId: bill._id,
+        sourceType: "pay_bill",
+        billNo: `PB-${bill._id.toString().slice(-6)}`,
+        accountId: p.account,
+        counterPartyAccountId: supplierAccount._id,
+        amount: Number(p.amount),
+        paymentType: p.paymentType?.toLowerCase() || "cash",
+        description: description || "Pay Bill",
+      });
+    }
+
+    // 🔄 Recalculate supplier accounts
+    if (oldSupplierAccountId) {
+      await safeRecalculate(oldSupplierAccountId);
+    }
+
     await safeRecalculate(supplierAccount._id);
-    await safeRecalculate(account);
 
-    console.log("📝 Pay Bill Updated:", bill._id);
-    res.json({ message: "Bill updated successfully", data: bill });
+    res.json({
+      message: "Bill updated successfully",
+      data: bill,
+    });
   } catch (err) {
     console.error("❌ Update Bill Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ Delete Pay Bill
+// ✅ Delete Pay Bill (CENTRALIZED SAFE VERSION)
 exports.deletePayBill = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const bill = await PayBill.findOne({ _id: req.params.id, userId });
-    if (!bill) return res.status(404).json({ error: "Record not found" });
 
+    const bill = await PayBill.findOne({ _id: req.params.id, userId });
+    if (!bill) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+
+    // 🔍 Supplier account
     const supplierData = await Supplier.findOne({
       _id: bill.supplier,
       userId,
     }).populate("account");
-    if (!supplierData || !supplierData.account)
+
+    if (!supplierData || !supplierData.account) {
       return res.status(404).json({ error: "Supplier or account missing" });
+    }
 
     const supplierAccount = supplierData.account;
+
+    // 🔍 Get ALL related journals (IMPORTANT for multiple payments)
+    const journals = await JournalEntry.find({
+      referenceId: bill._id,
+      sourceType: "pay_bill",
+    });
 
     if (bill.attachment) {
       try {
@@ -217,14 +341,16 @@ exports.deletePayBill = async (req, res) => {
       }
     }
 
+    // 🧹 Delete bill
     await bill.deleteOne();
 
+    // 🧹 Delete all related journals
     await JournalEntry.deleteMany({
       referenceId: bill._id,
       sourceType: "pay_bill",
     });
 
-    // ✅ Safe recalculation
+    // ✅ Safe recalculation helper
     const safeRecalculate = async (id) => {
       if (mongoose.Types.ObjectId.isValid(id)) {
         try {
@@ -232,16 +358,22 @@ exports.deletePayBill = async (req, res) => {
         } catch (err) {
           console.warn("⚠️ Error recalculating balance:", err.message);
         }
-      } else {
-        console.warn("⚠️ Invalid ObjectId for balance recalculation:", id);
       }
     };
 
-    await safeRecalculate(supplierAccount._id);
-    await safeRecalculate(bill.account);
+    // 🔄 Recalculate ALL involved accounts
+    for (const entry of journals) {
+      for (const line of entry.lines) {
+        await safeRecalculate(line.account);
+      }
+    }
 
-    console.log("🗑️ Pay Bill deleted:", bill._id);
-    res.json({ message: "Bill deleted successfully" });
+    // 🔄 Recalculate supplier account
+    await safeRecalculate(supplierAccount._id);
+
+    res.json({
+      message: "Bill deleted successfully",
+    });
   } catch (err) {
     console.error("❌ Delete Pay Bill Error:", err);
     res.status(500).json({ error: err.message });

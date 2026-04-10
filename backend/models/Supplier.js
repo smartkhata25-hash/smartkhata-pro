@@ -16,7 +16,7 @@ const SupplierSchema = new mongoose.Schema(
     account: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true, // ✅ Enforce linkage to COA
+      required: true,
     },
 
     /* Extras */
@@ -37,7 +37,7 @@ const SupplierSchema = new mongoose.Schema(
     /* Soft Delete */
     isDeleted: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 /* 🔍 Text Search Support */

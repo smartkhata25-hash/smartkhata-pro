@@ -1,7 +1,9 @@
+const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const Invoice = require("../models/Invoice");
-const PurchaseInvoice = require("../models/PurchaseInvoice");
+const PurchaseInvoice = require("../models/purchaseInvoice");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const RefundInvoice = require("../models/RefundInvoice");
 
 exports.getProductLedger = async (req, res) => {
   try {
@@ -17,8 +19,6 @@ exports.getProductLedger = async (req, res) => {
     if (startDate) dateFilter.$gte = new Date(startDate);
     if (endDate) dateFilter.$lte = new Date(endDate);
 
-    console.log("🔎 Product Ledger:", { productId, startDate, endDate });
-
     // 🔹 Get Product
     const product = await Product.findById(productId);
     if (!product) {
@@ -26,21 +26,31 @@ exports.getProductLedger = async (req, res) => {
     }
 
     // 🔹 Opening Stock (Before startDate)
-    const previousTransactions = await InventoryTransaction.find({
-      productId,
-      userId,
-      date: { $lt: startDate ? new Date(startDate) : new Date() },
-    });
+    let previousTransactions = [];
+
+    if (startDate) {
+      previousTransactions = await InventoryTransaction.find({
+        productId,
+        userId,
+        date: { $lt: new Date(startDate) },
+      });
+    } else {
+      previousTransactions = await InventoryTransaction.find({
+        productId,
+        userId,
+        note: "Opening Stock",
+      });
+    }
 
     let opening = 0;
     previousTransactions.forEach((t) => {
-      if (t.type === "IN") opening += t.quantity;
-      else if (t.type === "OUT") opening -= t.quantity;
+      if (t.type === "IN" || t.type === "ADJUST_IN") {
+        opening += t.quantity;
+      } else if (t.type === "OUT" || t.type === "ADJUST_OUT") {
+        opening -= t.quantity;
+      }
     });
 
-    let stockBalance = opening;
-
-    // 🔹 Purchases (IN)
     const purchases = await InventoryTransaction.find({
       productId,
       type: "IN",
@@ -56,7 +66,6 @@ exports.getProductLedger = async (req, res) => {
       .sort({ date: 1 });
 
     const purchaseEntries = purchases.map((p) => {
-      stockBalance += p.quantity;
       return {
         date: p.date,
         billNo: p.invoiceId?.billNo || "",
@@ -64,23 +73,67 @@ exports.getProductLedger = async (req, res) => {
         quantity: p.quantity,
         rate: p.rate || product.unitCost || 0,
         type: "purchase",
-        balance: stockBalance,
+
+        invoiceId: p.invoiceId?._id?.toString() || "",
       };
     });
 
-    // 🔹 Sales (OUT)
+    // 🔹 Refunds (IN)
+    const refunds = await InventoryTransaction.find({
+      productId,
+      type: "IN",
+      invoiceModel: "RefundInvoice",
+      userId,
+      ...(startDate || endDate ? { date: dateFilter } : {}),
+    })
+      .populate({
+        path: "invoiceId",
+        model: "RefundInvoice",
+        select: "customerName billNo invoiceDate",
+      })
+      .sort({ date: 1 });
+
+    const refundEntries = refunds.map((r) => {
+      return {
+        date: r.date,
+        billNo: r.invoiceId?.billNo || "",
+        customerName: r.invoiceId?.customerName || "Unknown",
+        quantity: r.quantity,
+        rate: r.rate || product.unitCost || 0,
+        type: "refund",
+
+        invoiceId: r.invoiceId?._id?.toString() || "",
+      };
+    });
+
     const salesInvoices = await Invoice.find({
-      "items.productId": productId,
+      "items.productId": new mongoose.Types.ObjectId(productId),
       createdBy: userId,
       ...(startDate || endDate ? { invoiceDate: dateFilter } : {}),
     }).sort({ invoiceDate: 1 });
 
     const saleEntries = [];
 
+    const adjustments = await InventoryTransaction.find({
+      productId,
+      userId,
+      type: { $in: ["ADJUST_IN", "ADJUST_OUT"] },
+      ...(startDate || endDate ? { date: dateFilter } : {}),
+    }).sort({ date: 1 });
+
+    const adjustmentEntries = adjustments.map((a) => {
+      return {
+        date: a.date,
+        billNo: a.adjustNo || "",
+        quantity: a.quantity,
+        adjustType: a.type,
+        type: "adjust",
+      };
+    });
+
     salesInvoices.forEach((inv) => {
       inv.items.forEach((item) => {
         if (item.productId.toString() === productId) {
-          stockBalance -= item.quantity;
           saleEntries.push({
             date: inv.invoiceDate,
             billNo: inv.billNo || "",
@@ -89,16 +142,37 @@ exports.getProductLedger = async (req, res) => {
             rate: item.price || 0,
             total: item.total || 0,
             type: "sale",
-            balance: stockBalance,
+
+            invoiceId: inv._id?.toString() || "",
           });
         }
       });
     });
 
-    // 🔹 Merge all entries and sort by date
-    const fullLedger = [...purchaseEntries, ...saleEntries].sort(
-      (a, b) => new Date(a.date) - new Date(b.date)
-    );
+    const fullLedger = [
+      ...purchaseEntries,
+      ...refundEntries,
+      ...saleEntries,
+      ...adjustmentEntries,
+    ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    let runningBalance = opening;
+
+    fullLedger.forEach((entry) => {
+      if (entry.type === "purchase" || entry.type === "refund") {
+        runningBalance += entry.quantity;
+      } else if (entry.type === "sale") {
+        runningBalance -= entry.quantity;
+      } else if (entry.type === "adjust") {
+        if (entry.adjustType === "ADJUST_IN") {
+          runningBalance += entry.quantity;
+        } else if (entry.adjustType === "ADJUST_OUT") {
+          runningBalance -= entry.quantity;
+        }
+      }
+
+      entry.balance = runningBalance;
+    });
 
     // ✅ Response
     res.json({
@@ -109,6 +183,9 @@ exports.getProductLedger = async (req, res) => {
         unitCost: product.unitCost,
       },
       openingStock: opening,
+      purchases: purchaseEntries,
+      refunds: refundEntries,
+      sales: saleEntries,
       ledger: fullLedger,
     });
   } catch (error) {

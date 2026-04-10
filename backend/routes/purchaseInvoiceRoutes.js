@@ -5,24 +5,47 @@ const router = express.Router();
 
 const {
   addPurchaseInvoice,
+  getAllPurchaseInvoices,
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
   deletePurchaseInvoice,
+  searchPurchaseInvoices,
+  getItemPurchaseHistory,
 } = require("../controllers/purchaseInvoiceController");
 
 const upload = require("../middleware/uploadMiddleware");
 const protect = require("../middleware/authMiddleware");
 
-// ✅ Add Purchase Invoice
+/* =====================================================
+   ✅ CREATE PURCHASE INVOICE
+===================================================== */
 router.post("/", protect, upload.single("attachment"), addPurchaseInvoice);
 
-// ✅ Get Purchase Invoice by ID (for Edit)
+router.get("/item-history/:productId", protect, getItemPurchaseHistory);
+
+/* =====================================================
+   ✅ SEARCH PURCHASE INVOICES  (⚠️ MUST BE BEFORE /:id)
+===================================================== */
+router.get("/search", protect, searchPurchaseInvoices);
+
+/* =====================================================
+   ✅ GET ALL PURCHASE INVOICES
+===================================================== */
+router.get("/", protect, getAllPurchaseInvoices);
+
+/* =====================================================
+   ✅ GET PURCHASE INVOICE BY ID
+===================================================== */
 router.get("/:id", protect, getPurchaseInvoiceById);
 
-// ✅ Update Purchase Invoice
+/* =====================================================
+   ✅ UPDATE PURCHASE INVOICE
+===================================================== */
 router.put("/:id", protect, upload.single("attachment"), updatePurchaseInvoice);
 
-// ✅ Delete Purchase Invoice
+/* =====================================================
+   ✅ DELETE PURCHASE INVOICE
+===================================================== */
 router.delete("/:id", protect, deletePurchaseInvoice);
 
 module.exports = router;

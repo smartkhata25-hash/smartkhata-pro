@@ -3,6 +3,7 @@
 const express = require("express");
 const router = express.Router();
 const accountController = require("../controllers/accountController");
+const { getAccountsSummary } = require("../controllers/accountController");
 const authenticate = require("../middleware/authMiddleware");
 
 // 🔍 OPTIONAL Middleware for validation (you can extend this)
@@ -21,7 +22,7 @@ router.post(
   "/",
   authenticate,
   validateAccount,
-  accountController.createAccount
+  accountController.createAccount,
 );
 
 // ✅ Get all accounts for logged-in user
@@ -39,11 +40,13 @@ router.get("/cash-summary", authenticate, accountController.getCashSummary);
 // ✅ Bank Summary Route
 router.get("/bank-summary", authenticate, accountController.getBankSummary);
 
+router.get("/summary", authenticate, getAccountsSummary);
+
 // ✅ NEW: Overall Balance Snapshot (Optional but useful for Dashboard)
 router.get(
   "/balance-summary",
   authenticate,
-  accountController.getBalanceSnapshot
+  accountController.getBalanceSnapshot,
 ); // 🆕
 
 /**
@@ -53,7 +56,7 @@ router.get(
 router.get(
   "/:id/transactions",
   authenticate,
-  accountController.getAccountTransactions
+  accountController.getAccountTransactions,
 );
 
 module.exports = router;

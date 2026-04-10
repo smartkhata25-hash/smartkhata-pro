@@ -15,15 +15,17 @@ const accountSchema = new mongoose.Schema({
     enum: ["Asset", "Liability", "Equity", "Income", "Expense"],
     required: true,
   },
+  normalBalance: {
+    type: String,
+    enum: ["debit", "credit"],
+    required: true,
+  },
+
   code: {
     type: String,
     required: true,
   },
 
-  balance: {
-    type: Number,
-    default: 0,
-  },
   openingBalance: {
     type: Number,
     default: 0,
@@ -35,20 +37,60 @@ const accountSchema = new mongoose.Schema({
   category: {
     type: String,
     enum: [
+      // Assets
       "cash",
       "bank",
-      "cheque",
       "online",
+      "cheque",
+      "inventory",
+      "receivable",
+      "prepaid",
+      "fixed",
+
+      // Liabilities
+      "payable",
       "credit",
-      "other",
-      "customer",
+      "loan",
+      "tax",
       "supplier",
+
+      // Equity
+      "capital",
+      "drawings",
+
+      // Income
+      "sales",
+      "service",
+      "discount_income",
+      "other_income",
+      "customer",
+
+      // Expense
+      "purchase",
+      "salary",
+      "rent",
+      "utility",
+      "transport",
+      "marketing",
+      "maintenance",
+      "other_expense",
+
+      // Common
+      "other",
     ],
     default: "other",
+  },
+  // 🔒 NEW FIELD
+  isSystem: {
+    type: Boolean,
+    default: false,
   },
 });
 
 // ✅ compound index to make `code` unique per user
 accountSchema.index({ userId: 1, code: 1 }, { unique: true });
+
+accountSchema.index({ userId: 1, type: 1 });
+accountSchema.index({ userId: 1, category: 1 });
 
 module.exports = mongoose.model("Account", accountSchema);

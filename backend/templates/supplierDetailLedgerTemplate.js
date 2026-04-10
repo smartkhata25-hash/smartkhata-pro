@@ -1,0 +1,271 @@
+/**
+ * Supplier Detailed Ledger HTML Template
+ * ---------------------------------------
+ * Professional accounting block layout
+ * Supports A4 + A5
+ */
+
+const generateSupplierDetailLedgerHTML = (data, pageSize = "A4") => {
+  const { documentTitle, supplier, period, summary, blocks } = data;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>${documentTitle}</title>
+
+<style>
+
+@page {
+  size: ${pageSize};
+  margin: 6mm;
+}
+
+/* ===== BASE ===== */
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: ${pageSize === "A5" ? "11px" : "13px"};
+  margin: 0;
+  color: #000;
+}
+
+.container {
+  width: 100%;
+}
+
+/* ===== HEADER ===== */
+
+.header {
+  text-align: center;
+  margin-bottom: ${pageSize === "A5" ? "8px" : "14px"};
+}
+
+.header h2 {
+  margin: 0;
+  font-size: ${pageSize === "A5" ? "16px" : "20px"};
+  font-weight: 800;
+}
+
+.sub-info {
+  margin-top: 4px;
+  font-weight: 600;
+  font-size: ${pageSize === "A5" ? "11px" : "13px"};
+}
+
+/* ===== SUMMARY ===== */
+
+.summary {
+  margin-top: ${pageSize === "A5" ? "6px" : "10px"};
+  margin-bottom: ${pageSize === "A5" ? "6px" : "12px"};
+  padding: ${pageSize === "A5" ? "4px" : "8px"};
+  font-weight: 800;
+  font-size: ${pageSize === "A5" ? "12px" : "15px"};
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+}
+
+/* ===== BLOCK ===== */
+
+.block {
+  border: 2px solid #000;
+  padding: ${pageSize === "A5" ? "6px" : "10px"};
+  margin-bottom: ${pageSize === "A5" ? "6px" : "10px"};
+  page-break-inside: avoid;
+}
+
+/* ===== BLOCK HEADER ===== */
+
+.block-header {
+  font-weight: 800;
+  margin-bottom: 6px;
+  font-size: ${pageSize === "A5" ? "12px" : "14px"};
+}
+
+/* ===== TABLE ===== */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-top: 4px;
+}
+
+th {
+  border: 1px solid #000;
+  padding: ${pageSize === "A5" ? "4px" : "6px"};
+  text-align: center;
+  font-weight: 800;
+  font-size: ${pageSize === "A5" ? "11px" : "13px"};
+}
+
+td {
+  border: 1px solid #000;
+  padding: ${pageSize === "A5" ? "4px" : "6px"};
+  text-align: center;
+  font-weight: 600;
+}
+
+td.left {
+  text-align: left;
+}
+
+td.right {
+  text-align: right;
+}
+
+/* ===== TOTAL ROW ===== */
+
+.totals-table td {
+  font-weight: 700;
+  font-size: ${pageSize === "A5" ? "11px" : "13px"};
+}
+
+/* ===== FOOTER ===== */
+
+.footer {
+  margin-top: ${pageSize === "A5" ? "10px" : "16px"};
+  text-align: center;
+  font-size: ${pageSize === "A5" ? "9px" : "11px"};
+  border-top: 1px solid #ccc;
+  padding-top: 6px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<!-- ===== HEADER ===== -->
+
+<div class="header">
+  <h2>${documentTitle}</h2>
+  <div class="sub-info">
+    Supplier: ${supplier.name}
+    &nbsp;&nbsp; | &nbsp;&nbsp;
+    Period: ${period.from} to ${period.to}
+  </div>
+</div>
+
+<!-- ===== SUMMARY ===== -->
+
+<div class="summary">
+  Opening: ${summary.opening.toFixed(2)} |
+  Debit: ${summary.totalDebit.toFixed(2)} |
+  Credit: ${summary.totalCredit.toFixed(2)} |
+  Closing: ${
+    summary.closingBalance < 0
+      ? `(${Math.abs(summary.closingBalance).toFixed(2)})`
+      : summary.closingBalance.toFixed(2)
+  }
+</div>
+
+<!-- ===== BLOCKS ===== -->
+
+${blocks
+  .map(
+    (blk) => `
+
+<div class="block">
+
+<div class="block-header">
+${blk.sourceLabel} #${blk.billNo}
+&nbsp;&nbsp; | &nbsp;&nbsp;
+Date: ${blk.date}
+</div>
+
+${
+  blk.items && blk.items.length > 0
+    ? `
+<table>
+<thead>
+<tr>
+<th style="width:40%">Product</th>
+<th style="width:15%">Qty</th>
+<th style="width:20%">Rate</th>
+<th style="width:25%">Total</th>
+</tr>
+</thead>
+
+<tbody>
+
+${blk.items
+  .map(
+    (it) => `
+<tr>
+<td class="left">${it.productName}</td>
+<td>${it.quantity}</td>
+<td>${it.rate.toFixed(2)}</td>
+<td>${it.total.toFixed(2)}</td>
+</tr>
+`,
+  )
+  .join("")}
+
+</tbody>
+</table>
+`
+    : ""
+}
+
+<table class="totals-table" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <td style="border:none; width:55%;"></td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:20%;">
+      Debit
+    </td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:25%;">
+      ${blk.debit ? blk.debit.toFixed(2) : "-"}
+    </td>
+  </tr>
+
+  <tr>
+    <td style="border:none; width:55%;"></td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:20%;">
+      Credit
+    </td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:25%;">
+      ${blk.credit ? blk.credit.toFixed(2) : "-"}
+    </td>
+  </tr>
+
+  <tr>
+    <td style="border:none; width:55%;"></td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:20%;">
+      Balance
+    </td>
+
+    <td style="border:1px solid #333; text-align:center; padding:4px; width:25%;">
+      ${blk.balance.toFixed(2)}
+    </td>
+  </tr>
+</table>
+
+</div>
+
+`,
+  )
+  .join("")}
+
+<!-- ===== FOOTER ===== -->
+
+<div class="footer">
+Generated by SmartKhata • ${new Date().toLocaleDateString("en-GB")}
+</div>
+
+</div>
+
+</body>
+</html>
+`;
+};
+
+module.exports = generateSupplierDetailLedgerHTML;

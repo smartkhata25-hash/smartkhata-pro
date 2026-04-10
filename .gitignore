@@ -1,0 +1,25 @@
+node_modules
+.env
+frontend/.env
+backend/.env
+
+# build folders
+dist
+frontend/build
+
+# electron build
+SmartKhata-win32-x64
+
+# uploads (user files)
+uploads
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+backend/db/data/

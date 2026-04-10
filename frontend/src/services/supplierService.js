@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API = `${BASE_URL}/api/suppliers`;
 
 const getConfig = () => ({
@@ -46,8 +46,19 @@ export const deleteSupplier = (id) =>
       throw err;
     });
 
+// 🔥 ✅ CONFIRM MERGE SUPPLIER (NEW – PRO LEVEL)
+export const confirmMergeSupplier = (data) =>
+  axios
+    .post(`${API}/merge/confirm`, data, getConfig())
+
+    .then((r) => r.data)
+    .catch((err) => {
+      console.error('❌ Error merging suppliers:', err.response?.data || err.message);
+      throw err;
+    });
+
 // ✅ Import Suppliers (with optional progress)
-export const importSuppliers = (file /* , onUploadProgress */) => {
+export const importSuppliers = (file) => {
   const fd = new FormData();
   fd.append('file', file);
 
@@ -58,7 +69,6 @@ export const importSuppliers = (file /* , onUploadProgress */) => {
         ...getConfig().headers,
         'Content-Type': 'multipart/form-data',
       },
-      // onUploadProgress, // Uncomment if needed
     })
     .then((r) => r.data)
     .catch((err) => {

@@ -2,6 +2,7 @@
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const mongoose = require("mongoose");
+const ACCOUNT_RULES = require("../utils/accountRules");
 
 // ✅ نیا اکاؤنٹ بنائیں
 exports.createAccount = async (req, res) => {
@@ -9,17 +10,40 @@ exports.createAccount = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { name, type, code, category } = req.body;
 
+    // 🔒 Accounting role validation
+    const rule = ACCOUNT_RULES[type];
+    if (!rule) {
+      return res.status(400).json({ message: "Invalid account type." });
+    }
+
+    if (!rule.allowedCategories.includes(category)) {
+      return res.status(400).json({
+        message: `Category '${category}' is not allowed for ${type} account.`,
+      });
+    }
+
     const existing = await Account.findOne({ code, userId });
     if (existing) {
       return res.status(400).json({ message: "Account code already exists." });
     }
 
-    const newAccount = new Account({ name, type, code, category, userId });
+    const newAccount = new Account({
+      name,
+      type,
+      code,
+      category,
+      userId,
+      normalBalance: rule.normalBalance,
+    });
     await newAccount.save();
     res.status(201).json({ message: "Account created", account: newAccount });
   } catch (error) {
-    console.error("Create Error:", error);
-    res.status(500).json({ message: "Create failed", error });
+    console.error("❌ CREATE ACCOUNT ERROR:", error); // 👈 console میں full error
+
+    res.status(500).json({
+      message: error.message || "Create failed",
+      error: error.message,
+    });
   }
 };
 
@@ -27,15 +51,55 @@ exports.createAccount = async (req, res) => {
 exports.getAccounts = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const category = req.query.category;
-    const query = { userId };
-    if (category) query.category = category;
 
-    const accounts = await Account.find(query);
+    const {
+      category,
+      type,
+      isSystem,
+      balance,
+      search,
+      sortBy,
+      sortOrder,
+      filter,
+    } = req.query;
+
+    const query = { userId };
+
+    if (filter === "payment") {
+      query.type = "Asset";
+      query.category = { $in: ["cash", "bank", "online", "cheque"] };
+    } else {
+      if (category) query.category = category;
+      if (type) query.type = type;
+    }
+
+    // 🔹 Filters (optional)
+    if (category) query.category = category;
+    if (type) query.type = type;
+    if (isSystem !== undefined) query.isSystem = isSystem === "true";
+
+    if (balance === "zero") query.balance = 0;
+    if (balance === "nonzero") query.balance = { $ne: 0 };
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { code: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // 🔹 Sorting
+    let sort = { code: 1 };
+    if (sortBy) {
+      const order = sortOrder === "desc" ? -1 : 1;
+      sort = { [sortBy]: order };
+    }
+
+    const accounts = await Account.find(query).sort(sort);
+
     res.status(200).json(accounts);
   } catch (error) {
-    console.error("Fetch Error:", error);
-    res.status(500).json({ message: "Fetch failed", error });
+    res.status(500).json({ message: "Fetch failed", error: error.message });
   }
 };
 
@@ -45,19 +109,46 @@ exports.updateAccount = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { id } = req.params;
 
-    const updated = await Account.findOneAndUpdate(
-      { _id: id, userId },
-      req.body,
-      { new: true }
-    );
-
-    if (!updated) {
+    const account = await Account.findOne({ _id: id, userId });
+    if (!account) {
       return res.status(404).json({ message: "Account not found" });
     }
 
-    res.status(200).json(updated);
+    // 🔒 SYSTEM ACCOUNT FIELD PROTECTION
+    if (account.isSystem) {
+      // صرف allowed fields update ہوں
+      const allowedUpdates = ["name", "category"];
+      for (let key of Object.keys(req.body)) {
+        if (!allowedUpdates.includes(key)) {
+          return res.status(403).json({
+            message: "Cannot modify protected fields of system account.",
+          });
+        }
+      }
+    }
+
+    // 🔒 Accounting rule protection (on update)
+    if (req.body.type || req.body.category) {
+      const newType = req.body.type || account.type;
+      const newCategory = req.body.category || account.category;
+
+      const rule = ACCOUNT_RULES[newType];
+      if (!rule) {
+        return res.status(400).json({ message: "Invalid account type." });
+      }
+
+      if (!rule.allowedCategories.includes(newCategory)) {
+        return res.status(400).json({
+          message: `Category '${newCategory}' is not allowed for ${newType} account.`,
+        });
+      }
+    }
+
+    Object.assign(account, req.body);
+    await account.save();
+
+    res.status(200).json(account);
   } catch (err) {
-    console.error("Update Error:", err);
     res.status(500).json({ message: "Update failed", err });
   }
 };
@@ -71,6 +162,13 @@ exports.deleteAccount = async (req, res) => {
     const account = await Account.findOne({ _id: id, userId });
     if (!account) {
       return res.status(404).json({ message: "Account not found" });
+    }
+
+    // 🔒 SYSTEM ACCOUNT PROTECTION
+    if (account.isSystem) {
+      return res.status(403).json({
+        message: "System account cannot be deleted.",
+      });
     }
 
     const entryExists = await JournalEntry.findOne({
@@ -87,7 +185,6 @@ exports.deleteAccount = async (req, res) => {
     await account.deleteOne();
     res.status(200).json({ message: "Account deleted" });
   } catch (err) {
-    console.error("Delete Error:", err);
     res.status(500).json({ message: "Delete failed", err });
   }
 };
@@ -119,7 +216,7 @@ exports.getBankSummary = async (req, res) => {
 
     const totalBank = bankAccounts.reduce(
       (sum, acc) => sum + (acc.balance || 0),
-      0
+      0,
     );
 
     res.json({
@@ -160,28 +257,15 @@ exports.getAccountTransactions = async (req, res) => {
       isDeleted: false,
     })
       .sort({ date: -1, time: -1 })
-      .limit(200)
-      .lean();
-
-    console.log(`📊 Total Transactions for ${accountId}:`, transactions.length);
+      .limit(200);
 
     // ✅ Prepare flat structure with adjusted debit/credit
     const flatEntries = transactions.flatMap((entry) =>
       entry.lines
         .filter((line) => line.account?.toString() === accountId)
         .map((line) => {
-          let debit = 0;
-          let credit = 0;
-
-          if (["cash", "bank"].includes(accountCategory)) {
-            // ⬅️ Invert logic for cash/bank
-            debit = line.type === "credit" ? line.amount : 0;
-            credit = line.type === "debit" ? line.amount : 0;
-          } else {
-            // ✅ Normal logic for other accounts
-            debit = line.type === "debit" ? line.amount : 0;
-            credit = line.type === "credit" ? line.amount : 0;
-          }
+          const debit = line.type === "debit" ? line.amount : 0;
+          const credit = line.type === "credit" ? line.amount : 0;
 
           return {
             _id: entry._id,
@@ -190,12 +274,19 @@ exports.getAccountTransactions = async (req, res) => {
             description: entry.description || "",
             debit,
             credit,
+
+            // ✅ Source
             sourceType: entry.sourceType || entry.source || "",
-            referenceId: entry.referenceId || entry.sourceId || "",
-            paymentType: entry.paymentType || "",
+
+            // ✅ Payment type (journal se)
+            paymentType: line.paymentType || entry.paymentType || "-",
+
+            // ✅ Account name (line se)
+            accountName: account.name || "",
+
             billNo: entry.billNo || "",
           };
-        })
+        }),
     );
 
     res.json(flatEntries);
@@ -225,5 +316,29 @@ exports.getBalanceSnapshot = async (req, res) => {
   } catch (err) {
     console.error("Balance snapshot error:", err);
     res.status(500).json({ message: "Snapshot error", error: err.message });
+  }
+};
+
+// ✅ Accounts Master Summary (counts + totals)
+exports.getAccountsSummary = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+
+    const accounts = await Account.find({ userId });
+
+    const summary = {
+      total: accounts.length,
+      system: accounts.filter((a) => a.isSystem).length,
+      user: accounts.filter((a) => !a.isSystem).length,
+      zeroBalance: accounts.filter((a) => (a.balance || 0) === 0).length,
+      nonZeroBalance: accounts.filter((a) => (a.balance || 0) !== 0).length,
+    };
+
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({
+      message: "Accounts summary error",
+      error: err.message,
+    });
   }
 };

@@ -3,10 +3,13 @@ const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
 
 // 🧾 Get Ledger for a Specific Customer (journal-based)
+
 const getCustomerLedger = async (req, res) => {
   try {
     const { customerId } = req.params;
+
     const { startDate, endDate } = req.query;
+
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
     // ✅ Step 1: Fetch customer with populated account
@@ -28,6 +31,7 @@ const getCustomerLedger = async (req, res) => {
     }
 
     const accountId = account.toString();
+
     const objectId = new mongoose.Types.ObjectId(accountId);
 
     // ✅ Step 3: Build filter
@@ -51,6 +55,7 @@ const getCustomerLedger = async (req, res) => {
 
     // ✅ Step 5: Opening balance
     let opening = 0;
+
     if (startDate) {
       const prevEntries = await JournalEntry.find({
         createdBy: userId,
@@ -83,16 +88,28 @@ const getCustomerLedger = async (req, res) => {
             _id: entry._id,
             date: entry.date,
             time: entry.time || "",
+            billNo: entry.billNo || "",
             description: entry.description || "",
             sourceType: entry.sourceType || "",
-            billNo: entry.billNo || "",
+            sourceLabel:
+              entry.sourceType === "sale_invoice"
+                ? "Sale Invoice"
+                : entry.sourceType === "receive_payment"
+                  ? "Receive Payment"
+                  : entry.sourceType === "refund_invoice"
+                    ? "Refund Invoice"
+                    : "-",
             debit,
             credit,
+
+            paymentType: line.paymentType || entry.paymentType || "-",
+
             balance,
             runningBalance: balance,
             attachmentUrl: entry.attachmentUrl || "",
             attachmentType: entry.attachmentType || "",
             invoiceId: entry.invoiceId || null,
+            referenceId: entry.referenceId || null,
           });
         }
       }

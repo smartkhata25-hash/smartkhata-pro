@@ -1,7 +1,7 @@
 // ✅ src/services/customerService.js
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL;
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/customers`;
 
 const getToken = () => localStorage.getItem('token');
@@ -46,5 +46,19 @@ export const fetchCustomerLedger = async (customerId, token) => {
     `${BASE_URL}/api/customer-ledger/${customerId}`,
     getAuthHeaders(token)
   );
+  return response.data;
+};
+// ✅ Search Customer by Name (for Refund Invoice)
+export const fetchCustomerByName = async (name, token = null) => {
+  const response = await axios.get(
+    `${API_URL}/search?name=${encodeURIComponent(name)}`,
+    getAuthHeaders(token)
+  );
+  return response.data;
+};
+
+// ✅ Confirm Merge Customers
+export const confirmMergeCustomers = async (payload, token) => {
+  const response = await axios.post(`${API_URL}/merge/confirm`, payload, getAuthHeaders(token));
   return response.data;
 };

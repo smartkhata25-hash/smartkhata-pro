@@ -7,21 +7,27 @@ const authMiddleware = require("../middleware/authMiddleware");
 router.get(
   "/dashboard-summary",
   authMiddleware,
-  dashboardController.getDashboardSummary
+  dashboardController.getDashboardSummary,
+);
+
+router.get(
+  "/dashboard-alerts",
+  authMiddleware,
+  dashboardController.getDashboardAlerts,
 );
 
 // ✅ Monthly Sales Chart
 router.get(
   "/dashboard-monthly-sales",
   authMiddleware,
-  dashboardController.getMonthlySales
+  dashboardController.getMonthlySales,
 );
 
 // ✅ Monthly Cash Flow
 router.get(
   "/dashboard-monthly-cashflow",
   authMiddleware,
-  dashboardController.getMonthlyCashFlow
+  dashboardController.getMonthlyCashFlow,
 );
 
 module.exports = router;

@@ -1,15 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import {
-  getCashSummary,
-  getBankSummary,
-  getAccountTransactions,
-  getAccountsByCategory,
-} from '../services/accountService';
+import { getCashSummary, getAccountTransactions, getAccounts } from '../services/accountService';
 import AccountTransactionTable from '../components/AccountTransactionTable';
+import { t } from '../i18n/i18n';
 
 const AccountDetailPage = () => {
   const location = useLocation();
+
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -18,81 +15,147 @@ const AccountDetailPage = () => {
   const isCashView = pathname === '/accounts/cash';
   const isBankView = pathname === '/accounts/bank';
 
-  const selectAndLoadAccount = useCallback(async (account) => {
-    setSelectedAccount(account);
-    try {
-      const data = await getAccountTransactions(account._id);
-      setTransactions(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('❌ Transaction Fetch Error:', err);
-      alert('Failed to load transactions.');
-    }
+  const calculateBalanceFromTxns = (txns = []) => {
+    let bal = 0;
+    txns.forEach((t) => {
+      bal += t.debit || 0;
+      bal -= t.credit || 0;
+    });
+    return bal;
+  };
+
+  const loadSingleAccount = useCallback(async (account) => {
+    const txns = await getAccountTransactions(account._id);
+    const safeTxns = Array.isArray(txns) ? txns : [];
+
+    const balance = calculateBalanceFromTxns(safeTxns);
+
+    setTransactions(safeTxns);
+
+    setSelectedAccount({
+      ...account,
+      balance,
+    });
   }, []);
 
   useEffect(() => {
-    const fetchAccounts = async () => {
+    const loadData = async () => {
       try {
+        /* ================= CASH ================= */
         if (isCashView) {
           const cash = await getCashSummary();
           if (!cash?._id) {
-            alert('⚠️ Cash account not found. Please create one.');
+            alert(t('alerts.cashAccountNotFound'));
             return;
           }
           setAccounts([cash]);
-          await selectAndLoadAccount(cash);
-        } else if (isBankView) {
-          const summary = await getBankSummary();
-          const bankAccounts = summary.accounts || [];
+          await loadSingleAccount(cash);
+          return;
+        }
+
+        /* ================= BANK ================= */
+        if (isBankView) {
+          const all = await getAccounts();
+
+          // ✅ ONLY BANK + WALLETS (STRICT FILTER)
+          const bankAccounts = all.filter(
+            (a) => a.category === 'bank' || a.category === 'online' || a.category === 'wallet'
+          );
+          // ✅ attach balance to each account
+          const accountsWithBalance = [];
+
+          for (const acc of bankAccounts) {
+            const txns = await getAccountTransactions(acc._id);
+
+            const balance = calculateBalanceFromTxns(Array.isArray(txns) ? txns : []);
+
+            accountsWithBalance.push({
+              ...acc,
+              balance,
+            });
+          }
+
           if (!bankAccounts.length) {
-            alert('⚠️ No bank accounts found.');
+            alert(t('alerts.noBankAccounts'));
             return;
           }
-          setAccounts(bankAccounts);
-          await selectAndLoadAccount(bankAccounts[0]);
-        } else {
-          const category = pathname.split('/').pop();
-          const catAccounts = await getAccountsByCategory(category);
-          if (!catAccounts.length) {
-            alert('⚠️ No accounts found in this category.');
-            return;
+
+          // ✅ Fake combined (UI only)
+          const combined = {
+            _id: 'ALL_BANKS',
+            name: 'All Banks (Combined)',
+            isCombined: true,
+          };
+
+          // ✅ Combined transactions
+          let allTxns = [];
+          for (const acc of bankAccounts) {
+            const txns = await getAccountTransactions(acc._id);
+            if (Array.isArray(txns)) allTxns.push(...txns);
           }
-          setAccounts(catAccounts);
-          await selectAndLoadAccount(catAccounts[0]);
+
+          allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+          // ✅ Combined account WITH balance (single source of truth)
+          const combinedWithBalance = {
+            ...combined,
+            balance: calculateBalanceFromTxns(allTxns),
+          };
+
+          // ✅ VERY IMPORTANT: accounts + selectedAccount same object
+          setAccounts([combinedWithBalance, ...accountsWithBalance]);
+          setSelectedAccount(combinedWithBalance);
+          setTransactions(allTxns);
         }
       } catch (err) {
-        console.error('❌ Account Load Error:', err);
-        alert('Failed to load account data.');
+        console.error(err);
+        alert(t('alerts.accountsLoadFailed'));
       }
     };
 
-    fetchAccounts();
-  }, [pathname, isCashView, isBankView, selectAndLoadAccount]);
+    loadData();
+  }, [pathname, isCashView, isBankView, loadSingleAccount]);
 
   const handleAccountChange = async (e) => {
-    const accId = e.target.value;
-    const acc = accounts.find((a) => a._id === accId);
-    if (acc) await selectAndLoadAccount(acc);
+    const acc = accounts.find((a) => a._id === e.target.value);
+    if (!acc) return;
+
+    if (acc.isCombined) {
+      let allTxns = [];
+      const real = accounts.filter((a) => !a.isCombined);
+
+      for (const r of real) {
+        const txns = await getAccountTransactions(r._id);
+        if (Array.isArray(txns)) allTxns.push(...txns);
+      }
+
+      allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
+      setTransactions(allTxns);
+
+      setSelectedAccount({
+        ...acc,
+        balance: calculateBalanceFromTxns(allTxns),
+      });
+    } else {
+      await loadSingleAccount(acc);
+    }
   };
 
   return (
     <div className="p-5">
       <h2 className="text-xl font-bold mb-3">
-        {isCashView
-          ? '💵 Cash Account Details'
-          : isBankView
-          ? '🏦 Bank Account Details'
-          : '📁 Account Details'}
+        {isCashView ? t('account.cashDetails') : t('account.bankDetails')}
       </h2>
 
       {accounts.length > 1 && (
         <select
-          onChange={handleAccountChange}
-          value={selectedAccount?._id}
           className="border p-2 mb-4"
+          value={selectedAccount?._id}
+          onChange={handleAccountChange}
         >
-          {accounts.map((acc) => (
-            <option key={acc._id} value={acc._id}>
-              {acc.name} (Rs. {parseFloat(acc.balance || 0).toFixed(2)})
+          {accounts.map((a) => (
+            <option key={a._id} value={a._id}>
+              {a.name} (Rs. {Number(a.balance || 0).toFixed(2)})
             </option>
           ))}
         </select>
@@ -101,8 +164,8 @@ const AccountDetailPage = () => {
       {selectedAccount && (
         <>
           <h3 className="font-semibold mb-2">
-            {selectedAccount.name} – Current Balance: Rs.{' '}
-            {parseFloat(selectedAccount.balance || 0).toFixed(2)}
+            {selectedAccount.name} – {t('account.balance')} Rs.{' '}
+            {Number(selectedAccount.balance || 0).toFixed(2)}
           </h3>
 
           <AccountTransactionTable transactions={transactions} />

@@ -18,18 +18,47 @@ const invoiceSchema = new mongoose.Schema(
     billNo: {
       type: String,
       required: true,
-      unique: true, // ✅ Avoid duplicates
+      trim: true,
     },
-    customerName: { type: String, required: true },
-    customerPhone: { type: String },
 
-    invoiceDate: { type: Date, default: Date.now },
-    dueDate: { type: Date },
+    customerName: {
+      type: String,
+      required: true,
+    },
 
-    items: [invoiceItemSchema],
+    customerPhone: {
+      type: String,
+      default: "",
+    },
 
-    totalAmount: { type: Number, required: true },
-    paidAmount: { type: Number, default: 0 },
+    invoiceDate: {
+      type: Date,
+      default: Date.now,
+    },
+
+    invoiceTime: {
+      type: String,
+      default: "",
+    },
+
+    dueDate: {
+      type: Date,
+    },
+
+    items: {
+      type: [invoiceItemSchema],
+      required: true,
+    },
+
+    totalAmount: {
+      type: Number,
+      required: true,
+    },
+
+    paidAmount: {
+      type: Number,
+      default: 0,
+    },
 
     status: {
       type: String,
@@ -37,7 +66,6 @@ const invoiceSchema = new mongoose.Schema(
       default: "Unpaid",
     },
 
-    // ✅ Only required when paidAmount > 0
     paymentType: {
       type: String,
       enum: ["cash", "bank", "cheque", "online", "credit"],
@@ -47,21 +75,33 @@ const invoiceSchema = new mongoose.Schema(
       lowercase: true,
     },
 
-    // ✅ Only required when paidAmount > 0
     accountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
+      default: null,
       required: function () {
         return this.paidAmount > 0;
       },
-      default: null,
     },
 
-    notes: { type: String, default: "" },
+    notes: {
+      type: String,
+      default: "",
+    },
+    by: {
+      type: String,
+      default: "",
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      required: true,
+    },
+
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
       required: true,
     },
 
@@ -71,21 +111,25 @@ const invoiceSchema = new mongoose.Schema(
       default: null,
     },
 
-    customerId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Customer",
-      required: true,
+    attachmentUrl: {
+      type: String,
+      default: "",
     },
 
-    attachmentUrl: { type: String, default: "" },
-    attachmentType: { type: String, default: "" },
+    attachmentType: {
+      type: String,
+      default: "",
+    },
 
     isDeleted: {
       type: Boolean,
       default: false,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+// ✅ Correct UNIQUE rule (per user, per bill)
+invoiceSchema.index({ createdBy: 1, billNo: 1 }, { unique: true });
 
 module.exports = mongoose.model("Invoice", invoiceSchema);

@@ -15,5 +15,10 @@ router.post("/import", upload.single("file"), ctrl.importSuppliers);
 router.route("/:id").put(ctrl.updateSupplier).delete(ctrl.deleteSupplier);
 
 // 🧾 Ledger route removed from here
+// ✅ Confirm Merge Supplier (Merge API)
+router.post("/merge/confirm", ctrl.confirmMergeSupplier);
+
+// 📘 Supplier Detailed Ledger
+router.get("/:id/detailed-ledger", ctrl.getSupplierDetailedLedger);
 
 module.exports = router;

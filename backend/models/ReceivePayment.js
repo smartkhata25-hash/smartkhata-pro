@@ -29,7 +29,7 @@ const receivePaymentSchema = new mongoose.Schema(
     account: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: false,
     },
     description: {
       type: String,
@@ -60,7 +60,7 @@ const receivePaymentSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // ✅ Optional full-text search support

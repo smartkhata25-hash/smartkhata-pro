@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { t } from '../i18n/i18n';
 
 const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -35,79 +36,115 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
     e.preventDefault();
 
     if (!formData.name.trim()) {
-      alert('Customer name is required');
+      alert(t('alerts.customerRequired'));
       return;
     }
 
     onSubmit(formData);
   };
 
+  useEffect(() => {
+    const esc = (e) => {
+      if (e.key === 'Escape') onCancel();
+    };
+
+    window.addEventListener('keydown', esc);
+
+    return () => window.removeEventListener('keydown', esc);
+  }, [onCancel]);
+
   return (
-    <form onSubmit={handleSubmit} style={formStyle}>
-      <input
-        type="text"
-        name="name"
-        placeholder="Customer Name"
-        value={formData.name}
-        onChange={handleChange}
-        required
-        style={input}
-      />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+        <form onSubmit={handleSubmit} style={formStyle}>
+          <input
+            type="text"
+            name="name"
+            placeholder={t('customerName')}
+            value={formData.name}
+            onChange={handleChange}
+            required
+            style={input}
+          />
 
-      <select name="type" value={formData.type} onChange={handleChange} style={input}>
-        <option value="regular">Regular</option>
-        <option value="vip">VIP</option>
-        <option value="blocked">Blocked</option>
-      </select>
+          <select name="type" value={formData.type} onChange={handleChange} style={input}>
+            <option value="regular">{t('customer.regular')}</option>
+            <option value="vip">{t('customer.vip')}</option>
+            <option value="blocked">{t('customer.blocked')}</option>
+          </select>
 
-      <input
-        type="number"
-        name="openingBalance"
-        placeholder="Opening Balance (can be negative)"
-        value={formData.openingBalance}
-        onChange={handleChange}
-        step="0.01"
-        style={input}
-      />
+          <input
+            type="number"
+            name="openingBalance"
+            placeholder={t('customer.openingBalance')}
+            value={formData.openingBalance}
+            onChange={handleChange}
+            style={input}
+          />
 
-      <input
-        type="email"
-        name="email"
-        placeholder="Email (optional)"
-        value={formData.email}
-        onChange={handleChange}
-        style={input}
-      />
+          <input
+            type="email"
+            name="email"
+            placeholder={t('customer.emailOptional')}
+            value={formData.email}
+            onChange={handleChange}
+            style={input}
+          />
 
-      <input
-        type="text"
-        name="phone"
-        placeholder="Phone (optional)"
-        value={formData.phone}
-        onChange={handleChange}
-        style={input}
-      />
+          <input
+            type="text"
+            name="phone"
+            placeholder={t('customer.phoneOptional')}
+            value={formData.phone}
+            onChange={handleChange}
+            style={input}
+          />
 
-      <input
-        type="text"
-        name="address"
-        placeholder="Address (optional)"
-        value={formData.address}
-        onChange={handleChange}
-        style={input}
-      />
+          <input
+            type="text"
+            name="address"
+            placeholder={t('customer.addressOptional')}
+            value={formData.address}
+            onChange={handleChange}
+            style={input}
+          />
 
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button type="submit" style={button}>
-          Save
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} style={buttonGray}>
-            Cancel
-          </button>
-        )}
+          <div className="flex gap-3 mt-4 justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                setFormData({
+                  name: '',
+                  email: '',
+                  phone: '',
+                  address: '',
+                  type: 'regular',
+                  openingBalance: 0,
+                })
+              }
+              style={{
+                padding: '10px 15px',
+                backgroundColor: '#f1f5f9',
+                color: '#0f172a',
+                border: '1px solid #cbd5e1',
+                borderRadius: '5px',
+                cursor: 'pointer',
+              }}
+            >
+              {t('clear')}
+            </button>
+
+            <button type="button" onClick={onCancel} style={buttonGray}>
+              {t('cancel')}
+            </button>
+
+            <button type="submit" style={button}>
+              {t('save')}
+            </button>
+          </div>
+        </form>
       </div>
-    </form>
+    </div>
   );
 };
 

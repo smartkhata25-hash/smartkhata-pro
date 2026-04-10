@@ -1,7 +1,7 @@
 // ✅ src/services/journalService.js
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
 const API_URL = `${BASE_URL}/api/journal`;
 
 const getToken = () => localStorage.getItem('token');
@@ -68,6 +68,18 @@ export const fetchIncomeStatement = async (startDate, endDate) => {
     return res.data;
   } catch (err) {
     console.error('Income Statement fetch error:', err);
+    return null;
+  }
+};
+
+// ✅ Month vs Month Income Statement
+export const fetchMonthVsMonthIncome = async (year) => {
+  try {
+    const url = `${API_URL}/income-statement/month-vs-month?year=${year}`;
+    const res = await axios.get(url, authHeaders());
+    return res.data;
+  } catch (err) {
+    console.error('Month vs Month Income fetch error:', err);
     return null;
   }
 };

@@ -29,7 +29,7 @@ exports.getSupplierLedger = async (req, res) => {
         .json({ message: "No account linked with supplier" });
     }
 
-    // 📋 Ledger query build
+    // 📋 Ledger query build (ACCOUNT BASED – SAME AS CUSTOMER)
     const query = {
       "lines.account": new mongoose.Types.ObjectId(accountId),
       isDeleted: false,
@@ -44,12 +44,26 @@ exports.getSupplierLedger = async (req, res) => {
       .sort({ date: 1, time: 1 })
       .lean();
 
-    console.log(
-      `📒 Total ledger entries for supplier (${supplier.name}): ${entries.length}`
-    );
-
-    // 🔄 Running balance build
     let balance = 0;
+
+    if (start) {
+      const openingEntries = await JournalEntry.find({
+        "lines.account": new mongoose.Types.ObjectId(accountId),
+        createdBy: req.user.id,
+        isDeleted: false,
+        date: { $lt: new Date(start) },
+      }).lean();
+
+      for (const entry of openingEntries) {
+        for (const line of entry.lines) {
+          if (line.account?.toString() === accountId) {
+            if (line.type === "debit") balance += Number(line.amount || 0);
+            if (line.type === "credit") balance -= Number(line.amount || 0);
+          }
+        }
+      }
+    }
+
     const formattedEntries = [];
 
     for (const entry of entries) {
@@ -69,7 +83,7 @@ exports.getSupplierLedger = async (req, res) => {
             description: entry.description || "",
             sourceType: entry.sourceType || "",
             billNo: entry.billNo || "",
-            paymentType: entry.paymentType || "",
+            paymentType: line.paymentType || entry.paymentType || "-",
             referenceId: entry.referenceId || "",
             debit: isDebit ? amount : 0,
             credit: isCredit ? amount : 0,
@@ -81,14 +95,16 @@ exports.getSupplierLedger = async (req, res) => {
       }
     }
 
-    // ✅ Final response
+    // ✅ Final response (SAME SHAPE AS CUSTOMER LEDGER)
     res.json({
       supplier: {
         _id: supplier._id,
         name: supplier.name,
         phone: supplier.phone,
       },
-      entries: formattedEntries,
+      openingBalance:
+        balance - formattedEntries.reduce((s, e) => s + e.debit - e.credit, 0),
+      ledger: formattedEntries,
     });
   } catch (err) {
     console.error("📛 Supplier ledger error:", err);
@@ -99,8 +115,6 @@ exports.getSupplierLedger = async (req, res) => {
 // ✅ Delete Ledger Entry (Soft delete)
 exports.deleteLedgerEntry = async (req, res) => {
   try {
-    console.log("🚨 DELETE HIT with ID:", req.params.entryId);
-
     const { entryId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(entryId)) {
@@ -119,7 +133,6 @@ exports.deleteLedgerEntry = async (req, res) => {
     entry.isDeleted = true;
     await entry.save();
 
-    console.log("🗑️ Entry soft-deleted:", entryId);
     res.json({ message: "Entry deleted successfully" });
   } catch (err) {
     console.error("❌ Ledger delete error:", err.message);

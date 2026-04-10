@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { getAllReceivePayments, deleteReceivePayment } from '../services/receivePaymentService';
 import { fetchCustomers } from '../services/customerService';
 import { useNavigate } from 'react-router-dom';
+import { t } from '../i18n/i18n';
 
 const ReceivePaymentList = () => {
   const [payments, setPayments] = useState([]);
@@ -28,7 +29,7 @@ const ReceivePaymentList = () => {
       setCustomers(customerData);
       setFiltered(paymentData);
     } catch (err) {
-      alert('❌ Error fetching data: ' + err.message);
+      alert(err.message);
     }
   };
 
@@ -70,24 +71,24 @@ const ReceivePaymentList = () => {
   }, [filters, payments]);
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this payment?')) return;
+    if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
     try {
       await deleteReceivePayment(id);
       fetchData();
     } catch (err) {
-      alert('❌ Failed to delete payment: ' + err.message);
+      alert(t('alerts.deletePaymentFailed') + ': ' + err.message);
     }
   };
 
   return (
     <div className="p-4 bg-white shadow rounded">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Receive Payment List</h2>
+        <h2 className="text-xl font-bold">{t('payment.payments')}</h2>
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/receive-payments/new')}
         >
-          New Payment
+          {t('payment.new')}
         </button>
       </div>
 
@@ -98,7 +99,7 @@ const ReceivePaymentList = () => {
           onChange={(e) => setFilters((prev) => ({ ...prev, customer: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">All Customers</option>
+          <option value="">{t('customers')}</option>
           {customers.map((c) => (
             <option key={c._id} value={c._id}>
               {c.name}
@@ -111,10 +112,10 @@ const ReceivePaymentList = () => {
           onChange={(e) => setFilters((prev) => ({ ...prev, paymentType: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">All Types</option>
-          <option value="Cash">Cash</option>
-          <option value="Cheque">Cheque</option>
-          <option value="Bank">Bank</option>
+          <option value="">{t('payment.allTypes')}</option>
+          <option value="Cash">{t('payment.cash')}</option>
+          <option value="Cheque">{t('payment.cheque')}</option>
+          <option value="Bank">{t('bank')}</option>
         </select>
 
         <input
@@ -135,7 +136,7 @@ const ReceivePaymentList = () => {
           type="text"
           value={filters.search}
           onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-          placeholder="Search..."
+          placeholder={t('search')}
           className="border rounded p-2"
         />
       </div>
@@ -145,39 +146,50 @@ const ReceivePaymentList = () => {
         <table className="w-full border text-sm">
           <thead>
             <tr className="bg-gray-100">
-              <th className="border p-2">Date</th>
-              <th className="border p-2">Customer</th>
-              <th className="border p-2">Amount</th>
-              <th className="border p-2">Type</th>
-              <th className="border p-2">Account</th>
-              <th className="border p-2">Description</th>
-              <th className="border p-2">Actions</th>
+              <th className="border p-2">{t('date')}</th>
+              <th className="border p-2">{t('customer')}</th>
+              <th className="border p-2">{t('expense.paymentMode')}</th>
+              <th className="border p-2">{t('account')}</th>
+              <th className="border p-2">{t('amount')}</th>
+              <th className="border p-2">{t('description')}</th>
+              <th className="border p-2">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((p) => (
-              <tr key={p._id}>
+              <tr key={p._id} className="text-center">
                 <td className="border p-2">
                   {p.date ? new Date(p.date).toLocaleDateString() : '-'}
                 </td>
+
                 <td className="border p-2">{p.customer?.name || '-'}</td>
-                <td className="border p-2 text-right">{parseFloat(p.amount).toFixed(2)}</td>
-                <td className="border p-2">{p.paymentType}</td>
-                <td className="border p-2">{p.account?.name || '-'}</td>
+
+                {/* ✅ Payment Mode */}
+                <td className="border p-2 capitalize">{p.paymentMode || '-'}</td>
+
+                {/* ✅ Account */}
+                <td className="border p-2">{p.accountName || '-'}</td>
+
+                <td className="border p-2 text-center">{Number(p.amount || 0).toFixed(2)}</td>
+
                 <td className="border p-2">{p.description || '-'}</td>
-                <td className="border p-2 flex gap-2">
-                  <button
-                    className="bg-yellow-400 px-2 py-1 rounded"
-                    onClick={() => navigate(`/receive-payments/edit/${p._id}`)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="bg-red-600 text-white px-2 py-1 rounded"
-                    onClick={() => handleDelete(p._id)}
-                  >
-                    Delete
-                  </button>
+
+                <td className="border p-2">
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      className="bg-yellow-400 px-2 py-1 rounded"
+                      onClick={() => navigate(`/receive-payments/edit/${p._id}`)}
+                    >
+                      {t('edit')}
+                    </button>
+
+                    <button
+                      className="bg-red-600 text-white px-2 py-1 rounded"
+                      onClick={() => handleDelete(p._id)}
+                    >
+                      {t('delete')}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -185,7 +197,7 @@ const ReceivePaymentList = () => {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-center p-4">
-                  No records found.
+                  {t('common.noRecords')}
                 </td>
               </tr>
             )}

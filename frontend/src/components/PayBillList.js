@@ -3,6 +3,7 @@ import { getAllPayBills, deletePayBill } from '../services/payBillService';
 import { fetchSuppliers } from '../services/supplierService';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
+import { t } from '../i18n/i18n';
 
 const PayBillList = () => {
   const [bills, setBills] = useState([]);
@@ -29,7 +30,7 @@ const PayBillList = () => {
         setFiltered(billData);
       } catch (err) {
         console.error('❌ Failed to fetch bills:', err.message);
-        alert('Failed to load pay bills.');
+        alert(t('alerts.payBillLoadFailed'));
       }
     };
     fetchData();
@@ -43,7 +44,7 @@ const PayBillList = () => {
     }
 
     if (filters.paymentType) {
-      result = result.filter((b) => b.paymentType === filters.paymentType);
+      result = result.filter((b) => b.paymentMode?.toLowerCase() === filters.paymentType);
     }
 
     if (filters.search) {
@@ -52,7 +53,7 @@ const PayBillList = () => {
         (b) =>
           b.description?.toLowerCase().includes(q) ||
           b.amount?.toString().includes(q) ||
-          b.account?.name?.toLowerCase().includes(q) ||
+          b.paymentMode?.toLowerCase().includes(q) ||
           b.supplier?.name?.toLowerCase().includes(q)
       );
     }
@@ -69,7 +70,7 @@ const PayBillList = () => {
   }, [filters, bills]);
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this payment?')) return;
+    if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
     try {
       await deletePayBill(id);
       const billData = await getAllPayBills();
@@ -77,19 +78,19 @@ const PayBillList = () => {
       setFiltered(billData);
     } catch (err) {
       console.error('❌ Failed to delete:', err.message);
-      alert('Failed to delete payment.');
+      alert(t('alerts.deletePaymentFailed'));
     }
   };
 
   return (
     <div className="p-4 bg-white shadow rounded">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Pay Bill List</h2>
+        <h2 className="text-xl font-bold">{t('payment.payBillList')}</h2>
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/pay-bills/new')}
         >
-          New Payment
+          {t('payment.new')}
         </button>
       </div>
 
@@ -100,7 +101,7 @@ const PayBillList = () => {
           onChange={(e) => setFilters((prev) => ({ ...prev, supplier: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">All Suppliers</option>
+          <option value="">{t('supplier.allSuppliers')}</option>
           {suppliers.map((s) => (
             <option key={s._id} value={s._id}>
               {s.name}
@@ -113,10 +114,10 @@ const PayBillList = () => {
           onChange={(e) => setFilters((prev) => ({ ...prev, paymentType: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">All Types</option>
-          <option value="Cash">Cash</option>
-          <option value="Cheque">Cheque</option>
-          <option value="Bank">Bank</option>
+          <option value="">{t('payment.allTypes')}</option>
+          <option value="cash">{t('payment.cash')}</option>
+          <option value="cheque">{t('payment.cheque')}</option>
+          <option value="online">{t('payment.online')}</option>
         </select>
 
         <input
@@ -137,7 +138,7 @@ const PayBillList = () => {
           type="text"
           value={filters.search}
           onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-          placeholder="Search..."
+          placeholder={t('search')}
           className="border rounded p-2"
         />
 
@@ -147,7 +148,7 @@ const PayBillList = () => {
           }
           className="bg-gray-300 px-3 py-1 rounded"
         >
-          Reset Filters
+          {t('reset')}
         </button>
       </div>
 
@@ -156,37 +157,52 @@ const PayBillList = () => {
         <table className="w-full border text-sm">
           <thead>
             <tr className="bg-gray-100">
-              <th className="border p-2">Date</th>
-              <th className="border p-2">Supplier</th>
-              <th className="border p-2">Amount</th>
-              <th className="border p-2">Type</th>
-              <th className="border p-2">Account</th>
-              <th className="border p-2">Description</th>
-              <th className="border p-2">Actions</th>
+              <th className="border p-2">{t('common.date')}</th>
+              <th className="border p-2">{t('supplier.supplier')}</th>
+              <th className="border p-2">{t('ledger.paymentType')}</th>
+              <th className="border p-2">{t('account')}</th>
+              <th className="border p-2">{t('common.amount')}</th>
+              <th className="border p-2">{t('common.description')}</th>
+              <th className="border p-2">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((bill) => (
-              <tr key={bill._id}>
+              <tr key={bill._id} className="text-center">
+                {/* Date */}
                 <td className="border p-2">{dayjs(bill.date).format('YYYY-MM-DD')}</td>
+
+                {/* Supplier */}
                 <td className="border p-2 break-all">{bill.supplier?.name || '-'}</td>
+
+                {/* Payment Mode (cash / online / cheque) */}
+                <td className="border p-2 capitalize">{bill.paymentMode || '-'}</td>
+
+                {/* Account (Cash / Meezan Bank / JazzCash etc) */}
+                <td className="border p-2">{bill.accountName || '-'}</td>
+
+                {/* Amount */}
                 <td className="border p-2">{bill.amount ?? '0.00'}</td>
-                <td className="border p-2">{bill.paymentType || '-'}</td>
-                <td className="border p-2">{bill.account?.name || '-'}</td>
+
+                {/* Description */}
                 <td className="border p-2">{bill.description || '-'}</td>
-                <td className="border p-2 flex gap-2">
-                  <button
-                    className="bg-yellow-400 px-2 py-1 rounded"
-                    onClick={() => navigate(`/pay-bills/edit/${bill._id}`)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="bg-red-600 text-white px-2 py-1 rounded"
-                    onClick={() => handleDelete(bill._id)}
-                  >
-                    Delete
-                  </button>
+
+                {/* Actions */}
+                <td className="border p-2">
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      className="bg-yellow-400 px-2 py-1 rounded"
+                      onClick={() => navigate(`/pay-bills/edit/${bill._id}`)}
+                    >
+                      {t('common.edit')}
+                    </button>
+                    <button
+                      className="bg-red-600 text-white px-2 py-1 rounded"
+                      onClick={() => handleDelete(bill._id)}
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -194,7 +210,7 @@ const PayBillList = () => {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-center p-4">
-                  No records found.
+                  {t('common.noRecords')}
                 </td>
               </tr>
             )}

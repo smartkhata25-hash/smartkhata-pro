@@ -1,13 +1,19 @@
 const PurchaseInvoice = require("../models/purchaseInvoice");
+
 const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");
-const InventoryTransaction = require("../models/InventoryTransaction");
+const {
+  createInventoryEntry,
+  deleteTransactionsByReference,
+} = require("../utils/stockHelper");
+
 const Product = require("../models/Product");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
 const path = require("path");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { createPaymentEntry } = require("../utils/paymentService");
 
 // ✅ Create Purchase Invoice
 const addPurchaseInvoice = asyncHandler(async (req, res) => {
@@ -27,9 +33,14 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     items,
   } = req.body;
 
+  // ✅ STATUS CALCULATION (ADD HERE)
+  let status = "Unpaid";
+  if (paidAmount >= grandTotal) status = "Paid";
+  else if (paidAmount > 0) status = "Partial";
+
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
   parsedItems = parsedItems.filter(
-    (i) => i.productId && i.quantity > 0 && i.price > 0
+    (i) => i.productId && i.quantity > 0 && i.price > 0,
   ); // ✅ Clean only valid items
 
   const userId = req.user?.id || req.userId;
@@ -46,7 +57,9 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   if (!supplier) {
     const account = await Account.create({
       name: supplierName,
-      type: "liability",
+      type: "Liability",
+
+      normalBalance: "credit",
       category: "supplier",
       userId,
     });
@@ -57,10 +70,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       account: account._id,
       userId,
     });
-
-    console.log("👷 Supplier + Account created:", supplier.name);
   } else {
-    console.log("🔍 Supplier found:", supplier.name);
   }
 
   if (!supplier.account) {
@@ -68,9 +78,12 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   // 💾 Save invoice
+  const parsedInvoiceDate = new Date(invoiceDate);
+
   const invoice = await PurchaseInvoice.create({
     billNo,
-    invoiceDate,
+    invoiceDate: parsedInvoiceDate,
+
     invoiceTime,
     supplier: supplier._id, // ✅ New
     supplierName,
@@ -81,6 +94,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     grandTotal,
     paidAmount,
     paymentType,
+    status,
     accountId: paidAmount > 0 ? accountId : null,
     attachment: attachmentPath,
     attachmentType, // ✅ New
@@ -89,7 +103,27 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   });
 
   // 📘 Create Journal Entry
+
+  // 🔹 Inventory account nikalein
+  const inventoryAccount = await Account.findOne({
+    code: "INVENTORY",
+    userId,
+  });
+  if (!inventoryAccount) {
+    return res.status(400).json({
+      message: "Inventory account not found",
+    });
+  }
+
   const lines = [
+    // ✅ Inventory increase
+    {
+      account: inventoryAccount._id,
+      type: "debit",
+      amount: grandTotal,
+    },
+
+    // ✅ Supplier liability
     {
       account: supplier.account,
       type: "credit",
@@ -97,37 +131,43 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     },
   ];
 
-  if (paidAmount > 0 && accountId) {
-    lines.push({
-      account: accountId,
-      type: "debit",
-      amount: paidAmount,
-    });
-  }
-
   await JournalEntry.create({
-    date: invoiceDate,
+    date: parsedInvoiceDate,
+
     time: invoiceTime || "",
-    description: `Purchase Invoice #${billNo}`,
+    billNo: billNo,
+    description: req.body.description || "",
+
     createdBy: userId,
     sourceType: "purchase_invoice",
+
+    supplierId: supplier._id, // ✅ already added
+    invoiceId: invoice._id, // ✅ ADD THIS
+    invoiceModel: "PurchaseInvoice", // ✅ ADD THIS
     referenceId: invoice._id,
+
     lines,
     attachmentUrl: attachmentPath,
     attachmentType,
   });
 
-  console.log("🧾 Journal lines created:", lines.length);
+  if (paidAmount > 0 && accountId) {
+    await createPaymentEntry({
+      userId,
+      referenceId: invoice._id,
+      sourceType: "purchase_payment",
+      billNo: invoice.billNo,
+      accountId,
+      counterPartyAccountId: supplier.account,
+      amount: paidAmount,
+      paymentType,
+      description: `Payment against Purchase Invoice ${invoice.billNo}`,
+    });
+  }
 
-  // 📦 Update Stock
+  // 📦 Stock via stockHelper
   for (const item of parsedItems) {
-    const product = await Product.findById(item.productId);
-    if (!product) continue;
-
-    product.stock += item.quantity;
-    await product.save();
-
-    await InventoryTransaction.create({
+    await createInventoryEntry({
       productId: item.productId,
       type: "IN",
       quantity: item.quantity,
@@ -137,8 +177,6 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       userId,
     });
   }
-
-  console.log("📦 Stock updated");
 
   await recalculateAccountBalance(supplier.account);
   if (accountId) await recalculateAccountBalance(accountId);
@@ -152,7 +190,9 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
 // ✅ Get invoice
 const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
-  const invoice = await PurchaseInvoice.findById(req.params.id);
+  const invoice = await PurchaseInvoice.findById(req.params.id).populate(
+    "items.productId",
+  );
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
@@ -184,10 +224,12 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     items,
   } = req.body;
 
+  const parsedInvoiceDate = new Date(invoiceDate);
+
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
   parsedItems = parsedItems.filter(
-    (i) => i.productId && i.quantity > 0 && i.price > 0
-  ); // ✅ Clean only valid items
+    (i) => i.productId && i.quantity > 0 && i.price > 0,
+  );
 
   const userId = req.user?.id || req.userId;
 
@@ -204,24 +246,27 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     attachmentType = invoice.attachmentType || "";
   }
 
-  // 🔁 Restore Stock
-  for (const oldItem of invoice.items) {
-    const product = await Product.findById(oldItem.productId);
-    if (product) {
-      product.stock -= oldItem.quantity;
-      await product.save();
-    }
-  }
-
-  await InventoryTransaction.deleteMany({
-    invoiceId: invoice._id,
-    invoiceModel: "PurchaseInvoice",
-  });
-
-  await JournalEntry.deleteMany({
+  await deleteTransactionsByReference({
     referenceId: invoice._id,
-    sourceType: "purchase_invoice",
+    invoiceModel: "PurchaseInvoice",
+    userId,
   });
+
+  await JournalEntry.updateMany(
+    {
+      referenceId: invoice._id,
+      sourceType: "purchase_invoice",
+    },
+    { isDeleted: true },
+  );
+
+  await JournalEntry.updateMany(
+    {
+      referenceId: invoice._id,
+      sourceType: "purchase_payment",
+    },
+    { isDeleted: true },
+  );
 
   const supplier = await Supplier.findOne({ name: supplierName, userId });
   if (!supplier || !supplier.account) {
@@ -230,9 +275,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   Object.assign(invoice, {
     billNo,
-    invoiceDate,
+    invoiceDate: parsedInvoiceDate,
     invoiceTime,
-    supplier: supplier._id, // ✅ Add this in update also
+    supplier: supplier._id,
     supplierName,
     supplierPhone,
     totalAmount,
@@ -243,13 +288,30 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     paymentType,
     accountId: paidAmount > 0 ? accountId : null,
     attachment: attachmentPath,
-    attachmentType, // ✅ Add this
+    attachmentType,
     items: parsedItems,
   });
 
+  invoice.status =
+    paidAmount >= grandTotal ? "Paid" : paidAmount > 0 ? "Partial" : "Unpaid";
+
   await invoice.save();
 
+  const inventoryAccount = await Account.findOne({
+    code: "INVENTORY",
+    userId,
+  });
+
+  if (!inventoryAccount) {
+    throw new Error("Inventory account not found");
+  }
+
   const lines = [
+    {
+      account: inventoryAccount._id,
+      type: "debit",
+      amount: grandTotal,
+    },
     {
       account: supplier.account,
       type: "credit",
@@ -257,34 +319,38 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     },
   ];
 
-  if (paidAmount > 0 && accountId) {
-    lines.push({
-      account: accountId,
-      type: "debit",
-      amount: paidAmount,
-    });
-  }
-
   await JournalEntry.create({
-    date: invoiceDate,
+    date: parsedInvoiceDate,
     time: invoiceTime || "",
-    description: `Updated Purchase Invoice #${billNo}`,
+    billNo,
+    description: req.body.description || "",
     createdBy: userId,
     sourceType: "purchase_invoice",
     referenceId: invoice._id,
+    supplierId: supplier._id,
+    invoiceId: invoice._id,
+    invoiceModel: "PurchaseInvoice",
     lines,
     attachmentUrl: attachmentPath,
     attachmentType,
   });
 
+  if (paidAmount > 0 && accountId) {
+    await createPaymentEntry({
+      userId,
+      referenceId: invoice._id,
+      sourceType: "purchase_payment",
+      billNo: invoice.billNo,
+      accountId,
+      counterPartyAccountId: supplier.account,
+      amount: paidAmount,
+      paymentType,
+      description: `Payment against Purchase Invoice ${invoice.billNo}`,
+    });
+  }
+
   for (const item of parsedItems) {
-    const product = await Product.findById(item.productId);
-    if (!product) continue;
-
-    product.stock += item.quantity;
-    await product.save();
-
-    await InventoryTransaction.create({
+    await createInventoryEntry({
       productId: item.productId,
       type: "IN",
       quantity: item.quantity,
@@ -313,17 +379,35 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
     throw new Error("Invoice not found");
   }
 
-  await invoice.deleteOne();
+  const userId = req.user?.id || req.userId;
 
-  await JournalEntry.deleteMany({
+  // ✅ STOCK ROLLBACK
+  await deleteTransactionsByReference({
     referenceId: invoice._id,
-    sourceType: "purchase_invoice",
+    invoiceModel: "PurchaseInvoice",
+    userId,
   });
 
-  await InventoryTransaction.deleteMany({
-    invoiceId: invoice._id,
-    invoiceModel: "PurchaseInvoice",
-  });
+  // ✅ 🔥 SOFT DELETE JOURNAL
+  await JournalEntry.updateMany(
+    {
+      referenceId: invoice._id,
+      sourceType: "purchase_invoice",
+    },
+    { isDeleted: true },
+  );
+
+  await JournalEntry.updateMany(
+    {
+      referenceId: invoice._id,
+      sourceType: "purchase_payment",
+    },
+    { isDeleted: true },
+  );
+
+  // ✅ DELETE INVOICE
+  invoice.isDeleted = true;
+  await invoice.save();
 
   res.status(200).json({
     success: true,
@@ -331,9 +415,140 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   });
 });
 
+const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+
+  const invoices = await PurchaseInvoice.find({
+    userId,
+    isDeleted: false,
+  })
+    .populate("supplier", "name")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const formatted = invoices.map((inv) => {
+    let status = "Unpaid";
+    if (inv.paidAmount >= inv.grandTotal) status = "Paid";
+    else if (inv.paidAmount > 0) status = "Partial";
+
+    return { ...inv, status };
+  });
+
+  res.status(200).json(formatted);
+});
+// ✅ SEARCH Purchase Invoices
+const searchPurchaseInvoices = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+  const { query } = req.query;
+
+  if (!query || !query.trim()) {
+    return res.status(400).json({
+      message: "Search query required",
+    });
+  }
+
+  const conditions = query
+    .split(" ")
+    .map((pair) => {
+      const [key, value] = pair.split(":");
+
+      if (!value) return null;
+
+      switch (key) {
+        case "billNo":
+          return { billNo: { $regex: value, $options: "i" } };
+
+        case "supplierName":
+          return { supplierName: { $regex: value, $options: "i" } };
+
+        case "supplierPhone":
+          return { supplierPhone: { $regex: value, $options: "i" } };
+
+        case "startDate":
+          return {
+            invoiceDate: {
+              $gte: new Date(value),
+            },
+          };
+
+        case "endDate":
+          return {
+            invoiceDate: {
+              $lte: new Date(value + "T23:59:59.999Z"),
+            },
+          };
+
+        default:
+          return null;
+      }
+    })
+    .filter(Boolean);
+
+  const invoices = await PurchaseInvoice.find({
+    userId,
+    isDeleted: false,
+    $and: conditions,
+  })
+    .populate("items.productId")
+    .sort({ createdAt: -1 });
+
+  res.status(200).json(invoices);
+});
+
+const getItemPurchaseHistory = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+  const { productId } = req.params;
+
+  if (!productId) {
+    return res.status(400).json({
+      message: "Product ID required",
+    });
+  }
+
+  const mongoose = require("mongoose");
+
+  const records = await PurchaseInvoice.aggregate([
+    {
+      $match: {
+        userId: new mongoose.Types.ObjectId(userId),
+        isDeleted: false,
+        "items.productId": new mongoose.Types.ObjectId(productId),
+      },
+    },
+    { $unwind: "$items" },
+    {
+      $match: {
+        "items.productId": new mongoose.Types.ObjectId(productId),
+      },
+    },
+    {
+      $project: {
+        supplierName: 1,
+        supplier: 1,
+        billNo: 1,
+        invoiceDate: 1,
+        price: "$items.price",
+        quantity: "$items.quantity",
+      },
+    },
+    {
+      $sort: {
+        price: 1,
+        invoiceDate: -1,
+      },
+    },
+    { $limit: 5 },
+  ]);
+
+  res.status(200).json(records);
+});
+
 module.exports = {
   addPurchaseInvoice,
+  getAllPurchaseInvoices,
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
   deletePurchaseInvoice,
+  searchPurchaseInvoices,
+  getItemPurchaseHistory,
 };

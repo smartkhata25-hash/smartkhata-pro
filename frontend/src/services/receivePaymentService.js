@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 // 📦 Base URL from environment
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/receive-payments`;
 
 // ✅ Authorization headers for JSON requests

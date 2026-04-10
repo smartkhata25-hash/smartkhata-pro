@@ -1,102 +1,179 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import ProductDropdown from './ProductDropdown';
+import { t } from '../i18n/i18n';
 
 const InvoiceTable = ({
   items,
   setItems,
-  productSuggestions,
-  selectedProductIndexByRow,
-  handleSearchChange,
-  handleProductKeyDown,
-  handleProductSelect,
+  products,
   handleQtyRateChange,
   clearOnFocus,
+  onProductChange,
+  historyAutoMode,
+  mode = 'sale',
 }) => {
+  const qtyRefs = useRef([]);
+  const rateRefs = useRef([]);
+  const itemRefs = useRef([]);
+
+  const blankRow = () => ({
+    search: '',
+    name: '',
+    productId: '',
+    description: '',
+    cost: 0,
+    quantity: 1,
+    rate: 0,
+    amount: 0,
+  });
+  const focusItem = (index) => {
+    setTimeout(() => {
+      itemRefs.current[index]?.focus();
+    }, 50);
+  };
+
   return (
-    <div className="overflow-x-auto mt-6">
-      <table className="w-full border">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="border p-2">#</th>
-            <th className="border p-2">Item</th>
-            <th className="border p-2">Description</th>
-            <th className="border p-2">Cost</th>
-            <th className="border p-2">Qty</th>
-            <th className="border p-2">Rate</th>
-            <th className="border p-2">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, index) => (
-            <tr key={index} className="relative">
-              <td className="border p-2 text-center">{item.itemNo}</td>
-
-              {/* ✅ Item Cell with Suggestions */}
-              <td className="border p-2">
-                <div className="relative z-20">
-                  <input
-                    value={item.search}
-                    onChange={(e) => handleSearchChange(index, e.target.value)}
-                    onKeyDown={(e) => handleProductKeyDown(e, index)}
-                    className="w-full border-0 p-1"
-                    autoComplete="off"
-                  />
-                  {productSuggestions.filter((p) => p.row === index).length > 0 && (
-                    <ul className="absolute z-50 bg-white shadow border mt-1 w-60 max-h-40 overflow-auto">
-                      {productSuggestions
-                        .filter((p) => p.row === index)
-                        .map((product, i) => {
-                          const isSelected = selectedProductIndexByRow[index] === i;
-                          return (
-                            <li
-                              key={i}
-                              onClick={() => handleProductSelect(product, index)}
-                              className="cursor-pointer p-2"
-                              style={{
-                                backgroundColor: isSelected ? '#bbf7d0' : 'white',
-                                fontWeight: isSelected ? 'bold' : 'normal',
-                              }}
-                            >
-                              {product.name} – Rs. {product.price}
-                            </li>
-                          );
-                        })}
-                    </ul>
-                  )}
+    <div className="overflow-x-auto mt-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="max-h-[50vh] overflow-y-auto border rounded">
+        <table className="w-full border text-xs md:text-sm leading-none">
+          <thead className="bg-gray-100 sticky top-0">
+            <tr>
+              <th className="border px-2 py-1 md:p-1">#</th>
+              <th className="border px-2 py-1 md:p-1 w-[35%]">{t('item')}</th>
+              <th className="border px-2 py-1 md:p-1 hidden md:table-cell">{t('description')}</th>
+              <th className="border px-2 py-1 md:p-1">{t('cost')}</th>
+              <th className="border px-2 py-1 md:p-1">{t('qty')}</th>
+              <th className="border px-2 py-1 md:p-1">{t('rate')}</th>
+              <th className="border px-2 py-1 md:p-1">
+                <div className="flex items-center justify-between">
+                  <span>{t('amount')}</span>
                 </div>
-              </td>
-
-              {/* ✅ باقی کالم */}
-              <td className="border p-2">
-                <input
-                  value={item.description}
-                  disabled
-                  className="w-full bg-gray-100 border-0 p-1"
-                />
-              </td>
-              <td className="border p-2 text-right">{item.cost.toFixed(2)}</td>
-              <td className="border p-2">
-                <input
-                  type="number"
-                  value={item.quantity}
-                  onChange={(e) => handleQtyRateChange(index, 'quantity', e.target.value)}
-                  onFocus={clearOnFocus}
-                  className="w-full border-0 p-1 text-right"
-                />
-              </td>
-              <td className="border p-2">
-                <input
-                  type="number"
-                  value={item.rate}
-                  onChange={(e) => handleQtyRateChange(index, 'rate', e.target.value)}
-                  onFocus={clearOnFocus}
-                  className="w-full border-0 p-1 text-right"
-                />
-              </td>
-              <td className="border p-2 text-right font-semibold">Rs. {item.amount.toFixed(2)}</td>
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {items.map((item, index) => (
+              <tr key={index} className="text-xs md:text-sm h-5">
+                <td className="border px-1 py-0 md:p-0 text-center">{index + 1}</td>
+
+                {/* ✅ Item */}
+                <td className="border px-1 py-0 md:p-0">
+                  <ProductDropdown
+                    inputRef={(el) => (itemRefs.current[index] = el)}
+                    productList={products}
+                    value={item.search}
+                    onSelect={(product) => {
+                      const updated = [...items];
+                      const qty = Number(updated[index].quantity) || 1;
+
+                      // ✅ Sale vs Purchase price logic
+                      const price =
+                        mode === 'purchase' ? product.unitCost || 0 : product.salePrice || 0;
+
+                      updated[index] = {
+                        ...updated[index],
+                        search: product.name,
+                        name: product.name,
+                        productId: product._id,
+                        description: product.description || '',
+                        cost: product.unitCost || 0,
+                        rate: price,
+                        quantity: qty,
+                        amount: qty * price,
+                      };
+
+                      onProductChange && onProductChange(product._id);
+
+                      if (index === items.length - 1) {
+                        updated.push(blankRow());
+                      }
+
+                      setItems(updated);
+
+                      window.dispatchEvent(new CustomEvent('show-history'));
+
+                      setTimeout(() => qtyRefs.current[index]?.focus(), 50);
+                    }}
+                  />
+                </td>
+
+                {/* Description */}
+                <td className="border p-1 hidden md:table-cell">
+                  <input
+                    value={item.description || ''}
+                    onChange={(e) => {
+                      const updated = [...items];
+                      updated[index].description = e.target.value;
+                      setItems(updated);
+                    }}
+                    className="w-full border-0 px-1 py-0.5 md:p-1"
+                  />
+                </td>
+
+                {/* Cost */}
+                <td className="border px-2 py-1 md:p-1 text-center">
+                  {mode === 'purchase' ? (
+                    <input
+                      type="number"
+                      value={item.cost || ''}
+                      onChange={(e) => handleQtyRateChange(index, 'cost', e.target.value)}
+                      onFocus={clearOnFocus}
+                      className="w-full border-0 p-0 text-center h-6"
+                    />
+                  ) : item.cost ? (
+                    item.cost.toFixed(2)
+                  ) : (
+                    '0.00'
+                  )}
+                </td>
+
+                {/* Qty */}
+                <td className="border p-0">
+                  <input
+                    ref={(el) => (qtyRefs.current[index] = el)}
+                    type="number"
+                    value={item.quantity || ''}
+                    onChange={(e) => handleQtyRateChange(index, 'quantity', e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        window.dispatchEvent(new CustomEvent('close-history'));
+                        rateRefs.current[index]?.focus();
+                      }
+                    }}
+                    onFocus={clearOnFocus}
+                    className="w-full border-0 p-0 text-center h-6"
+                  />
+                </td>
+
+                {/* Rate */}
+                <td className="border p-0">
+                  <input
+                    ref={(el) => (rateRefs.current[index] = el)}
+                    type="number"
+                    value={item.rate || ''}
+                    onChange={(e) => handleQtyRateChange(index, 'rate', e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        focusItem(index + 1);
+                      }
+                    }}
+                    onFocus={clearOnFocus}
+                    className="w-full border-0 p-0 text-center"
+                  />
+                </td>
+
+                {/* Amount */}
+                <td className="border px-0 py-0 md:p-0 text-center font-semibold">
+                  {item.amount ? item.amount.toFixed(2) : '0.00'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };

@@ -18,13 +18,13 @@ const purchaseInvoiceSchema = new mongoose.Schema(
   {
     billNo: {
       type: String,
-      required: false, // 🔁 Optional کر دیا گیا
-      unique: true,
+      required: false,
     },
     invoiceDate: {
-      type: String,
+      type: Date,
       required: true,
     },
+
     invoiceTime: {
       type: String,
       default: "", // ✅ Optional allowed
@@ -66,6 +66,11 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    status: {
+      type: String,
+      enum: ["Paid", "Partial", "Unpaid"],
+      default: "Unpaid",
+    },
 
     paymentType: {
       type: String,
@@ -106,8 +111,16 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       default: false, // ✅ Soft delete supported
     },
   },
-  { timestamps: true }
+
+  { timestamps: true },
 );
+
+// 🔥 PERFORMANCE INDEX (Cloud Ready)
+purchaseInvoiceSchema.index({
+  userId: 1,
+  "items.productId": 1,
+  invoiceDate: -1,
+});
 
 module.exports =
   mongoose.models.PurchaseInvoice ||

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/purchase-invoices`;
 
 // ✅ Token config
@@ -77,12 +77,44 @@ const deletePurchaseInvoice = async (id) => {
   }
 };
 
+// 🔍 Search Purchase Invoices
+export const searchPurchaseInvoices = async (query) => {
+  try {
+    const response = await axios.get(
+      `${API_URL}/search?query=${encodeURIComponent(query)}`,
+      getConfig()
+    );
+
+    return response.data;
+  } catch (err) {
+    console.error('❌ Error searching purchase invoices:', err.response?.data || err.message);
+    throw err;
+  }
+};
+
+// ✅ Alias for list (SalesInvoiceList jaisa)
+const getPurchaseInvoices = getAllPurchaseInvoices;
+
+// 📊 Get Item Purchase History
+const getItemPurchaseHistory = async (productId) => {
+  try {
+    const response = await axios.get(`${API_URL}/item-history/${productId}`, getConfig());
+    return response.data;
+  } catch (err) {
+    console.error('❌ Error fetching item purchase history:', err.response?.data || err.message);
+    throw err;
+  }
+};
+
 const purchaseInvoiceService = {
   addPurchaseInvoice,
-  getAllPurchaseInvoices,
+  getPurchaseInvoices, // 👈 LIST کے لیے
+  getAllPurchaseInvoices, // (optional, رکھنا چاہیں)
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
   deletePurchaseInvoice,
+  searchPurchaseInvoices,
+  getItemPurchaseHistory,
 };
 
 export default purchaseInvoiceService;

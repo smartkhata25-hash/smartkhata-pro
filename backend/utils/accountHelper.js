@@ -20,58 +20,69 @@ exports.updateAccountBalance = async (accountId, amount, operation = "add") => {
   }
 
   await account.save();
-  console.log(
-    `🛠️ Balance ${operation}ed for ${account.name}: ${account.balance}`
-  );
 };
 
 // ✅ 2. کسی ایک اکاؤنٹ کا بیلنس دوبارہ کلکولیٹ کریں (Journal کی بنیاد پر)
 exports.recalculateAccountBalance = async (accountId) => {
-  if (!mongoose.Types.ObjectId.isValid(accountId)) {
-    console.warn("⚠️ Invalid Account ID for recalculation");
-    return 0;
-  }
+  try {
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      console.warn("⚠️ Invalid Account ID for recalculation");
+      return 0;
+    }
 
-  const summary = await JournalEntry.aggregate([
-    { $unwind: "$lines" },
-    {
-      $match: {
-        "lines.account": new mongoose.Types.ObjectId(accountId),
-        isDeleted: false,
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalDebit: {
-          $sum: {
-            $cond: [{ $eq: ["$lines.type", "debit"] }, "$lines.amount", 0],
-          },
-        },
-        totalCredit: {
-          $sum: {
-            $cond: [{ $eq: ["$lines.type", "credit"] }, "$lines.amount", 0],
-          },
+    const objectId = new mongoose.Types.ObjectId(accountId);
+
+    // 🔍 Account load کریں تاکہ userId بھی مل جائے
+    const account = await Account.findById(objectId);
+    if (!account) {
+      console.error("❌ Account not found while recalculating:", accountId);
+      throw new Error("Account not found");
+    }
+
+    const summary = await JournalEntry.aggregate([
+      { $unwind: "$lines" },
+      {
+        $match: {
+          "lines.account": objectId,
+          createdBy: account.userId, // ✅ MULTI-USER SAFETY FIX
+          isDeleted: false,
         },
       },
-    },
-  ]);
+      {
+        $group: {
+          _id: null,
+          totalDebit: {
+            $sum: {
+              $cond: [{ $eq: ["$lines.type", "debit"] }, "$lines.amount", 0],
+            },
+          },
+          totalCredit: {
+            $sum: {
+              $cond: [{ $eq: ["$lines.type", "credit"] }, "$lines.amount", 0],
+            },
+          },
+        },
+      },
+    ]);
 
-  const { totalDebit = 0, totalCredit = 0 } = summary[0] || {};
+    const { totalDebit = 0, totalCredit = 0 } = summary[0] || {};
 
-  const account = await Account.findById(accountId);
-  if (!account) {
-    console.error("❌ Account not found while recalculating:", accountId);
-    throw new Error("Account not found");
+    let calculatedBalance = 0;
+
+    if (account.normalBalance === "debit") {
+      calculatedBalance = totalDebit - totalCredit;
+    } else {
+      calculatedBalance = totalCredit - totalDebit;
+    }
+
+    account.balance = calculatedBalance;
+    await account.save();
+
+    return account.balance;
+  } catch (err) {
+    console.error("❌ Error recalculating balance:", err.message);
+    throw err;
   }
-
-  account.balance = totalDebit - totalCredit;
-  await account.save();
-
-  console.log(
-    `📊 Balance recalculated for [${account.name}]: ${account.balance}`
-  );
-  return account.balance;
 };
 
 // ✅ 3. تمام اکاؤنٹس کا بیلنس ریفریش کریں (کسی مخصوص یوزر کے لیے)
@@ -95,6 +106,5 @@ exports.recalculateAllUserAccounts = async (userId) => {
     }
   }
 
-  console.log(`✅ Total ${accounts.length} accounts recalculated`);
   return results;
 };

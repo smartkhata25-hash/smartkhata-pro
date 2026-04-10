@@ -1,12 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import en from '../locales/en';
-import MonthlySalesChart from '../components/MonthlySalesChart';
-import CashFlowChart from '../components/CashFlowChart';
+import { t } from '../i18n/i18n';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
+
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 🔥 separate state for mobile & desktop
+  const [showCards, setShowCards] = useState(() => {
+    const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
+    const saved = localStorage.getItem(key);
+    return saved !== null ? JSON.parse(saved) : true;
+  });
 
   const [summary, setSummary] = useState({
     totalSales: 0,
@@ -14,238 +27,269 @@ const DashboardPage = () => {
     totalCash: 0,
     totalBank: 0,
   });
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [filterType, setFilterType] = useState('month');
 
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [showCharts, setShowCharts] = useState(false);
-  const [showSalesChart, setShowSalesChart] = useState(false);
-  const [showCashChart, setShowCashChart] = useState(false);
+  useEffect(() => {
+    const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
+    localStorage.setItem(key, JSON.stringify(showCards));
+  }, [showCards, isMobile]);
 
   useEffect(() => {
     const fetchSummary = async () => {
       try {
         const token = localStorage.getItem('token');
-        const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-        const res = await axios.get(`${baseUrl}/api/dashboard-summary`, {
+        const baseUrl = process.env.REACT_APP_API_BASE_URL;
+
+        let startDate = '';
+        let endDate = '';
+
+        const year = selectedYear;
+
+        if (filterType === 'month') {
+          startDate = new Date(year, selectedMonth, 1).toISOString();
+          endDate = new Date(year, selectedMonth + 1, 0).toISOString();
+        }
+
+        if (filterType === 'year') {
+          startDate = new Date(year, 0, 1).toISOString();
+          endDate = new Date(year, 11, 31).toISOString();
+        }
+
+        if (filterType === 'all') {
+          startDate = '';
+          endDate = '';
+        }
+
+        let url = `${baseUrl}/api/dashboard-summary`;
+
+        if (startDate && endDate) {
+          url += `?startDate=${startDate}&endDate=${endDate}`;
+        }
+
+        const res = await axios.get(url, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setSummary(res.data);
       } catch (err) {
-        console.error('Dashboard summary fetch error:', err);
+        console.error(t('alerts.dashboardSummaryFetchError'), err);
       }
     };
 
     fetchSummary();
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('userId');
-    navigate('/login');
-  };
+  }, [selectedMonth, selectedYear, filterType]);
 
   return (
-    <div style={{ padding: '20px', position: 'relative' }}>
-      {/* 🔴 Logout Button */}
-      <div style={{ position: 'absolute', top: '20px', right: '20px' }}>
-        <button
-          onClick={handleLogout}
-          style={{
-            backgroundColor: '#dc3545',
-            color: 'white',
-            padding: '8px 12px',
-            borderRadius: '5px',
-          }}
-        >
-          {en.logout}
-        </button>
-      </div>
+    <div className="space-y-10">
+      {/* Page Title + Toggle */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-800">{t('dashboard')}</h1>
 
-      <h1>{en.dashboardTitle}</h1>
-      <p>{en.dashboardSubtitle}</p>
-      {/* 📦 Summary Boxes */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginTop: '60px' }}>
-        <SummaryCard
-          label="Total Sales"
-          value={`Rs. ${(summary.totalSales || 0).toFixed(2)}`}
-          onClick={() => navigate('/sales-invoices')}
-          bg="#fde2e2"
-        />
+        {/* 👁 Toggle Button */}
+        <div className="flex items-center gap-2">
+          {/* 👁 Toggle */}
+          <button
+            onClick={() => setShowCards((prev) => !prev)}
+            className="text-xs md:text-sm px-3 py-1.5 rounded-full 
+bg-white/80 backdrop-blur-md border border-gray-300 
+shadow-sm hover:shadow-md hover:bg-gray-100 
+transition-all duration-200 
+font-medium"
+          >
+            {showCards ? 'Hide' : 'Show'}
+          </button>
 
-        <SummaryCard
-          label={en.totalExpenses}
-          value={summary.totalExpenses}
-          onClick={() => navigate('/add-expense')}
-          bg="#fbeae9"
-        />
-        <SummaryCard
-          label="💵 Hand Cash"
-          value={summary.totalCash}
-          onClick={() => navigate('/accounts/cash')}
-          bg="#e2f7e9"
-        />
-        <SummaryCard
-          label="🏦 Bank Accounts"
-          value={summary.totalBank}
-          onClick={() => navigate('/accounts/bank')}
-          bg="#e2f0fb"
-        />
-        <SummaryCard
-          label="👥 Customers"
-          value="Manage your customers"
-          onClick={() => navigate('/customers')}
-          bg="#d1ecf1"
-        />
-        <SummaryCard
-          label="🚚 Suppliers"
-          value="Manage your suppliers"
-          onClick={() => navigate('/suppliers')}
-          bg="#f0fce5"
-        />
-        <SummaryCard
-          label="📦 Sales & Invoicing"
-          value="Create and manage invoices"
-          onClick={() => navigate('/sales')}
-          bg="#e2e3f3"
-        />
-        <SummaryCard
-          label="📥 Purchase Invoice"
-          value="Add new purchase bills"
-          onClick={() => navigate('/purchase-invoice')}
-          bg="#fff3cd"
-        />
-        <SummaryCard
-          label="📤 Pay Bills"
-          value="Manage outgoing payments"
-          onClick={() => navigate('/pay-bills/new')}
-          bg="#fbeae9"
-        />
-        <SummaryCard
-          label="💸 Receive Payments"
-          value="Manage incoming payments"
-          onClick={() => navigate('/receive-payments/new')}
-          bg="#e9fbe9"
-        />
-      </div>
-
-      {/* 📂 Dropdown Menus */}
-      <div style={{ display: 'flex', gap: '20px', marginTop: '30px' }}>
-        <DropdownMenu
-          title="📁 Accounting Tools"
-          isOpen={showDropdown}
-          setOpen={setShowDropdown}
-          items={[
-            { label: en.chartOfAccounts, path: '/accounts' },
-            { label: en.journalEntries, path: '/journal-entries' },
-            { label: en.trialBalance, path: '/trial-balance' },
-            { label: en.generalLedger, path: '/ledger' },
-            { label: en.incomeStatement, path: '/income-statement' },
-            { label: '📦 Inventory Management', path: '/inventory' },
-            { label: '💰 Receive Payments List', path: '/receive-payments' },
-            { label: '🧾 Pay Bill List', path: '/pay-bills' },
-            { label: '📉 Expense List', path: '/expenses' },
-          ]}
-        />
-
-        <DropdownMenu
-          title="📊 Visual Reports"
-          isOpen={showCharts}
-          setOpen={setShowCharts}
-          items={[
-            {
-              label: '📈 Monthly Sales Chart',
-              action: () => setShowSalesChart(!showSalesChart),
-            },
-            {
-              label: '💸 Cash Flow Chart',
-              action: () => setShowCashChart(!showCashChart),
-            },
-            {
-              label: '📊 Aging Report',
-              path: '/aging-report',
-            },
-          ]}
-        />
-      </div>
-
-      {/* 📉 Chart Displays */}
-      {showSalesChart && <MonthlySalesChart />}
-      {showCashChart && <CashFlowChart />}
-    </div>
-  );
-};
-
-const SummaryCard = ({ label, value, onClick, bg }) => (
-  <div
-    onClick={onClick}
-    style={{
-      ...boxStyle,
-      backgroundColor: bg || '#f2f2f2',
-      cursor: onClick ? 'pointer' : 'default',
-    }}
-  >
-    <h3>{label}</h3>
-    <p>{typeof value === 'number' ? `Rs. ${value.toFixed(0)}` : value}</p>
-  </div>
-);
-
-const DropdownMenu = ({ title, items, isOpen, setOpen }) => {
-  const navigate = useNavigate();
-  return (
-    <div>
-      <button onClick={() => setOpen(!isOpen)} style={menuButton}>
-        {title} ▼
-      </button>
-      {isOpen && (
-        <div style={dropdownStyle}>
-          {items.map((item, idx) => (
-            <p
-              key={idx}
-              style={dropdownItem}
-              onClick={() => {
-                if (item.path) navigate(item.path);
-                else if (item.action) item.action();
-              }}
+          {/* 📅 Month Dropdown */}
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
+          >
+            <option value="month">Month</option>
+            <option value="year">Year</option>
+            <option value="all">Total</option>
+          </select>
+          {filterType === 'month' && (
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
             >
-              {item.label}
-            </p>
-          ))}
+              {[
+                'Jan',
+                'Feb',
+                'Mar',
+                'Apr',
+                'May',
+                'Jun',
+                'Jul',
+                'Aug',
+                'Sep',
+                'Oct',
+                'Nov',
+                'Dec',
+              ].map((m, i) => (
+                <option key={i} value={i}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
+          {filterType === 'year' && (
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
+            >
+              {[2023, 2024, 2025, 2026].map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {showCards && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+          <DashboardCard
+            title={t('totalSales')}
+            value={summary.totalSales}
+            accent="bg-blue-500"
+            onClick={() => navigate('/sales-invoices')}
+          />
+
+          <DashboardCard
+            title={t('totalExpenses')}
+            value={summary.totalExpenses}
+            accent="bg-red-500"
+            onClick={() => navigate('/expenses')}
+          />
+
+          <DashboardCard
+            title={t('handCash')}
+            value={summary.totalCash}
+            accent="bg-green-500"
+            onClick={() => navigate('/accounts/cash')}
+          />
+
+          <DashboardCard
+            title={t('bankAccounts')}
+            value={summary.totalBank}
+            accent="bg-indigo-500"
+            onClick={() => navigate('/accounts/bank')}
+          />
+          <DashboardCard
+            title={t('netProfit')}
+            value={summary.netProfit}
+            accent={summary.netProfit >= 0 ? 'bg-green-500' : 'bg-red-500'}
+            onClick={() => {}}
+          />
         </div>
       )}
+
+      {/* Quick Actions */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-700 mb-6">{t('quickActions')}</h2>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
+          <QuickAction
+            label={t('saleInvoice')}
+            icon="📄"
+            gradient="from-emerald-600 via-emerald-500 to-green-600"
+            onClick={() => navigate('/sales')}
+          />
+
+          <QuickAction
+            label={t('purchaseInvoice')}
+            icon="🧾"
+            gradient="from-blue-600 via-indigo-500 to-indigo-600"
+            onClick={() => navigate('/purchase-invoice')}
+          />
+
+          <QuickAction
+            label={t('receivePayment')}
+            icon="💰"
+            gradient="from-teal-600 via-cyan-500 to-cyan-600"
+            onClick={() => navigate('/receive-payments/new')}
+          />
+
+          <QuickAction
+            label={t('payBill')}
+            icon="💳"
+            gradient="from-orange-600 via-amber-500 to-orange-600"
+            onClick={() => navigate('/pay-bills/new')}
+          />
+
+          <QuickAction
+            label={t('saleRefund')}
+            icon="↩"
+            gradient="from-red-600 via-rose-500 to-red-600"
+            onClick={() => navigate('/refunds/new')}
+          />
+
+          <QuickAction
+            label={t('purchaseReturn')}
+            icon="📦"
+            gradient="from-purple-600 via-violet-500 to-purple-600"
+            onClick={() => navigate('/purchase-returns/new')}
+          />
+        </div>
+      </div>
     </div>
   );
 };
 
-// ✅ Styles
-const boxStyle = {
-  flex: '1 1 200px',
-  padding: '20px',
-  borderRadius: '10px',
-  boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+/* Dashboard Card */
+
+const DashboardCard = ({ title, value, onClick, accent }) => {
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-200 overflow-hidden"
+    >
+      <div className={`h-1 ${accent}`}></div>
+
+      <div className="p-5">
+        <h4 className="text-sm text-gray-500 font-medium">{title}</h4>
+
+        <p className="mt-2 text-2xl font-bold text-gray-800">
+          {t('currency.rs')} {Number(value || 0).toFixed(0)}
+        </p>
+      </div>
+    </div>
+  );
 };
 
-const menuButton = {
-  padding: '10px 15px',
-  backgroundColor: '#007bff',
-  color: 'white',
-  border: 'none',
-  borderRadius: '5px',
-};
+/* Quick Action */
 
-const dropdownStyle = {
-  backgroundColor: '#f9f9f9',
-  border: '1px solid #ccc',
-  padding: '10px',
-  borderRadius: '5px',
-  marginTop: '10px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-};
+const QuickAction = ({ label, onClick, icon, gradient }) => {
+  return (
+    <div
+      onClick={onClick}
+      className={`
+        rounded-2xl p-6 cursor-pointer
+        transition-all duration-300
+        hover:-translate-y-1 hover:shadow-2xl
+        bg-gradient-to-br ${gradient}
+        shadow-lg
+      `}
+    >
+      <div className="flex flex-col items-center justify-center space-y-4">
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center
+          text-2xl text-white bg-white/20 backdrop-blur-md shadow-lg"
+        >
+          {icon}
+        </div>
 
-const dropdownItem = {
-  cursor: 'pointer',
-  padding: '5px 0',
-  fontSize: '16px',
+        <div className="text-sm font-semibold text-white text-center">{label}</div>
+      </div>
+    </div>
+  );
 };
 
 export default DashboardPage;

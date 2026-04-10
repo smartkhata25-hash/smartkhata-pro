@@ -16,6 +16,11 @@ const expenseSchema = new mongoose.Schema(
       ref: "Account",
       required: false,
     },
+    titleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ExpenseTitle",
+      default: null,
+    },
     date: {
       type: String,
       required: true,
@@ -60,7 +65,7 @@ const expenseSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Expense", expenseSchema);

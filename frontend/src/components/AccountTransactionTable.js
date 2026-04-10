@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { t } from '../i18n/i18n';
 
 const AccountTransactionTable = ({ transactions = [] }) => {
   const [filtered, setFiltered] = useState([]);
@@ -44,15 +45,15 @@ const AccountTransactionTable = ({ transactions = [] }) => {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
         <input
           type="text"
-          placeholder="Search description or bill no..."
+          placeholder={t('ledger.search')}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           style={input}
         />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={input}>
-          <option value="all">All</option>
-          <option value="debit">Debit Only</option>
-          <option value="credit">Credit Only</option>
+          <option value="all">{t('ledger.all')}</option>
+          <option value="debit">{t('ledger.debitOnly')}</option>
+          <option value="credit">{t('ledger.creditOnly')}</option>
         </select>
         <input
           type="date"
@@ -70,30 +71,31 @@ const AccountTransactionTable = ({ transactions = [] }) => {
 
       {/* Table */}
       {filtered.length === 0 ? (
-        <p style={{ color: '#888', textAlign: 'center' }}>No transactions found.</p>
+        <p style={{ color: '#888', textAlign: 'center' }}>{t('ledger.noTransactions')}</p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              <th style={th}>Date</th>
-              <th style={th}>Time</th>
-              <th style={th}>Bill No</th>
-              <th style={th}>Source</th>
-              <th style={th}>Payment Type</th>
-              <th style={th}>Description</th>
-              <th style={th}>Debit</th>
-              <th style={th}>Credit</th>
+              <th style={th}>{t('date')}</th>
+              <th style={th}>{t('time')}</th>
+              <th style={th}>{t('billNo')}</th>
+              <th style={th}>{t('ledger.source')}</th>
+              <th style={th}>{t('ledger.paymentType')}</th>
+              <th style={th}>{t('description')}</th>
+              <th style={th}>{t('debit')}</th>
+              <th style={th}>{t('credit')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((txn) => (
-              <tr key={txn._id || txn.referenceId || Math.random()}>
+              <tr key={`${txn._id || txn.referenceId}-${txn.date}-${txn.debit}-${txn.credit}`}>
                 <td style={td}>
                   {txn.date ? new Date(txn.date).toLocaleDateString('en-GB') : '-'}
                 </td>
                 <td style={td}>{txn.time || '-'}</td>
                 <td style={td}>{txn.billNo || '-'}</td>
-                <td style={td}>{txn.sourceType || txn.source || '-'}</td>
+                <td style={td}>{txn.accountName || '-'}</td>
+
                 <td style={td}>{txn.paymentType || '-'}</td>
                 <td style={td}>{txn.description || '-'}</td>
                 <td style={td}>{txn.debit > 0 ? `Rs. ${txn.debit.toLocaleString()}` : '-'}</td>

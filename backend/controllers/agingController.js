@@ -2,9 +2,11 @@ const asyncHandler = require("express-async-handler");
 const Customer = require("../models/Customer");
 const JournalEntry = require("../models/JournalEntry");
 
-// 🧠 Aging Buckets Calculator
-const calculateAgingBuckets = (lines, fromDate, toDate) => {
-  const now = new Date();
+/* =========================================================
+   AGING BUCKET CALCULATOR
+========================================================= */
+
+const calculateAgingBuckets = (entries, asOfDate) => {
   const aging = {
     recent: 0,
     mid1: 0,
@@ -12,15 +14,12 @@ const calculateAgingBuckets = (lines, fromDate, toDate) => {
     oldest: 0,
   };
 
-  lines.forEach((line) => {
-    if (!line.account || !line.type || line.type !== "debit") return;
+  entries.forEach((entry) => {
+    const entryDate = new Date(entry.date);
+    const days = Math.floor((asOfDate - entryDate) / (1000 * 60 * 60 * 24));
 
-    const entryDate = new Date(line.date || line.createdAt || Date.now());
-    if (fromDate && entryDate < new Date(fromDate)) return;
-    if (toDate && entryDate > new Date(toDate)) return;
+    const amount = entry.balance;
 
-    const days = Math.floor((now - entryDate) / (1000 * 60 * 60 * 24));
-    const amount = Number(line.amount || 0);
     if (amount <= 0) return;
 
     if (days <= 30) aging.recent += amount;
@@ -32,50 +31,146 @@ const calculateAgingBuckets = (lines, fromDate, toDate) => {
   return aging;
 };
 
-// ✅ GET /api/aging-report
+/* =========================================================
+   GET CUSTOMER AGING REPORT
+========================================================= */
+
 const getAgingReport = asyncHandler(async (req, res) => {
-  const { fromDate, toDate } = req.query;
+  const { asOfDate } = req.query;
 
-  const customers = await Customer.find({}).lean();
+  const reportDate = asOfDate ? new Date(asOfDate) : new Date();
 
-  const results = await Promise.all(
-    customers.map(async (customer) => {
-      if (!customer.account) return null; // ✅ Skip if no account
+  /* ==============================
+     STEP 1 — GET CUSTOMERS
+  ============================== */
 
-      const journalEntries = await JournalEntry.find({
-        isDeleted: { $ne: true },
-        "lines.account": customer.account,
-      }).lean();
+  const customers = await Customer.find({ isActive: true }).lean();
 
-      const customerLines = journalEntries.flatMap((entry) =>
-        entry.lines
-          .filter(
-            (line) =>
-              line.account?.toString() === customer.account?.toString() &&
-              line.type === "debit"
-          )
-          .map((line) => ({
-            ...line,
-            date: entry.date,
-            createdAt: entry.createdAt,
-          }))
-      );
+  if (!customers.length) {
+    return res.json([]);
+  }
 
-      const aging = calculateAgingBuckets(customerLines, fromDate, toDate);
-      const totalAged = aging.recent + aging.mid1 + aging.mid2 + aging.oldest;
+  const accountMap = new Map();
 
-      console.log(`🧾 Aging fetched for ${customer.name}`);
+  customers.forEach((c) => {
+    if (c.account) {
+      accountMap.set(c.account.toString(), c);
+    }
+  });
 
+  const customerAccounts = Array.from(accountMap.keys());
+
+  /* ==============================
+     STEP 2 — GET JOURNAL ENTRIES
+  ============================== */
+
+  const journalEntries = await JournalEntry.find({
+    isDeleted: { $ne: true },
+    date: { $lte: reportDate },
+    "lines.account": { $in: customerAccounts },
+  }).lean();
+
+  /* ==============================
+     STEP 3 — GROUP CUSTOMER LINES
+  ============================== */
+
+  const customerLinesMap = {};
+
+  journalEntries.forEach((entry) => {
+    entry.lines.forEach((line) => {
+      const accId = line.account?.toString();
+
+      if (!accId || !customerAccounts.includes(accId)) return;
+
+      if (!customerLinesMap[accId]) {
+        customerLinesMap[accId] = [];
+      }
+
+      customerLinesMap[accId].push({
+        type: line.type,
+        amount: Number(line.amount || 0),
+        date: entry.date,
+      });
+    });
+  });
+
+  /* ==============================
+     STEP 4 — CALCULATE AGING
+  ============================== */
+
+  const results = customers.map((customer) => {
+    const accId = customer.account?.toString();
+
+    if (!accId || !customerLinesMap[accId]) {
       return {
         customerId: customer._id,
         customerName: customer.name,
-        aging,
-        totalAged,
+        aging: {
+          recent: 0,
+          mid1: 0,
+          mid2: 0,
+          oldest: 0,
+        },
+        total: 0,
       };
-    })
-  );
+    }
 
-  res.json(results.filter(Boolean)); // ✅ Remove nulls
+    const lines = customerLinesMap[accId];
+
+    let runningBalance = 0;
+
+    const entryBalances = [];
+
+    lines
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .forEach((line) => {
+        if (line.type === "debit") {
+          runningBalance += line.amount;
+
+          entryBalances.push({
+            date: line.date,
+            balance: line.amount,
+          });
+        }
+
+        if (line.type === "credit") {
+          runningBalance -= line.amount;
+
+          let remainingCredit = line.amount;
+
+          for (let i = 0; i < entryBalances.length; i++) {
+            const item = entryBalances[i];
+
+            if (item.balance <= 0) continue;
+
+            const applied = Math.min(item.balance, remainingCredit);
+
+            item.balance -= applied;
+
+            remainingCredit -= applied;
+
+            if (remainingCredit <= 0) break;
+          }
+        }
+      });
+
+    const aging = calculateAgingBuckets(entryBalances, reportDate);
+
+    const total = aging.recent + aging.mid1 + aging.mid2 + aging.oldest;
+
+    return {
+      customerId: customer._id,
+      customerName: customer.name,
+      aging,
+      total,
+    };
+  });
+
+  /* ==============================
+     FINAL RESPONSE
+  ============================== */
+
+  res.json(results);
 });
 
 module.exports = { getAgingReport };

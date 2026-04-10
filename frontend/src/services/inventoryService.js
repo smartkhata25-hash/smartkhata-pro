@@ -1,16 +1,26 @@
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/products`;
 const TRANS_URL = `${BASE_URL}/api/inventory-transactions`;
 
+// 🔐 Common Auth Header
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
   return { headers: { Authorization: `Bearer ${token}` } };
 };
 
+// =======================
+// 📦 PRODUCTS
+// =======================
+
 export const createProduct = async (productData) => {
   const res = await axios.post(API_URL, productData, getAuthHeader());
+  return res.data;
+};
+
+export const bulkCreateProducts = async (products) => {
+  const res = await axios.post(`${API_URL}/bulk`, products, getAuthHeader());
   return res.data;
 };
 
@@ -46,17 +56,54 @@ export const deleteProduct = async (id) => {
   return res.data;
 };
 
+// =======================
+// 🔁 INVENTORY TRANSACTIONS
+// =======================
+
 export const createTransaction = async (transactionData) => {
-  const res = await axios.post(TRANS_URL, transactionData);
+  const res = await axios.post(TRANS_URL, transactionData, getAuthHeader());
   return res.data;
 };
 
 export const getAllTransactions = async () => {
-  const res = await axios.get(TRANS_URL);
+  const res = await axios.get(TRANS_URL, getAuthHeader());
   return res.data;
 };
 
 export const deleteTransaction = async (id) => {
-  const res = await axios.delete(`${TRANS_URL}/${id}`);
+  const res = await axios.delete(`${TRANS_URL}/${id}`, getAuthHeader());
+  return res.data;
+};
+
+// =======================
+// 🔍 SEARCH
+// =======================
+
+export const searchProducts = async (query) => {
+  const res = await axios.get(`${API_URL}/search?q=${query}`, getAuthHeader());
+  return res.data;
+};
+
+// =======================
+// 🔧 INVENTORY ADJUST
+// =======================
+
+export const adjustInventory = async (data) => {
+  const res = await axios.post(`${TRANS_URL}/adjust`, data, getAuthHeader());
+  return res.data;
+};
+
+// 🔧 Inventory Adjust (Bulk)
+export const adjustInventoryBulk = async (rows) => {
+  const token = localStorage.getItem('token');
+
+  const res = await axios.post(
+    `${BASE_URL}/api/inventory-transactions/adjust/bulk`,
+    { rows },
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
   return res.data;
 };

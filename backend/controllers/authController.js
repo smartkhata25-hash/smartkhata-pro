@@ -66,11 +66,11 @@ const loginUser = async (req, res) => {
       if (!isMatch) {
         return res.status(401).json({ msg: "Invalid password" });
       }
-
-      recalculateAllUserAccounts(user._id).catch((err) => {
-        console.error("Recalculate Error:", err);
-      });
-
+      try {
+        await recalculateAllUserAccounts(user._id);
+      } catch (err) {
+        console.error("Recalculate Error:", err.message);
+      }
       // 🔒 Installation Check (Device Lock with User)
 
       let installation = await Installation.findOne({ deviceId });

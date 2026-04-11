@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const ImportDataPage = () => {
   const [file, setFile] = useState(null);
@@ -26,7 +27,7 @@ const ImportDataPage = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await axios.post(`/api/import/${type}?preview=true`, formData, {
+      const res = await axios.post(`${API}/api/import/${type}?preview=true`, formData, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -51,7 +52,7 @@ const ImportDataPage = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await axios.post(`/api/import/${type}`, formData, {
+      const res = await axios.post(`${API}/api/import/${type}`, formData, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },

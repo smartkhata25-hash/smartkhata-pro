@@ -28,7 +28,7 @@ export default function ResetPassword() {
 
       if (res.ok) {
         alert(t('auth.resetSuccess'));
-        window.location.href = '/login';
+        window.location.href = '/#/login';
       } else {
         alert(data.msg || t('common.error'));
       }

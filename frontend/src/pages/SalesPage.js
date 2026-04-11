@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import InvoiceForm from '../components/InvoiceForm';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 export default function SalesPage() {
   const token = localStorage.getItem('token');
@@ -31,7 +32,7 @@ export default function SalesPage() {
         setLoadingHistory(true);
 
         const res = await fetch(
-          `/api/sales-history?customerId=${customerId}&productId=${productId}`,
+          `${API}/api/sales-history?customerId=${customerId}&productId=${productId}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,

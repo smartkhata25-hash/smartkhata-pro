@@ -27,7 +27,7 @@ export default function ForgotPassword() {
 
       if (res.ok) {
         alert(t('auth.otpSent'));
-        window.location.href = '/reset-password';
+        window.location.href = '/#/reset-password';
       } else {
         alert(data.msg || t('common.error'));
       }

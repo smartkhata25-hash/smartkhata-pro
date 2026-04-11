@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function AdminDevices() {
   const [users, setUsers] = useState([]);
@@ -8,6 +9,7 @@ export default function AdminDevices() {
   const [message, setMessage] = useState('');
   const [selectedUser, setSelectedUser] = useState('all');
   const [sending, setSending] = useState(false);
+  const navigate = useNavigate();
 
   // 🔐 admin check
   useEffect(() => {
@@ -163,7 +165,7 @@ export default function AdminDevices() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h2 style={styles.title}>🔐 Admin Device Control</h2>
 
-          <button style={styles.inviteBtn} onClick={() => (window.location.href = '/admin/invite')}>
+          <button style={styles.inviteBtn} onClick={() => navigate('/admin/invite')}>
             ➕ Invite User
           </button>
         </div>

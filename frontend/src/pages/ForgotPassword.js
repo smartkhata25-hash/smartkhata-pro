@@ -122,7 +122,7 @@ export default function ForgotPassword() {
             fontSize: '13px',
           }}
         >
-          <a href="/login" style={{ color: '#2563eb' }}>
+          <a href="/#/login" style={{ color: '#2563eb' }}>
             {t('auth.backToLogin')}
           </a>
         </div>

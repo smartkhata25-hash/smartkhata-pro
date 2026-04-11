@@ -205,7 +205,7 @@ export default function RegisterPage() {
           }}
         >
           Already have an account?{' '}
-          <a href="/login" style={{ color: '#2563eb' }}>
+          <a href="/#/login" style={{ color: '#2563eb' }}>
             Login
           </a>
         </div>

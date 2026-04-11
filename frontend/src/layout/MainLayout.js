@@ -17,7 +17,7 @@ const MainLayout = () => {
       .then((res) => {
         if (!res.ok) {
           alert('Unauthorized device. Please login again.');
-          window.location.href = '/login';
+          window.location.href = '/#/login';
         }
       })
       .catch(() => {});

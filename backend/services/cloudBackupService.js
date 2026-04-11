@@ -1,35 +1,28 @@
-const dns = require("dns");
+const path = require("path");
+const { uploadFileToR2 } = require("./s3Service");
 
 let lastUploadedFile = null;
 
-function isInternetAvailable() {
-  return new Promise((resolve) => {
-    dns.lookup("google.com", (err) => {
-      resolve(!err);
-    });
-  });
-}
-
 async function uploadToCloud(filePath) {
-  const hasInternet = await isInternetAvailable();
+  try {
+    // ❗ duplicate upload نہ ہو
+    if (lastUploadedFile === filePath) {
+      console.log("⚠️ Backup already uploaded, skipping...");
+      return;
+    }
 
-  if (!hasInternet) {
-    console.log("🌐 No internet, skipping cloud backup");
-    return;
+    const fileName = path.basename(filePath);
+
+    console.log("☁️ Uploading backup to R2...", fileName);
+
+    await uploadFileToR2(filePath, fileName);
+
+    console.log("✅ Backup uploaded to R2");
+
+    lastUploadedFile = filePath;
+  } catch (error) {
+    console.error("❌ R2 Upload Error:", error.message);
   }
-
-  // ❗ SAME FILE دوبارہ upload نہ ہو
-  if (lastUploadedFile === filePath) {
-    console.log("⚠️ Backup already uploaded, skipping...");
-    return;
-  }
-
-  console.log("☁️ Uploading backup to cloud...", filePath);
-
-  // dummy success
-  console.log("✅ Cloud backup uploaded");
-
-  lastUploadedFile = filePath;
 }
 
 module.exports = {

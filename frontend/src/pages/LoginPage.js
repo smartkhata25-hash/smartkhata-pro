@@ -178,7 +178,7 @@ export default function LoginPage() {
             {t('auth.forgotPassword')}
           </a>
 
-          <a href="/register" style={{ color: '#2563eb' }}>
+          <a href="/#/register" style={{ color: '#2563eb' }}>
             {t('auth.registerHere')}
           </a>
         </div>

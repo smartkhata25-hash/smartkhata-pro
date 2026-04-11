@@ -28,6 +28,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const [notificationMsg, setNotificationMsg] = useState('');
   const [showMessagePopup, setShowMessagePopup] = useState(false);
   const token = localStorage.getItem('token');
+  const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
   useEffect(() => {
     // 📱 mobile detect
@@ -51,11 +52,11 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const res = await axios.get('/api/dashboard-alerts', {
+        const res = await axios.get(`${baseUrl}/api/dashboard-alerts`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        const data = res.data.summary;
+        const data = res.data?.summary || {};
 
         const total =
           (data.lowStock || 0) + (data.overdueInvoices || 0) + (data.pendingPayments || 0);
@@ -63,7 +64,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
         setAlertCount(total);
         // 🔥 notifications fetch
         try {
-          const notifRes = await axios.get('/api/notifications/my', {
+          const notifRes = await axios.get(`${baseUrl}/api/notifications/my`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
@@ -92,7 +93,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
     const interval = setInterval(fetchAlerts, 60000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, baseUrl]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;

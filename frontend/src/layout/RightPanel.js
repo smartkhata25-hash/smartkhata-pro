@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
 const Section = ({ title, children }) => {
   const [open, setOpen] = useState(true);
@@ -53,16 +54,17 @@ const RightPanel = () => {
   const fetchData = useCallback(async () => {
     try {
       const [summaryRes, alertsRes] = await Promise.all([
-        axios.get(`/api/dashboard-summary`, {
+        axios.get(`${baseUrl}/api/dashboard-summary`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        axios.get(`/api/dashboard-alerts`, {
+
+        axios.get(`${baseUrl}/api/dashboard-alerts`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);
 
       setSummary(summaryRes.data);
-      setAlerts(alertsRes.data.summary);
+      setAlerts(alertsRes.data?.summary || {});
     } catch (err) {
       console.error(t('alerts.panelLoadError'), err);
     }

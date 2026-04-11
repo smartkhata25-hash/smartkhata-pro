@@ -166,7 +166,7 @@ export default function LoginPage() {
           }}
         >
           <a
-            href="/forgot-password"
+            href="/#/forgot-password"
             style={{ color: '#2563eb' }}
             onClick={(e) => {
               if (!navigator.onLine) {

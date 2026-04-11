@@ -16,7 +16,7 @@ export default function RegisterPage() {
 
       if (res.msg === 'User registered successfully') {
         setForm({ name: '', email: '', password: '', code: '' });
-        navigate('/login');
+        navigate('/#/login');
       }
     } catch (err) {
       alert(t('alerts.registrationFailed'));

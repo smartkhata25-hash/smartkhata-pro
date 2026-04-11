@@ -33,7 +33,7 @@ const GeneralLedgerPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!token) return navigate('/login');
+    if (!token) return navigate('/#/login');
 
     const needsRefresh = localStorage.getItem('ledgerNeedsRefresh');
     if (needsRefresh === 'true') {

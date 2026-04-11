@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const PrintInvoicePage = () => {
   const { type, id } = useParams();
@@ -20,11 +21,11 @@ const PrintInvoicePage = () => {
           let previewUrl = '';
 
           if (type === 'sale') {
-            previewUrl = '/api/print/sale-preview';
+            previewUrl = `${API}/api/print/sale-preview`;
           }
 
           if (type === 'refund') {
-            previewUrl = '/api/print/sale-return-preview';
+            previewUrl = `${API}/api/print/sale-return-preview`;
           }
 
           const res = await fetch(previewUrl, {
@@ -44,7 +45,7 @@ const PrintInvoicePage = () => {
 
         /* ================= SAVED INVOICE ================= */
         if (type === 'sale') {
-          const res = await fetch(`/api/print/sale-html/${id}`, {
+          const res = await fetch(`${API}/api/print/sale-html/${id}`, {
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -55,7 +56,7 @@ const PrintInvoicePage = () => {
         }
 
         if (type === 'refund') {
-          const res = await fetch(`/api/print/sale-return-html/${id}`, {
+          const res = await fetch(`${API}/api/print/sale-return-html/${id}`, {
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -98,7 +99,7 @@ const PrintInvoicePage = () => {
               /* ================= PREVIEW MODE PDF ================= */
               if (isPreview && location.state?.invoiceData) {
                 if (type === 'sale') {
-                  res = await fetch('/api/print/sale-pdf', {
+                  res = await fetch(`${API}/api/print/sale-pdf`, {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',
@@ -109,7 +110,7 @@ const PrintInvoicePage = () => {
                 }
 
                 if (type === 'refund') {
-                  res = await fetch('/api/print/sale-return-pdf', {
+                  res = await fetch(`${API}/api/print/sale-return-pdf`, {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',
@@ -121,7 +122,7 @@ const PrintInvoicePage = () => {
               } else {
                 /* ================= SAVED PDF ================= */
                 if (type === 'sale') {
-                  res = await fetch(`/api/print/sale-pdf/${id}`, {
+                  res = await fetch(`${API}/api/print/sale-pdf/${id}`, {
                     headers: {
                       Authorization: `Bearer ${token}`,
                     },
@@ -129,7 +130,7 @@ const PrintInvoicePage = () => {
                 }
 
                 if (type === 'refund') {
-                  res = await fetch(`/api/print/sale-return-pdf/${id}`, {
+                  res = await fetch(`${API}/api/print/sale-return-pdf/${id}`, {
                     headers: {
                       Authorization: `Bearer ${token}`,
                     },

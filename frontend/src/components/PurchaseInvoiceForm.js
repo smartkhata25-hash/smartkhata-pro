@@ -13,6 +13,7 @@ import InvoiceTable from './InvoiceTable';
 import SupplierForm from './SupplierForm';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
   const printRef = useRef();
@@ -213,7 +214,7 @@ const PurchaseInvoiceForm = () => {
 
   const quickAddSupplier = async (name) => {
     try {
-      const res = await fetch('/api/suppliers', {
+      const res = await fetch(`${API}/api/suppliers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1039,7 +1040,7 @@ const PurchaseInvoiceForm = () => {
           initialData={{ name: supplierFormName }}
           onSubmit={async (data) => {
             try {
-              const res = await fetch('/api/suppliers', {
+              const res = await fetch(`${API}/api/suppliers`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',

@@ -7,6 +7,7 @@ import { t } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 export default function CustomerDetailLedgerPage() {
   const { customerId } = useParams();
@@ -113,7 +114,7 @@ export default function CustomerDetailLedgerPage() {
   }, [customerId]);
 
   useEffect(() => {
-    fetch('/api/customers', {
+    fetch(`${API}/api/customers`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,
       },

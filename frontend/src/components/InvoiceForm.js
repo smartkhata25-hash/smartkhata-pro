@@ -14,10 +14,11 @@ import { fetchCustomers } from '../services/customerService';
 import { getAccounts } from '../services/accountService';
 
 import InvoiceTable from './InvoiceTable';
-import { useLocation } from 'react-router-dom'; // ✅ ضروری import
+import { useLocation } from 'react-router-dom';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { useNavigate } from 'react-router-dom';
 import CustomerForm from './CustomerForm';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const InvoiceForm = ({
   token,
@@ -327,7 +328,7 @@ const InvoiceForm = ({
   // ⚡ Quick Add Customer (sirf name se)
   const quickAddCustomer = async (name) => {
     try {
-      const res = await fetch('/api/customers', {
+      const res = await fetch(`${API}/api/customers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -394,7 +395,7 @@ const InvoiceForm = ({
     try {
       if (!printSettings?.sales) return;
 
-      const response = await fetch('/api/print/preview-settings-html', {
+      const response = await fetch(`${API}/api/print/preview-settings-html`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1404,7 +1405,7 @@ const InvoiceForm = ({
         <CustomerForm
           initialData={{ name: customerFormName }}
           onSubmit={async (data) => {
-            await fetch('/api/customers', {
+            await fetch(`${API}/api/customers`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

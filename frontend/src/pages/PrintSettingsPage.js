@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { getPrintSettings, updatePrintSettings } from '../services/printSettingService';
 import { resetPrintSettings } from '../services/printSettingService';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const DOCUMENT_TYPES = [
   { label: 'Sales Invoice', value: 'sales' },
@@ -37,7 +38,7 @@ const PrintSettingsPage = () => {
 
       const token = localStorage.getItem('token');
 
-      const res = await fetch('/api/print/preview-settings-html', {
+      const res = await fetch(`${API}/api/print/preview-settings-html`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

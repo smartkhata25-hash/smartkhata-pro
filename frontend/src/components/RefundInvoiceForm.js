@@ -12,6 +12,7 @@ import {
 } from '../services/printSettingService';
 import ProductDropdown from './ProductDropdown';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const RefundInvoiceForm = ({
   token,
@@ -110,7 +111,7 @@ const RefundInvoiceForm = ({
 
       const token = localStorage.getItem('token');
 
-      const res = await fetch('/api/print/preview-settings-html', {
+      const res = await fetch(`${API}/api/print/preview-settings-html`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

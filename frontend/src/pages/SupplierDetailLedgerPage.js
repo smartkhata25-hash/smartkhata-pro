@@ -113,7 +113,7 @@ export default function SupplierDetailLedgerPage() {
   }, [supplierId, startDate, endDate, loadData]);
 
   useEffect(() => {
-    fetch('/api/suppliers', {
+    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/suppliers`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,
       },

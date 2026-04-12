@@ -26,7 +26,7 @@ export default function InviteUser() {
       if (res.ok) {
         setResult(data);
       } else {
-        alert(data.msg || 'Error generating code');
+        alert(data.error || data.msg || 'Error generating code');
       }
     } catch (err) {
       alert('Server error');

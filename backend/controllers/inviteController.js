@@ -37,7 +37,12 @@ const generateCode = async (req, res) => {
     try {
       await sendEmail(email, code);
     } catch (err) {
-      return res.status(500).json({ msg: "Email send failed" });
+      console.error("❌ Controller Email Error:", err.message);
+
+      return res.status(500).json({
+        msg: "Email send failed",
+        error: err.message,
+      });
     }
 
     res.json({

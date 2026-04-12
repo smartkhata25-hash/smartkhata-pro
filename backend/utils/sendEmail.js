@@ -11,8 +11,14 @@ const sendEmail = async (toEmail, code) => {
       html: `<p>Your verification code is: <b>${code}</b></p>`,
     });
   } catch (error) {
-    console.error("Email Error:", error);
-    throw error; // ⚠️ important
+    console.error("❌ Email Error FULL:", {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+      response: error.response?.data || null,
+    });
+
+    throw new Error("Email sending failed");
   }
 };
 

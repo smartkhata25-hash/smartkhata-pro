@@ -12,7 +12,7 @@ export default function InviteUser() {
     setResult(null);
 
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/invite/generate`, {
+      const res = await fetch(`https://smartkhata-pro.onrender.com/api/invite/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

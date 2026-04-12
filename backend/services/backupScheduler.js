@@ -10,12 +10,12 @@ const User = require("../models/User");
 
 const os = require("os");
 
-const BACKUP_DIR = path.join(
-  os.homedir(),
-  "Documents",
-  "SmartKhata",
-  "Backups",
-);
+const BASE_DIR =
+  process.env.NODE_ENV === "production"
+    ? "/tmp"
+    : path.join(os.homedir(), "Documents", "SmartKhata");
+
+const BACKUP_DIR = path.join(BASE_DIR, "Backups");
 
 /* =========================================================
    Get latest backup time

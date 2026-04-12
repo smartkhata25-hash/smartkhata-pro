@@ -5,12 +5,12 @@ const mongoose = require("mongoose");
 const archiver = require("archiver");
 const { uploadToCloud } = require("./cloudBackupService");
 
-const BACKUP_DIR = path.join(
-  os.homedir(),
-  "Documents",
-  "SmartKhata",
-  "Backups",
-);
+const BASE_DIR =
+  process.env.NODE_ENV === "production"
+    ? "/tmp"
+    : path.join(os.homedir(), "Documents", "SmartKhata");
+
+const BACKUP_DIR = path.join(BASE_DIR, "Backups");
 const TEMP_DIR = path.join(BACKUP_DIR, "temp");
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 

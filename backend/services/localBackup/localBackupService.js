@@ -9,9 +9,9 @@ const { createBackup } = require("../backupService");
 ===================================================== */
 
 function getDefaultBackupPath() {
-  const homeDir = os.homedir();
+  const baseDir = process.env.NODE_ENV === "production" ? "/tmp" : os.homedir();
 
-  const backupPath = path.join(homeDir, "Documents", "SmartKhata", "Backups");
+  const backupPath = path.join(baseDir, "SmartKhata", "Backups");
 
   if (!fs.existsSync(backupPath)) {
     fs.mkdirSync(backupPath, { recursive: true });

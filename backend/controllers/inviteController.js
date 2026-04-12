@@ -34,7 +34,11 @@ const generateCode = async (req, res) => {
       code,
     });
 
-    await sendEmail(email, code);
+    try {
+      await sendEmail(email, code);
+    } catch (err) {
+      return res.status(500).json({ msg: "Email send failed" });
+    }
 
     res.json({
       msg: "Code generated and sent to email",

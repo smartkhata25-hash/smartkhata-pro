@@ -14,8 +14,8 @@
     "mongoose": "^8.14.2",
     "multer": "^1.4.5-lts.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^8.0.3",
     "puppeteer": "^24.37.5",
+    "resend": "^6.10.0",
     "unzipper": "^0.12.3",
     "xlsx": "^0.18.5"
   },

@@ -1,25 +1,18 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async (toEmail, code) => {
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    await resend.emails.send({
+      from: "Smart Khata <onboarding@resend.dev>",
       to: toEmail,
       subject: "Smart Khata Invite Code",
-      text: `Your verification code is: ${code}`,
-    };
-
-    await transporter.sendMail(mailOptions);
+      html: `<p>Your verification code is: <b>${code}</b></p>`,
+    });
   } catch (error) {
     console.error("Email Error:", error);
+    throw error; // ⚠️ important
   }
 };
 

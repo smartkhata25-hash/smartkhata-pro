@@ -88,11 +88,14 @@ const loginUser = async (req, res) => {
         });
       } else {
         // ❌ اگر device کسی اور user کے ساتھ bind ہے
-        if (installation.userId.toString() !== user._id.toString()) {
-          return res.status(403).json({
-            msg: "This device is already registered with another user",
-          });
-        }
+        // ❌ disable for now
+        /*
+if (installation.userId.toString() !== user._id.toString()) {
+  return res.status(403).json({
+    msg: "This device is already registered with another user",
+  });
+}
+*/
 
         // ❌ اگر device inactive ہے
         if (!installation.isActive) {

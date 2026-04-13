@@ -34,19 +34,15 @@ const generateCode = async (req, res) => {
       code,
     });
 
-    try {
-      await sendEmail(email, code);
-    } catch (err) {
-      console.error("❌ Controller Email Error:", err.message);
-
-      return res.status(500).json({
-        msg: "Email send failed",
-        error: err.message,
-      });
-    }
+    // 📧 Email temporarily disabled
+    console.log("📩 Invite Code Generated:", {
+      email,
+      code,
+    });
 
     res.json({
-      msg: "Code generated and sent to email",
+      success: true,
+      msg: "Code generated successfully",
       email: invite.email,
       code: invite.code,
     });

@@ -19,7 +19,7 @@ export default function RegisterPage() {
         navigate('/#/login');
       }
     } catch (err) {
-      alert(t('alerts.registrationFailed'));
+      alert(err.response?.data?.msg || 'Registration failed');
     }
   };
 

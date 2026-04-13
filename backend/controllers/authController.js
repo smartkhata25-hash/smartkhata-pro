@@ -30,6 +30,11 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ msg: "Invalid or expired code" });
     }
 
+    // 🔐 extra safety (optional)
+    if (invite.email !== email) {
+      return res.status(400).json({ msg: "Email mismatch" });
+    }
+
     invite.isUsed = true;
     await invite.save();
 

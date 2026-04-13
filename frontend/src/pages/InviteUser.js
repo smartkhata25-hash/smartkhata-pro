@@ -128,7 +128,40 @@ export default function InviteUser() {
               <strong>Email:</strong> {result.email}
             </p>
 
-            <p style={{ color: '#16a34a', fontWeight: '600' }}>✅ Invite code sent successfully</p>
+            {result && (
+              <div
+                style={{
+                  marginTop: '18px',
+                  padding: '14px',
+                  borderRadius: '10px',
+                  background: '#ecfdf5',
+                  border: '1px solid #bbf7d0',
+                }}
+              >
+                <p>
+                  <strong>Email:</strong> {result.email}
+                </p>
+
+                <p>
+                  <strong>Code:</strong> {result.code}
+                </p>
+
+                <button
+                  onClick={() => navigator.clipboard.writeText(result.code)}
+                  style={{
+                    marginTop: '8px',
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  📋 Copy Code
+                </button>
+
+                <p style={{ color: '#16a34a', fontWeight: '600' }}>
+                  ✅ Code generated successfully
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>

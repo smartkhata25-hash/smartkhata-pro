@@ -911,5 +911,6 @@
   "menu.setup": "Setup",
   "menu.entries": "Entries",
   "menu.expenses": "Expenses",
-  "menu.import": "Import"
+  "menu.import": "Import",
+  "price": "Price"
 }

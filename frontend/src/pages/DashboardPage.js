@@ -84,18 +84,20 @@ const DashboardPage = () => {
     <div className="space-y-10">
       {/* Page Title + Toggle */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-800">{t('dashboard')}</h1>
+        <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+          {t('dashboard')}
+        </h1>
 
         {/* 👁 Toggle Button */}
         <div className="flex items-center gap-2">
           {/* 👁 Toggle */}
           <button
             onClick={() => setShowCards((prev) => !prev)}
-            className="text-xs md:text-sm px-3 py-1.5 rounded-full 
+            className="text-xs md:text-sm px-3 rounded-full 
 bg-white/80 backdrop-blur-md border border-gray-300 
 shadow-sm hover:shadow-md hover:bg-gray-100 
 transition-all duration-200 
-font-medium"
+font-medium h-[36px]"
           >
             {showCards ? 'Hide' : 'Show'}
           </button>
@@ -104,7 +106,7 @@ font-medium"
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
+            className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
           >
             <option value="month">Month</option>
             <option value="year">Year</option>
@@ -114,7 +116,7 @@ font-medium"
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
+              className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
             >
               {[
                 'Jan',
@@ -140,7 +142,7 @@ font-medium"
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="text-xs md:text-sm px-3 py-1.5 rounded-full border border-gray-300 bg-white"
+              className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
             >
               {[2023, 2024, 2025, 2026].map((y) => (
                 <option key={y} value={y}>
@@ -193,7 +195,9 @@ font-medium"
 
       {/* Quick Actions */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-700 mb-6">{t('quickActions')}</h2>
+        <h2 className="text-lg font-semibold mb-6 bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">
+          {t('quickActions')}
+        </h2>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
           <QuickAction

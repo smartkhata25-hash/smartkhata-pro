@@ -911,5 +911,6 @@
   "menu.setup": "سیٹ اپ",
   "menu.entries": "اندراجات",
   "menu.expenses": "اخراجات",
-  "menu.import": "امپورٹ"
+  "menu.import": "امپورٹ",
+  "price": "قیمت"
 }

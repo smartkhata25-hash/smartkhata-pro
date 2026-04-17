@@ -120,14 +120,18 @@ const generateSaleInvoiceHTML = (data) => {
       ? "A5"
       : page?.pageWidth === "wide"
         ? "A4 landscape"
-        : "A4";
+        : page?.pageWidth === "thermal"
+          ? "80mm auto"
+          : "A4";
 
   const pageMaxWidth =
     page?.pageWidth === "wide"
       ? "1000px"
       : page?.pageWidth === "narrow"
         ? "650px"
-        : "800px";
+        : page?.pageWidth === "thermal"
+          ? "300px"
+          : "800px";
 
   const footerStyle =
     footer?.footerBehavior === "hideIfNoSpace"
@@ -155,10 +159,11 @@ body {
   font-size: ${bodyFontSize}px;
   margin: 0;
   color: #000;
+  ${page?.pageWidth === "thermal" ? "width:100%;" : ""}
 }
 
 .container {
-  max-width: ${pageMaxWidth};
+  max-width: ${page?.pageWidth === "thermal" ? "300px" : pageMaxWidth};
   margin: 0 auto;
 }
 

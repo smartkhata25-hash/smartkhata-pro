@@ -4,6 +4,7 @@ import { deleteProduct } from '../services/inventoryService';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { t } from '../i18n/i18n';
+import { FaTrash, FaEdit } from 'react-icons/fa';
 
 const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick }) => {
   const [filters, setFilters] = useState({
@@ -155,7 +156,8 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
             value={filters.categoryId}
             onChange={(e) => setFilters({ ...filters, categoryId: e.target.value })}
             style={{
-              padding: isMobile ? '5px 6px' : '7px 10px',
+              padding: isMobile ? '5px 6px' : '6px 10px',
+              height: isMobile ? 'auto' : '34px',
               width: '100%',
               fontSize: isMobile ? 12 : 14,
               borderRadius: '8px',
@@ -164,7 +166,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
 
               whiteSpace: 'nowrap',
               overflow: 'hidden',
-              textOverflow: 'ellipsis', // ✅ text cut ہوگا
+              textOverflow: 'ellipsis',
             }}
           >
             <option value="">{t('common.all')}</option>
@@ -181,7 +183,8 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
           value={filters.stockFilter}
           onChange={(e) => setFilters({ ...filters, stockFilter: e.target.value })}
           style={{
-            padding: isMobile ? '5px 6px' : '7px 10px',
+            padding: isMobile ? '5px 6px' : '6px 10px',
+            height: isMobile ? 'auto' : '34px',
             borderRadius: '8px',
             border: '1px solid #d1d5db',
             width: isMobile ? '90px' : 'auto',
@@ -337,15 +340,15 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
             <tr className="bg-gray-100 text-center">
               <th className="border p-2 w-1/4">{t('inventory.product')}</th>
 
-              <th className="border p-2 w-64">{t('inventory.category')}</th>
-              <th className="border p-2 w-24">{t('inventory.rack')}</th>
-              <th className="border p-2">{t('common.description')}</th>
-              <th className="border p-2">{t('inventory.unit')}</th>
+              {!isMobile && <th className="border p-2 w-64">{t('inventory.category')}</th>}
+              {!isMobile && <th className="border p-2 w-24">{t('inventory.rack')}</th>}
+              {!isMobile && <th className="border p-2">{t('common.description')}</th>}
+              {!isMobile && <th className="border p-2">{t('inventory.unit')}</th>}
               <th className="border p-2">{t('inventory.cost')}</th>
 
-              <th className="border p-2">{t('inventory.salePrice')}</th>
+              <th className="border p-2">{t('price')}</th>
 
-              <th className="border p-2 w-24">{t('inventory.stock')}</th>
+              <th className={`border p-2 ${isMobile ? 'w-12' : 'w-24'}`}>{t('inventory.stock')}</th>
 
               <th className="border p-2 no-print w-20">{t('common.actions')}</th>
             </tr>
@@ -370,35 +373,60 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
                   }
                 }}
               >
-                <td className="border p-2 w-1/4">{p.name}</td>
+                <td className={`border p-2 ${isMobile ? 'w-2/4' : 'w-1/4'}`}>{p.name}</td>
 
-                <td className="border p-2 w-64">{p.categoryId?.name || '-'}</td>
-                <td className="border p-2 w-24">{p.rackNo || '-'}</td>
-                <td className="border p-2">{p.description || '-'}</td>
-                <td className="border p-2">{p.unit}</td>
+                {!isMobile && <td className="border p-2 w-64">{p.categoryId?.name || '-'}</td>}
+                {!isMobile && <td className="border p-2 w-24">{p.rackNo || '-'}</td>}
+                {!isMobile && <td className="border p-2">{p.description || '-'}</td>}
+                {!isMobile && <td className="border p-2">{p.unit}</td>}
                 <td className="border p-2">{p.unitCost}</td>
                 <td className="border p-2">{p.salePrice}</td>
-                <td className="border p-2 w-24">{p.stock}</td>
+                <td className={`border p-2 ${isMobile ? 'w-12' : 'w-24'}`}>{p.stock}</td>
                 <td className="border p-2 no-print w-20">
                   <div className="flex justify-center gap-2">
-                    <button
-                      className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEdit(p);
-                      }}
-                    >
-                      {t('common.edit')}
-                    </button>
-                    <button
-                      className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(p);
-                      }}
-                    >
-                      {t('common.delete')}
-                    </button>
+                    {isMobile ? (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(p);
+                          }}
+                        >
+                          <FaEdit />
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(p);
+                          }}
+                        >
+                          <FaTrash color="red" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="bg-yellow-400 px-2 py-1 rounded"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(p);
+                          }}
+                        >
+                          {t('common.edit')}
+                        </button>
+
+                        <button
+                          className="bg-red-600 text-white px-2 py-1 rounded"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(p);
+                          }}
+                        >
+                          {t('common.delete')}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

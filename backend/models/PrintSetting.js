@@ -81,7 +81,7 @@ const layoutSchema = new mongoose.Schema({
 
   pageWidth: {
     type: String,
-    enum: ["narrow", "standard", "wide"],
+    enum: ["narrow", "standard", "wide", "thermal"],
     default: "standard",
   },
 

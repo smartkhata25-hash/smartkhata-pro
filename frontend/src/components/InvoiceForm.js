@@ -900,52 +900,52 @@ const InvoiceForm = ({
                     {editingInvoiceFromAPI ? t('common.revert') : t('clear')}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editingInvoiceFromAPI?._id) {
-                        // ✅ Saved invoice → direct backend route
-                        navigate(`/print/sale/${editingInvoiceFromAPI._id}`);
-                      } else {
-                        // ✅ Preview mode (unsaved invoice) → backend preview API
+                  <div className="flex items-center gap-2">
+                    {/* PRINT BUTTON */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingInvoiceFromAPI?._id) {
+                          navigate(`/print/sale/${editingInvoiceFromAPI._id}`);
+                        } else {
+                          const previewItems = items
+                            .filter((i) => i.productId && i.quantity > 0)
+                            .map((i) => ({
+                              productId: i.productId,
+                              name: i.name,
+                              description: i.description,
+                              uom: i.uom,
+                              quantity: i.quantity,
+                              price: i.rate,
+                              total: i.amount,
+                            }));
 
-                        const previewItems = items
-                          .filter((i) => i.productId && i.quantity > 0)
-                          .map((i) => ({
-                            productId: i.productId,
-                            name: i.name, // 🔥 یہ add کریں
-                            description: i.description,
-                            uom: i.uom,
-                            quantity: i.quantity,
-                            price: i.rate,
-                            total: i.amount,
-                          }));
-
-                        navigate(`/print/sale/preview`, {
-                          state: {
-                            isPreview: true,
-                            invoiceData: {
-                              invoiceDate,
-                              invoiceTime,
-                              billNo,
-                              customerName: customerName || '-',
-                              customerPhone: customerPhone || '',
-                              by,
-                              items: previewItems,
-                              totalAmount,
-                              discountAmount: finalDiscount,
-                              grandTotal,
-                              paidAmount,
-                              paymentType,
+                          navigate(`/print/sale/preview`, {
+                            state: {
+                              isPreview: true,
+                              invoiceData: {
+                                invoiceDate,
+                                invoiceTime,
+                                billNo,
+                                customerName: customerName || '-',
+                                customerPhone: customerPhone || '',
+                                by,
+                                items: previewItems,
+                                totalAmount,
+                                discountAmount: finalDiscount,
+                                grandTotal,
+                                paidAmount,
+                                paymentType,
+                              },
                             },
-                          },
-                        });
-                      }
-                    }}
-                    className="bg-purple-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm"
-                  >
-                    {t('printInvoice')}
-                  </button>
+                          });
+                        }
+                      }}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm shadow-md"
+                    >
+                      🖨️ {t('printInvoice')}
+                    </button>
+                  </div>
 
                   <button
                     type="button"
@@ -1216,6 +1216,32 @@ const InvoiceForm = ({
               {/* LAYOUT */}
               <div className="space-y-2">
                 <h4 className="font-semibold">{t('print.layout')}</h4>
+                {/* PAGE SIZE (A4 / A5 / LANDSCAPE) */}
+                <div className="space-y-2">
+                  <h4 className="font-semibold">Page Size</h4>
+
+                  <select
+                    className="border w-full px-2 py-1"
+                    value={printSettings.sales.layout.pageWidth || 'standard'}
+                    onChange={(e) => {
+                      let value = e.target.value;
+                      setPrintSettings({
+                        ...printSettings,
+                        sales: {
+                          ...printSettings.sales,
+                          layout: {
+                            ...printSettings.sales.layout,
+                            pageWidth: value,
+                          },
+                        },
+                      });
+                    }}
+                  >
+                    <option value="standard">A4</option>
+                    <option value="narrow">A5</option>
+                    <option value="thermal">Thermal</option>
+                  </select>
+                </div>
 
                 <select
                   className="border w-full px-2 py-1"

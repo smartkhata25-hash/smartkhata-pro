@@ -12,6 +12,7 @@ const {
 const {
   shouldShowBackupReminder,
 } = require("../services/localBackup/backupReminderService");
+const { getCloudBackupList } = require("../services/cloudListService");
 
 /* ======================================================
    BACKUP DIRECTORY
@@ -73,8 +74,9 @@ exports.restoreBackupController = async (req, res) => {
       });
     }
 
-    const result = await restoreBackup(userId);
+    const { fileName } = req.body;
 
+    const result = await restoreBackup(userId, fileName);
     if (!result.success) {
       return res.status(500).json({
         success: false,
@@ -274,6 +276,31 @@ exports.getBackupReminderController = (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Reminder check failed",
+    });
+  }
+};
+
+exports.getCloudBackupListController = async (req, res) => {
+  try {
+    const result = await getCloudBackupList();
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+      files: result.files,
+    });
+  } catch (error) {
+    console.error("❌ Cloud list controller error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch cloud backups",
     });
   }
 };

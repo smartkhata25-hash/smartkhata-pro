@@ -11,6 +11,7 @@ const {
   createLocalBackupController,
   restoreLocalBackupController,
   getBackupReminderController,
+  getCloudBackupListController,
 } = require("../controllers/backupController");
 
 router.get("/status", protect, getBackupStatusController);
@@ -26,5 +27,7 @@ router.post("/local/create", protect, createLocalBackupController);
 router.post("/local/restore", protect, restoreLocalBackupController);
 
 router.get("/reminder", protect, getBackupReminderController);
+
+router.get("/cloud-list", protect, getCloudBackupListController);
 
 module.exports = router;

@@ -39,9 +39,9 @@ export const createBackup = async () => {
    RESTORE BACKUP
 ===================================================== */
 
-export const restoreBackup = async () => {
+export const restoreBackup = async (fileName = null) => {
   try {
-    const res = await axios.post(`${API}/restore`, {}, getAuthHeader());
+    const res = await axios.post(`${API}/restore`, { fileName }, getAuthHeader());
 
     return res.data;
   } catch (error) {
@@ -149,5 +149,15 @@ export const getBackupReminder = async () => {
     console.error('Reminder Error:', error);
 
     throw new Error('Failed to check reminder');
+  }
+};
+
+export const getCloudBackupList = async () => {
+  try {
+    const res = await axios.get(`${API}/cloud-list`, getAuthHeader());
+    return res.data.files;
+  } catch (error) {
+    console.error('Cloud List Error:', error);
+    throw new Error('Failed to fetch cloud backups');
   }
 };

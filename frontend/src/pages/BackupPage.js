@@ -7,6 +7,7 @@ import {
   createLocalBackup,
   restoreLocalBackup,
   getBackupReminder,
+  getCloudBackupList,
 } from '../services/backupService';
 
 import BackupInfoCard from '../components/BackupInfoCard';
@@ -20,6 +21,7 @@ const BackupPage = () => {
   const [mode, setMode] = useState('online');
   const [showReminder, setShowReminder] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
+  const [cloudBackups, setCloudBackups] = useState([]);
 
   /* ==========================================
      Load Backup Status
@@ -36,6 +38,7 @@ const BackupPage = () => {
   useEffect(() => {
     fetchBackupStatus();
     checkReminder();
+    loadCloudBackups();
 
     const savedMode = localStorage.getItem('mode');
     if (savedMode) setMode(savedMode);
@@ -97,7 +100,7 @@ const BackupPage = () => {
   /* ==========================================
      Restore Backup
   ========================================== */
-  const handleRestoreBackup = async () => {
+  const handleRestoreBackup = async (fileName = null) => {
     if (mode === 'offline') {
       alert('Offline mode میں cloud restore available نہیں ہے');
       return;
@@ -109,7 +112,7 @@ const BackupPage = () => {
     try {
       setLoading(true);
 
-      await restoreBackup();
+      await restoreBackup(fileName);
 
       setToast({ message: 'Backup restored successfully', type: 'success' });
 
@@ -187,6 +190,15 @@ const BackupPage = () => {
     }
   };
 
+  const loadCloudBackups = async () => {
+    try {
+      const files = await getCloudBackupList();
+      setCloudBackups(files);
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -243,6 +255,26 @@ const BackupPage = () => {
 
       {/* Backup Info */}
       {backupInfo && <BackupInfoCard backupInfo={backupInfo} />}
+      <div className="bg-white rounded-lg shadow p-5 border">
+        <h3 className="text-lg font-semibold mb-3">Cloud Backups ☁️</h3>
+
+        {cloudBackups.length === 0 ? (
+          <p className="text-sm text-gray-500">No backups found</p>
+        ) : (
+          cloudBackups.map((file, index) => (
+            <div key={index} className="flex justify-between items-center border-b py-2">
+              <span className="text-sm">{file.name}</span>
+
+              <button
+                onClick={() => handleRestoreBackup(file.name)}
+                className="bg-red-500 text-white px-3 py-1 rounded text-xs"
+              >
+                Restore
+              </button>
+            </div>
+          ))
+        )}
+      </div>
       <BackupModal
         show={showReminder}
         title="Backup Reminder"

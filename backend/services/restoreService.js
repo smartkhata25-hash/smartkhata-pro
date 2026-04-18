@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const unzipper = require("unzipper");
+const { createBackup } = require("./backupService");
 
 /* ======================================================
 COLLECTION CONFIG
@@ -88,6 +89,16 @@ function getLatestBackup() {
   }
 
   return files[0].path;
+}
+
+function getBackupByName(fileName) {
+  const filePath = path.join(BACKUP_DIR, fileName);
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error("Backup file not found");
+  }
+
+  return filePath;
 }
 
 /* ======================================================
@@ -333,12 +344,27 @@ function cleanTemp() {
 /* ======================================================
 MAIN RESTORE
 ====================================================== */
+async function restoreBackup(userId, fileName = null) {
+  let safetyBackupPath = null;
 
-async function restoreBackup(userId) {
   try {
     ensureDirectories();
 
-    const backupFile = getLatestBackup();
+    console.log("🛡️ Creating safety backup before restore...");
+
+    // ✅ STEP 1: safety backup
+    const safetyBackup = await createBackup(userId, { skipCloudUpload: true });
+
+    if (!safetyBackup.success) {
+      throw new Error("Safety backup failed. Restore cancelled.");
+    }
+
+    safetyBackupPath = safetyBackup.path;
+
+    console.log("✅ Safety backup created:", safetyBackupPath);
+
+    // ✅ STEP 2: normal restore
+    const backupFile = fileName ? getBackupByName(fileName) : getLatestBackup();
 
     await extractBackup(backupFile);
 
@@ -348,16 +374,37 @@ async function restoreBackup(userId) {
 
     cleanTemp();
 
+    console.log("✅ Restore successful");
+
     return {
       success: true,
       message: "Backup restored successfully",
     };
   } catch (error) {
-    console.error("Restore failed:", error);
+    console.error("❌ Restore failed:", error.message);
+
+    // ❗ STEP 3: ROLLBACK
+    try {
+      if (safetyBackupPath) {
+        console.log("🔄 Rolling back from safety backup...");
+
+        await extractBackup(safetyBackupPath);
+
+        await restoreCollections(new mongoose.Types.ObjectId(userId));
+
+        restoreUploads();
+
+        cleanTemp();
+
+        console.log("✅ Rollback successful");
+      }
+    } catch (rollbackError) {
+      console.error("❌ Rollback failed:", rollbackError.message);
+    }
 
     return {
       success: false,
-      message: error.message,
+      message: "Restore failed but data recovered",
     };
   }
 }

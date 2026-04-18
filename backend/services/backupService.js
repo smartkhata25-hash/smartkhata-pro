@@ -181,7 +181,7 @@ function deleteOldBackups(userId, limit = 5) {
    Create Backup (MAIN)
 ========================================================= */
 
-async function createBackup(userId) {
+async function createBackup(userId, options = {}) {
   try {
     ensureDirectories();
 
@@ -190,7 +190,9 @@ async function createBackup(userId) {
     createMeta(userId);
 
     const backupFile = await createZip(userId);
-    await uploadToCloud(backupFile);
+    if (!options.skipCloudUpload) {
+      await uploadToCloud(backupFile);
+    }
 
     cleanTemp();
     deleteOldBackups(userId, 5);

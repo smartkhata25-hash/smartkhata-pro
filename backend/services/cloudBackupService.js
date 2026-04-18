@@ -5,7 +5,6 @@ let lastUploadedFile = null;
 
 async function uploadToCloud(filePath) {
   try {
-    // ❗ duplicate upload نہ ہو
     if (lastUploadedFile === filePath) {
       console.log("⚠️ Backup already uploaded, skipping...");
       return;
@@ -15,7 +14,10 @@ async function uploadToCloud(filePath) {
 
     console.log("☁️ Uploading backup to R2...", fileName);
 
-    await uploadFileToR2(filePath, fileName);
+    const fs = require("fs"); // ✅ ADD
+    const fileBuffer = fs.readFileSync(filePath); // ✅ ADD
+
+    await uploadFileToR2(fileBuffer, fileName); // ✅ FIX
 
     console.log("✅ Backup uploaded to R2");
 

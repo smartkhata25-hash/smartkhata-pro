@@ -53,7 +53,7 @@ const generateSaleInvoiceHTML = (data) => {
         : 1;
 
   const bodyFontSize = BASE_FONT * layoutScale;
-  const headerMainSize = BASE_FONT * 2 * layoutScale * headerScale;
+  const headerMainSize = BASE_FONT * 1.5 * layoutScale * headerScale;
   const sectionTitleSize = BASE_FONT * 1.2 * layoutScale;
   const footerTextSize = BASE_FONT * 0.85 * layoutScale * footerScale;
   const tableHeaderSize = BASE_FONT * 1.05 * layoutScale;
@@ -189,7 +189,7 @@ body {
 
 .info-section {
   display: grid;
-  grid-template-columns: 70% 30%;
+  grid-template-columns: 60% 40%;
   margin-bottom: 4px;
   font-weight: 700;
 }
@@ -273,7 +273,7 @@ ${
 
 <div class="info-section">
   <div class="info-left">
-    <div><strong>Customer:</strong> ${party?.name || "-"}</div>
+    <div><strong>MS:</strong> ${party?.name || "-"}</div>
     <div><strong>Ph:</strong> ${party?.phone || "-"}</div>
     ${party?.by ? `<div><strong>By:</strong> ${party.by}</div>` : ""}
   </div>

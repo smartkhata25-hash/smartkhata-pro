@@ -1,4 +1,10 @@
-const { S3Client, ListObjectsV2Command } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  ListObjectsV2Command,
+  GetObjectCommand,
+} = require("@aws-sdk/client-s3");
+const fs = require("fs");
+const path = require("path");
 
 const s3 = new S3Client({
   region: "auto",
@@ -40,6 +46,40 @@ async function getCloudBackupList() {
   }
 }
 
+async function downloadBackupFromCloud(fileName) {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: fileName,
+    });
+
+    const response = await s3.send(command);
+
+    const filePath = path.join("/tmp", fileName); // render کیلئے
+
+    const writeStream = fs.createWriteStream(filePath);
+
+    await new Promise((resolve, reject) => {
+      response.Body.pipe(writeStream);
+      response.Body.on("error", reject);
+      writeStream.on("finish", resolve);
+    });
+
+    return {
+      success: true,
+      path: filePath,
+    };
+  } catch (error) {
+    console.error("❌ Download error:", error.message);
+
+    return {
+      success: false,
+      message: error.message,
+    };
+  }
+}
+
 module.exports = {
   getCloudBackupList,
+  downloadBackupFromCloud,
 };

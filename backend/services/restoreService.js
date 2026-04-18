@@ -3,6 +3,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 const unzipper = require("unzipper");
 const { createBackup } = require("./backupService");
+const { downloadBackupFromCloud } = require("./cloudListService");
 
 /* ======================================================
 COLLECTION CONFIG
@@ -364,7 +365,21 @@ async function restoreBackup(userId, fileName = null) {
     console.log("✅ Safety backup created:", safetyBackupPath);
 
     // ✅ STEP 2: normal restore
-    const backupFile = fileName ? getBackupByName(fileName) : getLatestBackup();
+    let backupFile;
+
+    if (fileName) {
+      console.log("☁️ Downloading backup from cloud...");
+
+      const downloaded = await downloadBackupFromCloud(fileName);
+
+      if (!downloaded.success) {
+        throw new Error("Failed to download backup from cloud");
+      }
+
+      backupFile = downloaded.path;
+    } else {
+      backupFile = getLatestBackup();
+    }
 
     await extractBackup(backupFile);
 

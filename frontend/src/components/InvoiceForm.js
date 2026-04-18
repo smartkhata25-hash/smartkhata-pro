@@ -10,7 +10,7 @@ import {
   getLastInvoiceNo,
 } from '../services/salesService';
 import { fetchProductsWithToken } from '../services/inventoryService';
-import { fetchCustomers } from '../services/customerService';
+
 import { getAccounts } from '../services/accountService';
 
 import InvoiceTable from './InvoiceTable';
@@ -263,7 +263,13 @@ const InvoiceForm = ({
   useEffect(() => {
     if (!token) return;
 
-    fetchCustomers(token).then(setCustomers);
+    fetch(`${API}/api/customers?limit=50`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then((res) => res.json())
+      .then(setCustomers);
     fetchProductsWithToken(token).then(setProducts);
 
     getAccounts(token).then((all) => {
@@ -276,22 +282,27 @@ const InvoiceForm = ({
     return customers.filter((c) => c.name.toLowerCase().includes(query) || c.phone.includes(query));
   };
 
+  const debounceTimer = useRef(null);
+
   const handleCustomerInput = (e) => {
     const value = e.target.value;
     setCustomerName(value);
 
-    if (value.trim() === '') {
-      setCustomerSuggestions([]);
-      setSelectedCustomerIndex(-1);
-      setShowCustomerAddOptions(false);
-    } else {
-      const filtered = filterCustomers(value);
-      setCustomerSuggestions(filtered);
-      setSelectedCustomerIndex(-1);
-      setShowCustomerAddOptions(true);
-    }
-  };
+    clearTimeout(debounceTimer.current);
 
+    debounceTimer.current = setTimeout(() => {
+      if (value.trim() === '') {
+        setCustomerSuggestions([]);
+        setSelectedCustomerIndex(-1);
+        setShowCustomerAddOptions(false);
+      } else {
+        const filtered = filterCustomers(value);
+        setCustomerSuggestions(filtered);
+        setSelectedCustomerIndex(-1);
+        setShowCustomerAddOptions(true);
+      }
+    }, 300);
+  };
   const handleCustomerKeyDown = (e) => {
     if (customerSuggestions.length === 0) return;
 

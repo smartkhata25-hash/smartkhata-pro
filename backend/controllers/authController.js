@@ -71,11 +71,11 @@ const loginUser = async (req, res) => {
       if (!isMatch) {
         return res.status(401).json({ msg: "Invalid password" });
       }
-      try {
-        await recalculateAllUserAccounts(user._id);
-      } catch (err) {
-        console.error("Recalculate Error:", err.message);
-      }
+
+      // 🔥 background mein chalega (login fast ho jayega)
+      setTimeout(() => {
+        recalculateAllUserAccounts(user._id);
+      }, 0);
       // 🔒 Installation Check (Device Lock with User)
 
       let installation = await Installation.findOne({ deviceId });

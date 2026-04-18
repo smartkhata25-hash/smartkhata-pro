@@ -92,18 +92,69 @@ exports.recalculateAllUserAccounts = async (userId) => {
     return { message: "Invalid userId" };
   }
 
-  const accounts = await Account.find({ userId });
+  const accounts = await Account.find({ userId }).select(
+    "_id name normalBalance",
+  );
+
+  const accountIds = accounts.map((acc) => acc._id);
+
+  // 🔥 single aggregation (instead of 50 queries)
+  const summary = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: new mongoose.Types.ObjectId(userId),
+        isDeleted: false,
+      },
+    },
+    { $unwind: "$lines" },
+    {
+      $match: {
+        "lines.account": { $in: accountIds },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          account: "$lines.account",
+          type: "$lines.type",
+        },
+        total: { $sum: "$lines.amount" },
+      },
+    },
+  ]);
+
+  // 🔄 map results
+  const resultMap = {};
+
+  summary.forEach((item) => {
+    const accId = item._id.account.toString();
+    if (!resultMap[accId]) {
+      resultMap[accId] = { debit: 0, credit: 0 };
+    }
+
+    if (item._id.type === "debit") {
+      resultMap[accId].debit = item.total;
+    } else {
+      resultMap[accId].credit = item.total;
+    }
+  });
 
   const results = [];
 
   for (let acc of accounts) {
-    try {
-      const newBalance = await exports.recalculateAccountBalance(acc._id);
-      results.push({ name: acc.name, balance: newBalance });
-    } catch (err) {
-      results.push({ name: acc.name, error: err.message });
-      console.error(`⚠️ Error updating account (${acc.name}):`, err.message);
+    const data = resultMap[acc._id.toString()] || { debit: 0, credit: 0 };
+
+    let balance = 0;
+
+    if (acc.normalBalance === "debit") {
+      balance = data.debit - data.credit;
+    } else {
+      balance = data.credit - data.debit;
     }
+
+    await Account.updateOne({ _id: acc._id }, { balance });
+
+    results.push({ name: acc.name, balance });
   }
 
   return results;

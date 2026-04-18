@@ -27,24 +27,11 @@ const getDashboardSummary = async (req, res) => {
       };
     }
 
-    // 🔍 FILTERED ENTRIES چیک کریں
-    const filteredEntries = await JournalEntry.find({
-      createdBy: userId,
-      isDeleted: false,
-      ...dateFilter,
-    });
-
-    // 🔍 ALL ENTRIES (TOTAL)
-    const allEntries = await JournalEntry.find({
-      createdBy: userId,
-      isDeleted: false,
-    });
-
     /* ======================================================
        1️⃣ SALES & EXPENSES (WITH FILTER)
     ====================================================== */
 
-    const salesExpenseData = await JournalEntry.aggregate([
+    const combinedData = await JournalEntry.aggregate([
       {
         $match: {
           createdBy: userId,
@@ -62,42 +49,6 @@ const getDashboardSummary = async (req, res) => {
           as: "accountInfo",
         },
       },
-
-      { $unwind: "$accountInfo" },
-
-      {
-        $group: {
-          _id: {
-            type: "$accountInfo.type",
-            lineType: "$lines.type",
-          },
-          total: { $sum: "$lines.amount" },
-        },
-      },
-    ]);
-
-    /* ======================================================
-       2️⃣ CASH / BANK / RECEIVABLE / PAYABLE (NO FILTER)
-    ====================================================== */
-
-    const balanceData = await JournalEntry.aggregate([
-      {
-        $match: {
-          createdBy: userId,
-          isDeleted: false,
-        },
-      },
-      { $unwind: "$lines" },
-
-      {
-        $lookup: {
-          from: "accounts",
-          localField: "lines.account",
-          foreignField: "_id",
-          as: "accountInfo",
-        },
-      },
-
       { $unwind: "$accountInfo" },
 
       {
@@ -111,7 +62,6 @@ const getDashboardSummary = async (req, res) => {
         },
       },
     ]);
-
     /* ======================================================
        🔢 CALCULATIONS
     ====================================================== */
@@ -127,39 +77,39 @@ const getDashboardSummary = async (req, res) => {
     let customerNet = 0;
 
     // 🔹 Sales & Expense
-    salesExpenseData.forEach((item) => {
-      const { type, lineType } = item._id;
+    combinedData.forEach((item) => {
+      const { type, category, lineType } = item._id;
       const amount = item.total;
 
+      // Sales
       if (type === "Income" && lineType === "credit") {
         totalSales += amount;
       }
 
+      // Expense
       if (type === "Expense" && lineType === "debit") {
         totalExpenses += amount;
       }
-    });
 
-    // 🔹 Balance
-    balanceData.forEach((item) => {
-      const { type, category, lineType } = item._id;
-      const amount = item.total;
-
+      // Cash
       if (category === "cash") {
         if (lineType === "debit") totalCash += amount;
         else totalCash -= amount;
       }
 
+      // Bank
       if (type === "Asset" && ["bank", "online", "cheque"].includes(category)) {
         if (lineType === "debit") totalBank += amount;
         else totalBank -= amount;
       }
 
+      // Customer
       if (type === "Asset" && category === "customer") {
         if (lineType === "debit") customerNet += amount;
         else customerNet -= amount;
       }
 
+      // Payable
       if (type === "Liability") {
         if (lineType === "credit") totalPayable += amount;
         else totalPayable -= amount;
@@ -211,8 +161,20 @@ const getMonthlySales = async (req, res) => {
       {
         $lookup: {
           from: "accounts",
-          localField: "lines.account",
-          foreignField: "_id",
+          let: { accId: "$lines.account" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$accId"] },
+              },
+            },
+            {
+              $project: {
+                type: 1,
+                category: 1,
+              },
+            },
+          ],
           as: "accountInfo",
         },
       },

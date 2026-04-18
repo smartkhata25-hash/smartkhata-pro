@@ -11,22 +11,76 @@ const getCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const customers = await Customer.find({
+    const { search = "", limit = 50 } = req.query;
+
+    const query = {
       createdBy: userId,
       isActive: true,
-    }).populate("account");
+    };
 
-    const customersWithBalance = await Promise.all(
-      customers.map(async (cust) => {
-        const balance = await getCustomerBalanceFromJournal(cust._id, userId);
-        return {
-          ...cust.toObject(),
-          balance,
-        };
-      }),
-    );
+    if (search) {
+      query.name = { $regex: search, $options: "i" };
+    }
 
-    res.json(customersWithBalance);
+    const customers = await Customer.find(query)
+      .limit(Number(limit))
+      .populate("account");
+
+    // ⚡ Step 1: accounts collect
+    const accountIds = customers.map((c) => c.account?._id).filter(Boolean);
+
+    // ⚡ Step 2: single aggregation
+    const balances = await JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: userId,
+          isDeleted: false,
+        },
+      },
+      { $unwind: "$lines" },
+      {
+        $match: {
+          "lines.account": { $in: accountIds },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            account: "$lines.account",
+            type: "$lines.type",
+          },
+          total: { $sum: "$lines.amount" },
+        },
+      },
+    ]);
+
+    // ⚡ Step 3: map
+    const balanceMap = {};
+
+    balances.forEach((b) => {
+      const id = b._id.account.toString();
+      if (!balanceMap[id]) balanceMap[id] = { debit: 0, credit: 0 };
+
+      if (b._id.type === "debit") balanceMap[id].debit = b.total;
+      else balanceMap[id].credit = b.total;
+    });
+
+    // ⚡ Step 4: attach balance
+    const result = customers.map((c) => {
+      const data = balanceMap[c.account?._id?.toString()] || {
+        debit: 0,
+        credit: 0,
+      };
+
+      const balance = data.debit - data.credit;
+
+      return {
+        ...c.toObject(),
+        balance,
+      };
+    });
+
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: "Server Error" });
   }

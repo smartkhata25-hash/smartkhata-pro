@@ -82,7 +82,7 @@ const PrintInvoicePage = () => {
   }
 
   return (
-    <div className="bg-white min-h-screen p-6">
+    <div className="bg-white p-6" style={{ height: '100vh', overflowY: 'auto' }}>
       {/* Top Bar (Not Printed) */}
       <div className="flex justify-end mb-4 no-print">
         <button
@@ -170,7 +170,9 @@ const PrintInvoicePage = () => {
       </div>
 
       {/* HTML Render */}
-      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <div style={{ minHeight: '100%', paddingBottom: '50px' }}>
+        <div dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
     </div>
   );
 };

@@ -60,9 +60,15 @@ async function downloadBackupFromCloud(fileName) {
     const writeStream = fs.createWriteStream(filePath);
 
     await new Promise((resolve, reject) => {
-      response.Body.pipe(writeStream);
-      response.Body.on("error", reject);
-      writeStream.on("finish", resolve);
+      const chunks = [];
+
+for await (const chunk of response.Body) {
+  chunks.push(chunk);
+}
+
+const buffer = Buffer.concat(chunks);
+
+fs.writeFileSync(filePath, buffer);
     });
 
     return {

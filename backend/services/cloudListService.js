@@ -55,21 +55,10 @@ async function downloadBackupFromCloud(fileName) {
 
     const response = await s3.send(command);
 
-    const filePath = path.join("/tmp", fileName); // render کیلئے
+    const filePath = path.join("/tmp", fileName);
 
-    const writeStream = fs.createWriteStream(filePath);
-
-    await new Promise((resolve, reject) => {
-      const chunks = [];
-
-for await (const chunk of response.Body) {
-  chunks.push(chunk);
-}
-
-const buffer = Buffer.concat(chunks);
-
-fs.writeFileSync(filePath, buffer);
-    });
+    const buffer = await response.Body.transformToByteArray();
+    fs.writeFileSync(filePath, Buffer.from(buffer));
 
     return {
       success: true,

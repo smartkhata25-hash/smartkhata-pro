@@ -22,7 +22,9 @@ async function getCloudBackupList() {
         name: item.Key,
         size: item.Size,
         lastModified: item.LastModified,
-      })) || [];
+      }))
+        .sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified))
+        .slice(0, 5) || [];
 
     return {
       success: true,

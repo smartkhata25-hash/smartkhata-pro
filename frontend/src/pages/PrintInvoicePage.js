@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { useNavigate } from 'react-router-dom';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const PrintInvoicePage = () => {
@@ -8,6 +9,7 @@ const PrintInvoicePage = () => {
   const location = useLocation();
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   const isPreview = location.state?.isPreview;
 
@@ -85,11 +87,11 @@ const PrintInvoicePage = () => {
       <div className="flex justify-end mb-4 no-print">
         <button
           onClick={() => {
-            window.onafterprint = function () {
-              window.location.href = '/create-sale';
-            };
-
             window.print();
+
+            setTimeout(() => {
+              navigate('/create-sale');
+            }, 500);
           }}
           className="px-5 py-2 bg-gray-700 text-white rounded shadow"
         >

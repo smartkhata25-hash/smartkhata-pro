@@ -84,7 +84,13 @@ const PrintInvoicePage = () => {
       {/* Top Bar (Not Printed) */}
       <div className="flex justify-end mb-4 no-print">
         <button
-          onClick={() => window.print()}
+          onClick={() => {
+            window.onafterprint = function () {
+              window.location.href = '/create-sale';
+            };
+
+            window.print();
+          }}
           className="px-5 py-2 bg-gray-700 text-white rounded shadow"
         >
           {t('print')}

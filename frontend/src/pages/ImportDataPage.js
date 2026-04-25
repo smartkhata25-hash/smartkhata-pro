@@ -7,6 +7,7 @@ const ImportDataPage = () => {
   const [file, setFile] = useState(null);
   const [type, setType] = useState('customers');
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const [previewData, setPreviewData] = useState([]);
   const [errors, setErrors] = useState([]);
@@ -49,21 +50,36 @@ const ImportDataPage = () => {
     try {
       setLoading(true);
 
-      const formData = new FormData();
-      formData.append('file', file);
+      const res = await axios.post(
+        `${API}/api/import/${type}`,
+        { data: previewData },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        }
+      );
 
-      const res = await axios.post(`${API}/api/import/${type}`, formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const jobId = res.data.jobId;
+
+      const interval = setInterval(async () => {
+        const progRes = await axios.get(`${API}/api/import/progress/${jobId}`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        });
+
+        setProgress(progRes.data.progress);
+
+        if (progRes.data.progress >= 100) {
+          clearInterval(interval);
+          setStep('done');
+        }
+      }, 1000);
 
       setResult(res.data);
-      setStep('done');
     } catch (err) {
       alert(err.response?.data?.message || t('import.importFailed'));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -102,6 +118,12 @@ const ImportDataPage = () => {
   };
 
   /* ================= RENDER TABLE ================= */
+  // ✅ HANDLE EDIT FUNCTION
+  const handleEdit = (index, field, value) => {
+    const updated = [...previewData];
+    updated[index][field] = value;
+    setPreviewData(updated);
+  };
 
   const renderTable = () => {
     if (type === 'products') {
@@ -117,13 +139,43 @@ const ImportDataPage = () => {
             </tr>
           </thead>
           <tbody>
-            {previewData.slice(0, 20).map((row, i) => (
+            {previewData.map((row, i) => (
               <tr key={i} className="border-t">
-                <td className="p-2">{row.category || '-'}</td>
-                <td className="p-2">{row.name}</td>
-                <td className="p-2">{row.unitCost}</td>
-                <td className="p-2">{row.salePrice}</td>
-                <td className="p-2">{row.stock}</td>
+                <td className="p-2">
+                  <input
+                    className="border p-1 w-full"
+                    value={row.category || ''}
+                    onChange={(e) => handleEdit(i, 'category', e.target.value)}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    className="border p-1 w-full"
+                    value={row.name}
+                    onChange={(e) => handleEdit(i, 'name', e.target.value)}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    className="border p-1 w-full"
+                    value={row.unitCost}
+                    onChange={(e) => handleEdit(i, 'unitCost', e.target.value)}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    className="border p-1 w-full"
+                    value={row.salePrice}
+                    onChange={(e) => handleEdit(i, 'salePrice', e.target.value)}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    className="border p-1 w-full"
+                    value={row.stock}
+                    onChange={(e) => handleEdit(i, 'stock', e.target.value)}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -141,11 +193,29 @@ const ImportDataPage = () => {
           </tr>
         </thead>
         <tbody>
-          {previewData.slice(0, 20).map((row, i) => (
+          {previewData.map((row, i) => (
             <tr key={i} className="border-t">
-              <td className="p-2">{row.name}</td>
-              <td className="p-2">{row.phone}</td>
-              <td className="p-2">{row.openingBalance}</td>
+              <td className="p-2">
+                <input
+                  className="border p-1 w-full"
+                  value={row.name}
+                  onChange={(e) => handleEdit(i, 'name', e.target.value)}
+                />
+              </td>
+              <td className="p-2">
+                <input
+                  className="border p-1 w-full"
+                  value={row.phone}
+                  onChange={(e) => handleEdit(i, 'phone', e.target.value)}
+                />
+              </td>
+              <td className="p-2">
+                <input
+                  className="border p-1 w-full"
+                  value={row.openingBalance}
+                  onChange={(e) => handleEdit(i, 'openingBalance', e.target.value)}
+                />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -184,8 +254,18 @@ const ImportDataPage = () => {
       )}
 
       {/* PREVIEW */}
-      {step === 'preview' && (
+      {(step === 'preview' || (loading && !result)) && (
         <div className="space-y-4">
+          {loading && (
+            <div className="w-full bg-gray-200 rounded">
+              <div
+                className="bg-green-500 text-white text-center text-xs p-1"
+                style={{ width: `${progress}%` }}
+              >
+                {progress}%
+              </div>
+            </div>
+          )}
           <h3 className="text-lg font-semibold">
             🔍 {t('import.preview')} ({previewData.length} {t('import.rows')})
           </h3>

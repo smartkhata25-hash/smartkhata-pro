@@ -5,6 +5,7 @@ const {
   importCustomers,
   importSuppliers,
   importProducts,
+  getImportProgress,
 } = require("../controllers/importController");
 
 const upload = require("../middleware/upload");
@@ -65,5 +66,7 @@ router.post(
   validateFile,
   importProducts,
 );
+
+router.get("/progress/:jobId", protect, getImportProgress);
 
 module.exports = router;

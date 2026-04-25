@@ -11,6 +11,7 @@ const Category = require("../models/Category");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const importProgress = {};
 
 /* =========================================================
    🔧 COMMON HELPERS
@@ -242,7 +243,13 @@ const createProductInternal = async (data, userId) => {
    🚀 IMPORT ENGINE (WITH PREVIEW SUPPORT)
 ========================================================= */
 
-const processImport = async (rows, userId, type, preview = false) => {
+const processImport = async (
+  rows,
+  userId,
+  type,
+  preview = false,
+  jobId = null,
+) => {
   let transformResult;
 
   if (type === "product") {
@@ -275,8 +282,19 @@ const processImport = async (rows, userId, type, preview = false) => {
       result = await createPartyInternal(valid[i], userId, type);
     }
 
-    if (result.success) success++;
-    else failed.push({ row: i + 2, message: result.message });
+    if (result.success) {
+      success++;
+    } else {
+      failed.push({ row: i + 2, message: result.message });
+    }
+
+    if (jobId) {
+      importProgress[jobId] = Math.floor(((i + 1) / valid.length) * 100);
+    }
+  }
+
+  if (jobId) {
+    importProgress[jobId] = 100;
   }
 
   return {
@@ -295,17 +313,31 @@ exports.importCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file) {
-      return res.status(400).json({ message: "Excel file is required" });
+    if (!req.file && !req.body.data) {
+      return res.status(400).json({
+        message: "File or data is required",
+      });
     }
 
     const preview = req.query.preview === "true";
+    let rows;
 
-    const rows = parseExcelFile(req.file.buffer);
+    if (req.body.data) {
+      rows = req.body.data;
+    } else {
+      rows = parseExcelFile(req.file.buffer);
+    }
+    const jobId = Date.now().toString();
 
-    const result = await processImport(rows, userId, "customer", preview);
+    const result = await processImport(
+      rows,
+      userId,
+      "customer",
+      preview,
+      jobId,
+    );
 
-    res.json(result);
+    res.json({ ...result, jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
@@ -324,11 +356,24 @@ exports.importSuppliers = async (req, res) => {
 
     const preview = req.query.preview === "true";
 
-    const rows = parseExcelFile(req.file.buffer);
+    let rows;
 
-    const result = await processImport(rows, userId, "supplier", preview);
+    if (req.body.data) {
+      rows = req.body.data;
+    } else {
+      rows = parseExcelFile(req.file.buffer);
+    }
+    const jobId = Date.now().toString();
 
-    res.json(result);
+    const result = await processImport(
+      rows,
+      userId,
+      "supplier",
+      preview,
+      jobId,
+    );
+
+    res.json({ ...result, jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
@@ -347,15 +392,31 @@ exports.importProducts = async (req, res) => {
 
     const preview = req.query.preview === "true";
 
-    const rows = parseExcelFile(req.file.buffer);
+    let rows;
 
-    const result = await processImport(rows, userId, "product", preview);
+    if (req.body.data) {
+      rows = req.body.data;
+    } else {
+      rows = parseExcelFile(req.file.buffer);
+    }
+    const jobId = Date.now().toString();
 
-    res.json(result);
+    const result = await processImport(rows, userId, "product", preview, jobId);
+
+    res.json({ ...result, jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
       error: error.message,
     });
   }
+};
+
+// ✅ GET IMPORT PROGRESS
+exports.getImportProgress = (req, res) => {
+  const { jobId } = req.params;
+
+  const progress = importProgress[jobId] || 0;
+
+  res.json({ progress });
 };

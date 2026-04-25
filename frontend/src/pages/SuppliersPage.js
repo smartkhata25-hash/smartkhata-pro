@@ -17,6 +17,7 @@ import { useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
+import { FaEdit, FaTrash } from 'react-icons/fa';
 
 const SuppliersPage = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -476,7 +477,7 @@ const SuppliersPage = () => {
                 </div>
 
                 {/* RIGHT ACTIONS */}
-                {selectedSupplierId === supplier._id && (
+                {(selectedSupplierId === supplier._id || isMobile) && (
                   <div
                     style={{
                       display: 'flex',
@@ -490,33 +491,37 @@ const SuppliersPage = () => {
                     <button
                       onClick={(e) => handleEditClick(e, supplier)}
                       style={{
-                        fontSize: 10,
-                        padding: '2px 4px',
+                        width: 26,
+                        height: 26,
                         borderRadius: 6,
                         border: '1px solid #7c3aed',
                         background: '#f3e8ff',
                         color: '#6b21a8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         cursor: 'pointer',
-                        fontWeight: 600,
                       }}
                     >
-                      {t('edit')}
+                      <FaEdit size={12} />
                     </button>
 
                     <button
                       onClick={(e) => handleDeleteClick(e, supplier._id)}
                       style={{
-                        fontSize: 11,
-                        padding: '4px 8px',
+                        width: 26,
+                        height: 26,
                         borderRadius: 6,
                         border: '1px solid #ef4444',
                         background: '#fef2f2',
                         color: '#b91c1c',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         cursor: 'pointer',
-                        fontWeight: 600,
                       }}
                     >
-                      {t('delete')}
+                      <FaTrash size={12} />
                     </button>
                   </div>
                 )}

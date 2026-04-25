@@ -34,7 +34,7 @@ const InvoiceTable = ({
 
   return (
     <div className="overflow-x-auto mt-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-      <div className="max-h-[50vh] overflow-y-auto border rounded">
+      <div className="max-h-[35vh] md:max-h-[50vh] overflow-y-auto border rounded">
         <table className="w-full border text-xs md:text-sm leading-none">
           <thead className="bg-gray-100 sticky top-0">
             <tr>

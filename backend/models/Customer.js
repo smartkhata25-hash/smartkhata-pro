@@ -43,8 +43,8 @@ const customerSchema = new mongoose.Schema(
     },
     account: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Account", // ✅ Automatically connect with Account
-      required: true, // ✅ System ko har customer ka account lazmi chahiye
+      ref: "Account",
+      required: true,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -53,8 +53,8 @@ const customerSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true, // ✅ Automatically add createdAt & updatedAt
+    timestamps: true,
   },
 );
 
-module.exports = mongoose.model("Customer", customerSchema); // forcefully register
+module.exports = mongoose.model("Customer", customerSchema);

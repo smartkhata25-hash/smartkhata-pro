@@ -93,7 +93,9 @@ export default function CustomerLedgerPage() {
 
   useEffect(() => {
     axios
-      .get('/api/customers', { headers: { Authorization: `Bearer ${token}` } })
+      .get(`${process.env.REACT_APP_API_BASE_URL}/api/customers`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       .then((res) => setCustomers(res.data))
       .catch(console.error);
   }, [token]);

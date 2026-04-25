@@ -35,6 +35,7 @@ const getCustomers = async (req, res) => {
         $match: {
           createdBy: userId,
           isDeleted: false,
+          accounts: { $in: accountIds },
         },
       },
       { $unwind: "$lines" },
@@ -520,24 +521,38 @@ const getCustomerDetailedLedger = async (req, res) => {
     let openingBalance = 0;
 
     if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(23, 59, 59, 999);
+      const result = await JournalEntry.aggregate([
+        {
+          $match: {
+            createdBy: userId,
+            isDeleted: false,
+            accounts: customer.account._id,
+            date: { $lt: new Date(startDate) },
+          },
+        },
+        { $unwind: "$lines" },
+        {
+          $match: {
+            "lines.account": customer.account._id,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            balance: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$lines.type", "debit"] },
+                  "$lines.amount",
+                  { $multiply: ["$lines.amount", -1] },
+                ],
+              },
+            },
+          },
+        },
+      ]);
 
-      const prevJournals = await JournalEntry.find({
-        createdBy: userId,
-        customerId: customer._id,
-        isDeleted: false,
-        date: { $lt: new Date(startDate) },
-      }).lean();
-
-      for (const entry of prevJournals) {
-        for (const line of entry.lines) {
-          if (line.account?.toString() === accountId) {
-            openingBalance +=
-              line.type === "debit" ? line.amount : -line.amount;
-          }
-        }
-      }
+      openingBalance = result[0]?.balance || 0;
     }
 
     // ===============================
@@ -560,6 +575,9 @@ const getCustomerDetailedLedger = async (req, res) => {
     }
 
     const journals = await JournalEntry.find(match)
+      .select(
+        "date time billNo description sourceType lines invoiceId referenceId",
+      )
       .sort({ date: 1, time: 1 })
       .lean();
 

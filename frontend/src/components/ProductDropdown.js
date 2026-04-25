@@ -60,7 +60,7 @@ const ProductDropdown = ({ productList, value = '', onSelect }) => {
         position: 'absolute',
         top: `${top}px`,
         left: `${rect.left + window.scrollX}px`,
-        width: `${rect.width}px`,
+        width: window.innerWidth < 768 ? `${window.innerWidth * 0.8}px` : `${rect.width}px`,
         zIndex: 9999,
         background: 'white',
         border: '1px solid #ccc',

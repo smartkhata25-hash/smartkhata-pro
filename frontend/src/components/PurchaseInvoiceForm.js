@@ -618,7 +618,11 @@ const PurchaseInvoiceForm = () => {
           <div className={showHistory ? 'col-span-10' : 'col-span-12'}>
             <div ref={printRef} id="print-section">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">📦 {t('purchase.invoice')}</h2>
+                <h2 className="text-xl font-semibold">
+                  📦
+                  <span className="md:hidden">Purchase</span>
+                  <span className="hidden md:inline">{t('purchase.invoice')}</span>
+                </h2>
 
                 <div className="flex gap-2">
                   {/* 🔍 Find Invoice */}
@@ -627,7 +631,9 @@ const PurchaseInvoiceForm = () => {
                     onClick={() => setShowSearchModal(true)}
                     className="bg-gray-700 text-white px-3 py-1 rounded text-sm"
                   >
-                    🔍 {t('findInvoice')}
+                    🔍
+                    <span className="md:hidden">Find</span>
+                    <span className="hidden md:inline">{t('findInvoice')}</span>
                   </button>
 
                   {/* 📊 History */}
@@ -804,7 +810,7 @@ const PurchaseInvoiceForm = () => {
                           setDiscountPercent(+e.target.value || 0);
                           setDiscountAmount(0);
                         }}
-                        className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
+                        className="hidden md:block border px-2 py-0 text-sm h-8 w-28 appearance-none"
                       />
 
                       <input
@@ -859,7 +865,7 @@ const PurchaseInvoiceForm = () => {
                     </div>
 
                     {/* SECOND ROW — Buttons */}
-                    <div className="flex flex-wrap gap-3 mt-8">
+                    <div className="flex flex-wrap gap-3 mt-2 md:mt-8">
                       {isEdit ? (
                         <button
                           type="button"
@@ -873,17 +879,19 @@ const PurchaseInvoiceForm = () => {
                           <button
                             type="button"
                             onClick={handleSaveAndClose}
-                            className="bg-green-600 text-white px-4 py-2 rounded"
+                            className="bg-green-600 text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded"
                           >
-                            💾 {t('saveClose')}
+                            <span className="md:hidden">{t('saveClose')}</span>
+                            <span className="hidden md:inline">💾 {t('saveClose')}</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={handleSaveAndNew}
-                            className="bg-blue-600 text-white px-4 py-2 rounded"
+                            className="bg-blue-600 text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded"
                           >
-                            📄 {t('saveNew')}
+                            <span className="md:hidden">{t('saveNew')}</span>
+                            <span className="hidden md:inline">📄 {t('saveNew')}</span>
                           </button>
                         </>
                       )}
@@ -891,25 +899,30 @@ const PurchaseInvoiceForm = () => {
                       <button
                         type="button"
                         onClick={handleClear}
-                        className="bg-gray-500 text-white px-4 py-2 rounded"
+                        className="bg-gray-500 text-white px-2 py-1 md:px-4 md:py-2 rounded"
                       >
-                        {isEdit ? t('common.revert') : t('clear')}
+                        <span className="md:hidden">🧹</span>
+                        <span className="hidden md:inline">
+                          {isEdit ? t('common.revert') : t('clear')}
+                        </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={handlePrint}
-                        className="bg-purple-600 text-white px-4 py-2 rounded"
+                        className="bg-purple-600 text-white px-2 py-1 md:px-4 md:py-2 rounded"
                       >
-                        🖨 {t('print')}
+                        <span className="md:hidden">🖨</span>
+                        <span className="hidden md:inline">🖨 {t('print')}</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={handleDownloadPDF}
-                        className="bg-indigo-600 text-white px-4 py-2 rounded"
+                        className="bg-indigo-600 text-white px-2 py-1 md:px-4 md:py-2 rounded"
                       >
-                        📄 {t('pdf')}
+                        <span className="md:hidden">📄</span>
+                        <span className="hidden md:inline">📄 {t('pdf')}</span>
                       </button>
                     </div>
                   </div>

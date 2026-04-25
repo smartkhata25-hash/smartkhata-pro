@@ -18,7 +18,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { sendWhatsAppReminder } from '../utils/whatsapp';
 import { FaWhatsapp } from 'react-icons/fa';
-import { FaTrash } from 'react-icons/fa';
+import { FaEdit, FaTrash } from 'react-icons/fa';
 
 import { getCurrentLanguage } from '../i18n/i18n';
 
@@ -309,10 +309,10 @@ const CustomersPage = () => {
         <div
           style={{
             width: isMobile ? '100%' : '20%',
+            display: isMobile && selectedCustomerId ? 'none' : 'flex',
             minWidth: isMobile ? '100%' : 260,
             borderRight: isMobile ? 'none' : '1px solid #e5e7eb',
             padding: 12,
-            display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
           }}
@@ -496,8 +496,8 @@ const CustomersPage = () => {
                     <div style={{ fontWeight: 700, fontSize: 14 }}>{customer.name}</div>
                     <div
                       style={{
-                        fontSize: 14, // 👈 font بڑا
-                        fontWeight: 800, // 👈 تھوڑا bold
+                        fontSize: 14,
+                        fontWeight: 800,
                         color: balanceColor,
                         marginTop: 2,
                       }}
@@ -507,7 +507,7 @@ const CustomersPage = () => {
                   </div>
 
                   {/* RIGHT ACTIONS */}
-                  {selectedCustomerId === customer._id && customer.phone && (
+                  {(selectedCustomerId === customer._id || isMobile) && (
                     <div
                       style={{
                         display: 'flex',
@@ -518,63 +518,74 @@ const CustomersPage = () => {
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* EDIT */}
+
                       <button
                         onClick={(e) => handleEditClick(e, customer)}
                         style={{
-                          fontSize: 10,
-                          padding: '2px 4px',
+                          width: 26,
+                          height: 26,
                           borderRadius: 6,
                           border: '1px solid #3b82f6',
                           background: '#eff6ff',
                           color: '#1d4ed8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           cursor: 'pointer',
-                          fontWeight: 600,
                         }}
                       >
-                        {t('edit')}
+                        <FaEdit size={12} />
                       </button>
 
+                      {/* DELETE */}
                       <button
                         onClick={(e) => handleDeleteClick(e, customer._id)}
                         style={{
-                          fontSize: 11,
-                          padding: '4px 8px',
+                          width: 26,
+                          height: 26,
                           borderRadius: 6,
                           border: '1px solid #ef4444',
                           background: '#fef2f2',
                           color: '#b91c1c',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           cursor: 'pointer',
-                          fontWeight: 600,
                         }}
                       >
                         <FaTrash size={12} />
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
 
-                          sendWhatsAppReminder({
-                            phone: customer.phone,
-                            customerName: customer.name,
-                            balance: Number(customer.balance || 0).toFixed(2),
-                            businessName: 'Your Business',
-                            mobile: '',
-                            lang: getCurrentLanguage(),
-                          });
-                        }}
-                        style={{
-                          fontSize: 12,
-                          padding: '4px 8px',
-                          borderRadius: 6,
-                          border: '1px solid #22c55e',
-                          background: '#ecfdf5',
-                          color: '#16a34a',
-                          cursor: 'pointer',
-                          fontWeight: 700,
-                        }}
-                      >
-                        <FaWhatsapp size={14} />
-                      </button>
+                      {/* WHATSAPP ONLY IF PHONE */}
+                      {customer.phone && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+
+                            sendWhatsAppReminder({
+                              phone: customer.phone,
+                              customerName: customer.name,
+                              balance: Number(customer.balance || 0).toFixed(2),
+                              businessName: 'Your Business',
+                              mobile: '',
+                              lang: getCurrentLanguage(),
+                            });
+                          }}
+                          style={{
+                            fontSize: 12,
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            border: '1px solid #22c55e',
+                            background: '#ecfdf5',
+                            color: '#16a34a',
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <FaWhatsapp size={12} />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

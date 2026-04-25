@@ -6,36 +6,39 @@ const Supplier = require("../models/Supplier");
  * 🔄 Reusable helper to calculate balance from journal entries
  */
 const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
-  if (!accountId) {
-    console.warn(`⚠️ ${label} accountId missing`);
-    return 0;
-  }
+  if (!accountId) return 0;
 
-  const entries = await JournalEntry.find({
-    "lines.account": accountId,
-    createdBy: userId,
-    isDeleted: false,
-  }).select("lines");
+  const result = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: userId,
+        isDeleted: false,
+        accounts: accountId,
+      },
+    },
+    { $unwind: "$lines" },
+    {
+      $match: {
+        "lines.account": accountId,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        balance: {
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "debit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
 
-  let debitTotal = 0;
-  let creditTotal = 0;
-
-  entries.forEach((entry, i) => {
-    entry.lines.forEach((line) => {
-      if (line.account?.toString() === accountId.toString()) {
-        const amount = line.amount || 0;
-        if (line.type === "debit") {
-          debitTotal += amount;
-        } else if (line.type === "credit") {
-          creditTotal += amount;
-        }
-      }
-    });
-  });
-
-  const balance = debitTotal - creditTotal;
-
-  return balance;
+  return result[0]?.balance || 0;
 };
 
 /**

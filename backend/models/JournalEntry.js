@@ -184,6 +184,13 @@ journalEntrySchema.index({
   isDeleted: 1,
 });
 
+journalEntrySchema.index({
+  createdBy: 1,
+  accounts: 1,
+  isDeleted: 1,
+  date: 1,
+});
+
 journalEntrySchema.index({ createdBy: 1, isDeleted: 1 });
 journalEntrySchema.index({
   createdBy: 1,

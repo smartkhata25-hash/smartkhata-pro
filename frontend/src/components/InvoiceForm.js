@@ -632,7 +632,7 @@ const InvoiceForm = ({
 
               {customerSuggestions.length > 0 && (
                 <ul
-                  className="absolute left-0 right-0 bg-white border mt-1 max-h-40 overflow-auto shadow-lg"
+                  className="absolute left-0 md:left-0 right-0 md:right-0 w-[95vw] md:w-full bg-white border mt-1 max-h-72 overflow-auto shadow-lg"
                   style={{ zIndex: 9999 }}
                 >
                   {customerSuggestions.map((c, i) => (
@@ -653,7 +653,7 @@ const InvoiceForm = ({
                 customerSuggestions.length === 0 &&
                 customerName.trim() !== '' && (
                   <ul
-                    className="absolute left-0 right-0 bg-white border mt-1 shadow-lg"
+                    className="absolute left-0 md:left-0 right-0 md:right-0 w-[95vw] md:w-full bg-white border mt-1 shadow-lg"
                     style={{ zIndex: 9999 }}
                   >
                     <li

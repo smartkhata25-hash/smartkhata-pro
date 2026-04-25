@@ -37,7 +37,7 @@ const getCustomerLedger = async (req, res) => {
     // ✅ Step 3: Build filter
     const matchFilter = {
       createdBy: userId,
-      "lines.account": objectId,
+      accounts: objectId,
       isDeleted: false,
     };
 
@@ -50,6 +50,9 @@ const getCustomerLedger = async (req, res) => {
 
     // ✅ Step 4: Get entries
     const entries = await JournalEntry.find(matchFilter)
+      .select(
+        "date time billNo description sourceType lines paymentType attachmentUrl attachmentType invoiceId referenceId",
+      )
       .sort({ date: 1, time: 1 })
       .lean();
 
@@ -57,20 +60,38 @@ const getCustomerLedger = async (req, res) => {
     let opening = 0;
 
     if (startDate) {
-      const prevEntries = await JournalEntry.find({
-        createdBy: userId,
-        isDeleted: false,
-        "lines.account": objectId,
-        date: { $lt: new Date(startDate) },
-      }).lean();
+      const result = await JournalEntry.aggregate([
+        {
+          $match: {
+            createdBy: userId,
+            isDeleted: false,
+            accounts: objectId,
+            date: { $lt: new Date(startDate) },
+          },
+        },
+        { $unwind: "$lines" },
+        {
+          $match: {
+            "lines.account": objectId,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            balance: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$lines.type", "debit"] },
+                  "$lines.amount",
+                  { $multiply: ["$lines.amount", -1] },
+                ],
+              },
+            },
+          },
+        },
+      ]);
 
-      for (let entry of prevEntries) {
-        for (let line of entry.lines) {
-          if (line.account?.toString() === accountId) {
-            opening += line.type === "debit" ? line.amount : -line.amount;
-          }
-        }
-      }
+      opening = result[0]?.balance || 0;
     }
 
     // ✅ Step 6: Running balance calculation

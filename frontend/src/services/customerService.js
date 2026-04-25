@@ -17,8 +17,8 @@ export const fetchCustomers = async (token) => {
 };
 
 // ✅ Get Customers (same as fetchCustomers, but separated for compatibility)
-export const getCustomers = async (token) => {
-  const response = await axios.get(API_URL, getAuthHeaders(token));
+export const getCustomers = async (token, limit = 30, skip = 0) => {
+  const response = await axios.get(`${API_URL}?limit=${limit}&skip=${skip}`, getAuthHeaders(token));
   return response.data;
 };
 

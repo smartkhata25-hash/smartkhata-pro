@@ -51,17 +51,38 @@ const CustomersPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
-  const loadCustomers = useCallback(async () => {
-    try {
-      const data = await getCustomers(token);
-      setCustomers(data);
-    } catch (error) {
-      console.error(t('alerts.customersLoadFailed'), error);
-    }
-  }, [token]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+
+  const loadCustomers = useCallback(
+    async (reset = false) => {
+      try {
+        const currentPage = reset ? 0 : page;
+
+        const data = await getCustomers(token, 30, currentPage * 30);
+
+        if (reset) {
+          setCustomers(data);
+        } else {
+          setCustomers((prev) => [...prev, ...data]);
+        }
+
+        if (data.length < 30) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
+
+        setPage(currentPage + 1);
+      } catch (error) {
+        console.error('Load failed', error);
+      }
+    },
+    [token, page]
+  );
 
   useEffect(() => {
-    loadCustomers();
+    loadCustomers(true);
   }, [loadCustomers]);
 
   // 📱 HANDLE RESPONSIVE
@@ -453,6 +474,14 @@ const CustomersPage = () => {
 
           {/* 👇 existing customers list yahan آئے گی (next phase) */}
           <div
+            onScroll={(e) => {
+              const bottom =
+                e.target.scrollHeight - e.target.scrollTop <= e.target.clientHeight + 50;
+
+              if (bottom && hasMore) {
+                loadCustomers();
+              }
+            }}
             style={{
               flex: 1,
               overflowY: 'auto',

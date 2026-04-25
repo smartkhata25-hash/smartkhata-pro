@@ -57,4 +57,6 @@ const customerSchema = new mongoose.Schema(
   },
 );
 
+customerSchema.index({ createdBy: 1, name: 1, phone: 1 });
+
 module.exports = mongoose.model("Customer", customerSchema);

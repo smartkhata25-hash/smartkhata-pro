@@ -11,7 +11,7 @@ const getCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const { search = "", limit = 30, skip = 0 } = req.query;
+    const { search = "" } = req.query;
 
     const query = {
       createdBy: userId,
@@ -22,12 +22,7 @@ const getCustomers = async (req, res) => {
       query.name = { $regex: search, $options: "i" };
     }
 
-    const customers = await Customer.find(query)
-      .select("name phone email account createdAt")
-      .populate("account")
-      .skip(Number(skip))
-      .limit(Number(limit))
-      .sort({ createdAt: -1 });
+    const customers = await Customer.find(query).populate("account");
 
     // ⚡ Step 1: accounts collect
     const accountIds = customers.map((c) => c.account?._id).filter(Boolean);

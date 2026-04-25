@@ -350,8 +350,10 @@ exports.importSuppliers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file) {
-      return res.status(400).json({ message: "Excel file is required" });
+    if (!req.file && !req.body.data) {
+      return res.status(400).json({
+        message: "File or data is required",
+      });
     }
 
     const preview = req.query.preview === "true";
@@ -386,8 +388,10 @@ exports.importProducts = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file) {
-      return res.status(400).json({ message: "Excel file is required" });
+    if (!req.file && !req.body.data) {
+      return res.status(400).json({
+        message: "File or data is required",
+      });
     }
 
     const preview = req.query.preview === "true";

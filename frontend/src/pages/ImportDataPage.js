@@ -50,6 +50,8 @@ const ImportDataPage = () => {
     try {
       setLoading(true);
 
+      setFile(null);
+
       const res = await axios.post(
         `${API}/api/import/${type}`,
         { data: previewData },

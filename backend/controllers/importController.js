@@ -313,20 +313,28 @@ exports.importCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file && !req.body.data) {
-      return res.status(400).json({
-        message: "File or data is required",
-      });
-    }
-
     const preview = req.query.preview === "true";
     let rows;
 
-    if (req.body.data) {
-      rows = req.body.data;
+    if (!preview) {
+      if (!Array.isArray(req.body)) {
+        return res.status(400).json({
+          message: "Invalid data format",
+        });
+      }
+
+      rows = req.body;
     } else {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "File is required for preview",
+        });
+      }
+
       rows = parseExcelFile(req.file.buffer);
     }
+    console.log("BODY TYPE:", typeof req.body);
+    console.log("IS ARRAY:", Array.isArray(req.body));
     const jobId = Date.now().toString();
 
     const result = await processImport(
@@ -350,21 +358,28 @@ exports.importSuppliers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file && !req.body.data) {
-      return res.status(400).json({
-        message: "File or data is required",
-      });
-    }
-
     const preview = req.query.preview === "true";
-
     let rows;
 
-    if (req.body.data) {
-      rows = req.body.data;
+    if (!preview) {
+      if (!Array.isArray(req.body)) {
+        return res.status(400).json({
+          message: "Invalid data format",
+        });
+      }
+
+      rows = req.body;
     } else {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "File is required for preview",
+        });
+      }
+
       rows = parseExcelFile(req.file.buffer);
     }
+    console.log("BODY TYPE:", typeof req.body);
+    console.log("IS ARRAY:", Array.isArray(req.body));
     const jobId = Date.now().toString();
 
     const result = await processImport(
@@ -388,21 +403,28 @@ exports.importProducts = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    if (!req.file && !req.body.data) {
-      return res.status(400).json({
-        message: "File or data is required",
-      });
-    }
-
     const preview = req.query.preview === "true";
-
     let rows;
 
-    if (req.body.data) {
-      rows = req.body.data;
+    if (!preview) {
+      if (!Array.isArray(req.body)) {
+        return res.status(400).json({
+          message: "Invalid data format",
+        });
+      }
+
+      rows = req.body;
     } else {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "File is required for preview",
+        });
+      }
+
       rows = parseExcelFile(req.file.buffer);
     }
+    console.log("BODY TYPE:", typeof req.body);
+    console.log("IS ARRAY:", Array.isArray(req.body));
     const jobId = Date.now().toString();
 
     const result = await processImport(rows, userId, "product", preview, jobId);

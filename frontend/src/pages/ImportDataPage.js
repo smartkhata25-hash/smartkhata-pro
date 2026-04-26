@@ -45,22 +45,30 @@ const ImportDataPage = () => {
   };
 
   /* ================= IMPORT ================= */
-
+  console.log('API URL:', `${API}/api/import/${type}`);
   const handleImport = async () => {
+    console.log('🔥 IMPORT CLICKED');
+
+    // ❗ پہلے یہ check add کریں
+    if (!previewData || previewData.length === 0) {
+      console.log('❌ NO DATA');
+      alert('No data to import');
+      return;
+    }
+
     try {
       setLoading(true);
+      console.log('📦 PREVIEW DATA:', previewData);
 
       setFile(null);
 
-      const res = await axios.post(
-        `${API}/api/import/${type}`,
-        { data: previewData },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-          },
-        }
-      );
+      console.log('🚀 API CALL START');
+      const res = await axios.post(`${API}/api/import/${type}`, previewData, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
       const jobId = res.data.jobId;
 
@@ -256,7 +264,7 @@ const ImportDataPage = () => {
       )}
 
       {/* PREVIEW */}
-      {(step === 'preview' || (loading && !result)) && (
+      {step === 'preview' && (
         <div className="space-y-4">
           {loading && (
             <div className="w-full bg-gray-200 rounded">
@@ -292,7 +300,7 @@ const ImportDataPage = () => {
               {t('cancel')}
             </button>
 
-            <button className="btn btn-primary" onClick={handleImport} disabled={loading}>
+            <button className="btn btn-primary" onClick={handleImport}>
               {loading ? t('import.importing') : t('import.confirm')}
             </button>
           </div>

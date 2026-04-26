@@ -37,36 +37,34 @@ const validateFile = (req, res, next) => {
 };
 
 /* =========================================================
-   📥 IMPORT ROUTES (WITH PREVIEW SUPPORT)
+   🧠 CONDITIONAL UPLOAD MIDDLEWARE
+   (صرف preview میں file آئے گی)
+========================================================= */
+
+const handleUploadIfPreview = (req, res, next) => {
+  if (req.query.preview === "true") {
+    return upload.single("file")(req, res, (err) => {
+      if (err) return next(err);
+      return validateFile(req, res, next);
+    });
+  }
+  next();
+};
+
+/* =========================================================
+   📥 IMPORT ROUTES
 ========================================================= */
 
 // 👉 Customers
-router.post(
-  "/customers",
-  protect,
-  upload.single("file"),
-  validateFile,
-  importCustomers,
-);
+router.post("/customers", protect, handleUploadIfPreview, importCustomers);
 
 // 👉 Suppliers
-router.post(
-  "/suppliers",
-  protect,
-  upload.single("file"),
-  validateFile,
-  importSuppliers,
-);
+router.post("/suppliers", protect, handleUploadIfPreview, importSuppliers);
 
 // 👉 Products
-router.post(
-  "/products",
-  protect,
-  upload.single("file"),
-  validateFile,
-  importProducts,
-);
+router.post("/products", protect, handleUploadIfPreview, importProducts);
 
+// 📊 Progress
 router.get("/progress/:jobId", protect, getImportProgress);
 
 module.exports = router;

@@ -5,6 +5,7 @@ const { getCustomerBalanceFromJournal } = require("../utils/balanceHelper");
 const { recalculateAccountBalance } = require("../utils/balanceHelper");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
+const mongoose = require("mongoose");
 
 // ✅ 1. Get all customers with balance
 const getCustomers = async (req, res) => {
@@ -14,7 +15,7 @@ const getCustomers = async (req, res) => {
     const { search = "" } = req.query;
 
     const query = {
-      createdBy: userId,
+      createdBy: new mongoose.Types.ObjectId(userId),
       isActive: true,
     };
 
@@ -31,7 +32,7 @@ const getCustomers = async (req, res) => {
     const balances = await JournalEntry.aggregate([
       {
         $match: {
-          createdBy: userId,
+          createdBy: new (require("mongoose").Types.ObjectId)(userId),
           isDeleted: false,
           accounts: { $in: accountIds },
         },

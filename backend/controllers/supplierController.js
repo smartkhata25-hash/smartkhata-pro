@@ -138,10 +138,12 @@ exports.getSuppliers = async (req, res) => {
 
     const suppliersWithBalance = await Promise.all(
       suppliers.map(async (sup) => {
+        console.log("🔥 CALL BALANCE FOR:", sup.name, sup._id);
         const balance = await getSupplierBalanceFromJournal(
           sup._id,
           req.user.id,
         );
+        console.log("🔥 RESULT BALANCE:", sup.name, balance);
         console.log("🔥 SUP BAL:", sup.name, balance);
         return {
           ...sup.toObject(),

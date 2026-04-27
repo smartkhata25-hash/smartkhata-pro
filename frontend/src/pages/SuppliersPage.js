@@ -228,7 +228,8 @@ const SuppliersPage = () => {
       );
     })
     .filter((supplier) => {
-      const balance = Number(supplier.balance) || 0;
+      const balance = Number(supplier.balance ?? supplier.openingBalance) || 0;
+
       if (filterType === 'receivable') return balance < 0;
       if (filterType === 'payable') return balance > 0;
       if (filterType === 'settled') return balance === 0;
@@ -436,7 +437,7 @@ const SuppliersPage = () => {
           />
 
           {(activeTab === 'active' ? activeSuppliers : hiddenSuppliers).map((supplier) => {
-            const balance = Number(supplier.balance) || 0;
+            const balance = Number(supplier.balance ?? supplier.openingBalance) || 0;
             const balanceColor = balance > 0 ? '#dc2626' : balance < 0 ? '#16a34a' : '#6b7280';
 
             return (

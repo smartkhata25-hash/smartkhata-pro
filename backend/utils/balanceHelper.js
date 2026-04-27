@@ -1,4 +1,5 @@
 const JournalEntry = require("../models/JournalEntry");
+const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
 
@@ -11,7 +12,7 @@ const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
   const result = await JournalEntry.aggregate([
     {
       $match: {
-        createdBy: userId,
+        createdBy: new mongoose.Types.ObjectId(userId),
         isDeleted: false,
         accounts: accountId,
       },

@@ -1,5 +1,10 @@
 const XLSX = require("xlsx");
 
+/* =========================================================
+   🧠 SMART CLEANING ENGINE
+========================================================= */
+
+// Normalize header keys
 const normalizeKey = (key) => {
   return key
     .toString()
@@ -8,6 +13,7 @@ const normalizeKey = (key) => {
     .replace(/[^a-z0-9]/g, "");
 };
 
+// Clean cell values
 const cleanValue = (val) => {
   if (val === null || val === undefined) return "";
   return val.toString().trim();
@@ -171,12 +177,19 @@ const transformPartyData = (rows, type = "customer") => {
 
       const phone = row[detectedColumns.phone] || row.phone || "";
 
-      let balance = toNumber(
-        row[normalizeKey(detectedColumns.balance || "")] ?? row.balance,
-      );
+      let youGet =
+        toNumber(row[detectedColumns.youget]) ?? toNumber(row.youget);
 
-      let youGet = 0;
-      let youGive = 0;
+      let youGive =
+        toNumber(row[detectedColumns.yougive]) ?? toNumber(row.yougive);
+
+      let balance =
+        toNumber(row[detectedColumns.balance]) ?? toNumber(row.balance);
+
+      if (!name) {
+        errors.push({ row: rowNumber, message: "Name is required" });
+        return;
+      }
 
       if (!isNaN(balance) && balance !== 0) {
         if (type === "customer") {
@@ -186,13 +199,6 @@ const transformPartyData = (rows, type = "customer") => {
           youGive = balance > 0 ? balance : 0;
           youGet = balance < 0 ? Math.abs(balance) : 0;
         }
-      } else {
-        youGet = toNumber(row[detectedColumns.youget] ?? row.youget);
-        youGive = toNumber(row[detectedColumns.yougive] ?? row.yougive);
-      }
-      if (!name) {
-        errors.push({ row: rowNumber, message: "Name is required" });
-        return;
       }
 
       if (isNaN(youGet) || isNaN(youGive)) {
@@ -228,12 +234,7 @@ const transformProductData = (rows) => {
     return { valid, errors: [{ row: 0, message: "Empty file" }] };
   }
 
-  const detectedColumns = detectColumns(
-    Object.keys(rows[0]).reduce((acc, key) => {
-      acc[key] = key;
-      return acc;
-    }, {}),
-  );
+  const detectedColumns = detectColumns(rows[0]);
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;

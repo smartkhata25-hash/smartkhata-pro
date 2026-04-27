@@ -13,7 +13,6 @@ const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
       $match: {
         createdBy: userId,
         isDeleted: false,
-        accounts: accountId,
       },
     },
     { $unwind: "$lines" },

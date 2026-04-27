@@ -24,6 +24,7 @@ const ImportDataPage = () => {
 
     try {
       setLoading(true);
+      setProgress(0);
 
       const formData = new FormData();
       formData.append('file', file);
@@ -45,11 +46,8 @@ const ImportDataPage = () => {
   };
 
   /* ================= IMPORT ================= */
-  console.log('API URL:', `${API}/api/import/${type}`);
-  const handleImport = async () => {
-    console.log('🔥 IMPORT CLICKED');
 
-    // ❗ پہلے یہ check add کریں
+  const handleImport = async () => {
     if (!previewData || previewData.length === 0) {
       console.log('❌ NO DATA');
       alert('No data to import');
@@ -58,11 +56,10 @@ const ImportDataPage = () => {
 
     try {
       setLoading(true);
-      console.log('📦 PREVIEW DATA:', previewData);
+      setProgress(0);
 
       setFile(null);
 
-      console.log('🚀 API CALL START');
       const res = await axios.post(`${API}/api/import/${type}`, previewData, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -83,6 +80,7 @@ const ImportDataPage = () => {
 
         if (progRes.data.progress >= 100) {
           clearInterval(interval);
+          setProgress(100);
           setStep('done');
         }
       }, 1000);

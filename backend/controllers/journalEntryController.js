@@ -122,6 +122,11 @@ exports.createEntry = async (req, res) => {
     });
 
     await entry.save();
+    console.log("🔥 STEP1 JOURNAL SAVED:", {
+      supplierId,
+      customerId,
+      lines,
+    });
     await recalculateInvolvedAccounts(lines);
     await logAudit({
       userId,

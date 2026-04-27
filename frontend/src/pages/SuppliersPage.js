@@ -55,6 +55,7 @@ const SuppliersPage = () => {
     try {
       const data = await fetchSuppliers({ search: '', type: '' });
       console.log('🔥 SUPPLIERS API RESPONSE:', data);
+      console.log('🔥 STEP4 FRONT DATA:', data);
       setSuppliers(data);
     } catch (error) {
       console.error(t('alerts.loadSuppliersError'), error);

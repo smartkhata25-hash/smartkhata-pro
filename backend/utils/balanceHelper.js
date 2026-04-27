@@ -7,12 +7,13 @@ const Supplier = require("../models/Supplier");
  */
 const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
   if (!accountId) return 0;
-
+  console.log("🔥 STEP2 ACCOUNT ID:", accountId);
   const result = await JournalEntry.aggregate([
     {
       $match: {
         createdBy: userId,
         isDeleted: false,
+        accounts: accountId,
       },
     },
     { $unwind: "$lines" },
@@ -36,7 +37,7 @@ const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
       },
     },
   ]);
-
+  console.log("🔥 STEP2 AGG RESULT:", result);
   return result[0]?.balance || 0;
 };
 

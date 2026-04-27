@@ -54,6 +54,7 @@ const SuppliersPage = () => {
   const loadSuppliers = useCallback(async () => {
     try {
       const data = await fetchSuppliers({ search: '', type: '' });
+      console.log('🔥 SUPPLIERS API RESPONSE:', data);
       setSuppliers(data);
     } catch (error) {
       console.error(t('alerts.loadSuppliersError'), error);

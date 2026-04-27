@@ -142,6 +142,7 @@ exports.getSuppliers = async (req, res) => {
           sup._id,
           req.user.id,
         );
+        console.log("🔥 SUP BAL:", sup.name, balance);
         return {
           ...sup.toObject(),
           balance,

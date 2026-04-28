@@ -259,6 +259,9 @@ const processImport = async (
   }
 
   const { valid, errors } = transformResult;
+  if (!valid.length && jobId) {
+    importProgress[jobId] = 100;
+  }
 
   // 🔥 PREVIEW MODE (NO DB WRITE)
   if (preview) {
@@ -333,19 +336,22 @@ exports.importCustomers = async (req, res) => {
 
       rows = parseExcelFile(req.file.buffer);
     }
-    console.log("BODY TYPE:", typeof req.body);
-    console.log("IS ARRAY:", Array.isArray(req.body));
+
     const jobId = Date.now().toString();
 
-    const result = await processImport(
-      rows,
-      userId,
-      "customer",
-      preview,
-      jobId,
-    );
+    if (preview) {
+      const result = await processImport(rows, userId, "customer", true, jobId);
 
-    res.json({ ...result, jobId });
+      return res.json({ ...result, jobId });
+    }
+
+    importProgress[jobId] = 0;
+
+    setTimeout(() => {
+      processImport(rows, userId, "customer", false, jobId);
+    }, 0);
+
+    res.json({ jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
@@ -378,19 +384,22 @@ exports.importSuppliers = async (req, res) => {
 
       rows = parseExcelFile(req.file.buffer);
     }
-    console.log("BODY TYPE:", typeof req.body);
-    console.log("IS ARRAY:", Array.isArray(req.body));
+
     const jobId = Date.now().toString();
 
-    const result = await processImport(
-      rows,
-      userId,
-      "supplier",
-      preview,
-      jobId,
-    );
+    if (preview) {
+      const result = await processImport(rows, userId, "supplier", true, jobId);
 
-    res.json({ ...result, jobId });
+      return res.json({ ...result, jobId });
+    }
+
+    importProgress[jobId] = 0;
+
+    setTimeout(() => {
+      processImport(rows, userId, "supplier", false, jobId);
+    }, 0);
+
+    res.json({ jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
@@ -423,13 +432,22 @@ exports.importProducts = async (req, res) => {
 
       rows = parseExcelFile(req.file.buffer);
     }
-    console.log("BODY TYPE:", typeof req.body);
-    console.log("IS ARRAY:", Array.isArray(req.body));
+
     const jobId = Date.now().toString();
 
-    const result = await processImport(rows, userId, "product", preview, jobId);
+    if (preview) {
+      const result = await processImport(rows, userId, "product", true, jobId);
 
-    res.json({ ...result, jobId });
+      return res.json({ ...result, jobId });
+    }
+
+    importProgress[jobId] = 0;
+
+    setTimeout(() => {
+      processImport(rows, userId, "product", false, jobId);
+    }, 0);
+
+    res.json({ jobId });
   } catch (error) {
     res.status(500).json({
       message: "Import failed",
@@ -442,7 +460,7 @@ exports.importProducts = async (req, res) => {
 exports.getImportProgress = (req, res) => {
   const { jobId } = req.params;
 
-  const progress = importProgress[jobId] || 0;
+  const progress = importProgress[jobId] ?? 0;
 
   res.json({ progress });
 };

@@ -259,8 +259,18 @@ const processImport = async (
   }
 
   const { valid, errors } = transformResult;
-  if (!valid.length && jobId) {
+  if (!valid.length && jobId && !preview) {
+    const finalResult = {
+      total: rows.length,
+      success: 0,
+      failed: errors.length,
+      errors,
+    };
+
+    importResults[jobId] = finalResult;
     importProgress[jobId] = 100;
+
+    return finalResult;
   }
 
   // 🔥 PREVIEW MODE (NO DB WRITE)
@@ -296,10 +306,6 @@ const processImport = async (
     }
   }
 
-  if (jobId) {
-    importProgress[jobId] = 100;
-  }
-
   const finalResult = {
     total: rows.length,
     success,
@@ -309,6 +315,7 @@ const processImport = async (
 
   if (jobId) {
     importResults[jobId] = finalResult;
+    importProgress[jobId] = 100;
   }
 
   return finalResult;
@@ -353,9 +360,13 @@ exports.importCustomers = async (req, res) => {
 
     importProgress[jobId] = 0;
 
-    setTimeout(() => {
-      processImport(rows, userId, "customer", false, jobId);
-    }, 0);
+    processImport(rows, userId, "customer", false, jobId)
+      .then(() => {
+        console.log("✅ Import finished:", jobId);
+      })
+      .catch((err) => {
+        console.error("❌ Import error:", err.message);
+      });
 
     res.json({ jobId });
   } catch (error) {
@@ -401,9 +412,13 @@ exports.importSuppliers = async (req, res) => {
 
     importProgress[jobId] = 0;
 
-    setTimeout(() => {
-      processImport(rows, userId, "supplier", false, jobId);
-    }, 0);
+    processImport(rows, userId, "supplier", false, jobId)
+      .then(() => {
+        console.log("✅ Import finished:", jobId);
+      })
+      .catch((err) => {
+        console.error("❌ Import error:", err.message);
+      });
 
     res.json({ jobId });
   } catch (error) {
@@ -449,9 +464,13 @@ exports.importProducts = async (req, res) => {
 
     importProgress[jobId] = 0;
 
-    setTimeout(() => {
-      processImport(rows, userId, "product", false, jobId);
-    }, 0);
+    processImport(rows, userId, "product", false, jobId)
+      .then(() => {
+        console.log("✅ Import finished:", jobId);
+      })
+      .catch((err) => {
+        console.error("❌ Import error:", err.message);
+      });
 
     res.json({ jobId });
   } catch (error) {

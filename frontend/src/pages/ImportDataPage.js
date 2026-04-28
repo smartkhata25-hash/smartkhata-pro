@@ -48,7 +48,7 @@ const ImportDataPage = () => {
   /* ================= IMPORT ================= */
 
   const handleImport = async () => {
-    if (!previewData || previewData.length === 0) {
+    if (!previewData.length && !errors.length) {
       console.log('❌ NO DATA');
       alert('No data to import');
       return;

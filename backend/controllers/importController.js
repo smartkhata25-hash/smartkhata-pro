@@ -12,7 +12,7 @@ const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const importProgress = {};
-
+const importResults = {};
 /* =========================================================
    🔧 COMMON HELPERS
 ========================================================= */
@@ -300,12 +300,18 @@ const processImport = async (
     importProgress[jobId] = 100;
   }
 
-  return {
+  const finalResult = {
     total: rows.length,
     success,
     failed: failed.length,
     errors: failed,
   };
+
+  if (jobId) {
+    importResults[jobId] = finalResult;
+  }
+
+  return finalResult;
 };
 
 /* =========================================================
@@ -462,5 +468,8 @@ exports.getImportProgress = (req, res) => {
 
   const progress = importProgress[jobId] ?? 0;
 
-  res.json({ progress });
+  res.json({
+    progress,
+    result: importResults[jobId] || null,
+  });
 };

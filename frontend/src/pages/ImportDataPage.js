@@ -81,11 +81,10 @@ const ImportDataPage = () => {
         if (progRes.data.progress >= 100) {
           clearInterval(interval);
           setProgress(100);
+          setResult(progRes.data.result);
           setStep('done');
         }
       }, 1000);
-
-      setResult(res.data);
     } catch (err) {
       alert(err.response?.data?.message || t('import.importFailed'));
     }

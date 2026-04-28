@@ -125,9 +125,9 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
       } else if (term.includes('stock')) {
         navigate('/stock-history');
       } else if (term.includes('expense')) {
-        navigate('/expenses'); // 🔥 NEW
+        navigate('/expenses');
       } else if (term.includes('account')) {
-        navigate('/accounts'); // 🔥 NEW
+        navigate('/accounts');
       } else if (term.includes('ledger')) {
         navigate('/ledger');
       } else if (term.includes('report')) {
@@ -321,12 +321,45 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
               >
                 {t('print.salesSettings')}
               </div>
+              <div
+                onClick={() => {
+                  navigate('/change-pin');
+                  setShowUserMenu(false);
+                }}
+                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+              >
+                🔑 Change PIN
+              </div>
+
+              <div
+                onClick={() => {
+                  const isEnabled = localStorage.getItem('lockEnabled');
+
+                  if (isEnabled === 'true') {
+                    localStorage.setItem('lockEnabled', 'false');
+                    localStorage.setItem('isUnlocked', 'true');
+                    alert('Lock بند ہو گیا 🔓');
+                    window.location.href = '/#/dashboard';
+                  } else {
+                    localStorage.setItem('lockEnabled', 'true');
+                    localStorage.setItem('isUnlocked', 'false');
+                    alert('Lock آن ہو گیا 🔒');
+                    window.location.href = '/#/lock';
+                  }
+
+                  setShowUserMenu(false);
+                }}
+                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+              >
+                🔒 Lock On / Off
+              </div>
 
               <div className="border-t"></div>
 
               <div
                 onClick={() => {
                   localStorage.removeItem('token');
+                  localStorage.setItem('isUnlocked', 'false');
                   navigate('/');
                 }}
                 className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 cursor-pointer"

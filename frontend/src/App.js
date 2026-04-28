@@ -43,6 +43,9 @@ import InviteUser from './pages/InviteUser';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import AdminDevices from './pages/AdminDevices';
+import LockScreen from './pages/LockScreen';
+import SetPinPage from './pages/SetPinPage';
+import ChangePinPage from './pages/ChangePinPage';
 
 /* 📋 Lists */
 import SalesInvoiceList from './components/SalesInvoiceList';
@@ -78,6 +81,14 @@ function NavigationTracker() {
 
 function App() {
   useEffect(() => {
+    const alreadyUnlocked = localStorage.getItem('isUnlocked');
+
+    if (!alreadyUnlocked) {
+      localStorage.setItem('isUnlocked', 'false');
+    }
+  }, []);
+
+  useEffect(() => {
     const lang = getCurrentLanguage();
 
     if (lang === 'ur') {
@@ -98,6 +109,9 @@ function App() {
         <Route path="/invite" element={<InviteUser />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/lock" element={<LockScreen onUnlock={() => window.location.reload()} />} />
+        <Route path="/set-pin" element={<SetPinPage />} />
+        <Route path="/change-pin" element={<ChangePinPage />} />
 
         <Route
           path="/admin/devices"

@@ -26,7 +26,12 @@ export default function LoginPage() {
         } else if (!user.businessName || !user.businessType || !user.currency) {
           navigate('/business-info');
         } else {
-          navigate('/dashboard');
+          if (!localStorage.getItem('appPin')) {
+            navigate('/set-pin');
+          } else {
+            localStorage.setItem('isUnlocked', 'true');
+            navigate('/dashboard');
+          }
         }
       } else {
         alert(res.msg || t('alerts.loginFailed'));

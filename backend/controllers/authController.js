@@ -139,7 +139,7 @@ if (installation.userId.toString() !== user._id.toString()) {
       const token = jwt.sign(
         { id: user._id, role: user.role },
         process.env.JWT_SECRET,
-        { expiresIn: "1d" },
+        { expiresIn: "30d" },
       );
 
       return res.json({
@@ -192,7 +192,7 @@ if (installation.userId.toString() !== user._id.toString()) {
     const token = jwt.sign(
       { id: localUser.userId, role: "user" },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" },
+      { expiresIn: "30d" },
     );
 
     return res.json({

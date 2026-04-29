@@ -333,18 +333,37 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
               <div
                 onClick={() => {
-                  const isEnabled = localStorage.getItem('lockEnabled');
+                  const userId = localStorage.getItem('userId');
+                  const isEnabled = localStorage.getItem(`lockEnabled_${userId}`);
 
                   if (isEnabled === 'true') {
-                    localStorage.setItem('lockEnabled', 'false');
-                    localStorage.setItem('isUnlocked', 'true');
+                    const userId = localStorage.getItem('userId');
+                    localStorage.setItem(`lockEnabled_${userId}`, 'false');
+                    localStorage.setItem(`isUnlocked_${userId}`, 'true');
                     alert('Lock بند ہو گیا 🔓');
                     window.location.href = '/#/dashboard';
                   } else {
-                    localStorage.setItem('lockEnabled', 'true');
-                    localStorage.setItem('isUnlocked', 'false');
+                    const userId = localStorage.getItem('userId');
+                    const pin = localStorage.getItem(`appPin_${userId}`);
+
+                    // 🔥 پہلے چیک کریں PIN موجود ہے یا نہیں
+                    if (!pin) {
+                      alert('پہلے PIN سیٹ کریں 🔑');
+                      window.location.href = '/#/set-pin';
+                      return;
+                    }
+
+                    console.log('CLICK LOCK ON');
+                    console.log('userId:', userId);
+
+                    localStorage.setItem(`lockEnabled_${userId}`, 'true');
+                    localStorage.setItem(`isUnlocked_${userId}`, 'false');
+
+                    console.log('AFTER SAVE:');
+                    console.log('lockEnabled:', localStorage.getItem(`lockEnabled_${userId}`));
+                    console.log('isUnlocked:', localStorage.getItem(`isUnlocked_${userId}`));
                     alert('Lock آن ہو گیا 🔒');
-                    window.location.href = '/#/lock';
+                    window.location.reload();
                   }
 
                   setShowUserMenu(false);
@@ -358,8 +377,12 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
               <div
                 onClick={() => {
+                  const userId = localStorage.getItem('userId');
+
+                  localStorage.setItem(`isUnlocked_${userId}`, 'false');
+
                   localStorage.removeItem('token');
-                  localStorage.setItem('isUnlocked', 'false');
+                  localStorage.removeItem('userId');
                   navigate('/');
                 }}
                 className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 cursor-pointer"

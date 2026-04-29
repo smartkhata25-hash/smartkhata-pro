@@ -2,11 +2,27 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as loginUser } from '../services/authService';
 import { t } from '../i18n/i18n';
-
+import { useEffect } from 'react';
 export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const userId = localStorage.getItem('userId');
+
+    const lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
+    const isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
+
+    if (token && userId) {
+      if (lockEnabled === 'true' && isUnlocked !== 'true') {
+        navigate('/lock');
+      } else {
+        navigate('/dashboard');
+      }
+    }
+  }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -18,20 +34,31 @@ export default function LoginPage() {
         localStorage.setItem('userId', res.user._id);
         localStorage.setItem('user', JSON.stringify(res.user));
         localStorage.setItem('mode', res.mode);
+
+        // ✅ 🔐 Lock system setup (FIXED)
+        const userId = res.user._id;
+
+        let lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
+
+        if (!lockEnabled) {
+          localStorage.setItem(`lockEnabled_${userId}`, 'false');
+          lockEnabled = 'false';
+        }
+
+        if (lockEnabled !== 'true') {
+          localStorage.setItem(`isUnlocked_${userId}`, 'true');
+        }
         alert(t('alerts.loginSuccess'));
 
         const user = res.user;
+
+        // ✅ navigation logic (same as before)
         if (!user.fullName || !user.cnic || !user.mobile || !user.address) {
           navigate('/personal-info');
         } else if (!user.businessName || !user.businessType || !user.currency) {
           navigate('/business-info');
         } else {
-          if (!localStorage.getItem('appPin')) {
-            navigate('/set-pin');
-          } else {
-            localStorage.setItem('isUnlocked', 'true');
-            navigate('/dashboard');
-          }
+          navigate('/dashboard');
         }
       } else {
         alert(res.msg || t('alerts.loginFailed'));

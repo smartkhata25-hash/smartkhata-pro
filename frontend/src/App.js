@@ -81,14 +81,6 @@ function NavigationTracker() {
 
 function App() {
   useEffect(() => {
-    const alreadyUnlocked = localStorage.getItem('isUnlocked');
-
-    if (!alreadyUnlocked) {
-      localStorage.setItem('isUnlocked', 'false');
-    }
-  }, []);
-
-  useEffect(() => {
     const lang = getCurrentLanguage();
 
     if (lang === 'ur') {
@@ -96,6 +88,24 @@ function App() {
     } else {
       document.body.classList.remove('urdu-mode');
     }
+  }, []);
+
+  // 🔒 AUTO LOCK ON APP CLOSE (WhatsApp style)
+  useEffect(() => {
+    const handleAppClose = () => {
+      const userId = localStorage.getItem('userId');
+
+      if (userId) {
+        localStorage.setItem(`isUnlocked_${userId}`, 'false');
+        console.log('App closed → Lock activated 🔒');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleAppClose);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleAppClose);
+    };
   }, []);
 
   return (

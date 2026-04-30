@@ -24,10 +24,22 @@ const SalesInvoiceList = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm(t('alerts.deleteInvoiceConfirm'))) {
+    if (!window.confirm('Delete invoice?')) return;
+
+    try {
       const token = localStorage.getItem('token');
-      await deleteInvoice(id, token);
-      fetchInvoices();
+
+      const res = await deleteInvoice(id, token);
+
+      if (!res || res.error) {
+        alert('Delete failed');
+        return;
+      }
+
+      setInvoices((prev) => prev.filter((inv) => inv._id !== id));
+    } catch (err) {
+      console.error(err);
+      alert('Error deleting invoice');
     }
   };
 

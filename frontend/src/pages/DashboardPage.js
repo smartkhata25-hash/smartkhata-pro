@@ -48,8 +48,18 @@ const DashboardPage = () => {
         const year = selectedYear;
 
         if (filterType === 'month') {
-          startDate = new Date(year, selectedMonth, 1).toISOString();
-          endDate = new Date(year, selectedMonth + 1, 0).toISOString();
+          // ✅ Local date range (NO timezone issue)
+          const start = new Date(year, selectedMonth, 1);
+          const end = new Date(year, selectedMonth + 1, 0);
+
+          // start of day
+          start.setHours(0, 0, 0, 0);
+
+          // end of day
+          end.setHours(23, 59, 59, 999);
+
+          startDate = start.toISOString();
+          endDate = end.toISOString();
         }
 
         if (filterType === 'year') {

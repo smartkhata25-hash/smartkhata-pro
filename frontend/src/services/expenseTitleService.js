@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API = '/api/expense-titles';
+const API = 'https://smartkhata-pro.onrender.com/api/expense-titles';
 
 // 🔐 Helper: get auth headers
 const getAuthHeaders = () => {

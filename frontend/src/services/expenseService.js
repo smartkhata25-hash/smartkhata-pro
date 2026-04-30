@@ -1,10 +1,9 @@
 import axios from 'axios';
 
-const API_URL = '/api/expense';
+const API_URL = 'https://smartkhata-pro.onrender.com/api/expense';
 
 const getConfig = () => ({
   headers: {
-    'Content-Type': 'multipart/form-data',
     Authorization: `Bearer ${localStorage.getItem('token')}`,
   },
 });
@@ -12,19 +11,18 @@ const getConfig = () => ({
 // ✅ Create New Expense
 export async function createExpense(formData) {
   const response = await axios.post(API_URL, formData, getConfig());
-  return response.data; // { success: true, expense: {...} }
+  return response.data;
 }
 
-// ✅ Get All Expenses (populated: category + creditEntries.account)
 export async function getAllExpenses() {
   const response = await axios.get(API_URL, getConfig());
-  return response.data; // [ { title, category: {name}, creditEntries: [{account: {name}}], ... } ]
+  return response.data;
 }
 
 // ✅ Get Single Expense by ID (for editing)
 export async function getExpenseById(id) {
   const response = await axios.get(`${API_URL}/${id}`, getConfig());
-  return response.data; // full object with populated fields
+  return response.data;
 }
 
 // ✅ Update Expense

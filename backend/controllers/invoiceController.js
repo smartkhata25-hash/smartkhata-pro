@@ -313,7 +313,10 @@ exports.getInvoices = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const invoices = await Invoice.find({ createdBy: userId })
+    const invoices = await Invoice.find({
+      createdBy: userId,
+      isDeleted: { $ne: true },
+    })
       .populate("items.productId", "name unit")
       .sort({ createdAt: -1 })
       .lean();

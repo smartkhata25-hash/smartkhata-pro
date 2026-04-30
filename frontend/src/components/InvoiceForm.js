@@ -297,9 +297,16 @@ const InvoiceForm = ({
         setShowCustomerAddOptions(false);
       } else {
         const filtered = filterCustomers(value);
+
         setCustomerSuggestions(filtered);
         setSelectedCustomerIndex(-1);
-        setShowCustomerAddOptions(true);
+
+        // ✅ FIX: Quick Add تب ہی show ہو جب واقعی کوئی match نہ ہو
+        if (filtered.length === 0) {
+          setShowCustomerAddOptions(true);
+        } else {
+          setShowCustomerAddOptions(false);
+        }
       }
     }, 300);
   };
@@ -791,7 +798,7 @@ const InvoiceForm = ({
                   </select>
 
                   {/* Account dropdown صرف تب */}
-                  {paidAmount > 0 && paymentType !== 'credit' && (
+                  {paidAmount > 0 && (
                     <select
                       value={selectedAccountId}
                       onChange={(e) => setSelectedAccountId(e.target.value)}

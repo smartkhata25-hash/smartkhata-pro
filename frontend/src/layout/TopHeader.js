@@ -259,14 +259,6 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
       {/* RIGHT SIDE */}
       <div className="flex items-center gap-4">
-        {/* Language */}
-        <button
-          onClick={() => changeLanguage(lang === 'en' ? 'ur' : 'en')}
-          className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-500 via-indigo-500 to-blue-600 text-white shadow-md hover:shadow-xl hover:scale-105 transition-all duration-200 border border-white/20 backdrop-blur-sm"
-        >
-          {lang === 'en' ? '🌐 اردو' : '🌐 EN'}
-        </button>
-
         {/* Install */}
         {deferredPrompt && isMobile && !isInstalled && (
           <button
@@ -337,33 +329,39 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
                   const isEnabled = localStorage.getItem(`lockEnabled_${userId}`);
 
                   if (isEnabled === 'true') {
-                    const userId = localStorage.getItem('userId');
+                    const confirmOff = window.confirm(
+                      'Are you sure you want to turn OFF the lock?'
+                    );
+
+                    if (!confirmOff) {
+                      setShowUserMenu(false);
+                      return;
+                    }
+
                     localStorage.setItem(`lockEnabled_${userId}`, 'false');
                     localStorage.setItem(`isUnlocked_${userId}`, 'true');
-                    alert('Lock بند ہو گیا 🔓');
+
                     window.location.href = '/#/dashboard';
                   } else {
-                    const userId = localStorage.getItem('userId');
+                    const confirmOn = window.confirm('Do you want to enable the lock?');
+
+                    if (!confirmOn) {
+                      setShowUserMenu(false);
+                      return;
+                    }
+
                     const pin = localStorage.getItem(`appPin_${userId}`);
 
-                    // 🔥 پہلے چیک کریں PIN موجود ہے یا نہیں
                     if (!pin) {
-                      alert('پہلے PIN سیٹ کریں 🔑');
+                      alert('Please set a PIN first.');
                       window.location.href = '/#/set-pin';
                       return;
                     }
 
-                    console.log('CLICK LOCK ON');
-                    console.log('userId:', userId);
-
                     localStorage.setItem(`lockEnabled_${userId}`, 'true');
                     localStorage.setItem(`isUnlocked_${userId}`, 'false');
 
-                    console.log('AFTER SAVE:');
-                    console.log('lockEnabled:', localStorage.getItem(`lockEnabled_${userId}`));
-                    console.log('isUnlocked:', localStorage.getItem(`isUnlocked_${userId}`));
-                    alert('Lock آن ہو گیا 🔒');
-                    window.location.reload();
+                    window.location.href = '/#/lock';
                   }
 
                   setShowUserMenu(false);
@@ -374,6 +372,13 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
               </div>
 
               <div className="border-t"></div>
+              {/* Language */}
+              <button
+                onClick={() => changeLanguage(lang === 'en' ? 'ur' : 'en')}
+                className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-500 via-indigo-500 to-blue-600 text-white shadow-md hover:shadow-xl hover:scale-105 transition-all duration-200 border border-white/20 backdrop-blur-sm"
+              >
+                {lang === 'en' ? '🌐 اردو' : '🌐 EN'}
+              </button>
 
               <div
                 onClick={() => {

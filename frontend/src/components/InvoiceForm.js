@@ -301,8 +301,7 @@ const InvoiceForm = ({
         setCustomerSuggestions(filtered);
         setSelectedCustomerIndex(-1);
 
-        // ✅ FIX: Quick Add تب ہی show ہو جب واقعی کوئی match نہ ہو
-        if (filtered.length === 0) {
+        if (customers.length > 0 && filtered.length === 0) {
           setShowCustomerAddOptions(true);
         } else {
           setShowCustomerAddOptions(false);
@@ -553,7 +552,7 @@ const InvoiceForm = ({
         setShowPreview(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       } else {
-        window.location.href = '/dashboard';
+        navigate('/dashboard');
       }
     } catch (err) {
       console.error('Save error:', err);

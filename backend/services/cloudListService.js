@@ -2,6 +2,7 @@ const {
   S3Client,
   ListObjectsV2Command,
   GetObjectCommand,
+  DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
 const fs = require("fs");
 const path = require("path");
@@ -46,6 +47,39 @@ async function getCloudBackupList() {
   }
 }
 
+async function deleteOldCloudBackups(limit = 5) {
+  try {
+    const command = new ListObjectsV2Command({
+      Bucket: process.env.R2_BUCKET,
+    });
+
+    const response = await s3.send(command);
+
+    const files =
+      response.Contents?.map((item) => ({
+        name: item.Key,
+        lastModified: item.LastModified,
+      })).sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified)) ||
+      [];
+
+    if (files.length <= limit) return;
+
+    const filesToDelete = files.slice(limit);
+
+    for (const file of filesToDelete) {
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: file.name,
+      });
+
+      await s3.send(deleteCommand);
+      console.log("🗑️ Deleted old cloud backup:", file.name);
+    }
+  } catch (error) {
+    console.error("❌ Cloud delete error:", error.message);
+  }
+}
+
 async function downloadBackupFromCloud(fileName) {
   try {
     const command = new GetObjectCommand({
@@ -77,4 +111,5 @@ async function downloadBackupFromCloud(fileName) {
 module.exports = {
   getCloudBackupList,
   downloadBackupFromCloud,
+  deleteOldCloudBackups,
 };

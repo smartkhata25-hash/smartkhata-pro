@@ -10,6 +10,7 @@ const AccountDetailPage = () => {
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [txnCache, setTxnCache] = useState({});
 
   const pathname = location.pathname;
   const isCashView = pathname === '/accounts/cash';
@@ -24,19 +25,41 @@ const AccountDetailPage = () => {
     return bal;
   };
 
-  const loadSingleAccount = useCallback(async (account) => {
-    const txns = await getAccountTransactions(account._id);
-    const safeTxns = Array.isArray(txns) ? txns : [];
+  const loadSingleAccount = useCallback(
+    async (account) => {
+      // ✅ CACHE CHECK
+      if (txnCache[account._id]) {
+        const cached = txnCache[account._id];
 
-    const balance = calculateBalanceFromTxns(safeTxns);
+        setTransactions(cached);
 
-    setTransactions(safeTxns);
+        setSelectedAccount({
+          ...account,
+          balance: calculateBalanceFromTxns(cached),
+        });
 
-    setSelectedAccount({
-      ...account,
-      balance,
-    });
-  }, []);
+        return;
+      }
+
+      // 🔄 API call (only first time)
+      const txns = await getAccountTransactions(account._id);
+      const safeTxns = Array.isArray(txns) ? txns : [];
+
+      // ✅ SAVE IN CACHE
+      setTxnCache((prev) => ({
+        ...prev,
+        [account._id]: safeTxns,
+      }));
+
+      setTransactions(safeTxns);
+
+      setSelectedAccount({
+        ...account,
+        balance: calculateBalanceFromTxns(safeTxns),
+      });
+    },
+    [txnCache]
+  );
 
   useEffect(() => {
     const loadData = async () => {
@@ -62,18 +85,40 @@ const AccountDetailPage = () => {
             (a) => a.category === 'bank' || a.category === 'online' || a.category === 'wallet'
           );
           // ✅ attach balance to each account
-          const accountsWithBalance = [];
 
-          for (const acc of bankAccounts) {
-            const txns = await getAccountTransactions(acc._id);
+          const txnResults = await Promise.all(
+            bankAccounts.map(async (acc) => {
+              // ✅ اگر cache میں ہے تو وہی use کرو
+              if (txnCache[acc._id]) {
+                return txnCache[acc._id];
+              }
 
-            const balance = calculateBalanceFromTxns(Array.isArray(txns) ? txns : []);
+              // 🔄 نہیں ہے تو API call
+              const txns = await getAccountTransactions(acc._id);
+              return Array.isArray(txns) ? txns : [];
+            })
+          );
 
-            accountsWithBalance.push({
-              ...acc,
-              balance,
+          // ✅ SAVE ALL IN CACHE (MERGE, overwrite نہیں)
+          setTxnCache((prev) => {
+            const updated = { ...prev };
+
+            bankAccounts.forEach((acc, i) => {
+              const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
+              updated[acc._id] = txns;
             });
-          }
+
+            return updated;
+          });
+
+          const accountsWithBalance = bankAccounts.map((acc, i) => {
+            const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
+
+            return {
+              ...acc,
+              balance: calculateBalanceFromTxns(txns),
+            };
+          });
 
           if (!bankAccounts.length) {
             alert(t('alerts.noBankAccounts'));
@@ -88,11 +133,7 @@ const AccountDetailPage = () => {
           };
 
           // ✅ Combined transactions
-          let allTxns = [];
-          for (const acc of bankAccounts) {
-            const txns = await getAccountTransactions(acc._id);
-            if (Array.isArray(txns)) allTxns.push(...txns);
-          }
+          let allTxns = txnResults.flat().filter(Boolean);
 
           allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -114,6 +155,7 @@ const AccountDetailPage = () => {
     };
 
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, isCashView, isBankView, loadSingleAccount]);
 
   const handleAccountChange = async (e) => {
@@ -125,8 +167,8 @@ const AccountDetailPage = () => {
       const real = accounts.filter((a) => !a.isCombined);
 
       for (const r of real) {
-        const txns = await getAccountTransactions(r._id);
-        if (Array.isArray(txns)) allTxns.push(...txns);
+        const cached = txnCache[r._id] || [];
+        allTxns.push(...cached);
       }
 
       allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));

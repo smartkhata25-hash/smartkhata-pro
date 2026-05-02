@@ -15,9 +15,9 @@ export default function AdminDevices() {
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user'));
     if (user?.role !== 'admin') {
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     }
-  }, []);
+  }, [navigate]);
 
   // 📥 load users
   const fetchUsers = async () => {
@@ -163,6 +163,19 @@ export default function AdminDevices() {
       {/* HEADER */}
       <div style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => navigate('/dashboard')}
+            style={{
+              background: '#fff',
+              border: 'none',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            ⬅️
+          </button>
           <h2 style={styles.title}>🔐 Admin Device Control</h2>
 
           <button style={styles.inviteBtn} onClick={() => navigate('/admin/invite')}>

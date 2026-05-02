@@ -13,12 +13,14 @@ import InvoiceTable from './InvoiceTable';
 import SupplierForm from './SupplierForm';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
+import { useNavigate } from 'react-router-dom';
 const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
   const printRef = useRef();
   const fileInputRef = useRef();
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [isEdit, setIsEdit] = useState(false);
   const [invoiceId, setInvoiceId] = useState(null);
@@ -349,7 +351,7 @@ const PurchaseInvoiceForm = () => {
     try {
       await savePurchaseInvoice();
 
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error saving invoice:', err);
     }
@@ -434,7 +436,7 @@ const PurchaseInvoiceForm = () => {
     try {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
       alert(t('alerts.invoiceUpdated'));
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error updating invoice:', err?.response?.data || err.message);
       alert(t('alerts.invoiceUpdateFailed'));
@@ -585,7 +587,7 @@ const PurchaseInvoiceForm = () => {
         alert(t('alerts.invoiceSaved'));
       }
 
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error saving invoice:', err?.response?.data || err.message);
       alert(t('alerts.invoiceSaveFailed'));

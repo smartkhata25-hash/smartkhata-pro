@@ -57,6 +57,10 @@ export default function SalesPage() {
     [token]
   );
 
+  const refreshHistory = async () => {
+    await fetchSalesHistory(selectedCustomerId, selectedProductId);
+  };
+
   // 🔁 Trigger fetch when customer or product changes
   useEffect(() => {
     fetchSalesHistory(selectedCustomerId, selectedProductId);
@@ -131,6 +135,7 @@ export default function SalesPage() {
             invoiceId={invoiceId}
             onCustomerChange={setSelectedCustomerId}
             onProductChange={setSelectedProductId}
+            onSuccess={refreshHistory}
             salesHistory={salesHistory}
             loadingHistory={loadingHistory}
           />

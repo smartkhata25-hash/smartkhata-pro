@@ -37,8 +37,8 @@ const getCustomerLedger = async (req, res) => {
     // ✅ Step 3: Build filter
     const matchFilter = {
       createdBy: userId,
-      accounts: objectId,
       isDeleted: false,
+      "lines.account": objectId,
     };
 
     if (startDate && endDate) {
@@ -65,7 +65,7 @@ const getCustomerLedger = async (req, res) => {
           $match: {
             createdBy: userId,
             isDeleted: false,
-            accounts: objectId,
+            "lines.account": objectId,
             date: { $lt: new Date(startDate) },
           },
         },

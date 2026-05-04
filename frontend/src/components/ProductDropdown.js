@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
-const ProductDropdown = ({ productList, value = '', onSelect }) => {
+const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
   const [query, setQuery] = useState(value);
 
   // 🔁 Sync value from parent (Edit / Refund case)
@@ -106,6 +106,9 @@ const ProductDropdown = ({ productList, value = '', onSelect }) => {
   const handleAddNewProduct = () => {
     const name = encodeURIComponent(query);
     const returnTo = encodeURIComponent(location.pathname);
+
+    localStorage.setItem('lastCreatedProductQuery', query);
+    localStorage.setItem('lastCreatedProductRow', rowIndex);
 
     navigate(`/inventory?new=true&name=${name}&return=${returnTo}`);
   };

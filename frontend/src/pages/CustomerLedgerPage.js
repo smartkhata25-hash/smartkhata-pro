@@ -194,8 +194,7 @@ export default function CustomerLedgerPage() {
     if (!entry || entry.isOpening) return;
 
     if (entry.sourceType === 'sale_invoice' && entry.invoiceId) {
-      const confirm = window.confirm(t('alerts.invoiceLinkedEditConfirm'));
-      if (confirm) navigate(`/edit-invoice/${entry.invoiceId}`);
+      navigate(`/sales?invoiceId=${entry.invoiceId}`);
     }
   };
 

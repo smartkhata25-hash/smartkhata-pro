@@ -10,6 +10,7 @@ const InvoiceTable = ({
   clearOnFocus,
   onProductChange,
   historyAutoMode,
+  hideCost,
   mode = 'sale',
 }) => {
   const qtyRefs = useRef([]);
@@ -41,7 +42,7 @@ const InvoiceTable = ({
               <th className="border px-2 py-1 md:p-1">#</th>
               <th className="border px-2 py-1 md:p-1 w-[35%]">{t('item')}</th>
               <th className="border px-2 py-1 md:p-1 hidden md:table-cell">{t('description')}</th>
-              <th className="border px-2 py-1 md:p-1">{t('cost')}</th>
+              {!hideCost && <th className="border px-2 py-1 md:p-1">{t('cost')}</th>}
               <th className="border px-2 py-1 md:p-1">{t('qty')}</th>
               <th className="border px-2 py-1 md:p-1">{t('rate')}</th>
               <th className="border px-2 py-1 md:p-1">
@@ -63,6 +64,7 @@ const InvoiceTable = ({
                     inputRef={(el) => (itemRefs.current[index] = el)}
                     productList={products}
                     value={item.search}
+                    rowIndex={index}
                     onSelect={(product) => {
                       const updated = [...items];
                       const qty = Number(updated[index].quantity) || 1;
@@ -112,21 +114,23 @@ const InvoiceTable = ({
                 </td>
 
                 {/* Cost */}
-                <td className="border px-2 py-1 md:p-1 text-center">
-                  {mode === 'purchase' ? (
-                    <input
-                      type="number"
-                      value={item.cost || ''}
-                      onChange={(e) => handleQtyRateChange(index, 'cost', e.target.value)}
-                      onFocus={clearOnFocus}
-                      className="w-full border-0 p-0 text-center h-6"
-                    />
-                  ) : item.cost ? (
-                    item.cost.toFixed(2)
-                  ) : (
-                    '0.00'
-                  )}
-                </td>
+                {!hideCost && (
+                  <td className="border px-2 py-1 md:p-1 text-center">
+                    {mode === 'purchase' ? (
+                      <input
+                        type="number"
+                        value={item.cost || ''}
+                        onChange={(e) => handleQtyRateChange(index, 'cost', e.target.value)}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6"
+                      />
+                    ) : item.cost ? (
+                      item.cost.toFixed(2)
+                    ) : (
+                      '0.00'
+                    )}
+                  </td>
+                )}
 
                 {/* Qty */}
                 <td className="border p-0">

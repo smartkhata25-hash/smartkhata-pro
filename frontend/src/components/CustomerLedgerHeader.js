@@ -3,6 +3,7 @@ import { t } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const CustomerLedgerHeader = ({
   customers,
@@ -143,7 +144,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                 }).toString();
-                window.open(`/api/print/customer-ledger/${cid}/pdf?${query}`, '_blank');
+                window.open(`${API}/api/print/customer-ledger/${cid}/pdf?${query}`, '_blank');
               }}
             >
               PDF
@@ -541,7 +542,7 @@ const CustomerLedgerHeader = ({
             endDate: end || '',
           }).toString();
 
-          const pdfUrl = `/api/print/customer-ledger/${cid}/pdf?${query}`;
+          const pdfUrl = `${API}/api/print/customer-ledger/${cid}/pdf?${query}`;
 
           const token = localStorage.getItem('token');
 

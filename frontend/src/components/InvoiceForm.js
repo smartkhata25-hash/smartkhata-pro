@@ -18,6 +18,7 @@ import { useLocation } from 'react-router-dom';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { useNavigate } from 'react-router-dom';
 import CustomerForm from './CustomerForm';
+import useFormPersist from '../hooks/useFormPersist';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const InvoiceForm = ({
@@ -31,6 +32,7 @@ const InvoiceForm = ({
   loadingHistory = false,
 }) => {
   const printRef = useRef();
+  const customerInputRef = useRef(null);
   const fileInputRef = useRef();
   const location = useLocation(); // ✅ location setup
 
@@ -43,6 +45,7 @@ const InvoiceForm = ({
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [by, setBy] = useState('');
+  const [hideCost, setHideCost] = useState(false);
 
   const [attachment, setAttachment] = useState(null);
 
@@ -137,13 +140,183 @@ const InvoiceForm = ({
 
   const [items, setItems] = useState(Array.from({ length: 20 }, () => blankRow()));
 
+  useEffect(() => {
+    const handler = (e) => {
+      const newProduct = e.detail;
+      const rowIndex = Number(localStorage.getItem('lastCreatedProductRow'));
+
+      if (!newProduct || rowIndex < 0) return;
+
+      const applyUpdate = () => {
+        setItems((prevItems) => {
+          const updated = [...prevItems];
+
+          const price = newProduct.salePrice || 0;
+
+          updated[rowIndex] = {
+            ...updated[rowIndex],
+            search: newProduct.name,
+            name: newProduct.name,
+            productId: newProduct._id,
+            rate: price,
+            quantity: 1,
+            amount: price,
+          };
+
+          return updated;
+        });
+
+        // ✅ focus Qty after UI render
+        setTimeout(() => {
+          const rows = document.querySelectorAll('tbody tr');
+          const currentRow = rows[rowIndex];
+
+          if (!currentRow) return;
+
+          const qtyInput = currentRow.querySelector('input[type="number"]');
+
+          if (qtyInput) {
+            qtyInput.focus();
+            qtyInput.select();
+          }
+        }, 100);
+      };
+
+      setTimeout(() => {
+        applyUpdate();
+      }, 150);
+    };
+
+    window.addEventListener('product-created', handler);
+
+    return () => {
+      window.removeEventListener('product-created', handler);
+    };
+  }, []);
+
   const [discountPercent, setDiscountPercent] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [paidAmount, setPaidAmount] = useState(0);
 
   const [paymentType, setPaymentType] = useState('credit');
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [formState, setFormState] = useState({
+    customerName,
+    customerPhone,
+    items,
+    discountPercent,
+    discountAmount,
+    paidAmount,
+    paymentType,
+    selectedAccountId,
+  });
   const [accounts, setAccounts] = useState([]);
+  const persistKey = 'sales_invoice';
+  const handleClear = () => {
+    console.log('🧹 CLEAR START');
+
+    localStorage.removeItem('app_state_sales_invoice');
+
+    isHydrated.current = false;
+
+    const defaultItems = Array.from({ length: 20 }, () => blankRow());
+
+    setFormState({
+      customerName: '',
+      customerPhone: '',
+      items: defaultItems,
+      discountPercent: 0,
+      discountAmount: 0,
+      paidAmount: 0,
+      paymentType: 'cash',
+      selectedAccountId: '',
+    });
+
+    setCustomerName('');
+    setCustomerPhone('');
+    setItems(defaultItems);
+    setDiscountPercent(0);
+    setDiscountAmount(0);
+    setPaidAmount(0);
+    setPaymentType('cash');
+    setSelectedAccountId('');
+
+    setTimeout(() => {
+      customerInputRef.current?.focus();
+    }, 0);
+
+    setTimeout(() => {
+      isHydrated.current = true;
+    }, 100);
+
+    console.log('✅ CLEAR DONE');
+  };
+  const isHydrated = useRef(false);
+
+  useEffect(() => {
+    if (!isHydrated.current) return;
+
+    const newState = {
+      customerName,
+      customerPhone,
+      items,
+      discountPercent,
+      discountAmount,
+      paidAmount,
+      paymentType,
+      selectedAccountId,
+    };
+
+    setFormState((prev) => {
+      if (JSON.stringify(prev) === JSON.stringify(newState)) {
+        return prev;
+      }
+      return newState;
+    });
+  }, [
+    customerName,
+    customerPhone,
+    items,
+    discountPercent,
+    discountAmount,
+    paidAmount,
+    paymentType,
+    selectedAccountId,
+  ]);
+
+  useFormPersist(persistKey, formState, setFormState);
+
+  useEffect(() => {
+    if (!formState || isHydrated.current) return;
+
+    if (formState.customerName !== undefined) setCustomerName(formState.customerName);
+    if (formState.customerPhone !== undefined) setCustomerPhone(formState.customerPhone);
+    if (formState.items !== undefined) setItems(formState.items);
+    if (formState.discountPercent !== undefined) setDiscountPercent(formState.discountPercent);
+    if (formState.discountAmount !== undefined) setDiscountAmount(formState.discountAmount);
+    if (formState.paidAmount !== undefined) setPaidAmount(formState.paidAmount);
+    if (formState.paymentType !== undefined) setPaymentType(formState.paymentType);
+    if (formState.selectedAccountId !== undefined)
+      setSelectedAccountId(formState.selectedAccountId);
+
+    isHydrated.current = true;
+  }, [formState]);
+  useEffect(() => {
+    if (paidAmount > 0 && paymentType === 'credit') {
+      setPaymentType('cash');
+    }
+
+    if (paidAmount === 0) {
+      setPaymentType('credit');
+      setSelectedAccountId('');
+    }
+  }, [paidAmount, paymentType]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      customerInputRef.current?.focus();
+    }, 0);
+  }, []);
 
   useEffect(() => {
     const handler = () => {
@@ -270,12 +443,26 @@ const InvoiceForm = ({
     })
       .then((res) => res.json())
       .then(setCustomers);
-    fetchProductsWithToken(token).then(setProducts);
+    fetchProductsWithToken(token).then((data) => {
+      setProducts(data);
+    });
 
     getAccounts(token).then((all) => {
+      console.log('🔥 ACCOUNTS FROM API:', all);
       setAccounts(all);
     });
-  }, [token]);
+  }, [token, onProductChange]);
+
+  // 🔥 FIX: restore customerId after reload
+  useEffect(() => {
+    if (!customerName || customers.length === 0) return;
+
+    const matchedCustomer = customers.find((c) => c.name === customerName);
+
+    if (matchedCustomer) {
+      onCustomerChange && onCustomerChange(matchedCustomer._id);
+    }
+  }, [customerName, customers, onCustomerChange]);
 
   const filterCustomers = (value) => {
     const query = value.toLowerCase();
@@ -342,7 +529,6 @@ const InvoiceForm = ({
     setShowCustomerAddOptions(false);
   };
 
-  // ⚡ Quick Add Customer (sirf name se)
   const quickAddCustomer = async (name) => {
     try {
       const res = await fetch(`${API}/api/customers`, {
@@ -530,7 +716,10 @@ const InvoiceForm = ({
         }
       }
 
-      if (onSuccess) onSuccess();
+      if (onSuccess) {
+        await onSuccess();
+      }
+      localStorage.removeItem('app_state_sales_invoice');
 
       if (mode === 'new' && !editingInvoice) {
         const now = new Date();
@@ -543,6 +732,9 @@ const InvoiceForm = ({
         setItems(Array.from({ length: 20 }, () => blankRow()));
 
         setCustomerName('');
+        setTimeout(() => {
+          customerInputRef.current?.focus();
+        }, 0);
         setCustomerPhone('');
         setBy('');
         setDiscountPercent(0);
@@ -574,13 +766,24 @@ const InvoiceForm = ({
             <h2 className="text-2xl font-bold">{t('saleInvoice')}</h2>
 
             <div className="flex flex-wrap items-center gap-1 md:gap-2">
-              <input
-                type="text"
-                placeholder={t('invoice.by')}
-                value={by}
-                onChange={(e) => setBy(e.target.value)}
-                className="border px-2 py-1 h-8 text-sm w-40"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder={t('invoice.by')}
+                  value={by}
+                  onChange={(e) => setBy(e.target.value)}
+                  className="border px-2 py-1 h-8 text-sm w-40"
+                />
+
+                <label className="flex items-center gap-1 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={hideCost}
+                    onChange={(e) => setHideCost(e.target.checked)}
+                  />
+                  Hide Cost
+                </label>
+              </div>
 
               {/* ⚙️ Settings Icon */}
               <button
@@ -627,6 +830,7 @@ const InvoiceForm = ({
           <div className="grid grid-cols-12 md:grid-cols-12 gap-2 items-start">
             <div className="col-span-4 relative">
               <input
+                ref={customerInputRef}
                 type="text"
                 placeholder={t('customerName')}
                 value={customerName}
@@ -739,6 +943,7 @@ const InvoiceForm = ({
               clearOnFocus={clearOnFocus}
               onProductChange={onProductChange}
               historyAutoMode={historyAutoMode}
+              hideCost={hideCost}
             />
           </div>
 
@@ -807,27 +1012,10 @@ const InvoiceForm = ({
 
                       {accounts
                         .filter((acc) => {
-                          const type = acc.type?.toLowerCase();
-                          const category = acc.category?.toLowerCase();
-                          const name = acc.name?.toLowerCase();
-
-                          // ❌ customer / supplier accounts exclude
-                          if (name?.startsWith('customer:')) return false;
-
-                          // ❌ non-asset accounts exclude
-                          if (type !== 'asset') return false;
-
-                          // ✅ CASH → only cash
-                          if (paymentType === 'cash') {
-                            return category === 'cash';
-                          }
-
-                          // ✅ ONLINE / CHEQUE → bank, online, cheque
-                          if (paymentType === 'online' || paymentType === 'cheque') {
-                            return ['bank', 'online', 'cheque', 'cash'].includes(category);
-                          }
-
-                          return false;
+                          return (
+                            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
+                            !acc.name?.toLowerCase().startsWith('customer:')
+                          );
                         })
                         .map((acc) => (
                           <option key={acc._id} value={acc._id}>
@@ -904,14 +1092,7 @@ const InvoiceForm = ({
 
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (editingInvoiceFromAPI?._id) {
-                        const data = await getInvoiceById(editingInvoiceFromAPI._id, token);
-                        setEditingInvoiceFromAPI(data);
-                      } else {
-                        window.location.reload();
-                      }
-                    }}
+                    onClick={handleClear}
                     className="bg-gray-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm"
                   >
                     {editingInvoiceFromAPI ? t('common.revert') : t('clear')}

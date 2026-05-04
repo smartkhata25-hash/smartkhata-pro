@@ -82,10 +82,15 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         onUpdate?.(updated);
         clearEdit?.();
       } else {
-        await createProduct(form);
+        const created = await createProduct(form);
 
-        // ✅ product list reload کرو
-        onAdd?.(!saveNew);
+        localStorage.setItem('lastCreatedProductId', created._id);
+
+        onAdd?.(created);
+
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('product-created', { detail: created }));
+        }, 100);
 
         if (returnTo) {
           navigate(returnTo);

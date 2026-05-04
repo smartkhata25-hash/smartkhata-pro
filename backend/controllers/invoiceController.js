@@ -388,10 +388,10 @@ exports.deleteInvoice = async (req, res) => {
   });
 
   // 🟡 Soft Delete Related Journal
-  await JournalEntry.updateMany(
-    { referenceId: invoice._id, sourceType: "sale_invoice" },
-    { isDeleted: true },
-  );
+  await JournalEntry.deleteMany({
+    referenceId: invoice._id,
+    sourceType: "sale_invoice",
+  });
 
   if (invoice.accountId) {
     await recalculateAccountBalance(invoice.accountId);
@@ -473,8 +473,6 @@ exports.updateInvoice = async (req, res) => {
       invoice.attachmentType = req.file.mimetype?.split("/")[0] || "";
     }
 
-    await invoice.save();
-
     for (let item of items) {
       await createInventoryEntry({
         productId: item.productId,
@@ -539,7 +537,18 @@ exports.updateInvoice = async (req, res) => {
       });
     }
 
-    const customer = await Customer.findById(invoice.customerId);
+    const customer = await Customer.findOne({
+      name: customerName,
+      createdBy: userId,
+    });
+
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    // ✅ update customerId
+    invoice.customerId = customer._id;
+    await invoice.save();
     const incomeAccount = await Account.findOne({
       name: "sales",
       type: "Income",
@@ -572,7 +581,10 @@ exports.updateInvoice = async (req, res) => {
         sourceType: "sale_invoice",
         referenceId: invoice._id,
         invoiceId: invoice._id,
+        billNo: invoice.billNo,
         createdBy: userId,
+
+        customerId: customer._id,
 
         lines: [
           // 👤 Customer debit (sale total)
@@ -625,7 +637,6 @@ exports.updateInvoice = async (req, res) => {
       }
 
       invoice.journalEntryId = journal._id;
-      await invoice.save();
 
       await recalculateAccountBalance(finalInventoryAccount._id);
       await recalculateAccountBalance(finalCogsAccount._id);

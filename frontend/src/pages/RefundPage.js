@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import RefundInvoiceForm from '../components/RefundInvoiceForm';
 import { t } from '../i18n/i18n';
+const API = process.env.REACT_APP_API_BASE_URL;
 
 export default function RefundPage() {
   const token = localStorage.getItem('token');
-  const { id } = useParams(); // اگر URL میں :id موجود ہو تو وہ یہاں آ جائے گا
+  const { id } = useParams();
 
   // 🔹 Selected IDs
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
@@ -27,7 +28,7 @@ export default function RefundPage() {
         setLoadingHistory(true);
 
         const res = await fetch(
-          `/api/sales-history?customerId=${customerId}&productId=${productId}`,
+          `${API}/api/sales-history?customerId=${customerId}&productId=${productId}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,

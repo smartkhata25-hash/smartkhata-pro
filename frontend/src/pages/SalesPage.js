@@ -30,7 +30,7 @@ export default function SalesPage() {
 
       try {
         setLoadingHistory(true);
-
+        console.log('🧠 Sending IDs:', customerId, productId);
         const res = await fetch(
           `${API}/api/sales-history?customerId=${customerId}&productId=${productId}`,
           {
@@ -41,6 +41,7 @@ export default function SalesPage() {
         );
 
         const data = await res.json();
+        console.log('📥 API RESPONSE:', data);
 
         if (res.ok) {
           setSalesHistory(data || []);

@@ -66,6 +66,7 @@ const InvoiceTable = ({
                     value={item.search}
                     rowIndex={index}
                     onSelect={(product) => {
+                      console.log('📦 Product SELECTED:', product._id, product.name);
                       const updated = [...items];
                       const qty = Number(updated[index].quantity) || 1;
 
@@ -86,6 +87,7 @@ const InvoiceTable = ({
                       };
 
                       onProductChange && onProductChange(product._id);
+                      console.log('📦 Product ID SENT TO PARENT:', product._id);
 
                       if (index === items.length - 1) {
                         updated.push(blankRow());

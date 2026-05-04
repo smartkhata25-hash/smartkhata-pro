@@ -458,7 +458,7 @@ const InvoiceForm = ({
     if (!customerName || customers.length === 0) return;
 
     const matchedCustomer = customers.find((c) => c.name === customerName);
-
+    console.log('🔁 Auto matched customer:', matchedCustomer?._id, customerName);
     if (matchedCustomer) {
       onCustomerChange && onCustomerChange(matchedCustomer._id);
     }
@@ -519,6 +519,8 @@ const InvoiceForm = ({
   };
 
   const handleCustomerSelect = (name, phone, id) => {
+    console.log('👤 Customer SELECTED:', id, name);
+    console.log('👤 Selected Customer:', id, name);
     setCustomerName(name);
     setCustomerPhone(phone);
 

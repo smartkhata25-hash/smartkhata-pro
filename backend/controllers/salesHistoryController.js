@@ -6,12 +6,14 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { customerId, productId } = req.query;
 
+    console.log("🔵 API HIT customerId:", customerId, "productId:", productId);
+
     if (!customerId || !productId) {
       return res.status(400).json({
         message: "customerId and productId are required",
       });
     }
-
+    console.log("🟣 Running aggregation for:", customerId, productId);
     const history = await Invoice.aggregate([
       {
         $match: {
@@ -44,7 +46,7 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
         },
       },
     ]);
-
+    console.log("📊 HISTORY RESULT:", history);
     res.json(history);
   } catch (error) {
     console.error("Sales history error:", error);

@@ -94,6 +94,8 @@ exports.createInvoice = async (req, res) => {
       createdBy: userId,
     });
 
+    console.log("🟡 Customer FOUND:", customer?._id, customer?.name);
+
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
     }
@@ -112,9 +114,10 @@ exports.createInvoice = async (req, res) => {
       }
     }
     invoice.customerId = customer._id;
+    console.log("🟢 Saving customerId in invoice:", customer._id);
 
     const saved = await invoice.save();
-
+    console.log("✅ SAVED invoice customerId:", saved.customerId);
     // ✅ Stock Updates...
     for (let item of items) {
       await createInventoryEntry({

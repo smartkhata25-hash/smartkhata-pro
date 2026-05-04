@@ -96,6 +96,7 @@ const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
   };
 
   const selectProduct = (product) => {
+    console.log('🧾 Dropdown SELECT:', product._id, product.name);
     setQuery(product.name);
     onSelect(product);
     setShowList(false);

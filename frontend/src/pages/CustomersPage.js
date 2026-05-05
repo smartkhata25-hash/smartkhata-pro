@@ -19,6 +19,7 @@ import { t } from '../i18n/i18n';
 import { sendWhatsAppReminder } from '../utils/whatsapp';
 import { FaWhatsapp } from 'react-icons/fa';
 import { FaEdit, FaTrash } from 'react-icons/fa';
+import { deleteJournalEntry } from '../services/customerLedgerService';
 
 import { getCurrentLanguage } from '../i18n/i18n';
 
@@ -697,6 +698,29 @@ const CustomersPage = () => {
                   ledgerData={ledgerData.ledger || []}
                   search={ledgerSearch}
                   openingBalance={ledgerData.openingBalance || 0}
+                  onDelete={async (id) => {
+                    if (!window.confirm('Delete karna hai?')) return;
+
+                    try {
+                      await deleteJournalEntry(id);
+                      loadCustomerLedger(selectedCustomerId);
+                    } catch (err) {
+                      alert(err?.response?.data?.message || 'Delete failed');
+                    }
+                  }}
+                  onEdit={(entry) => {
+                    const type = entry.sourceType?.toLowerCase();
+
+                    if ((type === 'sale_invoice' || type === 'invoice') && entry.invoiceId) {
+                      navigate(`/sales?invoiceId=${entry.invoiceId}`);
+                    } else if (type === 'receive_payment' && entry.referenceId) {
+                      navigate(`/receive-payments/edit/${entry.referenceId}`);
+                    } else if (type === 'refund_invoice' && entry.referenceId) {
+                      navigate(`/refunds/edit/${entry.referenceId}`);
+                    } else {
+                      alert('Yeh entry edit nahi ho sakti');
+                    }
+                  }}
                 />
               </div>
             </>

@@ -148,6 +148,9 @@ code {
 .table tr:hover {
   background: #f8fafc;
 }
+.active-row {
+  background-color: #bfdbfe !important;
+}
 
 /* 💰 Amount Highlights – SCREEN ONLY */
 

@@ -6,8 +6,7 @@ const SupplierLedgerHeader = ({
   suppliers,
   sid,
   setSid,
-  pageSize,
-  setPageSize,
+
   print,
   name,
   token,
@@ -18,7 +17,7 @@ const SupplierLedgerHeader = ({
   setEnd,
   load,
   setSearch,
-  setPage,
+
   navigate,
   opening,
   dateilteredLedger,
@@ -113,7 +112,7 @@ const SupplierLedgerHeader = ({
                         setSupplierName(s.name);
                         setSid(s._id);
                         setShowSuggestions(false);
-                        setPage(1);
+
                         load(s._id);
                       }}
                       style={{
@@ -226,7 +225,6 @@ const SupplierLedgerHeader = ({
               placeholder="Search..."
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1);
               }}
               style={{
                 height: 32,
@@ -297,10 +295,10 @@ const SupplierLedgerHeader = ({
               }}
               onClick={() => {
                 setSearch('');
-                setStart('');
-                setEnd('');
-                setPage(1);
-                load(sid, '', '');
+                const currentYear = new Date().getFullYear();
+                setStart(`${currentYear}-01-01`);
+                setEnd(`${currentYear}-12-31`);
+                load(sid, `${currentYear}-01-01`, `${currentYear}-12-31`);
               }}
             >
               ✖
@@ -319,28 +317,6 @@ const SupplierLedgerHeader = ({
               flex: 1,
             }}
           >
-            {/* Page size */}
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              style={{
-                height: 36,
-                borderRadius: 8,
-                border: '1px solid #93c5fd',
-                padding: '0 10px',
-                background: '#ffffff',
-                fontWeight: 600,
-                fontSize: 14,
-              }}
-            >
-              <option value={10}>10 {t('perPage')}</option>
-              <option value={25}>25 {t('perPage')}</option>
-              <option value={50}>50 {t('perPage')}</option>
-            </select>
-
             <button className="btn btn-primary" style={{ height: 36 }} onClick={print}>
               {t('print')}
             </button>
@@ -365,7 +341,6 @@ const SupplierLedgerHeader = ({
               placeholder={t('ledger.searchLedger')}
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1);
               }}
               style={{
                 height: 36,
@@ -434,11 +409,11 @@ const SupplierLedgerHeader = ({
                 fontWeight: 600,
               }}
               onClick={() => {
+                const currentYear = new Date().getFullYear();
                 setSearch('');
-                setStart('');
-                setEnd('');
-                setPage(1);
-                load(sid, '', '');
+                setStart(`${currentYear}-01-01`);
+                setEnd(`${currentYear}-12-31`);
+                load(sid, `${currentYear}-01-01`, `${currentYear}-12-31`);
               }}
             >
               {t('common.clear')}

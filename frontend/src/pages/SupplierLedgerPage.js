@@ -26,11 +26,11 @@ export default function SupplierLedgerPage() {
   const [search, setSearch] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [pageSize, setPageSize] = useState(10);
-  const [page, setPage] = useState(1);
 
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const currentYear = new Date().getFullYear();
+
+  const [start, setStart] = useState(`${currentYear}-01-01`);
+  const [end, setEnd] = useState(`${currentYear}-12-31`);
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -55,15 +55,6 @@ export default function SupplierLedgerPage() {
     if (en && d > en) return false;
     return true;
   });
-
-  /* ===============================
-     PAGINATION
-  =============================== */
-  const totalPages = Math.ceil(dateFilteredLedger.length / pageSize);
-  const paginatedLedger = dateFilteredLedger.slice((page - 1) * pageSize, page * pageSize);
-
-  const startRow = dateFilteredLedger.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const endRow = Math.min(page * pageSize, dateFilteredLedger.length);
 
   /* ===============================
      TOTALS
@@ -133,7 +124,7 @@ export default function SupplierLedgerPage() {
           balance: openingBalance,
         };
 
-        const ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
+        const ledgerRows = Array.isArray(data.ledger) ? [...data.ledger].reverse() : [];
 
         setLedger([openingRow, ...ledgerRows]);
         setOpening(openingBalance);
@@ -350,7 +341,7 @@ export default function SupplierLedgerPage() {
                           setSupplierName(s.name);
                           setSid(s._id);
                           setShowSuggestions(false);
-                          setPage(1);
+
                           load(s._id);
                         }}
                         style={{
@@ -366,25 +357,6 @@ export default function SupplierLedgerPage() {
               )}
             </div>
 
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              style={{
-                height: 36,
-                borderRadius: 8,
-                border: '1px solid #93c5fd',
-                padding: '0 10px',
-                background: '#ffffff',
-                fontWeight: 600,
-              }}
-            >
-              <option value={10}>{t('pagination.page10')}</option>
-              <option value={25}>{t('pagination.page25')}</option>
-              <option value={50}>{t('pagination.page50')}</option>
-            </select>
             <select
               value={printSize}
               onChange={(e) => setPrintSize(e.target.value)}
@@ -500,7 +472,6 @@ export default function SupplierLedgerPage() {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1);
               }}
               style={{
                 height: window.innerWidth < 768 ? 32 : 36,
@@ -570,10 +541,9 @@ export default function SupplierLedgerPage() {
               }}
               onClick={() => {
                 setSearch('');
-                setStart('');
-                setEnd('');
-                setPage(1);
-                load(sid, '', '');
+                setStart(`${currentYear}-01-01`);
+                setEnd(`${currentYear}-12-31`);
+                load(sid, `${currentYear}-01-01`, `${currentYear}-12-31`);
               }}
             >
               {t('clear')}
@@ -592,48 +562,13 @@ export default function SupplierLedgerPage() {
         }}
       >
         <LedgerTable
-          ledgerData={paginatedLedger}
+          ledgerData={dateFilteredLedger}
           search={search}
           openingBalance={opening}
           onRowClick={handleRowClick}
           onEdit={handleRowClick}
         />
       </div>
-
-      {totalPages > 1 && (
-        <div
-          style={{
-            padding: '6px 0',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: 12,
-            fontSize: 12,
-          }}
-        >
-          <span>
-            {t('pagination.showing')} {startRow}–{endRow} {t('pagination.of')}{' '}
-            {dateFilteredLedger.length}
-          </span>
-          <button
-            className="pagination-btn"
-            disabled={page === 1}
-            onClick={() => setPage(page - 1)}
-          >
-            ⬅ {t('pagination.prev')}
-          </button>
-          <span>
-            {t('pagination.page')} <strong>{page}</strong> of {totalPages}
-          </span>
-          <button
-            className="pagination-btn"
-            disabled={page === totalPages}
-            onClick={() => setPage(page + 1)}
-          >
-            {t('pagination.next')} ➡
-          </button>
-        </div>
-      )}
 
       {!loading && sid && ledger.length === 0 && <p>{t('ledger.noEntries')}</p>}
       <WhatsAppShareModal

@@ -27,6 +27,11 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
 
   const tableRef = useRef();
   const navigate = useNavigate();
+  const searchRef = useRef();
+
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
 
   // 🔽 Categories from products (unique, safe)
   const categories = [
@@ -99,12 +104,6 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
     pdf.save('Inventory_Report.pdf');
   };
 
-  useEffect(() => {
-    if (tableRef.current) {
-      tableRef.current.focus();
-    }
-  }, [filteredProducts]);
-
   return (
     <div
       style={{
@@ -134,6 +133,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
         {/* 🔍 Search */}
         <input
           type="text"
+          ref={searchRef}
           placeholder={t('inventory.searchProduct')}
           value={filters.search}
           onChange={(e) => setFilters({ ...filters, search: e.target.value })}

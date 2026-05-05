@@ -31,9 +31,6 @@ export default function CustomerLedgerPage() {
 
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
-  const [pageSize, setPageSize] = useState(10);
-
-  const [page, setPage] = useState(1);
 
   const [cid, setCid] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -42,8 +39,10 @@ export default function CustomerLedgerPage() {
 
   const [opening, setOpening] = useState(0);
 
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const currentYear = new Date().getFullYear();
+
+  const [start, setStart] = useState(`${currentYear}-01-01`);
+  const [end, setEnd] = useState(`${currentYear}-12-31`);
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -65,13 +64,6 @@ export default function CustomerLedgerPage() {
 
     return true;
   });
-
-  const totalPages = Math.ceil(dateFilteredLedger.length / pageSize);
-
-  const paginatedLedger = dateFilteredLedger.slice((page - 1) * pageSize, page * pageSize);
-
-  const startRow = dateFilteredLedger.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const endRow = Math.min(page * pageSize, dateFilteredLedger.length);
 
   const totalDebit = dateFilteredLedger.reduce((sum, e) => sum + (e.debit || 0), 0);
   const totalCredit = dateFilteredLedger.reduce((sum, e) => sum + (e.credit || 0), 0);
@@ -153,8 +145,12 @@ export default function CustomerLedgerPage() {
 
   const del = async (id) => {
     if (window.confirm(t('alerts.deleteTransaction'))) {
-      await deleteJournalEntry(id);
-      load();
+      try {
+        await deleteJournalEntry(id);
+        load();
+      } catch (err) {
+        alert(err?.response?.data?.message || 'Delete allowed nahi hai');
+      }
     }
   };
 
@@ -369,7 +365,7 @@ export default function CustomerLedgerPage() {
                           setCustomerName(c.name);
                           setCid(c._id);
                           setShowSuggestions(false);
-                          setPage(1);
+
                           load(c._id);
                         }}
                         style={{
@@ -385,43 +381,6 @@ export default function CustomerLedgerPage() {
               )}
             </div>
 
-            <div style={{ position: 'relative' }}>
-              {/* mobile icon */}
-              <span
-                style={{
-                  position: 'absolute',
-                  left: 6,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: window.innerWidth < 768 ? 'block' : 'none',
-                  fontSize: 14,
-                }}
-              >
-                📄
-              </span>
-
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                style={{
-                  height: window.innerWidth < 768 ? 32 : 36,
-                  width: window.innerWidth < 768 ? 44 : 'auto',
-                  minWidth: window.innerWidth < 768 ? 44 : 'auto',
-                  borderRadius: 8,
-                  border: '1px solid #93c5fd',
-                  padding: window.innerWidth < 768 ? '0 4px 0 20px' : '0 10px',
-                  background: '#ffffff',
-                  fontWeight: 600,
-                }}
-              >
-                <option value={10}>10 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-              </select>
-            </div>
             <select
               value={printSize}
               onChange={(e) => setPrintSize(e.target.value)}
@@ -534,7 +493,6 @@ export default function CustomerLedgerPage() {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1);
               }}
               className="w-[110px] md:w-[260px]"
               style={{
@@ -609,10 +567,9 @@ export default function CustomerLedgerPage() {
               }}
               onClick={() => {
                 setSearch('');
-                setStart('');
-                setEnd('');
-                setPage(1);
-                load(cid, '', '');
+                setStart(`${currentYear}-01-01`);
+                setEnd(`${currentYear}-12-31`);
+                load(cid, `${currentYear}-01-01`, `${currentYear}-12-31`);
               }}
             >
               {t('common.clear')}
@@ -633,7 +590,7 @@ export default function CustomerLedgerPage() {
           }}
         >
           <LedgerTable
-            ledgerData={paginatedLedger}
+            ledgerData={dateFilteredLedger}
             search={search}
             openingBalance={opening}
             onDelete={del}
@@ -652,45 +609,6 @@ export default function CustomerLedgerPage() {
             }}
             onRowClick={handleRowClick}
           />
-          {totalPages > 1 && (
-            <div
-              className="pagination"
-              style={{
-                padding: '8px 0',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: 12,
-                fontSize: window.innerWidth < 768 ? 10 : 12,
-                color: '#6b7280',
-                background: '#ffffff',
-              }}
-            >
-              <span>
-                {t('common.showing')} {startRow}–{endRow} {t('of')} {dateFilteredLedger.length}
-              </span>
-
-              <button
-                className="pagination-btn"
-                disabled={page === 1}
-                onClick={() => setPage(page - 1)}
-              >
-                ⬅ {t('previous')}
-              </button>
-
-              <span>
-                {t('page')} <strong>{page}</strong> {t('of')} {totalPages}
-              </span>
-
-              <button
-                className="pagination-btn"
-                disabled={page === totalPages}
-                onClick={() => setPage(page + 1)}
-              >
-                {t('next')} ➡
-              </button>
-            </div>
-          )}
         </div>
 
         {!loading && cid && ledger.length === 0 && <p>{t('ledger.noTransactions')}</p>}

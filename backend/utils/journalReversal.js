@@ -18,6 +18,7 @@ const createReversalEntry = async (originalEntry, userId) => {
     isDeleted: false,
     isReversed: false,
     reversalOf: originalEntry._id,
+    isReversal: true,
   });
 
   await reversalEntry.save();

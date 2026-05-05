@@ -90,6 +90,56 @@ function App() {
     }
   }, []);
 
+  useEffect(() => {
+    let currentRow = null;
+
+    const handleClick = (e) => {
+      const row = e.target.closest('tbody tr');
+      if (!row) return;
+
+      if (currentRow) currentRow.classList.remove('active-row');
+      row.classList.add('active-row');
+      currentRow = row;
+    };
+
+    const handleKeyDown = (e) => {
+      // 👇 input میں typing ہو رہی ہو تو ignore
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+      const rows = document.querySelectorAll('tbody tr');
+      if (!rows.length) return;
+
+      let index = Array.from(rows).indexOf(currentRow);
+      if (index === -1) index = 0;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        index = index + 1 < rows.length ? index + 1 : 0;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        index = index - 1 >= 0 ? index - 1 : rows.length - 1;
+      }
+
+      const next = rows[index];
+      if (!next) return;
+
+      if (currentRow) currentRow.classList.remove('active-row');
+      next.classList.add('active-row');
+      next.scrollIntoView({ block: 'nearest' });
+
+      currentRow = next;
+    };
+
+    document.addEventListener('click', handleClick);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('click', handleClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // 🔒 AUTO LOCK ON APP CLOSE (WhatsApp style)
   useEffect(() => {
     const handleAppClose = () => {

@@ -10,7 +10,10 @@ import { fetchProducts } from '../services/inventoryService';
 import { t } from '../i18n/i18n';
 
 const InventoryPage = () => {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => {
+    const saved = sessionStorage.getItem('products');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [showLowStock, setShowLowStock] = useState(false);
@@ -23,6 +26,7 @@ const InventoryPage = () => {
   const loadProducts = async () => {
     const data = await fetchProducts();
     setProducts(data);
+    sessionStorage.setItem('products', JSON.stringify(data));
   };
 
   useEffect(() => {

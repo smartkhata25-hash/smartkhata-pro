@@ -118,6 +118,10 @@ const journalEntrySchema = new mongoose.Schema(
       ref: "JournalEntry",
       default: null,
     },
+    isReversal: {
+      type: Boolean,
+      default: false,
+    },
     accounts: [
       {
         type: mongoose.Schema.Types.ObjectId,

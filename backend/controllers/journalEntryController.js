@@ -320,14 +320,6 @@ exports.deleteEntry = async (req, res) => {
       });
     }
 
-    // 🔒 Prevent reversing invoice-linked locked entries
-    if (entry.sourceType === "sale_invoice" && entry.referenceId) {
-      return res.status(403).json({
-        message:
-          "Invoice-linked journal entries cannot be deleted or reversed.",
-      });
-    }
-
     if (entry.isReversed) {
       return res.status(400).json({
         message: "This journal entry has already been reversed.",

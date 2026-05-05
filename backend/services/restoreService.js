@@ -402,7 +402,33 @@ async function restoreBackup(userId, fileName = null) {
     updateProgress(userId, 70, "Restoring data...");
 
     // 🗄️ restore DB
+    // 🗄️ restore DB
     await restoreCollections(new mongoose.Types.ObjectId(userId));
+
+    // ✅ STEP 1: ensure base accounts (VERY IMPORTANT)
+    const createBaseAccountsForUser = require("../utils/createBaseAccountsForUser");
+    await createBaseAccountsForUser(userId);
+
+    // ✅ STEP 2: repair account metadata
+    const Account = require("../models/Account");
+
+    await Account.updateMany(
+      {
+        $or: [
+          { category: { $exists: false } },
+          { category: null },
+          { category: "" },
+        ],
+      },
+      { $set: { category: "other" } },
+    );
+
+    await Account.updateMany(
+      {
+        $or: [{ type: { $exists: false } }, { type: null }, { type: "" }],
+      },
+      { $set: { type: "Asset" } },
+    );
 
     updateProgress(userId, 85, "Restoring files...");
 

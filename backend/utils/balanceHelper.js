@@ -14,7 +14,7 @@ const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
       $match: {
         createdBy: new mongoose.Types.ObjectId(userId),
         isDeleted: false,
-        accounts: accountId,
+        "lines.account": accountId,
       },
     },
     { $unwind: "$lines" },
@@ -38,7 +38,6 @@ const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
       },
     },
   ]);
-
   return result[0]?.balance || 0;
 };
 

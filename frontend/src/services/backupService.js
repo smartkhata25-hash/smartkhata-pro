@@ -161,3 +161,11 @@ export const getCloudBackupList = async () => {
     throw new Error('Failed to fetch cloud backups');
   }
 };
+
+export const getBackupProgress = async () => {
+  const res = await fetch('/api/backup/progress', {
+    credentials: 'include',
+  });
+
+  return res.json();
+};

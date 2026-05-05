@@ -13,16 +13,11 @@ const {
   shouldShowBackupReminder,
 } = require("../services/localBackup/backupReminderService");
 const { getCloudBackupList } = require("../services/cloudListService");
-
-/* ======================================================
-   BACKUP DIRECTORY
-====================================================== */
+const { getProgress } = require("../services/backupProgressService");
 
 const BACKUP_DIR = path.join(__dirname, "../backups");
 
-/* ======================================================
-   CREATE BACKUP
-====================================================== */
+// CREATE BACKUP
 
 exports.createBackupController = async (req, res) => {
   try {
@@ -261,10 +256,9 @@ exports.restoreLocalBackupController = async (req, res) => {
 /* ======================================================
    BACKUP REMINDER STATUS
 ====================================================== */
-
-exports.getBackupReminderController = (req, res) => {
+exports.getBackupReminderController = async (req, res) => {
   try {
-    const shouldRemind = shouldShowBackupReminder();
+    const shouldRemind = await shouldShowBackupReminder();
 
     return res.json({
       success: true,
@@ -301,6 +295,37 @@ exports.getCloudBackupListController = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch cloud backups",
+    });
+  }
+};
+
+/* ======================================================
+   GET BACKUP/RESTORE PROGRESS
+====================================================== */
+
+exports.getBackupProgressController = (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
+
+    const progressData = getProgress(userId);
+
+    return res.json({
+      success: true,
+      data: progressData,
+    });
+  } catch (error) {
+    console.error("❌ Progress Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get progress",
     });
   }
 };

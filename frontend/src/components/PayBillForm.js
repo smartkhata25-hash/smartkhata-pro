@@ -45,21 +45,38 @@ const PayBillForm = () => {
 
   useEffect(() => {
     async function fetchData() {
-      const sData = await getSuppliers();
-      const aData = await getAccounts();
-      setSuppliers(sData);
-      setAccounts(aData);
-
       if (id) {
-        const existing = await getPayBillById(id);
+        let sData = JSON.parse(localStorage.getItem('suppliers') || 'null');
+        let aData = JSON.parse(localStorage.getItem('accounts') || 'null');
+
+        if (!sData || !aData) {
+          const [freshSuppliers, freshAccounts] = await Promise.all([
+            getSuppliers(),
+            getAccounts(),
+          ]);
+
+          sData = freshSuppliers;
+          aData = freshAccounts;
+
+          localStorage.setItem('suppliers', JSON.stringify(sData));
+          localStorage.setItem('accounts', JSON.stringify(aData));
+        }
+
+        let existing = JSON.parse(localStorage.getItem(`paybill_${id}`) || 'null');
+
+        if (!existing) {
+          existing = await getPayBillById(id);
+          localStorage.setItem(`paybill_${id}`, JSON.stringify(existing));
+        }
+
+        setSuppliers(sData);
+        setAccounts(aData);
 
         setFormData({
           supplier: existing.supplier?._id || '',
-
           date: existing.date?.slice(0, 10) || '',
           time: existing.time || '',
-
-          paymentType: existing.paymentEntries?.[0]?.paymentType || 'cash',
+          paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
           description: existing.description || '',
           attachment: null,
         });
@@ -69,12 +86,33 @@ const PayBillForm = () => {
             ? existing.paymentEntries.map((p) => ({
                 account: p.account || '',
                 amount: p.amount || '',
-                paymentType: p.paymentType || existing.paymentType || 'Cash',
+                paymentType:
+                  (p.paymentType || existing.paymentType) === 'online'
+                    ? 'Online'
+                    : (p.paymentType || existing.paymentType) === 'cheque'
+                      ? 'Cheque'
+                      : 'Cash',
               }))
-            : [{ account: '', amount: '', paymentType: 'Cash' }]
+            : [
+                {
+                  account: '',
+                  amount: '',
+                  paymentType:
+                    existing.paymentType === 'online'
+                      ? 'Online'
+                      : existing.paymentType === 'cheque'
+                        ? 'Cheque'
+                        : 'Cash',
+                },
+              ]
         );
 
         loadLedger(existing.supplier?._id);
+      } else {
+        const [sData, aData] = await Promise.all([getSuppliers(), getAccounts()]);
+
+        setSuppliers(sData);
+        setAccounts(aData);
       }
     }
     fetchData();
@@ -145,7 +183,12 @@ const PayBillForm = () => {
           ? existing.paymentEntries.map((p) => ({
               account: p.account || '',
               amount: p.amount || '',
-              paymentType: p.paymentType || 'Cash',
+              paymentType:
+                p.paymentType === 'online'
+                  ? 'Online'
+                  : p.paymentType === 'cheque'
+                    ? 'Cheque'
+                    : 'Cash',
             }))
           : [{ account: '', amount: '', paymentType: 'Cash' }]
       );

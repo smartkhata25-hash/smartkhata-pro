@@ -143,6 +143,8 @@ const InvoiceForm = ({
   useEffect(() => {
     const handler = (e) => {
       const newProduct = e.detail;
+      const cached = JSON.parse(localStorage.getItem('products') || '[]');
+      localStorage.setItem('products', JSON.stringify([...cached, newProduct]));
       const rowIndex = Number(localStorage.getItem('lastCreatedProductRow'));
 
       if (!newProduct || rowIndex < 0) return;
@@ -410,7 +412,7 @@ const InvoiceForm = ({
     setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
   }, [editingInvoiceFromAPI]);
   useEffect(() => {
-    if (!editingInvoiceFromAPI || products.length === 0) return;
+    if (!editingInvoiceFromAPI) return;
 
     const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
       const matchedProduct = products.find((p) => p._id === item.productId);
@@ -443,8 +445,15 @@ const InvoiceForm = ({
     })
       .then((res) => res.json())
       .then(setCustomers);
+    const cachedProducts = localStorage.getItem('products');
+
+    if (cachedProducts) {
+      setProducts(JSON.parse(cachedProducts));
+    }
+
     fetchProductsWithToken(token).then((data) => {
       setProducts(data);
+      localStorage.setItem('products', JSON.stringify(data));
     });
 
     getAccounts(token).then((all) => {

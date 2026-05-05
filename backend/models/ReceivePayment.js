@@ -13,12 +13,12 @@ const receivePaymentSchema = new mongoose.Schema(
     },
     time: {
       type: String,
-      default: "", // ✅ Optional support
+      default: "",
     },
     amount: {
       type: Number,
       required: true,
-      min: 0.01, // ✅ Minimum validation
+      min: 0.01,
     },
     paymentType: {
       type: String,
@@ -37,7 +37,7 @@ const receivePaymentSchema = new mongoose.Schema(
     },
     attachment: {
       type: String,
-      default: "", // ✅ Safe fallback
+      default: "",
     },
 
     journalEntryId: {
@@ -52,7 +52,6 @@ const receivePaymentSchema = new mongoose.Schema(
       required: true,
     },
 
-    // ✅ Soft delete support
     isDeleted: {
       type: Boolean,
       default: false,
@@ -62,8 +61,5 @@ const receivePaymentSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
-
-// ✅ Optional full-text search support
-// receivePaymentSchema.index({ description: "text" });
 
 module.exports = mongoose.model("ReceivePayment", receivePaymentSchema);

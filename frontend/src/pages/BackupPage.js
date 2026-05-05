@@ -9,6 +9,7 @@ import {
   getBackupReminder,
   getCloudBackupList,
 } from '../services/backupService';
+import { getBackupProgress } from '../services/backupService';
 
 import BackupInfoCard from '../components/BackupInfoCard';
 import { t } from '../i18n/i18n';
@@ -22,6 +23,9 @@ const BackupPage = () => {
   const [showReminder, setShowReminder] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
   const [cloudBackups, setCloudBackups] = useState([]);
+  const [progress, setProgress] = useState(0);
+  const [progressMsg, setProgressMsg] = useState('');
+  const [progressStatus, setProgressStatus] = useState('idle');
 
   /* ==========================================
      Load Backup Status
@@ -199,6 +203,33 @@ const BackupPage = () => {
     }
   };
 
+  // PROGRESS POLLING
+
+  useEffect(() => {
+    let interval;
+
+    if (loading) {
+      interval = setInterval(async () => {
+        try {
+          const res = await getBackupProgress();
+
+          if (res?.data) {
+            setProgress(res.data.progress || 0);
+            setProgressMsg(res.data.message || '');
+            setProgressStatus(res.data.status || 'idle');
+
+            if (res.data.status === 'completed' || res.data.status === 'failed') {
+              clearInterval(interval);
+            }
+          }
+        } catch (err) {
+          console.log(err);
+        }
+      }, 1000);
+    }
+
+    return () => clearInterval(interval);
+  }, [loading]);
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -251,7 +282,18 @@ const BackupPage = () => {
       </div>
 
       {/* Loading */}
-      {loading && <div className="text-sm text-gray-600">{t('backup.processing')}</div>}
+      {loading && (
+        <div className="bg-white p-4 rounded shadow border">
+          <p className="text-sm text-gray-600 mb-2">{progressMsg || t('backup.processing')}</p>
+
+          <div className="w-full bg-gray-200 rounded h-3">
+            <div className="bg-blue-600 h-3 rounded" style={{ width: `${progress}%` }}></div>
+          </div>
+
+          <p className="text-xs text-right mt-1">{progress}%</p>
+          <p className="text-xs text-gray-500">{progressStatus}</p>
+        </div>
+      )}
 
       {/* Backup Info */}
       {backupInfo && <BackupInfoCard backupInfo={backupInfo} />}

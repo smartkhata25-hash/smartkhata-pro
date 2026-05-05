@@ -4,6 +4,12 @@ const mongoose = require("mongoose");
 const unzipper = require("unzipper");
 const { createBackup } = require("./backupService");
 const { downloadBackupFromCloud } = require("./cloudListService");
+const {
+  initProgress,
+  updateProgress,
+  completeProgress,
+  failProgress,
+} = require("./backupProgressService");
 
 /* ======================================================
 COLLECTION CONFIG
@@ -349,7 +355,11 @@ async function restoreBackup(userId, fileName = null) {
   let safetyBackupPath = null;
 
   try {
+    // 🚀 INIT
+    initProgress(userId, "restore");
+
     ensureDirectories();
+    updateProgress(userId, 5, "Preparing restore...");
 
     console.log("🛡️ Creating safety backup before restore...");
 
@@ -361,14 +371,17 @@ async function restoreBackup(userId, fileName = null) {
     }
 
     safetyBackupPath = safetyBackup.path;
+    updateProgress(userId, 20, "Safety backup created");
 
     console.log("✅ Safety backup created:", safetyBackupPath);
 
-    // ✅ STEP 2: normal restore
+    // ✅ STEP 2: get backup
     let backupFile;
 
     if (fileName) {
       console.log("☁️ Downloading backup from cloud...");
+
+      updateProgress(userId, 30, "Downloading from cloud...");
 
       const downloaded = await downloadBackupFromCloud(fileName);
 
@@ -381,13 +394,26 @@ async function restoreBackup(userId, fileName = null) {
       backupFile = getLatestBackup();
     }
 
+    updateProgress(userId, 50, "Extracting backup...");
+
+    // 📦 extract
     await extractBackup(backupFile);
 
+    updateProgress(userId, 70, "Restoring data...");
+
+    // 🗄️ restore DB
     await restoreCollections(new mongoose.Types.ObjectId(userId));
 
+    updateProgress(userId, 85, "Restoring files...");
+
+    // 📁 uploads
     restoreUploads();
 
     cleanTemp();
+
+    // ✅ DONE
+    updateProgress(userId, 95, "Finalizing...");
+    completeProgress(userId, "Restore completed");
 
     console.log("✅ Restore successful");
 
@@ -397,6 +423,8 @@ async function restoreBackup(userId, fileName = null) {
     };
   } catch (error) {
     console.error("❌ Restore failed:", error.message);
+
+    failProgress(userId, "Restore failed");
 
     // ❗ STEP 3: ROLLBACK
     try {

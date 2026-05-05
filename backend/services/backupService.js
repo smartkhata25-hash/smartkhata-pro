@@ -4,6 +4,12 @@ const os = require("os");
 const mongoose = require("mongoose");
 const archiver = require("archiver");
 const { uploadToCloud } = require("./cloudBackupService");
+const {
+  initProgress,
+  updateProgress,
+  completeProgress,
+  failProgress,
+} = require("./backupProgressService");
 
 const BASE_DIR =
   process.env.NODE_ENV === "production"
@@ -183,19 +189,36 @@ function deleteOldBackups(userId, limit = 5) {
 
 async function createBackup(userId, options = {}) {
   try {
+    // 🚀 INIT
+    initProgress(userId, "backup");
+
     ensureDirectories();
+    updateProgress(userId, 10, "Preparing backup...");
 
+    // 📦 Export data
     await exportUserDatabase(userId);
+    updateProgress(userId, 40, "Exporting data...");
 
+    // 🧾 Meta
     createMeta(userId);
+    updateProgress(userId, 55, "Creating metadata...");
 
+    // 🗜️ Zip
     const backupFile = await createZip(userId);
+    updateProgress(userId, 75, "Compressing files...");
+
+    // ☁️ Upload
     if (!options.skipCloudUpload) {
       await uploadToCloud(backupFile);
+      updateProgress(userId, 90, "Uploading to cloud...");
     }
 
+    // 🧹 Clean
     cleanTemp();
     deleteOldBackups(userId, 5);
+
+    // ✅ Done
+    completeProgress(userId, "Backup completed");
 
     return {
       success: true,
@@ -204,6 +227,8 @@ async function createBackup(userId, options = {}) {
     };
   } catch (error) {
     console.error("❌ Backup failed:", error);
+
+    failProgress(userId, "Backup failed");
 
     return {
       success: false,

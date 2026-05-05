@@ -11,8 +11,6 @@ const getDashboardSummary = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    // 🔍 Sample entry دیکھنے کے لیے
-
     const { startDate, endDate } = req.query;
 
     // ✅ Date filter

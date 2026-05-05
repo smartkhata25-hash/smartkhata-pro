@@ -23,16 +23,35 @@ const PayBillList = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const billData = await getAllPayBills();
-        const supplierData = await fetchSuppliers();
+        // ✅ 1. پہلے cache load کرو
+        let cachedBills = JSON.parse(localStorage.getItem('paybills') || 'null');
+        let cachedSuppliers = JSON.parse(localStorage.getItem('suppliers') || 'null');
+
+        if (cachedBills) {
+          setBills(cachedBills);
+          setFiltered(cachedBills);
+        }
+
+        if (cachedSuppliers) {
+          setSuppliers(cachedSuppliers);
+        }
+
+        // ✅ 2. background میں fresh data لو
+        const [billData, supplierData] = await Promise.all([getAllPayBills(), fetchSuppliers()]);
+
         setBills(billData);
-        setSuppliers(supplierData);
         setFiltered(billData);
+        setSuppliers(supplierData);
+
+        // ✅ 3. cache update کرو
+        localStorage.setItem('paybills', JSON.stringify(billData));
+        localStorage.setItem('suppliers', JSON.stringify(supplierData));
       } catch (err) {
         console.error('❌ Failed to fetch bills:', err.message);
         alert(t('alerts.payBillLoadFailed'));
       }
     };
+
     fetchData();
   }, []);
 
@@ -76,6 +95,7 @@ const PayBillList = () => {
       const billData = await getAllPayBills();
       setBills(billData);
       setFiltered(billData);
+      localStorage.setItem('paybills', JSON.stringify(billData));
     } catch (err) {
       console.error('❌ Failed to delete:', err.message);
       alert(t('alerts.deletePaymentFailed'));

@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { restoreBackup } = require("../restoreService");
+const unzipper = require("unzipper");
 
 /* =====================================================
    RESTORE FROM LOCAL FILE
@@ -16,7 +17,28 @@ async function restoreFromLocalBackup(userId, filePath) {
       };
     }
 
-    // temp میں copy کریں
+    // ❗ STEP 1: ZIP validation
+    let isValidBackup = false;
+
+    await fs
+      .createReadStream(filePath)
+      .pipe(unzipper.Parse())
+      .on("entry", (entry) => {
+        if (entry.path === "meta.json") {
+          isValidBackup = true;
+        }
+        entry.autodrain();
+      })
+      .promise();
+
+    if (!isValidBackup) {
+      return {
+        success: false,
+        message: "Invalid backup file (meta.json missing)",
+      };
+    }
+
+    // ❗ STEP 2: temp میں copy کریں
     const tempPath = path.join(
       __dirname,
       "../../backups",
@@ -25,7 +47,7 @@ async function restoreFromLocalBackup(userId, filePath) {
 
     fs.copyFileSync(filePath, tempPath);
 
-    // restore call کریں
+    // ❗ STEP 3: restore call
     const result = await restoreBackup(userId);
 
     return result;
@@ -34,7 +56,7 @@ async function restoreFromLocalBackup(userId, filePath) {
 
     return {
       success: false,
-      message: error.message,
+      message: "Restore failed (invalid or corrupt backup)",
     };
   }
 }

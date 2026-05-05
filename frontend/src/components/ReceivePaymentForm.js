@@ -53,9 +53,19 @@ const ReceivePaymentForm = () => {
   useEffect(() => {
     async function fetchData() {
       try {
-        const cData = await fetchCustomers();
+        let cData = JSON.parse(localStorage.getItem('customers') || 'null');
 
-        const aData = await getAccounts();
+        if (!cData) {
+          cData = await fetchCustomers();
+          localStorage.setItem('customers', JSON.stringify(cData));
+        }
+
+        let aData = JSON.parse(localStorage.getItem('accounts') || 'null');
+
+        if (!aData) {
+          aData = await getAccounts();
+          localStorage.setItem('accounts', JSON.stringify(aData));
+        }
 
         // ✅ Sirf Receive Payment ke liye valid accounts
         const paymentAccounts = aData.filter(
@@ -72,7 +82,7 @@ const ReceivePaymentForm = () => {
           (acc) => acc.name?.toLowerCase() === 'handcash'
         );
 
-        if (handCashAccount) {
+        if (!id && handCashAccount) {
           setPaymentEntries([
             {
               account: handCashAccount._id,
@@ -102,9 +112,25 @@ const ReceivePaymentForm = () => {
               ? existing.paymentEntries.map((p) => ({
                   account: p.account || '',
                   amount: p.amount || '',
-                  paymentType: p.paymentType || existing.paymentType || 'Cash',
+                  paymentType:
+                    (p.paymentType || existing.paymentType) === 'online'
+                      ? 'Online'
+                      : (p.paymentType || existing.paymentType) === 'cheque'
+                        ? 'Cheque'
+                        : 'Cash',
                 }))
-              : [{ account: '', amount: '', paymentType: existing.paymentType || 'Cash' }]
+              : [
+                  {
+                    account: '',
+                    amount: '',
+                    paymentType:
+                      existing.paymentType === 'online'
+                        ? 'Online'
+                        : existing.paymentType === 'cheque'
+                          ? 'Cheque'
+                          : 'Cash',
+                  },
+                ]
           );
 
           loadLedger(existing.customer);
@@ -130,7 +156,7 @@ const ReceivePaymentForm = () => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'paymentType' ? value.toLowerCase() : value,
+      [name]: value,
     }));
   };
 
@@ -182,7 +208,7 @@ const ReceivePaymentForm = () => {
         customer: existing.customer,
         date: existing.date,
         time: existing.time,
-        paymentType: existing.paymentType || 'Cash',
+        paymentType: existing.paymentType || '',
         description: existing.description || '',
         attachment: null,
       });
@@ -192,11 +218,26 @@ const ReceivePaymentForm = () => {
           ? existing.paymentEntries.map((p) => ({
               account: p.account || '',
               amount: p.amount || '',
-              paymentType: p.paymentType || existing.paymentType || 'Cash',
+              paymentType:
+                (p.paymentType || existing.paymentType) === 'online'
+                  ? 'Online'
+                  : (p.paymentType || existing.paymentType) === 'cheque'
+                    ? 'Cheque'
+                    : 'Cash',
             }))
-          : [{ account: '', amount: '', paymentType: existing.paymentType || 'Cash' }]
+          : [
+              {
+                account: '',
+                amount: '',
+                paymentType:
+                  existing.paymentType === 'online'
+                    ? 'Online'
+                    : existing.paymentType === 'cheque'
+                      ? 'Cheque'
+                      : 'Cash',
+              },
+            ]
       );
-
       loadLedger(existing.customer);
     } catch (err) {
       console.error('Revert error:', err);

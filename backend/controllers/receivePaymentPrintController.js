@@ -1,4 +1,5 @@
 const ReceivePayment = require("../models/ReceivePayment");
+const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 
 const {

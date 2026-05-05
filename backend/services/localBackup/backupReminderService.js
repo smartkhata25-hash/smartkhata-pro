@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const BACKUP_DIR = path.join(__dirname, "../../backups");
+const { getCloudBackupList } = require("../cloudListService");
 
 /* =====================================================
    CHECK LAST BACKUP TIME
@@ -28,17 +29,45 @@ function getLastBackupTime() {
    SHOULD SHOW REMINDER
 ===================================================== */
 
-function shouldShowBackupReminder() {
-  const lastBackup = getLastBackupTime();
+async function shouldShowBackupReminder() {
+  try {
+    // 💻 Local backup check
+    const localLast = getLastBackupTime();
 
-  if (!lastBackup) return true;
+    let localOk = false;
 
-  const now = new Date();
-  const last = new Date(lastBackup);
+    if (localLast) {
+      const diffHours = (new Date() - new Date(localLast)) / (1000 * 60 * 60);
 
-  const diffHours = (now - last) / (1000 * 60 * 60);
+      if (diffHours <= 24) {
+        localOk = true;
+      }
+    }
 
-  return diffHours > 24;
+    // ☁️ Cloud backup check
+    let cloudOk = false;
+
+    try {
+      const cloud = await getCloudBackupList();
+
+      if (cloud.success && cloud.files.length > 0) {
+        const latest = cloud.files[0].lastModified;
+
+        const diffHours = (new Date() - new Date(latest)) / (1000 * 60 * 60);
+
+        if (diffHours <= 24) {
+          cloudOk = true;
+        }
+      }
+    } catch (err) {
+      console.log("Cloud check failed");
+    }
+
+    return !(localOk || cloudOk);
+  } catch (error) {
+    console.error("Reminder check error:", error);
+    return true;
+  }
 }
 
 module.exports = {

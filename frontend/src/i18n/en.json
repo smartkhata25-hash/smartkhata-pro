@@ -297,7 +297,7 @@
   "purchase.invoiceList": "Purchase Invoice List",
 
   "alerts.billRequired": "Bill number is required",
-  "alerts.invoiceSaved": "Purchase invoice saved successfully",
+  "alerts.invoiceSaved": "Refund invoice saved successfully",
   "alerts.invoiceUpdated": "Purchase invoice updated successfully",
   "alerts.invoiceUpdateFailed": "Failed to update purchase invoice",
   "alerts.quickAddFailed": "Quick add failed",

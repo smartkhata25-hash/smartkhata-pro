@@ -5,7 +5,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const { createBackup } = require("./backupService");
-
+const { createLocalBackup } = require("./localBackup/localBackupService");
 const User = require("../models/User");
 
 const os = require("os");
@@ -76,13 +76,17 @@ async function backupAllUsers() {
 
     for (const user of users) {
       try {
+        // ☁️ Cloud backup
         await createBackup(user._id);
+
+        // 💻 Local backup (NEW)
+        await createLocalBackup(user._id);
       } catch (err) {
         console.error(`Backup failed for ${user._id}:`, err.message);
       }
     }
 
-    console.log("📦 All user backups completed");
+    console.log("📦 All user backups (cloud + local) completed");
   } catch (err) {
     console.error("Backup scheduler error:", err.message);
   }

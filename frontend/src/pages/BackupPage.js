@@ -116,6 +116,10 @@ const BackupPage = () => {
     try {
       setLoading(true);
 
+      setProgressStatus('running');
+      setProgress(0);
+      setProgressMsg('Starting restore...');
+
       await restoreBackup(fileName);
 
       setToast({ message: 'Backup restored successfully', type: 'success' });
@@ -208,7 +212,7 @@ const BackupPage = () => {
   useEffect(() => {
     let interval;
 
-    if (loading) {
+    if (progressStatus === 'running') {
       interval = setInterval(async () => {
         try {
           const res = await getBackupProgress();
@@ -229,7 +233,7 @@ const BackupPage = () => {
     }
 
     return () => clearInterval(interval);
-  }, [loading]);
+  }, [progressStatus]);
   return (
     <div className="p-6 space-y-6">
       {/* Header */}

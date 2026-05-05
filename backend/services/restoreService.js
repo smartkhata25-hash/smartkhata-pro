@@ -406,7 +406,7 @@ async function restoreBackup(userId, fileName = null) {
     await restoreCollections(new mongoose.Types.ObjectId(userId));
 
     // ✅ STEP 1: ensure base accounts (VERY IMPORTANT)
-    const createBaseAccountsForUser = require("../utils/createBaseAccountsForUser");
+    const createBaseAccountsForUser = require("../../utils/createBaseAccounts");
     await createBaseAccountsForUser(userId);
 
     // ✅ STEP 2: repair account metadata

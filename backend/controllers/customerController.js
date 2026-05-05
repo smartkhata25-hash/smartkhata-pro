@@ -34,7 +34,7 @@ const getCustomers = async (req, res) => {
         $match: {
           createdBy: new (require("mongoose").Types.ObjectId)(userId),
           isDeleted: false,
-          accounts: { $in: accountIds },
+          "lines.account": { $in: accountIds }, // ✅ FIX
         },
       },
       { $unwind: "$lines" },
@@ -525,7 +525,7 @@ const getCustomerDetailedLedger = async (req, res) => {
           $match: {
             createdBy: userId,
             isDeleted: false,
-            accounts: customer.account._id,
+            "lines.account": customer.account._id,
             date: { $lt: new Date(startDate) },
           },
         },

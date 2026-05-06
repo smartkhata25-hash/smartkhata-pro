@@ -276,7 +276,10 @@ const previewReceivePaymentPdf = async (req, res) => {
 
     return res.send(pdfBuffer);
   } catch (error) {
-    console.error("❌ Preview PDF Error:", error);
+    console.error("❌ Preview PDF Error FULL:", {
+      message: error.message,
+      stack: error.stack,
+    });
 
     return res.status(500).json({
       message: "Preview PDF failed",

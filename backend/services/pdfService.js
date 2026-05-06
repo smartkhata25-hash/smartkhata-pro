@@ -1,4 +1,5 @@
-const puppeteer = require("puppeteer");
+const chromium = require("@sparticuz/chromium");
+const puppeteer = require("puppeteer-core");
 
 let browserInstance = null;
 
@@ -10,24 +11,24 @@ const getBrowser = async () => {
     console.log("🟡 getBrowser() called");
 
     if (!browserInstance) {
-      console.log("🚀 Launching Puppeteer Browser...");
+      console.log("🚀 Launching Chromium Browser...");
 
       console.log("🔥 BEFORE BROWSER LAUNCH");
 
-      browserInstance = await puppeteer.launch({
-        headless: true,
+      const executablePath = await chromium.executablePath();
 
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--single-process",
-        ],
+      console.log("📍 Chromium Path:", executablePath);
+
+      browserInstance = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath,
+        headless: chromium.headless,
       });
 
       console.log("🔥 AFTER BROWSER LAUNCH");
 
-      console.log("✅ Puppeteer Browser Started");
+      console.log("✅ Chromium Browser Started");
     } else {
       console.log("♻️ Reusing existing browser instance");
     }
@@ -72,8 +73,6 @@ const generatePdfFromHtml = async (html) => {
 
     console.log("✅ HTML loaded");
 
-    console.log("🟡 Emulating screen media...");
-
     await page.emulateMediaType("screen");
 
     console.log("✅ Screen media emulated");
@@ -92,8 +91,6 @@ const generatePdfFromHtml = async (html) => {
 
     console.log("📏 Buffer Length:", pdfBuffer?.length);
 
-    console.log("🟡 Closing page...");
-
     await page.close();
 
     console.log("✅ Page closed");
@@ -106,14 +103,8 @@ const generatePdfFromHtml = async (html) => {
     });
 
     try {
-      console.log("🟡 Attempting page close after error...");
-
       await page.close();
-
-      console.log("✅ Page closed after error");
-    } catch (closeError) {
-      console.error("❌ PAGE CLOSE ERROR:", closeError);
-    }
+    } catch (_) {}
 
     throw error;
   }
@@ -131,8 +122,6 @@ const closeBrowser = async () => {
       console.log("✅ Browser closed");
 
       browserInstance = null;
-    } else {
-      console.log("ℹ️ No browser instance to close");
     }
   } catch (error) {
     console.error("❌ CLOSE BROWSER ERROR:", {

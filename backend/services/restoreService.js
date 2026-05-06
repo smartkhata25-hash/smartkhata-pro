@@ -2,8 +2,12 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const unzipper = require("unzipper");
+
 const { createBackup } = require("./backupService");
 const { downloadBackupFromCloud } = require("./cloudListService");
+
+const { BACKUP_DIR, getTempDir } = require("../config/backupPaths");
+
 const {
   initProgress,
   updateProgress,
@@ -27,16 +31,10 @@ const COLLECTION_CONFIG = {
   inventorytransactions: { field: "userId" },
 };
 
-/* ======================================================
-PATHS
-====================================================== */
-
-const BACKUP_DIR = path.join(__dirname, "../backups");
-const TEMP_DIR = path.join(BACKUP_DIR, "temp");
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 
 /* ======================================================
-RESTORE ORDER (RELATION SAFE)
+RESTORE ORDER
 ====================================================== */
 
 const RESTORE_ORDER = [
@@ -52,22 +50,24 @@ const RESTORE_ORDER = [
 ];
 
 /* ======================================================
-GLOBAL ID MAPS
+ACCOUNT ID MAP FACTORY
 ====================================================== */
 
-let accountIdMap = {};
+function createAccountIdMap() {
+  return {};
+}
 
 /* ======================================================
 ENSURE DIRECTORIES
 ====================================================== */
 
-function ensureDirectories() {
+function ensureDirectories(tempDir) {
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR);
   }
 
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
   }
 }
 
@@ -75,12 +75,13 @@ function ensureDirectories() {
 GET LATEST BACKUP
 ====================================================== */
 
-function getLatestBackup() {
+function getLatestBackup(userId) {
   const files = fs
     .readdirSync(BACKUP_DIR)
-    .filter((f) => f.endsWith(".zip"))
+    .filter((f) => f.includes(`smartkhata-backup-${userId}`))
     .map((file) => {
       const filePath = path.join(BACKUP_DIR, file);
+
       const stats = fs.statSync(filePath);
 
       return {
@@ -98,6 +99,10 @@ function getLatestBackup() {
   return files[0].path;
 }
 
+/* ======================================================
+GET BACKUP BY NAME
+====================================================== */
+
 function getBackupByName(fileName) {
   const filePath = path.join(BACKUP_DIR, fileName);
 
@@ -112,19 +117,20 @@ function getBackupByName(fileName) {
 EXTRACT ZIP
 ====================================================== */
 
-async function extractBackup(zipFile) {
+async function extractBackup(zipFile, tempDir) {
   await fs
     .createReadStream(zipFile)
-    .pipe(unzipper.Extract({ path: TEMP_DIR }))
+    .pipe(unzipper.Extract({ path: tempDir }))
     .promise();
 }
 
 /* ======================================================
-RESTORE ACCOUNTS (WITH ID MAPPING)
+RESTORE ACCOUNTS
 ====================================================== */
 
-async function restoreAccounts(userId, docs) {
+async function restoreAccounts(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
+
   const collection = db.collection("accounts");
 
   await collection.deleteMany({ userId });
@@ -150,8 +156,9 @@ async function restoreAccounts(userId, docs) {
 RESTORE CUSTOMERS
 ====================================================== */
 
-async function restoreCustomers(userId, docs) {
+async function restoreCustomers(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
+
   const collection = db.collection("customers");
 
   await collection.deleteMany({ createdBy: userId });
@@ -177,8 +184,9 @@ async function restoreCustomers(userId, docs) {
 RESTORE SUPPLIERS
 ====================================================== */
 
-async function restoreSuppliers(userId, docs) {
+async function restoreSuppliers(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
+
   const collection = db.collection("suppliers");
 
   await collection.deleteMany({ userId });
@@ -201,11 +209,12 @@ async function restoreSuppliers(userId, docs) {
 }
 
 /* ======================================================
-RESTORE JOURNAL ENTRIES
+RESTORE JOURNALS
 ====================================================== */
 
-async function restoreJournals(userId, docs) {
+async function restoreJournals(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
+
   const collection = db.collection("journalentries");
 
   await collection.deleteMany({ createdBy: userId });
@@ -236,11 +245,12 @@ async function restoreJournals(userId, docs) {
 }
 
 /* ======================================================
-GENERIC COLLECTION RESTORE
+GENERIC RESTORE
 ====================================================== */
 
 async function restoreGeneric(collectionName, userId, docs) {
   const db = mongoose.connection.db;
+
   const collection = db.collection(collectionName);
 
   const filterField = COLLECTION_CONFIG[collectionName]?.field;
@@ -272,38 +282,39 @@ async function restoreGeneric(collectionName, userId, docs) {
 RESTORE COLLECTIONS
 ====================================================== */
 
-async function restoreCollections(userId) {
-  const db = mongoose.connection.db;
+async function restoreCollections(userId, tempDir) {
+  const accountIdMap = createAccountIdMap();
 
   for (const collectionName of RESTORE_ORDER) {
-    const filePath = path.join(TEMP_DIR, `${collectionName}.json`);
+    const filePath = path.join(tempDir, `${collectionName}.json`);
 
     if (!fs.existsSync(filePath)) {
       continue;
     }
 
     const raw = fs.readFileSync(filePath);
+
     const docs = JSON.parse(raw);
 
     if (!docs.length) continue;
 
     if (collectionName === "accounts") {
-      await restoreAccounts(userId, docs);
+      await restoreAccounts(userId, docs, accountIdMap);
       continue;
     }
 
     if (collectionName === "customers") {
-      await restoreCustomers(userId, docs);
+      await restoreCustomers(userId, docs, accountIdMap);
       continue;
     }
 
     if (collectionName === "suppliers") {
-      await restoreSuppliers(userId, docs);
+      await restoreSuppliers(userId, docs, accountIdMap);
       continue;
     }
 
     if (collectionName === "journalentries") {
-      await restoreJournals(userId, docs);
+      await restoreJournals(userId, docs, accountIdMap);
       continue;
     }
 
@@ -315,26 +326,56 @@ async function restoreCollections(userId) {
 RESTORE UPLOADS
 ====================================================== */
 
-function restoreUploads() {
-  const uploadsBackup = path.join(TEMP_DIR, "uploads");
+function copyRecursive(src, dest) {
+  const stats = fs.lstatSync(src);
+
+  // 📁 folder
+  if (stats.isDirectory()) {
+    if (!fs.existsSync(dest)) {
+      fs.mkdirSync(dest, { recursive: true });
+    }
+
+    const items = fs.readdirSync(src);
+
+    items.forEach((item) => {
+      copyRecursive(path.join(src, item), path.join(dest, item));
+    });
+
+    return;
+  }
+
+  // 📄 file
+  let finalDest = dest;
+
+  if (fs.existsSync(dest)) {
+    const ext = path.extname(dest);
+
+    const name = path.basename(dest, ext);
+
+    finalDest = path.join(
+      path.dirname(dest),
+      `${name}-restore-${Date.now()}${ext}`,
+    );
+  }
+
+  fs.copyFileSync(src, finalDest);
+}
+
+function restoreUploads(tempDir) {
+  const uploadsBackup = path.join(tempDir, "uploads");
 
   if (!fs.existsSync(uploadsBackup)) {
     return;
   }
 
   if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR);
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 
-  const files = fs.readdirSync(uploadsBackup);
+  const items = fs.readdirSync(uploadsBackup);
 
-  files.forEach((file) => {
-    const src = path.join(uploadsBackup, file);
-    const dest = path.join(UPLOADS_DIR, file);
-
-    if (fs.lstatSync(src).isFile()) {
-      fs.copyFileSync(src, dest);
-    }
+  items.forEach((item) => {
+    copyRecursive(path.join(uploadsBackup, item), path.join(UPLOADS_DIR, item));
   });
 }
 
@@ -342,40 +383,54 @@ function restoreUploads() {
 CLEAN TEMP
 ====================================================== */
 
-function cleanTemp() {
-  if (!fs.existsSync(TEMP_DIR)) return;
+function cleanTemp(tempDir) {
+  if (!fs.existsSync(tempDir)) return;
 
-  fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
 /* ======================================================
 MAIN RESTORE
 ====================================================== */
+
 async function restoreBackup(userId, fileName = null) {
   let safetyBackupPath = null;
 
+  const operationId = `restore-${userId}-${Date.now()}`;
+
+  const tempDir = getTempDir(operationId);
+
   try {
-    // 🚀 INIT
     initProgress(userId, "restore");
 
-    ensureDirectories();
+    ensureDirectories(tempDir);
+
+    cleanTemp(tempDir);
+
+    ensureDirectories(tempDir);
+
     updateProgress(userId, 5, "Preparing restore...");
 
     console.log("🛡️ Creating safety backup before restore...");
 
-    // ✅ STEP 1: safety backup
-    const safetyBackup = await createBackup(userId, { skipCloudUpload: true });
+    /* STEP 1: SAFETY BACKUP */
+
+    const safetyBackup = await createBackup(userId, {
+      skipCloudUpload: true,
+    });
 
     if (!safetyBackup.success) {
       throw new Error("Safety backup failed. Restore cancelled.");
     }
 
     safetyBackupPath = safetyBackup.path;
+
     updateProgress(userId, 20, "Safety backup created");
 
     console.log("✅ Safety backup created:", safetyBackupPath);
 
-    // ✅ STEP 2: get backup
+    /* STEP 2: GET BACKUP */
+
     let backupFile;
 
     if (fileName) {
@@ -383,7 +438,7 @@ async function restoreBackup(userId, fileName = null) {
 
       updateProgress(userId, 30, "Downloading from cloud...");
 
-      const downloaded = await downloadBackupFromCloud(fileName);
+      const downloaded = await downloadBackupFromCloud(userId, fileName);
 
       if (!downloaded.success) {
         throw new Error("Failed to download backup from cloud");
@@ -391,25 +446,29 @@ async function restoreBackup(userId, fileName = null) {
 
       backupFile = downloaded.path;
     } else {
-      backupFile = getLatestBackup();
+      backupFile = getLatestBackup(userId);
     }
 
     updateProgress(userId, 50, "Extracting backup...");
 
-    // 📦 extract
-    await extractBackup(backupFile);
+    /* EXTRACT */
+
+    await extractBackup(backupFile, tempDir);
 
     updateProgress(userId, 70, "Restoring data...");
 
-    // 🗄️ restore DB
-    // 🗄️ restore DB
-    await restoreCollections(new mongoose.Types.ObjectId(userId));
+    /* RESTORE DATABASE */
 
-    // ✅ STEP 1: ensure base accounts (VERY IMPORTANT)
+    await restoreCollections(new mongoose.Types.ObjectId(userId), tempDir);
+
+    /* ENSURE BASE ACCOUNTS */
+
     const createBaseAccountsForUser = require("../utils/createBaseAccounts");
+
     await createBaseAccountsForUser(userId);
 
-    // ✅ STEP 2: repair account metadata
+    /* REPAIR ACCOUNT METADATA */
+
     const Account = require("../models/Account");
 
     await Account.updateMany(
@@ -432,13 +491,14 @@ async function restoreBackup(userId, fileName = null) {
 
     updateProgress(userId, 85, "Restoring files...");
 
-    // 📁 uploads
-    restoreUploads();
+    /* RESTORE UPLOADS */
 
-    cleanTemp();
+    restoreUploads(tempDir);
 
-    // ✅ DONE
+    cleanTemp(tempDir);
+
     updateProgress(userId, 95, "Finalizing...");
+
     completeProgress(userId, "Restore completed");
 
     console.log("✅ Restore successful");
@@ -452,18 +512,19 @@ async function restoreBackup(userId, fileName = null) {
 
     failProgress(userId, "Restore failed");
 
-    // ❗ STEP 3: ROLLBACK
+    /* ROLLBACK */
+
     try {
       if (safetyBackupPath) {
         console.log("🔄 Rolling back from safety backup...");
 
-        await extractBackup(safetyBackupPath);
+        await extractBackup(safetyBackupPath, tempDir);
 
-        await restoreCollections(new mongoose.Types.ObjectId(userId));
+        await restoreCollections(new mongoose.Types.ObjectId(userId), tempDir);
 
-        restoreUploads();
+        restoreUploads(tempDir);
 
-        cleanTemp();
+        cleanTemp(tempDir);
 
         console.log("✅ Rollback successful");
       }

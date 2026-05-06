@@ -5,17 +5,9 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const { createBackup } = require("./backupService");
-const { createLocalBackup } = require("./localBackup/localBackupService");
+
 const User = require("../models/User");
-
-const os = require("os");
-
-const BASE_DIR =
-  process.env.NODE_ENV === "production"
-    ? "/tmp"
-    : path.join(os.homedir(), "Documents", "SmartKhata");
-
-const BACKUP_DIR = path.join(BASE_DIR, "Backups");
+const { BACKUP_DIR } = require("../config/backupPaths");
 
 /* =========================================================
    Get latest backup time
@@ -78,15 +70,12 @@ async function backupAllUsers() {
       try {
         // ☁️ Cloud backup
         await createBackup(user._id);
-
-        // 💻 Local backup (NEW)
-        await createLocalBackup(user._id);
       } catch (err) {
         console.error(`Backup failed for ${user._id}:`, err.message);
       }
     }
 
-    console.log("📦 All user backups (cloud + local) completed");
+    console.log("📦 All user cloud backups completed");
   } catch (err) {
     console.error("Backup scheduler error:", err.message);
   }

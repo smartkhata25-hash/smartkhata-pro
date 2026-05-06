@@ -1,9 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
+
 const mongoose = require("mongoose");
 const archiver = require("archiver");
 const { uploadToCloud } = require("./cloudBackupService");
+const { BACKUP_DIR, getTempDir } = require("../config/backupPaths");
 const {
   initProgress,
   updateProgress,
@@ -11,13 +12,6 @@ const {
   failProgress,
 } = require("./backupProgressService");
 
-const BASE_DIR =
-  process.env.NODE_ENV === "production"
-    ? "/tmp"
-    : path.join(os.homedir(), "Documents", "SmartKhata");
-
-const BACKUP_DIR = path.join(BASE_DIR, "Backups");
-const TEMP_DIR = path.join(BACKUP_DIR, "temp");
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 
 const SOFTWARE_VERSION = "2.0";
@@ -42,13 +36,13 @@ const COLLECTION_CONFIG = {
    Ensure directories
 ========================================================= */
 
-function ensureDirectories() {
+function ensureDirectories(tempDir) {
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR);
   }
 
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
   }
 }
 
@@ -56,7 +50,7 @@ function ensureDirectories() {
    Export USER DATA only
 ========================================================= */
 
-async function exportUserDatabase(userId) {
+async function exportUserDatabase(userId, tempDir) {
   if (mongoose.connection.readyState !== 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -73,7 +67,7 @@ async function exportUserDatabase(userId) {
 
       dump[collectionName] = docs;
 
-      const filePath = path.join(TEMP_DIR, `${collectionName}.json`);
+      const filePath = path.join(tempDir, `${collectionName}.json`);
 
       fs.writeFileSync(filePath, JSON.stringify(docs, null, 2));
     } catch (err) {}
@@ -86,7 +80,7 @@ async function exportUserDatabase(userId) {
    Create meta.json
 ========================================================= */
 
-function createMeta(userId) {
+function createMeta(userId, tempDir) {
   const meta = {
     software: "SmartKhata",
     version: SOFTWARE_VERSION,
@@ -95,7 +89,7 @@ function createMeta(userId) {
     database: mongoose.connection.name,
   };
 
-  const metaFile = path.join(TEMP_DIR, "meta.json");
+  const metaFile = path.join(tempDir, "meta.json");
 
   fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
 }
@@ -104,7 +98,7 @@ function createMeta(userId) {
    Create ZIP
 ========================================================= */
 
-function createZip(userId) {
+function createZip(userId, tempDir) {
   const backupFile = path.join(
     BACKUP_DIR,
     `smartkhata-backup-${userId}-${Date.now()}.zip`,
@@ -128,10 +122,10 @@ function createZip(userId) {
     archive.pipe(output);
 
     /* add json files */
-    const files = fs.readdirSync(TEMP_DIR);
+    const files = fs.readdirSync(tempDir);
 
     files.forEach((file) => {
-      archive.file(path.join(TEMP_DIR, file), { name: file });
+      archive.file(path.join(tempDir, file), { name: file });
     });
 
     /* uploads */
@@ -146,11 +140,10 @@ function createZip(userId) {
 /* =========================================================
    Clean temp
 ========================================================= */
+function cleanTemp(tempDir) {
+  if (!fs.existsSync(tempDir)) return;
 
-function cleanTemp() {
-  if (!fs.existsSync(TEMP_DIR)) return;
-
-  fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
 /* =========================================================
@@ -192,29 +185,33 @@ async function createBackup(userId, options = {}) {
     // 🚀 INIT
     initProgress(userId, "backup");
 
-    ensureDirectories();
+    const operationId = `backup-${userId}-${Date.now()}`;
+
+    const tempDir = getTempDir(operationId);
+
+    ensureDirectories(tempDir);
     updateProgress(userId, 10, "Preparing backup...");
 
     // 📦 Export data
-    await exportUserDatabase(userId);
+    await exportUserDatabase(userId, tempDir);
     updateProgress(userId, 40, "Exporting data...");
 
     // 🧾 Meta
-    createMeta(userId);
+    createMeta(userId, tempDir);
     updateProgress(userId, 55, "Creating metadata...");
 
     // 🗜️ Zip
-    const backupFile = await createZip(userId);
+    const backupFile = await createZip(userId, tempDir);
     updateProgress(userId, 75, "Compressing files...");
 
     // ☁️ Upload
     if (!options.skipCloudUpload) {
-      await uploadToCloud(backupFile);
+      await uploadToCloud(backupFile, userId);
       updateProgress(userId, 90, "Uploading to cloud...");
     }
 
     // 🧹 Clean
-    cleanTemp();
+    cleanTemp(tempDir);
     deleteOldBackups(userId, 5);
 
     // ✅ Done

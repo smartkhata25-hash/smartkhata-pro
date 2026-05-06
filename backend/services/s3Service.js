@@ -9,17 +9,20 @@ const s3 = new S3Client({
   },
 });
 
-const uploadFileToR2 = async (fileBuffer, fileName) => {
+const uploadFileToR2 = async (fileBuffer, fileName, userId) => {
+  const key = `users/${userId}/${fileName}`;
+
   const params = {
     Bucket: process.env.R2_BUCKET,
-    Key: fileName,
+    Key: key,
     Body: fileBuffer,
   };
 
   const command = new PutObjectCommand(params);
+
   await s3.send(command);
 
-  return fileName;
+  return key;
 };
 
 module.exports = { uploadFileToR2 };

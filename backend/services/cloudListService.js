@@ -16,17 +16,18 @@ const s3 = new S3Client({
   },
 });
 
-async function getCloudBackupList() {
+async function getCloudBackupList(userId) {
   try {
     const command = new ListObjectsV2Command({
       Bucket: process.env.R2_BUCKET,
+      Prefix: `users/${userId}/`,
     });
 
     const response = await s3.send(command);
 
     const files =
       response.Contents?.map((item) => ({
-        name: item.Key,
+        name: path.basename(item.Key),
         size: item.Size,
         lastModified: item.LastModified,
       }))
@@ -47,10 +48,11 @@ async function getCloudBackupList() {
   }
 }
 
-async function deleteOldCloudBackups(limit = 5) {
+async function deleteOldCloudBackups(userId, limit = 5) {
   try {
     const command = new ListObjectsV2Command({
       Bucket: process.env.R2_BUCKET,
+      Prefix: `users/${userId}/`,
     });
 
     const response = await s3.send(command);
@@ -80,16 +82,16 @@ async function deleteOldCloudBackups(limit = 5) {
   }
 }
 
-async function downloadBackupFromCloud(fileName) {
+async function downloadBackupFromCloud(userId, fileName) {
   try {
     const command = new GetObjectCommand({
       Bucket: process.env.R2_BUCKET,
-      Key: fileName,
+      Key: `users/${userId}/${fileName}`,
     });
 
     const response = await s3.send(command);
 
-    const filePath = path.join("/tmp", fileName);
+    const filePath = path.join("/tmp", `${Date.now()}-${fileName}`);
 
     const buffer = await response.Body.transformToByteArray();
     fs.writeFileSync(filePath, Buffer.from(buffer));

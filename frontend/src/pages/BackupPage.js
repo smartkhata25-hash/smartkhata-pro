@@ -4,23 +4,21 @@ import {
   restoreBackup,
   getBackupStatus,
   downloadBackup,
-  createLocalBackup,
   restoreLocalBackup,
-  getBackupReminder,
   getCloudBackupList,
 } from '../services/backupService';
 import { getBackupProgress } from '../services/backupService';
 
 import BackupInfoCard from '../components/BackupInfoCard';
 import { t } from '../i18n/i18n';
-import BackupModal from '../components/BackupModal';
+
 import Toast from '../components/Toast';
 
 const BackupPage = () => {
   const [backupInfo, setBackupInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState('online');
-  const [showReminder, setShowReminder] = useState(false);
+
   const [toast, setToast] = useState({ message: '', type: '' });
   const [cloudBackups, setCloudBackups] = useState([]);
   const [progress, setProgress] = useState(0);
@@ -41,7 +39,7 @@ const BackupPage = () => {
 
   useEffect(() => {
     fetchBackupStatus();
-    checkReminder();
+
     loadCloudBackups();
 
     const savedMode = localStorage.getItem('mode');
@@ -62,6 +60,7 @@ const BackupPage = () => {
      Create Backup
   ========================================== */
   const handleCreateBackup = async () => {
+    if (loading) return;
     if (mode === 'offline') {
       alert('Offline mode میں cloud backup available نہیں ہے');
       return;
@@ -69,11 +68,16 @@ const BackupPage = () => {
     try {
       setLoading(true);
 
+      setProgressStatus('running');
+      setProgress(0);
+      setProgressMsg('Starting backup...');
+
       await createBackup();
 
       setToast({ message: 'Backup created successfully', type: 'success' });
 
       fetchBackupStatus();
+      loadCloudBackups();
     } catch (err) {
       setToast({ message: err.message, type: 'error' });
     } finally {
@@ -105,6 +109,7 @@ const BackupPage = () => {
      Restore Backup
   ========================================== */
   const handleRestoreBackup = async (fileName = null) => {
+    if (loading) return;
     if (mode === 'offline') {
       alert('Offline mode میں cloud restore available نہیں ہے');
       return;
@@ -132,27 +137,10 @@ const BackupPage = () => {
   };
 
   /* ==========================================
-   Local Backup
-========================================== */
-  const handleLocalBackup = async () => {
-    try {
-      setLoading(true);
-
-      await createLocalBackup();
-
-      setToast({ message: 'Backup saved in Documents/SmartKhata/Backups', type: 'success' });
-
-      setLoading(false);
-    } catch (err) {
-      setToast({ message: err.message, type: 'error' });
-      setLoading(false);
-    }
-  };
-
-  /* ==========================================
    Restore from File
 ========================================== */
   const handleLocalRestore = async () => {
+    if (loading) return;
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = '.zip';
@@ -169,6 +157,10 @@ const BackupPage = () => {
       try {
         setLoading(true);
 
+        setProgressStatus('running');
+        setProgress(0);
+        setProgressMsg('Starting restore...');
+
         await restoreLocalBackup(file);
 
         setToast({ message: 'Backup restored successfully', type: 'success' });
@@ -181,21 +173,6 @@ const BackupPage = () => {
     };
 
     fileInput.click();
-  };
-
-  /* ==========================================
-   Backup Reminder
-========================================== */
-  const checkReminder = async () => {
-    try {
-      const res = await getBackupReminder();
-
-      if (res.remind) {
-        setShowReminder(true);
-      }
-    } catch (err) {
-      console.log(err);
-    }
   };
 
   const loadCloudBackups = async () => {
@@ -224,6 +201,8 @@ const BackupPage = () => {
 
             if (res.data.status === 'completed' || res.data.status === 'failed') {
               clearInterval(interval);
+
+              setLoading(false);
             }
           }
         } catch (err) {
@@ -267,13 +246,6 @@ const BackupPage = () => {
           className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow"
         >
           {t('backup.restore')}
-        </button>
-        <button
-          onClick={handleLocalBackup}
-          disabled={loading}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded shadow"
-        >
-          Save to Computer
         </button>
 
         <button
@@ -321,16 +293,7 @@ const BackupPage = () => {
           ))
         )}
       </div>
-      <BackupModal
-        show={showReminder}
-        title="Backup Reminder"
-        message="آپ نے آج backup نہیں لیا، ابھی لے لیں؟"
-        onConfirm={() => {
-          setShowReminder(false);
-          handleLocalBackup();
-        }}
-        onCancel={() => setShowReminder(false)}
-      />
+
       <Toast message={toast.message} type={toast.type} />
     </div>
   );

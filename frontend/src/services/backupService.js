@@ -107,48 +107,28 @@ export const downloadBackup = async () => {
 };
 
 /* =====================================================
-   LOCAL BACKUP
-===================================================== */
-
-export const createLocalBackup = async () => {
-  try {
-    const res = await axios.post(`${API}/local/create`, {}, getAuthHeader());
-    return res.data;
-  } catch (error) {
-    console.error('Local Backup Error:', error);
-
-    throw new Error(error?.response?.data?.message || 'Failed to create local backup');
-  }
-};
-
-/* =====================================================
    LOCAL RESTORE
 ===================================================== */
 
-export const restoreLocalBackup = async (filePath) => {
+export const restoreLocalBackup = async (file) => {
   try {
-    const res = await axios.post(`${API}/local/restore`, { filePath }, getAuthHeader());
+    const formData = new FormData();
+
+    formData.append('backup', file);
+
+    const res = await axios.post(`${API}/local/restore`, formData, {
+      ...getAuthHeader(),
+      headers: {
+        ...getAuthHeader().headers,
+        'Content-Type': 'multipart/form-data',
+      },
+    });
 
     return res.data;
   } catch (error) {
     console.error('Local Restore Error:', error);
 
     throw new Error(error?.response?.data?.message || 'Failed to restore local backup');
-  }
-};
-
-/* =====================================================
-   BACKUP REMINDER
-===================================================== */
-
-export const getBackupReminder = async () => {
-  try {
-    const res = await axios.get(`${API}/reminder`, getAuthHeader());
-    return res.data;
-  } catch (error) {
-    console.error('Reminder Error:', error);
-
-    throw new Error('Failed to check reminder');
   }
 };
 
@@ -163,9 +143,7 @@ export const getCloudBackupList = async () => {
 };
 
 export const getBackupProgress = async () => {
-  const res = await fetch('/api/backup/progress', {
-    credentials: 'include',
-  });
+  const res = await axios.get(`${API}/progress`, getAuthHeader());
 
-  return res.json();
+  return res.data;
 };

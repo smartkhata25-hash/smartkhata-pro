@@ -2,15 +2,14 @@ const express = require("express");
 const router = express.Router();
 
 const protect = require("../middleware/authMiddleware");
+const uploadBackup = require("../middleware/backupUploadMiddleware");
 
 const {
   createBackupController,
   restoreBackupController,
   getBackupStatusController,
   downloadBackupController,
-  createLocalBackupController,
   restoreLocalBackupController,
-  getBackupReminderController,
   getCloudBackupListController,
   getBackupProgressController,
 } = require("../controllers/backupController");
@@ -23,11 +22,12 @@ router.get("/download", protect, downloadBackupController);
 
 router.post("/restore", protect, restoreBackupController);
 
-router.post("/local/create", protect, createLocalBackupController);
-
-router.post("/local/restore", protect, restoreLocalBackupController);
-
-router.get("/reminder", protect, getBackupReminderController);
+router.post(
+  "/local/restore",
+  protect,
+  uploadBackup.single("backup"),
+  restoreLocalBackupController,
+);
 
 router.get("/cloud-list", protect, getCloudBackupListController);
 

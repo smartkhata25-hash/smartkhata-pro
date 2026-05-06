@@ -2,7 +2,10 @@ const fs = require("fs");
 const path = require("path");
 
 const { restoreBackup } = require("../restoreService");
+
 const unzipper = require("unzipper");
+
+const { BACKUP_DIR } = require("../../config/backupPaths");
 
 /* =====================================================
    RESTORE FROM LOCAL FILE
@@ -17,7 +20,10 @@ async function restoreFromLocalBackup(userId, filePath) {
       };
     }
 
-    // ❗ STEP 1: ZIP validation
+    /* =====================================================
+       ZIP VALIDATION
+    ===================================================== */
+
     let isValidBackup = false;
 
     await fs
@@ -27,6 +33,7 @@ async function restoreFromLocalBackup(userId, filePath) {
         if (entry.path === "meta.json") {
           isValidBackup = true;
         }
+
         entry.autodrain();
       })
       .promise();
@@ -38,16 +45,20 @@ async function restoreFromLocalBackup(userId, filePath) {
       };
     }
 
-    // ❗ STEP 2: temp میں copy کریں
-    const tempPath = path.join(
-      __dirname,
-      "../../backups",
-      path.basename(filePath),
-    );
+    /* =====================================================
+       COPY TO BACKUP DIRECTORY
+    ===================================================== */
+
+    const uniqueName = `smartkhata-backup-${userId}-${Date.now()}.zip`;
+
+    const tempPath = path.join(BACKUP_DIR, uniqueName);
 
     fs.copyFileSync(filePath, tempPath);
 
-    // ❗ STEP 3: restore call
+    /* =====================================================
+       RESTORE CALL
+    ===================================================== */
+
     const result = await restoreBackup(userId);
 
     return result;

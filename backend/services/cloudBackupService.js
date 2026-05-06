@@ -4,7 +4,7 @@ const { deleteOldCloudBackups } = require("./cloudListService");
 
 let lastUploadedFile = null;
 
-async function uploadToCloud(filePath) {
+async function uploadToCloud(filePath, userId) {
   try {
     if (lastUploadedFile === filePath) {
       console.log("⚠️ Backup already uploaded, skipping...");
@@ -15,13 +15,13 @@ async function uploadToCloud(filePath) {
 
     console.log("☁️ Uploading backup to R2...", fileName);
 
-    const fs = require("fs"); // ✅ ADD
+    const fs = require("fs");
     const fileBuffer = fs.readFileSync(filePath);
 
-    await uploadFileToR2(fileBuffer, fileName);
+    await uploadFileToR2(fileBuffer, fileName, userId);
 
     console.log("✅ Backup uploaded to R2");
-    await deleteOldCloudBackups(5);
+    await deleteOldCloudBackups(userId, 5);
 
     lastUploadedFile = filePath;
   } catch (error) {

@@ -3,19 +3,16 @@ const fs = require("fs");
 
 const { createBackup, getBackupStatus } = require("../services/backupService");
 const { restoreBackup } = require("../services/restoreService");
-const {
-  createLocalBackup,
-} = require("../services/localBackup/localBackupService");
+
 const {
   restoreFromLocalBackup,
 } = require("../services/localBackup/localRestoreService");
-const {
-  shouldShowBackupReminder,
-} = require("../services/localBackup/backupReminderService");
-const { getCloudBackupList } = require("../services/cloudListService");
-const { getProgress } = require("../services/backupProgressService");
 
-const BACKUP_DIR = path.join(__dirname, "../backups");
+const {
+  getCloudBackupList,
+  downloadBackupFromCloud,
+} = require("../services/cloudListService");
+const { getProgress, isRunning } = require("../services/backupProgressService");
 
 // CREATE BACKUP
 
@@ -29,7 +26,12 @@ exports.createBackupController = async (req, res) => {
         message: "User not authenticated",
       });
     }
-
+    if (isRunning(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Another backup/restore already running",
+      });
+    }
     const result = await createBackup(userId);
 
     if (!result.success) {
@@ -71,6 +73,12 @@ exports.restoreBackupController = async (req, res) => {
 
     const { fileName } = req.body;
 
+    if (isRunning(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Another backup/restore already running",
+      });
+    }
     const result = await restoreBackup(userId, fileName);
     if (!result.success) {
       return res.status(500).json({
@@ -119,42 +127,42 @@ exports.getBackupStatusController = (req, res) => {
    DOWNLOAD LATEST BACKUP
 ====================================================== */
 
-exports.downloadBackupController = (req, res) => {
+exports.downloadBackupController = async (req, res) => {
   try {
-    if (!fs.existsSync(BACKUP_DIR)) {
+    const userId = req.user?.id || req.userId;
+    const result = await getCloudBackupList(userId);
+
+    if (!result.success || !result.files.length) {
       return res.status(404).json({
         success: false,
-        message: "No backups found",
+        message: "No cloud backups found",
       });
     }
 
-    const files = fs
-      .readdirSync(BACKUP_DIR)
-      .filter((f) => f.endsWith(".zip"))
-      .map((file) => {
-        const filePath = path.join(BACKUP_DIR, file);
-        const stats = fs.statSync(filePath);
+    // latest backup
+    const latestBackup = result.files[0];
 
-        return {
-          file,
-          path: filePath,
-          created: stats.mtime,
-        };
-      })
-      .sort((a, b) => new Date(b.created) - new Date(a.created));
+    const downloaded = await downloadBackupFromCloud(userId, latestBackup.name);
 
-    if (files.length === 0) {
-      return res.status(404).json({
+    if (!downloaded.success) {
+      return res.status(500).json({
         success: false,
-        message: "Backup file not found",
+        message: "Failed to download backup from cloud",
       });
     }
 
-    const latestBackup = files[0];
-
-    res.download(latestBackup.path, latestBackup.file, (err) => {
+    return res.download(downloaded.path, latestBackup.name, (err) => {
       if (err) {
-        console.error("Download error:", err);
+        console.error("❌ Download error:", err);
+      }
+
+      // cleanup temp file after download
+      try {
+        if (fs.existsSync(downloaded.path)) {
+          fs.unlinkSync(downloaded.path);
+        }
+      } catch (cleanupError) {
+        console.error("❌ Cleanup error:", cleanupError);
       }
     });
   } catch (error) {
@@ -168,45 +176,6 @@ exports.downloadBackupController = (req, res) => {
 };
 
 /* ======================================================
-   CREATE LOCAL BACKUP
-====================================================== */
-
-exports.createLocalBackupController = async (req, res) => {
-  try {
-    const userId = req.user?.id || req.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "User not authenticated",
-      });
-    }
-
-    const result = await createLocalBackup(userId);
-
-    if (!result.success) {
-      return res.status(500).json({
-        success: false,
-        message: result.message,
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: "Local backup created",
-      path: result.path,
-    });
-  } catch (error) {
-    console.error("❌ Local Backup Controller Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Local backup failed",
-    });
-  }
-};
-
-/* ======================================================
    RESTORE FROM LOCAL FILE
 ====================================================== */
 
@@ -214,7 +183,7 @@ exports.restoreLocalBackupController = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const { filePath } = req.body;
+    const filePath = req.file?.path;
 
     if (!userId) {
       return res.status(401).json({
@@ -226,10 +195,16 @@ exports.restoreLocalBackupController = async (req, res) => {
     if (!filePath) {
       return res.status(400).json({
         success: false,
-        message: "File path is required",
+        message: "Backup ZIP file is required",
       });
     }
 
+    if (isRunning(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Another backup/restore already running",
+      });
+    }
     const result = await restoreFromLocalBackup(userId, filePath);
 
     if (!result.success) {
@@ -239,12 +214,30 @@ exports.restoreLocalBackupController = async (req, res) => {
       });
     }
 
+    // cleanup uploaded ZIP after successful restore
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (cleanupError) {
+      console.error("❌ Uploaded ZIP cleanup failed:", cleanupError);
+    }
+
     return res.json({
       success: true,
-      message: "Local backup restored successfully",
+      message: "Backup restored successfully",
     });
   } catch (error) {
     console.error("❌ Local Restore Controller Error:", error);
+
+    // cleanup uploaded ZIP if restore failed
+    try {
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+    } catch (cleanupError) {
+      console.error("❌ Failed ZIP cleanup:", cleanupError);
+    }
 
     return res.status(500).json({
       success: false,
@@ -253,30 +246,10 @@ exports.restoreLocalBackupController = async (req, res) => {
   }
 };
 
-/* ======================================================
-   BACKUP REMINDER STATUS
-====================================================== */
-exports.getBackupReminderController = async (req, res) => {
-  try {
-    const shouldRemind = await shouldShowBackupReminder();
-
-    return res.json({
-      success: true,
-      remind: shouldRemind,
-    });
-  } catch (error) {
-    console.error("❌ Reminder Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Reminder check failed",
-    });
-  }
-};
-
 exports.getCloudBackupListController = async (req, res) => {
   try {
-    const result = await getCloudBackupList();
+    const userId = req.user?.id || req.userId;
+    const result = await getCloudBackupList(userId);
 
     if (!result.success) {
       return res.status(500).json({

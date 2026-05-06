@@ -6,24 +6,41 @@ let browserInstance = null;
  * Launch browser once
  */
 const getBrowser = async () => {
-  if (!browserInstance) {
-    console.log("🚀 Launching Puppeteer Browser...");
+  try {
+    console.log("🟡 getBrowser() called");
 
-    browserInstance = await puppeteer.launch({
-      headless: true,
+    if (!browserInstance) {
+      console.log("🚀 Launching Puppeteer Browser...");
 
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--single-process",
-      ],
+      console.log("🔥 BEFORE BROWSER LAUNCH");
+
+      browserInstance = await puppeteer.launch({
+        headless: true,
+
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--single-process",
+        ],
+      });
+
+      console.log("🔥 AFTER BROWSER LAUNCH");
+
+      console.log("✅ Puppeteer Browser Started");
+    } else {
+      console.log("♻️ Reusing existing browser instance");
+    }
+
+    return browserInstance;
+  } catch (error) {
+    console.error("❌ BROWSER LAUNCH ERROR FULL:", {
+      message: error.message,
+      stack: error.stack,
     });
 
-    console.log("✅ Puppeteer Browser Started");
+    throw error;
   }
-
-  return browserInstance;
 };
 
 /**
@@ -34,9 +51,17 @@ const generatePdfFromHtml = async (html) => {
 
   console.log("📏 HTML Length:", html?.length);
 
+  console.log("🟡 Calling getBrowser()...");
+
   const browser = await getBrowser();
 
+  console.log("✅ Browser object received");
+
+  console.log("🟡 Creating new page...");
+
   const page = await browser.newPage();
+
+  console.log("✅ New page created");
 
   try {
     console.log("📄 Setting HTML...");
@@ -46,6 +71,14 @@ const generatePdfFromHtml = async (html) => {
     });
 
     console.log("✅ HTML loaded");
+
+    console.log("🟡 Emulating screen media...");
+
+    await page.emulateMediaType("screen");
+
+    console.log("✅ Screen media emulated");
+
+    console.log("🟡 Generating PDF buffer...");
 
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -59,30 +92,53 @@ const generatePdfFromHtml = async (html) => {
 
     console.log("📏 Buffer Length:", pdfBuffer?.length);
 
+    console.log("🟡 Closing page...");
+
     await page.close();
+
+    console.log("✅ Page closed");
 
     return pdfBuffer;
   } catch (error) {
-    console.error("❌ PDF SERVICE ERROR:", {
+    console.error("❌ PDF SERVICE ERROR FULL:", {
       message: error.message,
       stack: error.stack,
     });
 
     try {
+      console.log("🟡 Attempting page close after error...");
+
       await page.close();
-    } catch (_) {}
+
+      console.log("✅ Page closed after error");
+    } catch (closeError) {
+      console.error("❌ PAGE CLOSE ERROR:", closeError);
+    }
 
     throw error;
   }
 };
 
 const closeBrowser = async () => {
-  if (browserInstance) {
-    console.log("🛑 Closing browser...");
+  try {
+    console.log("🟡 closeBrowser() called");
 
-    await browserInstance.close();
+    if (browserInstance) {
+      console.log("🛑 Closing browser...");
 
-    browserInstance = null;
+      await browserInstance.close();
+
+      console.log("✅ Browser closed");
+
+      browserInstance = null;
+    } else {
+      console.log("ℹ️ No browser instance to close");
+    }
+  } catch (error) {
+    console.error("❌ CLOSE BROWSER ERROR:", {
+      message: error.message,
+      stack: error.stack,
+    });
   }
 };
 

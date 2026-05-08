@@ -28,6 +28,7 @@ const CustomerLedgerHeader = ({
   setCustomerName,
   showSuggestions,
   setShowSuggestions,
+  printSize,
 }) => {
   const [showShareModal, setShowShareModal] = React.useState(false);
   return (
@@ -125,7 +126,41 @@ const CustomerLedgerHeader = ({
             <button
               className="btn btn-primary"
               style={{ height: 32, padding: '0 6px', fontSize: 11 }}
-              onClick={print}
+              onClick={async () => {
+                if (!cid) return;
+
+                const token = localStorage.getItem('token');
+
+                const query = new URLSearchParams({
+                  startDate: start || '',
+                  endDate: end || '',
+                  size: printSize || 'A5',
+                }).toString();
+
+                try {
+                  const response = await fetch(
+                    `${API}/api/print/customer-ledger/${cid}/html?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const html = await response.text();
+
+                  const newWindow = window.open('', '_blank');
+
+                  newWindow.document.write(html);
+                  newWindow.document.close();
+
+                  newWindow.onload = function () {
+                    newWindow.print();
+                  };
+                } catch (error) {
+                  alert('Print failed');
+                }
+              }}
             >
               🖨️
             </button>
@@ -135,13 +170,44 @@ const CustomerLedgerHeader = ({
               className="btn btn-primary"
               style={{ height: 32, padding: '0 6px', fontSize: 11 }}
               disabled={!cid}
-              onClick={() => {
+              onClick={async () => {
                 if (!cid) return;
+
+                const token = localStorage.getItem('token');
+
                 const query = new URLSearchParams({
                   startDate: start || '',
                   endDate: end || '',
+                  size: printSize || 'A5',
                 }).toString();
-                window.open(`${API}/api/print/customer-ledger/${cid}/pdf?${query}`, '_blank');
+
+                try {
+                  const response = await fetch(
+                    `${API}/api/print/customer-ledger/${cid}/pdf?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+
+                  const link = document.createElement('a');
+
+                  const selectedCustomer = customers.find((c) => c._id === cid);
+                  const customerName = selectedCustomer?.name || 'Customer';
+
+                  link.href = url;
+                  link.download = `${customerName.replace(/\s+/g, '-')}-Ledger.pdf`;
+
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch (error) {
+                  alert('PDF generate failed');
+                }
               }}
             >
               PDF
@@ -261,10 +327,19 @@ const CustomerLedgerHeader = ({
               }}
               onClick={() => {
                 const currentYear = new Date().getFullYear();
+
+                const startDate = `${currentYear}-01-01`;
+                const endDate = `${currentYear}-12-31`;
+
                 setSearch('');
-                setStart(`${currentYear}-01-01`);
-                setEnd(`${currentYear}-12-31`);
-                load(cid, `${currentYear}-01-01`, `${currentYear}-12-31`);
+                setStart(startDate);
+                setEnd(endDate);
+
+                localStorage.removeItem('app_state_customers_page_state');
+
+                if (cid) {
+                  load(cid, startDate, endDate);
+                }
               }}
             >
               ✖
@@ -283,7 +358,45 @@ const CustomerLedgerHeader = ({
               flex: 1,
             }}
           >
-            <button className="btn btn-primary" style={{ height: 36 }} onClick={print}>
+            <button
+              className="btn btn-primary"
+              style={{ height: 36 }}
+              onClick={async () => {
+                if (!cid) return;
+
+                const token = localStorage.getItem('token');
+
+                const query = new URLSearchParams({
+                  startDate: start || '',
+                  endDate: end || '',
+                  size: printSize || 'A5',
+                }).toString();
+
+                try {
+                  const response = await fetch(
+                    `${API}/api/print/customer-ledger/${cid}/html?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const html = await response.text();
+
+                  const newWindow = window.open('', '_blank');
+
+                  newWindow.document.write(html);
+                  newWindow.document.close();
+
+                  newWindow.onload = function () {
+                    newWindow.print();
+                  };
+                } catch (error) {
+                  alert('Print failed');
+                }
+              }}
+            >
               {t('print')}
             </button>
 
@@ -291,13 +404,44 @@ const CustomerLedgerHeader = ({
               className="btn btn-primary"
               style={{ height: 36 }}
               disabled={!cid}
-              onClick={() => {
+              onClick={async () => {
                 if (!cid) return;
+
+                const token = localStorage.getItem('token');
+
                 const query = new URLSearchParams({
                   startDate: start || '',
                   endDate: end || '',
+                  size: printSize || 'A5',
                 }).toString();
-                window.open(`/api/print/customer-ledger/${cid}/pdf?${query}`, '_blank');
+
+                try {
+                  const response = await fetch(
+                    `${API}/api/print/customer-ledger/${cid}/pdf?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+
+                  const link = document.createElement('a');
+
+                  const selectedCustomer = customers.find((c) => c._id === cid);
+                  const customerName = selectedCustomer?.name || 'Customer';
+
+                  link.href = url;
+                  link.download = `${customerName.replace(/\s+/g, '-')}-Ledger.pdf`;
+
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch (error) {
+                  alert('PDF generate failed');
+                }
               }}
             >
               {t('pdf')}
@@ -385,10 +529,19 @@ const CustomerLedgerHeader = ({
               }}
               onClick={() => {
                 const currentYear = new Date().getFullYear();
+
+                const startDate = `${currentYear}-01-01`;
+                const endDate = `${currentYear}-12-31`;
+
                 setSearch('');
-                setStart(`${currentYear}-01-01`);
-                setEnd(`${currentYear}-12-31`);
-                load(cid, `${currentYear}-01-01`, `${currentYear}-12-31`);
+                setStart(startDate);
+                setEnd(endDate);
+
+                localStorage.removeItem('app_state_customers_page_state');
+
+                if (cid) {
+                  load(cid, startDate, endDate);
+                }
               }}
             >
               {t('common.clear')}

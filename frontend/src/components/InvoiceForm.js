@@ -202,107 +202,9 @@ const InvoiceForm = ({
 
   const [paymentType, setPaymentType] = useState('credit');
   const [selectedAccountId, setSelectedAccountId] = useState('');
-  const [formState, setFormState] = useState({
-    customerName,
-    customerPhone,
-    items,
-    discountPercent,
-    discountAmount,
-    paidAmount,
-    paymentType,
-    selectedAccountId,
-  });
+
   const [accounts, setAccounts] = useState([]);
-  const persistKey = 'sales_invoice';
-  const handleClear = () => {
-    console.log('🧹 CLEAR START');
 
-    localStorage.removeItem('app_state_sales_invoice');
-
-    isHydrated.current = false;
-
-    const defaultItems = Array.from({ length: 20 }, () => blankRow());
-
-    setFormState({
-      customerName: '',
-      customerPhone: '',
-      items: defaultItems,
-      discountPercent: 0,
-      discountAmount: 0,
-      paidAmount: 0,
-      paymentType: 'cash',
-      selectedAccountId: '',
-    });
-
-    setCustomerName('');
-    setCustomerPhone('');
-    setItems(defaultItems);
-    setDiscountPercent(0);
-    setDiscountAmount(0);
-    setPaidAmount(0);
-    setPaymentType('cash');
-    setSelectedAccountId('');
-
-    setTimeout(() => {
-      customerInputRef.current?.focus();
-    }, 0);
-
-    setTimeout(() => {
-      isHydrated.current = true;
-    }, 100);
-
-    console.log('✅ CLEAR DONE');
-  };
-  const isHydrated = useRef(false);
-
-  useEffect(() => {
-    if (!isHydrated.current) return;
-
-    const newState = {
-      customerName,
-      customerPhone,
-      items,
-      discountPercent,
-      discountAmount,
-      paidAmount,
-      paymentType,
-      selectedAccountId,
-    };
-
-    setFormState((prev) => {
-      if (JSON.stringify(prev) === JSON.stringify(newState)) {
-        return prev;
-      }
-      return newState;
-    });
-  }, [
-    customerName,
-    customerPhone,
-    items,
-    discountPercent,
-    discountAmount,
-    paidAmount,
-    paymentType,
-    selectedAccountId,
-  ]);
-
-  useFormPersist(persistKey, formState, setFormState);
-
-  useEffect(() => {
-    if (!formState || isHydrated.current) return;
-
-    if (formState.customerName !== undefined) setCustomerName(formState.customerName);
-    if (formState.customerPhone !== undefined) setCustomerPhone(formState.customerPhone);
-    if (formState.items !== undefined) setItems(formState.items);
-    if (formState.discountPercent !== undefined) setDiscountPercent(formState.discountPercent);
-    if (formState.discountAmount !== undefined) setDiscountAmount(formState.discountAmount);
-    if (formState.paidAmount !== undefined) setPaidAmount(formState.paidAmount);
-    if (formState.paymentType !== undefined) setPaymentType(formState.paymentType);
-    if (formState.selectedAccountId !== undefined)
-      setSelectedAccountId(formState.selectedAccountId);
-
-    isHydrated.current = true;
-  }, [formState]);
   useEffect(() => {
     if (paidAmount > 0 && paymentType === 'credit') {
       setPaymentType('cash');
@@ -640,11 +542,98 @@ const InvoiceForm = ({
   const handleFileChange = (e) => {
     setAttachment(e.target.files[0]);
   };
+  const formState = {
+    billNo,
+    customerName,
+    customerPhone,
+    invoiceDate,
+    invoiceTime,
+    items,
+    discountPercent,
+    discountAmount,
+    paidAmount,
+    paymentType,
+    selectedAccountId,
+    by,
+  };
+
+  useEffect(() => {
+    if (editingInvoiceFromAPI) return;
+
+    const saved = localStorage.getItem('app_state_sale_invoice_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+      setBillNo(data.billNo || 'Auto');
+      setCustomerName(data.customerName || '');
+      setCustomerPhone(data.customerPhone || '');
+
+      const safeDate =
+        data.invoiceDate && !isNaN(new Date(data.invoiceDate))
+          ? data.invoiceDate
+          : new Date().toISOString().split('T')[0];
+
+      setInvoiceDate(safeDate);
+      setInvoiceTime(data.invoiceTime || '');
+
+      setItems(data.items?.length ? data.items : Array.from({ length: 20 }, () => blankRow()));
+
+      setDiscountPercent(data.discountPercent || 0);
+      setDiscountAmount(data.discountAmount || 0);
+
+      setPaidAmount(data.paidAmount || 0);
+
+      setPaymentType(data.paymentType || 'credit');
+
+      setSelectedAccountId(data.selectedAccountId || '');
+
+      setBy(data.by || '');
+    } catch (err) {
+      console.error(err);
+    }
+  }, [editingInvoiceFromAPI]);
+
+  useFormPersist('sale_invoice_draft', formState, () => {});
+
+  const handleClear = () => {
+    localStorage.removeItem('app_state_sale_invoice_draft');
+
+    setCustomerName('');
+    setCustomerPhone('');
+    setItems(Array.from({ length: 20 }, () => blankRow()));
+    setDiscountPercent(0);
+    setDiscountAmount(0);
+    setPaidAmount(0);
+    setPaymentType('credit');
+    setSelectedAccountId('');
+    setBy('');
+    const now = new Date();
+
+    setInvoiceDate(now.toISOString().split('T')[0]);
+    setInvoiceTime(now.toTimeString().slice(0, 5));
+    setAttachment(null);
+    setShowPreview(false);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
   const handleSubmit = async (e, mode = 'close') => {
     e.preventDefault();
 
     if (!customerName.trim()) {
       alert(t('alerts.customerRequired'));
+      return;
+    }
+
+    if (!invoiceDate || isNaN(new Date(invoiceDate))) {
+      alert('Invalid invoice date');
       return;
     }
 
@@ -730,7 +719,8 @@ const InvoiceForm = ({
       if (onSuccess) {
         await onSuccess();
       }
-      localStorage.removeItem('app_state_sales_invoice');
+
+      localStorage.removeItem('app_state_sale_invoice_draft');
 
       if (mode === 'new' && !editingInvoice) {
         const now = new Date();
@@ -743,17 +733,30 @@ const InvoiceForm = ({
         setItems(Array.from({ length: 20 }, () => blankRow()));
 
         setCustomerName('');
+
         setTimeout(() => {
           customerInputRef.current?.focus();
         }, 0);
+
         setCustomerPhone('');
         setBy('');
+
         setDiscountPercent(0);
         setDiscountAmount(0);
+
         setPaidAmount(0);
+
+        setPaymentType('credit');
+        setSelectedAccountId('');
+
         setAttachment(null);
         setShowPreview(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+
+        localStorage.removeItem('app_state_sale_invoice_draft');
+
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
       } else {
         navigate('/dashboard');
       }

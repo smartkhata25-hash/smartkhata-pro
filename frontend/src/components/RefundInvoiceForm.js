@@ -11,6 +11,7 @@ import {
   resetPrintSettings,
 } from '../services/printSettingService';
 import ProductDropdown from './ProductDropdown';
+import useFormPersist from '../hooks/useFormPersist';
 import { t } from '../i18n/i18n';
 const API = process.env.REACT_APP_API_BASE_URL;
 
@@ -217,6 +218,7 @@ const RefundInvoiceForm = ({
 
     setNotes('');
     setAccountId('');
+    localStorage.removeItem('app_state_refund_invoice_draft');
   };
 
   const handleRevert = async () => {
@@ -236,6 +238,67 @@ const RefundInvoiceForm = ({
   };
 
   const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
+
+  const formState = {
+    items,
+    billNo,
+    invoiceDate,
+    invoiceTime,
+    customerName,
+    customerPhone,
+    notes,
+    refundMethod,
+    accountId,
+    customerId,
+    paymentType,
+    originalInvoiceId,
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_refund_invoice_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+
+      const loadedItems = data.items || [];
+
+      const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
+        blankRow()
+      );
+
+      setItems([...loadedItems, ...emptyRows]);
+
+      setBillNo(data.billNo || '');
+
+      setInvoiceDate(data.invoiceDate || '');
+      setInvoiceTime(data.invoiceTime || '');
+
+      setCustomerName(data.customerName || '');
+      setCustomerPhone(data.customerPhone || '');
+
+      setNotes(data.notes || '');
+
+      setRefundMethod(data.refundMethod || 'credit');
+
+      setAccountId(data.accountId || '');
+
+      setCustomerId(data.customerId || '');
+
+      setPaymentType(data.paymentType || 'cash');
+
+      setOriginalInvoiceId(data.originalInvoiceId || '');
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useFormPersist('refund_invoice_draft', formState, () => {});
 
   const handleSubmit = async (action) => {
     const filteredItems = items.filter((item) => item.name && item.quantity > 0);
@@ -284,16 +347,18 @@ const RefundInvoiceForm = ({
 
       if (id) {
         await updateRefund(id, formData, token);
+        localStorage.removeItem('app_state_refund_invoice_draft');
         alert(t('alerts.invoiceUpdated'));
       } else {
         await createRefund(formData, token);
+        localStorage.removeItem('app_state_refund_invoice_draft');
         alert(t('alerts.invoiceSaved'));
       }
 
       if (action === 'new') {
         handleClear(); // form reset
       } else if (action === 'close') {
-        navigate('/dashboard'); // ✅ Correct route for dashboard
+        navigate('/dashboard');
       }
     } catch (err) {
       console.error('Refund Error:', err);

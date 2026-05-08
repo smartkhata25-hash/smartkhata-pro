@@ -1,6 +1,6 @@
 // 📁 src/pages/CustomersPage.js
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   getCustomers,
   addCustomer,
@@ -22,6 +22,7 @@ import { FaEdit, FaTrash } from 'react-icons/fa';
 import { deleteJournalEntry } from '../services/customerLedgerService';
 
 import { getCurrentLanguage } from '../i18n/i18n';
+import useFormPersist from '../hooks/useFormPersist';
 
 const CustomersPage = () => {
   const [customers, setCustomers] = useState([]);
@@ -48,10 +49,12 @@ const CustomersPage = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   // 📱 MOBILE VIEW STATE
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [printSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
 
   const location = useLocation();
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const restoredRef = useRef(false);
   const loadCustomers = useCallback(async () => {
     try {
       const data = await getCustomers(token);
@@ -88,29 +91,54 @@ const CustomersPage = () => {
   }, [location.search, navigate]);
 
   const loadCustomerLedger = useCallback(
-    async (customerId) => {
+    async (customerId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
       if (!customerId) return;
 
       setLedgerLoading(true);
+
       try {
         const customer = customers.find((c) => c._id === customerId);
+
         if (!customer) return;
 
-        const data = await getLedgerByCustomerAccount(
-          customer.account?._id,
-          ledgerStartDate,
-          ledgerEndDate
-        );
+        const data = await getLedgerByCustomerAccount(customer.account?._id, startDate, endDate);
 
         setLedgerData(data);
       } catch (error) {
         console.error(t('alerts.ledgerLoadFailed'), error);
         setLedgerData(null);
       }
+
       setLedgerLoading(false);
     },
-    [ledgerStartDate, ledgerEndDate, customers]
+    [customers, ledgerStartDate, ledgerEndDate]
   );
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_customers_page_state');
+
+    if (!saved || customers.length === 0 || restoredRef.current) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setSelectedCustomerId(data.selectedCustomerId || '');
+      setCustomerName(data.customerName || '');
+      setLedgerStartDate(data.ledgerStartDate || '');
+      setLedgerEndDate(data.ledgerEndDate || '');
+      setLedgerSearch(data.ledgerSearch || '');
+
+      if (data.selectedCustomerId) {
+        loadCustomerLedger(data.selectedCustomerId);
+      }
+      restoredRef.current = true;
+    } catch (err) {
+      console.error(err);
+    }
+  }, [customers, loadCustomerLedger]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -127,6 +155,7 @@ const CustomersPage = () => {
           const next = Math.min(prev + 1, list.length - 1);
           const customer = list[next];
           setSelectedCustomerId(customer._id);
+          setCustomerName(customer.name);
           return next;
         });
       }
@@ -137,6 +166,7 @@ const CustomersPage = () => {
           const next = Math.max(prev - 1, 0);
           const customer = list[next];
           setSelectedCustomerId(customer._id);
+          setCustomerName(customer.name);
           return next;
         });
       }
@@ -283,6 +313,16 @@ const CustomersPage = () => {
     : Number(ledgerData?.openingBalance || 0);
 
   const closingColor = closing > 0 ? '#16a34a' : closing < 0 ? '#2563eb' : '#6b7280';
+
+  const persistState = {
+    selectedCustomerId,
+    customerName,
+    ledgerStartDate,
+    ledgerEndDate,
+    ledgerSearch,
+  };
+
+  useFormPersist('customers_page_state', persistState, () => {});
 
   return (
     <PageLayout>
@@ -469,6 +509,7 @@ const CustomersPage = () => {
                   key={customer._id}
                   onClick={() => {
                     setSelectedCustomerId(customer._id);
+                    setCustomerName(customer.name);
                     setSelectedIndex(
                       (activeTab === 'active' ? activeCustomers : hiddenCustomers).findIndex(
                         (c) => c._id === customer._id
@@ -661,7 +702,8 @@ const CustomersPage = () => {
                 setCustomerName={setCustomerName}
                 showSuggestions={showSuggestions}
                 setShowSuggestions={setShowSuggestions}
-                load={(id, s, e) => loadCustomerLedger(id)}
+                printSize={printSize}
+                load={(id, s, e) => loadCustomerLedger(id, s, e)}
                 setSearch={setLedgerSearch}
                 setPage={() => {}}
                 navigate={navigate}

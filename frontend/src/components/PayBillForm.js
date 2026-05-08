@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { fetchSuppliers as getSuppliers, fetchSupplierLedger } from '../services/supplierService';
 import { getAccounts } from '../services/accountService';
 import { createPayBill, updatePayBill, getPayBillById } from '../services/payBillService';
-import { useNavigate, useSearchParams, useParams } from 'react-router-dom'; // ⬅️ updated import
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import Select from 'react-select';
 import { t } from '../i18n/i18n';
+import useFormPersist from '../hooks/useFormPersist';
 const PayBillForm = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -37,7 +38,6 @@ const PayBillForm = () => {
 
   const navigate = useNavigate();
 
-  // ✅ Dual support: /pay-bills/edit/:id AND /pay-bill?id=xxx
   const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
   const queryId = searchParams.get('id');
@@ -155,8 +155,13 @@ const PayBillForm = () => {
       description: '',
       attachment: null,
     });
+
+    setPaymentEntries([{ account: '', amount: '', paymentType: 'Cash' }]);
+
     setSupplierLedger([]);
     setShowPreview(false);
+
+    localStorage.removeItem('app_state_pay_bill_draft');
   };
 
   const handleRevert = async () => {
@@ -199,6 +204,33 @@ const PayBillForm = () => {
     }
   };
 
+  const formState = {
+    formData,
+    paymentEntries,
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_pay_bill_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setFormData(data.formData || {});
+
+      setPaymentEntries(data.paymentEntries || [{ account: '', amount: '', paymentType: 'Cash' }]);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useFormPersist('pay_bill_draft', formState, () => {});
+
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
 
@@ -231,9 +263,11 @@ const PayBillForm = () => {
       setLoading(true);
       if (id) {
         await updatePayBill(id, data);
+        localStorage.removeItem('app_state_pay_bill_draft');
         alert(t('alerts.paymentUpdated'));
       } else {
         await createPayBill(data);
+        localStorage.removeItem('app_state_pay_bill_draft');
         alert(t('alerts.paymentSaved'));
       }
 
@@ -328,7 +362,7 @@ const PayBillForm = () => {
           isClearable
         />
       </div>
-      \{/* DATE */}
+      {/* DATE */}
       <div>
         <label>{t('common.date')}:</label>
         <input

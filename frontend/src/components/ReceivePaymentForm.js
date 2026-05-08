@@ -11,6 +11,7 @@ import { fetchCustomers, fetchCustomerLedger } from '../services/customerService
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t } from '../i18n/i18n';
+import useFormPersist from '../hooks/useFormPersist';
 
 const ReceivePaymentForm = () => {
   const [customers, setCustomers] = useState([]);
@@ -193,6 +194,7 @@ const ReceivePaymentForm = () => {
     setCustomerLedger([]);
 
     setShowPreview(false);
+    localStorage.removeItem('app_state_receive_payment_draft');
   };
 
   const handleRevert = async () => {
@@ -298,6 +300,36 @@ const ReceivePaymentForm = () => {
     window.location.href = `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/preview/pdf?size=${printSize}&data=${encoded}`;
   };
 
+  const formState = {
+    formData,
+    customerName,
+    paymentEntries,
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_receive_payment_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setFormData(data.formData || {});
+
+      setCustomerName(data.customerName || '');
+
+      setPaymentEntries(data.paymentEntries || [{ account: '', amount: '', paymentType: 'Cash' }]);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useFormPersist('receive_payment_draft', formState, () => {});
+
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
 
@@ -329,9 +361,11 @@ const ReceivePaymentForm = () => {
       setLoading(true);
       if (id) {
         await updateReceivePayment(id, data);
+        localStorage.removeItem('app_state_receive_payment_draft');
         alert(t('alerts.paymentUpdated'));
       } else {
         await createReceivePayment(data);
+        localStorage.removeItem('app_state_receive_payment_draft');
       }
 
       if (type === 'close') {

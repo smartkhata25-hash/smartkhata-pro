@@ -130,7 +130,39 @@ const SupplierLedgerHeader = ({
             <button
               className="btn btn-primary"
               style={{ height: 32, padding: '0 6px', fontSize: 11 }}
-              onClick={print}
+              onClick={async () => {
+                if (!sid) return;
+
+                const query = new URLSearchParams({
+                  startDate: start || '',
+                  endDate: end || '',
+                  size: printSize || 'A5',
+                }).toString();
+
+                try {
+                  const response = await fetch(
+                    `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/html?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const html = await response.text();
+
+                  const newWindow = window.open('', '_blank');
+
+                  newWindow.document.write(html);
+                  newWindow.document.close();
+
+                  newWindow.onload = function () {
+                    newWindow.print();
+                  };
+                } catch (error) {
+                  alert(t('alerts.printFailed'));
+                }
+              }}
             >
               🖨️
             </button>
@@ -295,6 +327,7 @@ const SupplierLedgerHeader = ({
               }}
               onClick={() => {
                 setSearch('');
+                localStorage.removeItem('app_state_suppliers_page_state');
                 const currentYear = new Date().getFullYear();
                 setStart(`${currentYear}-01-01`);
                 setEnd(`${currentYear}-12-31`);
@@ -317,7 +350,43 @@ const SupplierLedgerHeader = ({
               flex: 1,
             }}
           >
-            <button className="btn btn-primary" style={{ height: 36 }} onClick={print}>
+            <button
+              className="btn btn-primary"
+              style={{ height: 36 }}
+              onClick={async () => {
+                if (!sid) return;
+
+                const query = new URLSearchParams({
+                  startDate: start || '',
+                  endDate: end || '',
+                  size: printSize || 'A5',
+                }).toString();
+
+                try {
+                  const response = await fetch(
+                    `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/html?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const html = await response.text();
+
+                  const newWindow = window.open('', '_blank');
+
+                  newWindow.document.write(html);
+                  newWindow.document.close();
+
+                  newWindow.onload = function () {
+                    newWindow.print();
+                  };
+                } catch (error) {
+                  alert(t('alerts.printFailed'));
+                }
+              }}
+            >
               {t('print')}
             </button>
 
@@ -325,13 +394,42 @@ const SupplierLedgerHeader = ({
               className="btn btn-primary"
               style={{ height: 36 }}
               disabled={!sid}
-              onClick={() => {
+              onClick={async () => {
                 if (!sid) return;
+
                 const query = new URLSearchParams({
                   startDate: start || '',
                   endDate: end || '',
+                  size: printSize || 'A5',
                 }).toString();
-                window.open(`/api/print/supplier-ledger/${sid}/pdf?${query}`, '_blank');
+
+                try {
+                  const response = await fetch(
+                    `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/pdf?${query}`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }
+                  );
+
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+
+                  const link = document.createElement('a');
+
+                  const selectedSupplier = suppliers.find((s) => s._id === sid);
+                  const supplierName = selectedSupplier?.name || 'Supplier';
+
+                  link.href = url;
+                  link.download = `${supplierName.replace(/\s+/g, '-')}-Ledger.pdf`;
+
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch (error) {
+                  alert(t('alerts.pdfFailed'));
+                }
               }}
             >
               {t('pdf')}
@@ -411,6 +509,7 @@ const SupplierLedgerHeader = ({
               onClick={() => {
                 const currentYear = new Date().getFullYear();
                 setSearch('');
+                localStorage.removeItem('app_state_suppliers_page_state');
                 setStart(`${currentYear}-01-01`);
                 setEnd(`${currentYear}-12-31`);
                 load(sid, `${currentYear}-01-01`, `${currentYear}-12-31`);

@@ -11,6 +11,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import ProductDropdown from './ProductDropdown';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
+import useFormPersist from '../hooks/useFormPersist';
 
 const PurchaseReturnForm = ({ token }) => {
   const getCurrentTime = () => {
@@ -150,6 +151,67 @@ const PurchaseReturnForm = ({ token }) => {
 
   const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
+  const formState = {
+    items,
+    billNo,
+    returnDate,
+    returnTime,
+    supplierName,
+    supplierPhone,
+    supplierId,
+    notes,
+    returnMethod,
+    accountId,
+    paymentType,
+    originalInvoiceId,
+  };
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_purchase_return_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setBillNo(data.billNo || '');
+
+      setReturnDate(data.returnDate || new Date().toISOString().slice(0, 10));
+
+      setReturnTime(data.returnTime || getCurrentTime());
+
+      setSupplierName(data.supplierName || '');
+
+      setSupplierPhone(data.supplierPhone || '');
+
+      setSupplierId(data.supplierId || '');
+
+      setNotes(data.notes || '');
+
+      setReturnMethod(data.returnMethod || 'adjust');
+
+      setAccountId(data.accountId || '');
+
+      setPaymentType(data.paymentType || 'cash');
+
+      setOriginalInvoiceId(data.originalInvoiceId || '');
+
+      const loadedItems = data.items || [];
+
+      const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
+        blankRow()
+      );
+
+      setItems([...loadedItems, ...emptyRows]);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+  useFormPersist('purchase_return_draft', formState, () => {});
+
   const handleRevert = async () => {
     if (!id) {
       // 🆕 New return → clear form
@@ -162,6 +224,7 @@ const PurchaseReturnForm = ({ token }) => {
       setAccountId('');
       setPaymentType('cash');
       setItems(Array.from({ length: 20 }, () => blankRow()));
+      localStorage.removeItem('app_state_purchase_return_draft');
       return;
     }
 
@@ -211,9 +274,11 @@ const PurchaseReturnForm = ({ token }) => {
 
     if (id) {
       await updatePurchaseReturn(id, formData, token);
+      localStorage.removeItem('app_state_purchase_return_draft');
       alert(t('alerts.invoiceUpdated'));
     } else {
       await createPurchaseReturn(formData, token);
+      localStorage.removeItem('app_state_purchase_return_draft');
       alert(t('alerts.invoiceSaved'));
     }
 

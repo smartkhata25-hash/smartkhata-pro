@@ -10,6 +10,7 @@ import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import InvoiceTable from './InvoiceTable';
+import useFormPersist from '../hooks/useFormPersist';
 import SupplierForm from './SupplierForm';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
@@ -276,7 +277,54 @@ const PurchaseInvoiceForm = () => {
   const finalDiscount =
     discountPercent > 0 ? (totalAmount * discountPercent) / 100 : discountAmount;
   const grandTotal = totalAmount - finalDiscount;
+  const formState = {
+    supplierName,
+    supplierPhone,
+    billNo,
+    invoiceDate,
+    invoiceTime,
+    items,
+    discountPercent,
+    discountAmount,
+    paidAmount,
+    paymentType,
+    selectedAccountId,
+  };
 
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_purchase_invoice_draft');
+
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setSupplierName(data.supplierName || '');
+      setSupplierPhone(data.supplierPhone || '');
+      setBillNo(data.billNo || '');
+
+      setInvoiceDate(data.invoiceDate || '');
+      setInvoiceTime(data.invoiceTime || '');
+
+      setItems(data.items || []);
+
+      setDiscountPercent(data.discountPercent || 0);
+      setDiscountAmount(data.discountAmount || 0);
+
+      setPaidAmount(data.paidAmount || 0);
+
+      setPaymentType(data.paymentType || 'cash');
+
+      setSelectedAccountId(data.selectedAccountId || '');
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+  useFormPersist('purchase_invoice_draft', formState, () => {});
   // 📊 Product select ہونے پر صرف ID محفوظ کریں
   const handleProductHistory = (productId) => {
     if (!productId) return;
@@ -344,6 +392,7 @@ const PurchaseInvoiceForm = () => {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
     } else {
       await purchaseInvoiceService.addPurchaseInvoice(formData);
+      localStorage.removeItem('app_state_purchase_invoice_draft');
     }
   };
 
@@ -435,6 +484,7 @@ const PurchaseInvoiceForm = () => {
 
     try {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
+      localStorage.removeItem('app_state_purchase_invoice_draft');
       alert(t('alerts.invoiceUpdated'));
       navigate('/dashboard');
     } catch (err) {

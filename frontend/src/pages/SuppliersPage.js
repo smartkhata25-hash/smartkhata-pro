@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   fetchSuppliers,
   createSupplier,
@@ -18,6 +18,7 @@ import { t } from '../i18n/i18n';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import { FaEdit, FaTrash } from 'react-icons/fa';
+import useFormPersist from '../hooks/useFormPersist';
 
 const SuppliersPage = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -50,6 +51,17 @@ const SuppliersPage = () => {
   const location = useLocation();
 
   const token = localStorage.getItem('token');
+
+  const restoredRef = useRef(false);
+
+  const persistState = {
+    selectedSupplierId,
+    supplierName,
+    ledgerStartDate,
+    ledgerEndDate,
+    ledgerSearch,
+  };
+  useFormPersist('suppliers_page_state', persistState, () => {});
 
   const loadSuppliers = useCallback(async () => {
     try {
@@ -105,6 +117,32 @@ const SuppliersPage = () => {
     },
     [ledgerStartDate, ledgerEndDate]
   );
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_suppliers_page_state');
+
+    if (!saved || suppliers.length === 0 || restoredRef.current) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setSelectedSupplierId(data.selectedSupplierId || '');
+      setSupplierName(data.supplierName || '');
+      setLedgerStartDate(data.ledgerStartDate || '');
+      setLedgerEndDate(data.ledgerEndDate || '');
+      setLedgerSearch(data.ledgerSearch || '');
+
+      if (data.selectedSupplierId) {
+        loadSupplierLedger(data.selectedSupplierId);
+      }
+      restoredRef.current = true;
+    } catch (err) {
+      console.error(err);
+    }
+  }, [suppliers, loadSupplierLedger]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -445,6 +483,9 @@ const SuppliersPage = () => {
                 key={supplier._id}
                 onClick={() => {
                   setSelectedSupplierId(supplier._id);
+
+                  // 🔥 YE LINE MISSING THI
+                  setSupplierName(supplier.name);
 
                   const list = activeTab === 'active' ? activeSuppliers : hiddenSuppliers;
 

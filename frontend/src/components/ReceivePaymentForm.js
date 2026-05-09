@@ -145,6 +145,7 @@ const ReceivePaymentForm = () => {
   }, [id]);
 
   const loadLedger = async (customerId) => {
+    console.log('🔥 loadLedger CALLED =>', customerId);
     if (customerId) {
       const res = await fetchCustomerLedger(customerId);
       setCustomerLedger(res.ledger || []);

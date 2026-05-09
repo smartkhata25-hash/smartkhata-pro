@@ -1,5 +1,5 @@
 // 📁 src/pages/CustomersPage.js
-
+import axios from 'axios';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   getCustomers,
@@ -47,6 +47,7 @@ const CustomersPage = () => {
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [businessName, setBusinessName] = useState('');
   // 📱 MOBILE VIEW STATE
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [printSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
@@ -67,6 +68,24 @@ const CustomersPage = () => {
   useEffect(() => {
     loadCustomers();
   }, [loadCustomers]);
+
+  useEffect(() => {
+    const fetchBusinessInfo = async () => {
+      try {
+        const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/users/profile`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        setBusinessName(res.data?.businessName || '');
+      } catch (err) {
+        console.error('Business fetch failed', err);
+      }
+    };
+
+    fetchBusinessInfo();
+  }, [token]);
 
   // 📱 HANDLE RESPONSIVE
   useEffect(() => {
@@ -609,8 +628,7 @@ const CustomersPage = () => {
                               phone: customer.phone,
                               customerName: customer.name,
                               balance: Number(customer.balance || 0).toFixed(2),
-                              businessName: 'Your Business',
-                              mobile: '',
+                              businessName,
                               lang: getCurrentLanguage(),
                             });
                           }}

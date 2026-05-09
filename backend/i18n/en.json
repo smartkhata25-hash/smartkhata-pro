@@ -2,7 +2,7 @@
   "dashboard": "Dashboard",
   "customers": "Customers",
   "suppliers": "Suppliers",
-  "inventory": "Inventory",
+  "inventory": "Stock",
   "reports": "Reports",
   "sales": "Sales",
   "purchases": "Purchases",
@@ -37,8 +37,8 @@
   "saleRefund": "Sale Refund",
   "purchaseReturn": "Purchase Return",
 
-  "performance": "Performance",
-  "financialPosition": "Financial Position",
+  "performance": "Business Status",
+  "financialPosition": "Income Status",
   "cashPosition": "Cash Position",
   "smartAlerts": "Smart Alerts",
   "netProfit": "Net Profit",
@@ -64,8 +64,8 @@
   "netTotal": "Net Total",
   "paid": "Paid",
   "remaining": "Remaining",
-  "credit": "Credit",
-  "debit": "Debit",
+  "credit": "Money Out",
+  "debit": "Money In",
   "balance": "Balance",
   "date": "Date",
   "description": "Description",
@@ -282,7 +282,7 @@
   "inventory.lowStock": "Low Stock",
   "inventory.outOfStock": "Out of Stock",
   "inventory.bulkProducts": "Bulk Products",
-  "inventory.adjust": "Inventory Adjust",
+  "inventory.adjust": "Stock Adjust",
   "inventory.stockHistory": "Stock History",
   "inventory.addProduct": "Add Product",
   "inventory.editProduct": "Edit Product",
@@ -540,7 +540,7 @@
   "alerts.incomeStatementFailed": "Failed to generate income statement",
   "alerts.selectStartEndDate": "Please select start and end date",
 
-  "reports.incomeStatement": "Income Statement",
+  "reports.incomeStatement": "Profit Report",
   "reports.businessPerformanceReport": "Professional business performance report",
   "reports.reportType": "Report Type",
 
@@ -554,14 +554,14 @@
 
   "reports.revenue": "Revenue",
   "reports.cogsSection": "Cost of Goods Sold",
-  "reports.operatingExpenses": "Operating Expenses",
+  "reports.operatingExpenses": "Business Expenses",
 
   "reports.salesReturn": "Sales Return",
   "reports.totalCogs": "Total COGS",
   "reports.totalOperatingExpenses": "Total Operating Expenses",
 
-  "reports.businessInsights": "Business Insights",
-  "reports.grossMargin": "Gross Margin",
+  "reports.businessInsights": "Business Info",
+  "reports.grossMargin": "Profit Margin",
   "reports.expenseRatio": "Expense Ratio",
 
   "reports.businessProfitable": "Your business is operating profitably",
@@ -691,7 +691,7 @@
   "confirm.yesDelete": "Yes, Delete",
   "confirm.actionIrreversible": "This action cannot be undone",
 
-  "reports.trialBalance": "Trial Balance",
+  "reports.trialBalance": "Balance Check",
   "reports.trialBalanceReport": "Trial Balance Report",
   "reports.difference": "Difference",
   "reports.trialBalanced": "Trial Balance is Balanced",
@@ -713,8 +713,8 @@
   "menu.manageSuppliers": "Manage Suppliers",
   "menu.products": "Products",
   "menu.stock": "Stock",
-  "menu.financialReports": "Financial Reports",
-  "menu.analytics": "Analytics",
+  "menu.financialReports": "Business Reports",
+  "menu.analytics": "Business Overview",
   "menu.transactions": "Transactions",
   "common.quickSearch": "Quick Search...",
   "dashboard.loading": "Loading dashboard...",
@@ -914,5 +914,6 @@
   "menu.import": "Import",
   "price": "Price",
   "print.noItems": "No items",
-  "payment.none": "No payments"
+  "payment.none": "No payments",
+  "back": "Back"
 }

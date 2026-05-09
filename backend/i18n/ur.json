@@ -2,7 +2,7 @@
   "dashboard": "ڈیش بورڈ",
   "customers": "کسٹمرز",
   "suppliers": "سپلائرز",
-  "inventory": "انوینٹری",
+  "inventory": "اسٹاک",
   "reports": "رپورٹس",
   "sales": "سیلز",
   "purchases": "خریداری",
@@ -39,12 +39,12 @@
   "purchaseReturn": "خریداری واپسی",
 
   "performance": "کارکردگی",
-  "financialPosition": "مالی پوزیشن",
+  "financialPosition": "مالی حالت",
   "cashPosition": "نقد پوزیشن",
-  "smartAlerts": "اہم الرٹس",
+  "smartAlerts": "اہم اطلاعیں",
   "netProfit": "خالص منافع",
-  "receivables": "وصولیاں",
-  "payables": "ادائگیاں",
+  "receivables": "لینے والے پیسے",
+  "payables": "دینے والے پیسے",
   "cash": "نقد",
   "bank": "بینک",
   "lowStock": "کم اسٹاک آئٹمز",
@@ -65,8 +65,8 @@
   "netTotal": "خالص کل",
   "paid": "ادا شدہ",
   "remaining": "باقی",
-  "credit": "کریڈٹ",
-  "debit": "ڈیبٹ",
+  "credit": "پیسے گئے",
+  "debit": "پیسے آئے",
   "balance": "بیلنس",
   "date": "تاریخ",
   "description": "تفصیل",
@@ -95,7 +95,7 @@
   "payment.cheque": "چیک",
 
   "account": "اکاؤنٹ",
-  "preview": "پری ویو",
+  "preview": "دیکھیں",
   "hide": "چھپائیں",
 
   "alerts.removeAttachment": "اٹیچمنٹ حذف کریں؟",
@@ -235,7 +235,7 @@
   "alerts.salesLoadFailed": "سیلز ڈیٹا لوڈ نہیں ہو سکا",
 
   "inventory.product": "پراڈکٹ",
-  "inventory.category": "کیٹیگری",
+  "inventory.category": "قسم",
   "inventory.rack": "ریک",
   "inventory.unit": "یونٹ",
   "inventory.stock": "اسٹاک",
@@ -284,7 +284,7 @@
   "inventory.lowStock": "کم اسٹاک",
   "inventory.outOfStock": "اسٹاک ختم",
   "inventory.bulkProducts": "متعدد پراڈکٹس",
-  "inventory.adjust": "انوینٹری ایڈجسٹ",
+  "inventory.adjust": "اسٹاک درست کریں",
   "inventory.stockHistory": "اسٹاک ہسٹری",
   "inventory.addProduct": "پراڈکٹ شامل کریں",
   "inventory.editProduct": "پراڈکٹ میں ترمیم",
@@ -463,7 +463,7 @@
   "accounts.type.income": "آمدنی",
   "accounts.type.expense": "اخراجات",
   "ledger.customerDetailed": "کسٹمر تفصیلی لیجر",
-  "ledger.customerLedger": "کسٹمر لیجر",
+  "ledger.customerLedger": "کسٹمر حساب",
 
   "ledger.quickRange": "فوری تاریخ رینج",
 
@@ -531,7 +531,7 @@
   "alerts.ledgerNeedsRefresh": "نئی انٹری شامل ہوئی ہے۔ براہ کرم لیجر ریفریش کریں",
   "alerts.ledgerLoadError": "لیجر لوڈ کرنے میں خرابی",
 
-  "ledger.generalLedger": "جنرل لیجر",
+  "ledger.generalLedger": "مکمل حساب",
   "ledger.generalReport": "جنرل لیجر رپورٹ",
   "ledger.summary": "لیجر خلاصہ",
   "ledger.entryDetail": "انٹری کی تفصیل",
@@ -540,7 +540,7 @@
   "alerts.incomeStatementFailed": "انکم اسٹیٹمنٹ بنانے میں خرابی",
   "alerts.selectStartEndDate": "براہ کرم شروع اور اختتام کی تاریخ منتخب کریں",
 
-  "reports.incomeStatement": "انکم اسٹیٹمنٹ",
+  "reports.incomeStatement": "منافع رپورٹ",
   "reports.businessPerformanceReport": "کاروباری کارکردگی کی پیشہ ورانہ رپورٹ",
   "reports.reportType": "رپورٹ کی قسم",
 
@@ -548,19 +548,19 @@
 
   "reports.netSales": "خالص فروخت",
   "reports.cogs": "سامان کی لاگت",
-  "reports.grossProfit": "مجموعی منافع",
+  "reports.grossProfit": "کل منافع",
   "reports.netProfit": "خالص منافع",
   "reports.netLoss": "خالص نقصان",
 
   "reports.revenue": "آمدنی",
   "reports.cogsSection": "سامان کی لاگت",
-  "reports.operatingExpenses": "آپریٹنگ اخراجات",
+  "reports.operatingExpenses": "کاروباری خرچے",
 
   "reports.salesReturn": "سیلز واپسی",
   "reports.totalCogs": "کل لاگت",
   "reports.totalOperatingExpenses": "کل آپریٹنگ اخراجات",
 
-  "reports.businessInsights": "کاروباری بصیرت",
+  "reports.businessInsights": "کاروبار کی معلومات",
   "reports.grossMargin": "گراس مارجن",
   "reports.expenseRatio": "اخراجات کا تناسب",
 
@@ -604,7 +604,7 @@
   "alerts.journalSaveFailed": "جرنل انٹری محفوظ نہیں ہو سکی",
   "alerts.deleteJournalConfirm": "کیا آپ واقعی اس انٹری کو حذف کرنا چاہتے ہیں؟",
 
-  "journal.newEntry": "نئی جرنل انٹری",
+  "journal.newEntry": "نیا حساب اندراج",
   "journal.editEntry": "جرنل انٹری میں ترمیم",
   "journal.addLine": "مزید لائن شامل کریں",
   "journal.updateEntry": "انٹری اپڈیٹ کریں",
@@ -713,9 +713,9 @@
   "menu.manageSuppliers": "سپلائر مینجمنٹ",
   "menu.products": "پراڈکٹس",
   "menu.stock": "اسٹاک",
-  "menu.financialReports": "مالی رپورٹس",
-  "menu.analytics": "تجزیات",
-  "menu.transactions": "ٹرانزیکشنز",
+  "menu.financialReports": "کاروباری رپورٹس",
+  "menu.analytics": "کاروبار کا جائزہ",
+  "menu.transactions": "لین دین",
   "common.quickSearch": "فوری تلاش...",
   "dashboard.loading": "ڈیش بورڈ لوڈ ہو رہا ہے...",
   "common.searchEnter": "ٹائپ کریں اور Enter دبائیں...",
@@ -758,7 +758,7 @@
 
   "customer.yesMerge": "ہاں، مرج کریں",
 
-  "ledger.supplierLedger": "سپلائر لیجر",
+  "ledger.supplierLedger": "سپلائر حساب",
 
   "alerts.supplierLedgerLoadFailed": "سپلائر تفصیلی لیجر لوڈ نہیں ہو سکا",
   "common.edit": "ترمیم",
@@ -893,7 +893,7 @@
   "accounts.category.otherExpense": "دیگر اخراجات",
   "common.error": "خرابی",
   "common.serverError": "سرور خرابی",
-  "common.refresh": "ریفریش",
+  "common.refresh": "دوبارہ لوڈ کریں",
 
   "alerts.panelLoadError": "رائٹ پینل لوڈ نہیں ہو سکا",
   "alerts.notificationError": "نوٹیفکیشن حاصل نہیں ہو سکے",
@@ -903,16 +903,17 @@
   "language.english": "انگریزی",
   "items": "آئٹمز",
   "dataImport": "ڈیٹا امپورٹ",
-  "import.data": "ڈیٹا امپورٹ کریں",
+  "import.data": "ڈیٹا شامل کریں",
   "expense.add": "خرچ شامل کریں",
   "expense.list": "خرچوں کی فہرست",
 
-  "inventory.bulkImport": "بلک امپورٹ",
+  "inventory.bulkImport": "ایک ساتھ ڈیٹا ڈالیں",
   "menu.setup": "سیٹ اپ",
   "menu.entries": "اندراجات",
   "menu.expenses": "اخراجات",
   "menu.import": "امپورٹ",
   "price": "قیمت",
   "print.noItems": "کوئی آئٹم موجود نہیں",
-  "payment.none": "کوئی ادائیگی موجود نہیں"
+  "payment.none": "کوئی ادائیگی موجود نہیں",
+  "back": "واپس"
 }

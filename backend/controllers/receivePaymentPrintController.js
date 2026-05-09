@@ -147,7 +147,13 @@ const generateReceivePaymentPdf = async (req, res) => {
 
     const built = await buildReceiptData(payment, size);
 
-    const html = generateReceivePaymentHTML(built);
+    const html = generateReceivePaymentHTML({
+      ...built,
+      page: {
+        ...built.page,
+        isPdf: true,
+      },
+    });
 
     const pdfBuffer = await generatePdfFromHtml(html);
 
@@ -166,7 +172,6 @@ const generateReceivePaymentPdf = async (req, res) => {
     });
   }
 };
-
 /* =========================================================
    PREVIEW RECEIVE PAYMENT (UNSAVED FORM) - HTML
 ========================================================= */
@@ -264,7 +269,13 @@ const previewReceivePaymentPdf = async (req, res) => {
       previousBalance: previousBalance,
     });
 
-    const html = generateReceivePaymentHTML(built);
+    const html = generateReceivePaymentHTML({
+      ...built,
+      page: {
+        ...built.page,
+        isPdf: true,
+      },
+    });
 
     const pdfBuffer = await generatePdfFromHtml(html);
 
@@ -286,7 +297,6 @@ const previewReceivePaymentPdf = async (req, res) => {
     });
   }
 };
-
 /* =========================================================
    EXPORT
 ========================================================= */

@@ -43,14 +43,16 @@ export const buildReminderMessage = ({
   customerName = '',
   balance = '0',
   businessName = '',
-  mobile = '',
   lang = 'en',
 }) => {
   const safeName = customerName || 'Customer';
   const safeBalance = balance || '0';
 
+  // 🇵🇰 URDU MESSAGE
   if (lang === 'ur') {
-    return `السلام علیکم
+    return `💰 ادائیگی یاد دہانی
+
+السلام علیکم
 
 محترم ${safeName}
 
@@ -59,21 +61,22 @@ Rs ${safeBalance}
 
 براہ کرم جلد ادائیگی کریں۔
 
-شکریہ
-${businessName || ''}
-${mobile || ''}`;
+بھیجنے والا:
+${businessName || ''}`;
   }
 
-  return `Hello ${safeName},
+  // 🌍 ENGLISH MESSAGE
+  return `💰 PAYMENT REMINDER
 
-Your outstanding balance is:
+Aslamoalaikum ${safeName},
+
+Remaining balance:
 Rs ${safeBalance}
 
-Please make the payment at your earliest convenience.
+Please pay soon.
 
-Thank you
-${businessName || ''}
-${mobile || ''}`;
+Sent by:
+${businessName || ''}`;
 };
 
 // ===============================
@@ -85,10 +88,11 @@ export const encodeMessage = (message) => {
 };
 
 // ===============================
-// ✅ GENERATE WHATSAPP LINK (SMART)
+// ✅ GENERATE WHATSAPP LINK
 // ===============================
 export const generateWhatsAppLink = (phone, message) => {
   const formattedPhone = formatPhone(phone);
+
   if (!formattedPhone) return '';
 
   const encodedMessage = encodeMessage(message);
@@ -105,26 +109,18 @@ export const generateWhatsAppLink = (phone, message) => {
 };
 
 // ===============================
-// ✅ MAIN FUNCTION (FINAL)
+// ✅ MAIN FUNCTION
 // ===============================
-export const sendWhatsAppReminder = ({
-  phone,
-  customerName,
-  balance,
-  businessName,
-  mobile,
-  lang,
-}) => {
+export const sendWhatsAppReminder = ({ phone, customerName, balance, businessName, lang }) => {
   const formattedPhone = formatPhone(phone);
 
-  // ❌ invalid → کچھ نہ کرو
+  // ❌ invalid phone
   if (!formattedPhone) return;
 
   const message = buildReminderMessage({
     customerName,
     balance,
     businessName,
-    mobile,
     lang,
   });
 
@@ -132,6 +128,6 @@ export const sendWhatsAppReminder = ({
 
   if (!link) return;
 
-  // 🔥 SAME TAB reuse (important fix)
+  // 🚀 OPEN WHATSAPP
   window.open(link, '_blank');
 };

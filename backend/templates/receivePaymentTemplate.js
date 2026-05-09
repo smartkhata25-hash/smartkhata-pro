@@ -337,12 +337,33 @@ ${footer.message}
     : ""
 }
 
-<div class="no-print" style="text-align:center;margin-top:15px;">
-  <button onclick="window.print()" 
-  style="padding:6px 14px;font-size:13px;cursor:pointer;">
-  ${t("print")}
+${
+  !page?.isPdf
+    ? `
+<script>
+  window.onafterprint = function () {
+    window.close();
+  };
+</script>
+
+<div class="no-print" style="text-align:center;margin-top:15px;display:flex;justify-content:center;gap:10px;">
+
+  <button 
+    onclick="window.close()" 
+    style="padding:6px 14px;font-size:13px;cursor:pointer;">
+    ← ${t("back")}
   </button>
+
+  <button 
+    onclick="window.print()" 
+    style="padding:6px 14px;font-size:13px;cursor:pointer;">
+    ${t("print")}
+  </button>
+
 </div>
+`
+    : ""
+}
 
 </div>
 

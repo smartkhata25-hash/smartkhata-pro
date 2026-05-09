@@ -94,25 +94,20 @@ export default function CustomerLedgerPage() {
 
   const load = useCallback(
     async (id = cid, s = start, e = end) => {
-      console.log('LOAD FUNCTION CALLED');
-      console.log('ID:', id);
-      console.log('Customers:', customers);
       if (!id) return;
 
       const customer = customers.find((c) => c._id === id);
-      console.log('FOUND CUSTOMER:', customer);
-      console.log('ACCOUNT FIELD:', customer?.account);
+
       if (!customer) return;
 
       setLoading(true);
       try {
-        console.log('ACCOUNT ID GOING TO API:', customer.account?._id || customer.account);
         const data = await getLedgerByCustomerAccount(
           customer.account?._id || customer.account,
           s,
           e
         );
-        console.log('LEDGER API RESPONSE:', data);
+
         let openingBalance = data.openingBalance || 0;
 
         if (start && Array.isArray(data.ledger) && data.ledger.length > 0) {

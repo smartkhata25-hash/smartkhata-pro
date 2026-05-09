@@ -16,7 +16,15 @@ const MainLayout = () => {
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/auth/check-device`)
       .then((res) => {
         if (!res.ok) {
+          // 🔥 PURANA LOGIN DATA CLEAR
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          localStorage.removeItem('user');
+          localStorage.removeItem('mode');
+
           alert('Unauthorized device. Please login again.');
+
+          // 🔥 LOGIN PAGE
           window.location.href = '/#/login';
         }
       })

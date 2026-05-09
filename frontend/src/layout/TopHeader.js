@@ -22,7 +22,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [alertCount, setAlertCount] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
+
   const [isInstalled, setIsInstalled] = useState(false);
 
   const [notificationMsg, setNotificationMsg] = useState('');
@@ -31,9 +31,6 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
   useEffect(() => {
-    // 📱 mobile detect
-    setIsMobile(window.innerWidth < 768);
-
     // 📦 app installed detect
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
     setIsInstalled(isStandalone);
@@ -260,7 +257,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
       {/* RIGHT SIDE */}
       <div className="flex items-center gap-4">
         {/* Install */}
-        {deferredPrompt && isMobile && !isInstalled && (
+        {deferredPrompt && !isInstalled && (
           <button
             onClick={handleInstallClick}
             className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3 py-1.5 rounded text-sm shadow hover:scale-105 transition"

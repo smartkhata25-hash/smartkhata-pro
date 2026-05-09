@@ -90,4 +90,30 @@ const saveBusinessInfo = async (req, res) => {
   }
 };
 
-module.exports = { savePersonalInfo, saveBusinessInfo };
+const getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({ msg: "User not found" });
+    }
+
+    res.json({
+      fullName: user.fullName,
+      businessName: user.businessName,
+      mobile: user.mobile,
+      address: user.address,
+      currency: user.currency,
+      taxNumber: user.taxNumber,
+    });
+  } catch (err) {
+    console.error("Profile Fetch Error:", err);
+    res.status(500).json({ msg: "Server error" });
+  }
+};
+
+module.exports = {
+  savePersonalInfo,
+  saveBusinessInfo,
+  getProfile,
+};

@@ -297,6 +297,7 @@ const CustomersPage = () => {
     })
     .filter((customer) => {
       const balance = Number(customer.balance) || 0;
+
       if (filterType === 'receivable') return balance > 0;
       if (filterType === 'payable') return balance < 0;
       if (filterType === 'settled') return balance === 0;
@@ -522,7 +523,12 @@ const CustomersPage = () => {
             {(activeTab === 'active' ? activeCustomers : hiddenCustomers).map((customer) => {
               const balance = Number(customer.balance) || 0;
               const balanceColor = balance > 0 ? '#16a34a' : balance < 0 ? '#dc2626' : '#6b7280';
-
+              const typeColor =
+                customer.type === 'vip'
+                  ? '#facc15'
+                  : customer.type === 'blocked'
+                    ? '#ef4444'
+                    : '#3b82f6';
               return (
                 <div
                   key={customer._id}
@@ -554,7 +560,18 @@ const CustomersPage = () => {
                 >
                   {/* LEFT */}
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{customer.name}</div>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 14,
+                        color: typeColor,
+                      }}
+                    >
+                      {customer.name}
+
+                      {customer.type === 'vip' && ' ⭐'}
+                      {customer.type === 'blocked' && ' ⛔'}
+                    </div>
                     <div
                       style={{
                         fontSize: 14,

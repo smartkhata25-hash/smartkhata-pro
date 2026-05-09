@@ -9,7 +9,7 @@ const usedKeys = new Set();
 function scanFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
 
-  const regex = /t\(['"`](.*?)['"`]\)/g;
+  const regex = /\bt\s*\(\s*['"`]([a-zA-Z0-9_.-]+)['"`]\s*\)/g;
 
   let match;
 

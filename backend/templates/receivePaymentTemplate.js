@@ -1,3 +1,5 @@
+const { t } = require("../i18n/i18n");
+
 const generateReceivePaymentHTML = (data = {}) => {
   const {
     documentTitle = "Receive Payment Receipt",
@@ -214,9 +216,9 @@ ${header.companyName ? `<h2>${header.companyName}</h2>` : ""}
 
 ${header.address ? `<p>${header.address}</p>` : ""}
 
-${header.phone ? `<p>Phone: ${header.phone}</p>` : ""}
+${header.phone ? `<p>${t("phone")}: ${header.phone}</p>` : ""}
 
-${header.taxNumber ? `<p>Tax No: ${header.taxNumber}</p>` : ""}
+${header.taxNumber ? `<p>${t("business.taxOptional")}: ${header.taxNumber}</p>` : ""}
 
 </div>
 `
@@ -231,21 +233,19 @@ ${documentTitle}
 
 <div class="info-left">
 
-<div><strong>${party?.label || "Customer"}:</strong> ${party?.name || "-"}</div>
+<div><strong>${party?.label || t("customer")}:</strong> ${party?.name || "-"}</div>
 
-<div><strong>Phone:</strong> ${party?.phone || "-"}</div>
+<div><strong>${t("phone")}:</strong> ${party?.phone || "-"}</div>
 
-<div><strong>No:</strong> ${documentInfo?.receiptNo || "-"}</div>
+<div><strong>${t("billNo")}:</strong> ${documentInfo?.receiptNo || "-"}</div>
 
 </div>
 
 <div class="info-right">
 
+<div><strong>${t("date")}:</strong> ${documentInfo?.date || "-"}</div>
 
-
-<div><strong>Date:</strong> ${documentInfo?.date || "-"}</div>
-
-<div><strong>Time:</strong> ${documentInfo?.time || "-"}</div>
+<div><strong>${t("time")}:</strong> ${documentInfo?.time || "-"}</div>
 
 </div>
 
@@ -258,9 +258,9 @@ ${documentTitle}
 <tr>
 
 <th style="width:10%">#</th>
-<th>Account</th>
-<th style="width:25%">Payment Type</th>
-<th style="width:25%">Amount</th>
+<th>${t("account")}</th>
+<th style="width:25%">${t("paymentType")}</th>
+<th style="width:25%">${t("amount")}</th>
 
 </tr>
 
@@ -289,7 +289,7 @@ ${
         .join("")
     : `
 <tr>
-<td colspan="4" class="center">No payments</td>
+<td colspan="4" class="center">${t("payment.none")}</td>
 </tr>
 `
 }
@@ -301,17 +301,17 @@ ${
 <div class="summary">
 
 <div class="summary-row">
-<span>Previous Balance</span>
+<span>${t("ledger.openingBalance")}</span>
 <span>${previousBalance}</span>
 </div>
 
 <div class="summary-row">
-<span>Received Amount</span>
+<span>${t("receivePayment")}</span>
 <span>${receivedAmount}</span>
 </div>
 
 <div class="summary-row total">
-<span>Remaining Balance</span>
+<span>${t("balance")}</span>
 <span>${remainingBalance}</span>
 </div>
 
@@ -321,7 +321,7 @@ ${
   extra?.description
     ? `
 <div class="description">
-<strong>Description:</strong> ${extra.description}
+<strong>${t("description")}:</strong> ${extra.description}
 </div>
 `
     : ""
@@ -336,10 +336,11 @@ ${footer.message}
 `
     : ""
 }
+
 <div class="no-print" style="text-align:center;margin-top:15px;">
   <button onclick="window.print()" 
   style="padding:6px 14px;font-size:13px;cursor:pointer;">
-  Print
+  ${t("print")}
   </button>
 </div>
 

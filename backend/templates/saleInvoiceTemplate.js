@@ -1,3 +1,4 @@
+const { t } = require("../i18n/i18n");
 const generateSaleInvoiceHTML = (data) => {
   if (!data) {
   }
@@ -273,15 +274,15 @@ ${
 
 <div class="info-section">
   <div class="info-left">
-    <div><strong>MS:</strong> ${party?.name || "-"}</div>
-    <div><strong>Ph:</strong> ${party?.phone || "-"}</div>
-    ${party?.by ? `<div><strong>By:</strong> ${party.by}</div>` : ""}
+    <div><strong>${t("customer")}:</strong> ${party?.name || "-"}</div>
+    <div><strong>${t("phone")}:</strong> ${party?.phone || "-"}</div>
+    ${party?.by ? `<div><strong>${t("invoice.by")}:</strong> ${party.by}</div>` : ""}
   </div>
 
   <div class="info-right">
-    <div><strong>Bill No:</strong> ${documentInfo?.billNo || "-"}</div>
-    <div><strong>Date:</strong> ${documentInfo?.date || ""} ${documentInfo?.time || ""}</div>
-    <div><strong>Type:</strong> ${documentInfo?.type || "-"}</div>
+    <div><strong>${t("billNo")}:</strong> ${documentInfo?.billNo || "-"}</div>
+    <div><strong>${t("date")}:</strong> ${documentInfo?.date || ""} ${documentInfo?.time || ""}</div>
+    <div><strong>${t("common.type")}:</strong> ${documentInfo?.type || "-"}</div>
   </div>
 </div>
 
@@ -289,16 +290,16 @@ ${
 <thead>
 <tr>
   <th style="width:5%">#</th>
-  <th style="${widthStyle("name")}; text-align:left;">Item</th>
+  <th style="${widthStyle("name")}; text-align:left;">${t("item")}</th>
   ${
     columns?.showDescription
-      ? `<th style="${widthStyle("description")}">Description</th>`
+      ? `<th style="${widthStyle("description")}">${t("description")}</th>`
       : ""
   }
-  ${columns?.showUOM ? `<th style="${widthStyle("uom")}">UOM</th>` : ""}
-  <th style="${widthStyle("quantity")}">Qty</th>
-  <th style="${widthStyle("price")}">Rate</th>
-  <th style="${widthStyle("total")}">Amount</th>
+  ${columns?.showUOM ? `<th style="${widthStyle("uom")}">${t("print.showUom")}</th>` : ""}
+  <th style="${widthStyle("quantity")}">${t("qty")}</th>
+  <th style="${widthStyle("price")}">${t("rate")}</th>
+  <th style="${widthStyle("total")}">${t("amount")}</th>
 </tr>
 </thead>
 
@@ -319,38 +320,38 @@ ${
 </tr>`,
         )
         .join("")
-    : `<tr><td colspan="${totalColumns}">No items</td></tr>`
+    : `<tr><td colspan="${totalColumns}">${t("print.noItems")}</td></tr>`
 }
 </tbody>
 </table>
 
 <div class="totals">
   <div class="totals-row">
-    <span>Total:</span>
+    <span>${t("total")}:</span>
     <span>${total}</span>
   </div>
 
   ${
     totals?.discountAmount
       ? `<div class="totals-row">
-           <span>Discount:</span>
+           <span>${t("discount")}:</span>
            <span>${totals.discountAmount}</span>
          </div>`
       : ""
   }
 
   <div class="totals-row">
-    <span>Net Total:</span>
+    <span>${t("netTotal")}:</span>
     <span>${totals?.grandTotal || total}</span>
   </div>
 
   <div class="totals-row">
-    <span>Paid:</span>
+    <span>${t("paid")}:</span>
     <span>${paid}</span>
   </div>
 
   <div class="totals-row">
-    <span>Balance:</span>
+    <span>${t("balance")}:</span>
     <span>${balance}</span>
   </div>
 </div>

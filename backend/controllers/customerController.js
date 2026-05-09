@@ -397,11 +397,6 @@ const confirmMergeCustomers = async (req, res) => {
 
 const getCustomerLedger = async (req, res) => {
   try {
-    console.log("🔥 LEDGER API HIT");
-
-    console.log("📦 req.params =>", req.params);
-
-    console.log("🆔 customerId =>", req.params.customerId);
     const userId = req.user?.id || req.userId;
     const customerId = req.params.id;
     const { startDate, endDate } = req.query;

@@ -68,11 +68,37 @@ const getSupplierBalanceFromJournal = async (supplierId, userId) => {
     return 0;
   }
 
-  return calculateBalanceFromJournal(
-    supplier.account,
-    userId,
-    `Supplier(${supplier.name})`,
-  );
+  const result = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: new mongoose.Types.ObjectId(userId),
+        isDeleted: false,
+        "lines.account": supplier.account,
+      },
+    },
+    { $unwind: "$lines" },
+    {
+      $match: {
+        "lines.account": supplier.account,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        balance: {
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "credit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  return result[0]?.balance || 0;
 };
 
 module.exports = {

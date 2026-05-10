@@ -575,7 +575,7 @@ const SupplierLedgerHeader = ({
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {totalDebit.toFixed(2)}
+              Rs. {totalCredit.toFixed(2)}
             </div>
           </div>
 
@@ -589,7 +589,7 @@ const SupplierLedgerHeader = ({
           >
             <div style={{ color: '#dc2626', fontWeight: 600 }}>{t('ledger.totalCredit')}</div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {totalCredit.toFixed(2)}
+              Rs. {totalDebit.toFixed(2)}
             </div>
           </div>
 

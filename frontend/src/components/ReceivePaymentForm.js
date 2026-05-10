@@ -699,10 +699,10 @@ const ReceivePaymentForm = () => {
                     <td className="p-2 border">{e.billNo || '-'}</td>
                     <td className="p-2 border">{e.description || '-'}</td>
                     <td className="p-2 border text-right font-medium text-green-700">
-                      {e.debit?.toFixed(2) || '0.00'}
+                      {e.credit?.toFixed(2) || '0.00'}
                     </td>
                     <td className="p-2 border text-right font-medium text-red-600">
-                      {e.credit?.toFixed(2) || '0.00'}
+                      {e.debit?.toFixed(2) || '0.00'}
                     </td>
                     <td className="p-2 border text-right font-bold text-blue-700">
                       {e.runningBalance?.toFixed(2) || '0.00'}
@@ -716,9 +716,9 @@ const ReceivePaymentForm = () => {
                     Total
                   </td>
 
-                  <td className="p-2 border text-right text-green-700">{totalDebit.toFixed(2)}</td>
+                  <td className="p-2 border text-right text-green-700">{totalCredit.toFixed(2)}</td>
 
-                  <td className="p-2 border text-right text-red-600">{totalCredit.toFixed(2)}</td>
+                  <td className="p-2 border text-right text-red-600">{totalDebit.toFixed(2)}</td>
 
                   <td className="p-2 border text-right text-blue-700 font-bold">
                     {closingBalance.toFixed(2)}

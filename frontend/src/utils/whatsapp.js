@@ -68,9 +68,9 @@ ${businessName || ''}`;
   // 🌍 ENGLISH MESSAGE
   return `💰 PAYMENT REMINDER
 
-Aslamoalaikum ${safeName},
+Aslamoalaikum: ${safeName},
 
-Remaining balance:
+Your Remaining balance is:
 Rs ${safeBalance}
 
 Please pay soon.

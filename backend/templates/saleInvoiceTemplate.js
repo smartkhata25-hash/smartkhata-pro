@@ -358,6 +358,28 @@ ${
 
 ${footer?.message ? `<div class="footer">${footer.message}</div>` : ""}
 
+${
+  !page?.isPdf
+    ? `
+<div class="no-print" style="text-align:center;margin-top:15px;display:flex;justify-content:center;gap:10px;">
+
+  <button 
+    onclick="history.back()" 
+    style="padding:6px 14px;font-size:13px;cursor:pointer;">
+    ← ${t("back")}
+  </button>
+
+  <button 
+    onclick="window.print()" 
+    style="padding:6px 14px;font-size:13px;cursor:pointer;">
+    ${t("print")}
+  </button>
+
+</div>
+`
+    : ""
+}
+
 </div>
 </body>
 </html>

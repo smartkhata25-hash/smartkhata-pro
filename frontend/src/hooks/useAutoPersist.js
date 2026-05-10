@@ -1,18 +1,26 @@
 // 📁 src/hooks/useAutoPersist.js
 
 import { useEffect, useRef } from 'react';
-import { saveState, loadState, deepMerge, debounce } from '../utils/pageState';
+import { saveState, loadState, deepMerge } from '../utils/pageState';
 
 export default function useAutoPersist(key, state, setState) {
   const isLoaded = useRef(false);
 
-  const debouncedSave = useRef(
-    debounce((value) => {
+  // ✅ debounce timer
+  const debounceTimer = useRef(null);
+
+  // ✅ safe debounced save
+  const debouncedSave = useRef();
+
+  debouncedSave.current = (value) => {
+    clearTimeout(debounceTimer.current);
+
+    debounceTimer.current = setTimeout(() => {
       console.log('💾 SAVING STATE FULL:', JSON.stringify(value, null, 2));
 
       saveState(key, value);
-    }, 500)
-  ).current;
+    }, 500);
+  };
 
   // 🔹 LOAD (پہلی بار)
   useEffect(() => {
@@ -42,11 +50,20 @@ export default function useAutoPersist(key, state, setState) {
       return;
     }
 
-    debouncedSave(state);
-  }, [state, debouncedSave]);
+    debouncedSave.current(state);
+  }, [state]);
+
+  // ✅ cleanup pending save
+  useEffect(() => {
+    return () => {
+      clearTimeout(debounceTimer.current);
+    };
+  }, []);
 
   // 🔹 clear function
   const clear = () => {
+    clearTimeout(debounceTimer.current);
+
     saveState(key, null);
   };
 

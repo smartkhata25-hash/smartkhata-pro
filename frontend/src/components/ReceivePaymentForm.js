@@ -7,7 +7,8 @@ import {
   getReceivePaymentById,
 } from '../services/receivePaymentService';
 import { getAccounts } from '../services/accountService';
-import { fetchCustomers, fetchCustomerLedger } from '../services/customerService';
+import { fetchCustomers } from '../services/customerService';
+import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t } from '../i18n/i18n';
@@ -142,11 +143,19 @@ const ReceivePaymentForm = () => {
     }
 
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadLedger = async (customerId) => {
     if (customerId) {
-      const res = await fetchCustomerLedger(customerId);
+      const customer = customers.find((c) => c._id === customerId);
+
+      const accountId = customer?.account?._id || customer?.account;
+
+      console.log('ACCOUNT ID:', accountId);
+
+      const res = await getLedgerByCustomerAccount(accountId);
+
       setCustomerLedger(res.ledger || []);
     } else {
       setCustomerLedger([]);
@@ -194,7 +203,7 @@ const ReceivePaymentForm = () => {
     setCustomerLedger([]);
 
     setShowPreview(false);
-    localStorage.removeItem('app_state_receive_payment_draft');
+    clear();
   };
 
   const handleRevert = async () => {
@@ -328,7 +337,7 @@ const ReceivePaymentForm = () => {
     }
   }, []);
 
-  useFormPersist('receive_payment_draft', formState, () => {});
+  const { clear } = useFormPersist('receive_payment_draft', formState, () => {});
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
@@ -361,11 +370,11 @@ const ReceivePaymentForm = () => {
       setLoading(true);
       if (id) {
         await updateReceivePayment(id, data);
-        localStorage.removeItem('app_state_receive_payment_draft');
+        clear();
         alert(t('alerts.paymentUpdated'));
       } else {
         await createReceivePayment(data);
-        localStorage.removeItem('app_state_receive_payment_draft');
+        clear();
       }
 
       if (type === 'close') {

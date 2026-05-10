@@ -599,7 +599,7 @@ const InvoiceForm = ({
     }
   }, [editingInvoiceFromAPI]);
 
-  useFormPersist('sale_invoice_draft', formState, () => {});
+  const { clear } = useFormPersist('sale_invoice_draft', formState, () => {});
 
   const handleClear = () => {
     localStorage.removeItem('app_state_sale_invoice_draft');
@@ -720,7 +720,7 @@ const InvoiceForm = ({
         await onSuccess();
       }
 
-      localStorage.removeItem('app_state_sale_invoice_draft');
+      clear();
 
       if (mode === 'new' && !editingInvoice) {
         const now = new Date();
@@ -752,7 +752,7 @@ const InvoiceForm = ({
         setAttachment(null);
         setShowPreview(false);
 
-        localStorage.removeItem('app_state_sale_invoice_draft');
+        clear();
 
         if (fileInputRef.current) {
           fileInputRef.current.value = '';

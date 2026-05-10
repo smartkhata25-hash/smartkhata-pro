@@ -317,7 +317,16 @@ const InvoiceForm = ({
     if (!editingInvoiceFromAPI) return;
 
     const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
+      console.log('🔍 MATCHING PRODUCT');
+
+      console.log('item.productId:', item.productId);
+
+      console.log(
+        'ALL PRODUCT IDS:',
+        products.map((p) => p._id)
+      );
       const matchedProduct = products.find((p) => p._id === item.productId);
+      console.log('MATCHED PRODUCT:', matchedProduct);
       return {
         itemNo: i + 1,
         search: matchedProduct?.name || '',
@@ -354,7 +363,19 @@ const InvoiceForm = ({
     }
 
     fetchProductsWithToken(token).then((data) => {
+      console.log('🟢 PRODUCTS LOADED');
+
+      console.log('TOTAL PRODUCTS:', data.length);
+
+      console.log(
+        'FIRST 5 PRODUCTS:',
+        data.slice(0, 5).map((p) => ({
+          id: p._id,
+          name: p.name,
+        }))
+      );
       setProducts(data);
+
       localStorage.setItem('products', JSON.stringify(data));
     });
 
@@ -561,6 +582,7 @@ const InvoiceForm = ({
     if (editingInvoiceFromAPI) return;
 
     const saved = localStorage.getItem('app_state_sale_invoice_draft');
+    console.log('📦 RAW DRAFT:', saved);
 
     if (!saved) return;
 
@@ -568,6 +590,17 @@ const InvoiceForm = ({
       const parsed = JSON.parse(saved);
 
       const data = parsed.data;
+
+      console.log('📦 RESTORED DRAFT DATA:', data);
+
+      console.log(
+        '📦 RESTORED ITEMS:',
+        data.items?.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          search: i.search,
+        }))
+      );
 
       if (!data) return;
       setBillNo(data.billNo || 'Auto');
@@ -706,6 +739,24 @@ const InvoiceForm = ({
     formData.append('items', JSON.stringify(mappedItems));
 
     try {
+      console.log('🔥 SUBMIT MODE CHECK');
+
+      console.log('editingInvoiceFromAPI:', editingInvoiceFromAPI);
+
+      console.log('editingInvoiceFromAPI._id:', editingInvoiceFromAPI?._id);
+
+      console.log('billNo:', billNo);
+
+      console.log(
+        'FINAL ITEMS:',
+        items.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          search: i.search,
+          quantity: i.quantity,
+          rate: i.rate,
+        }))
+      );
       if (editingInvoiceFromAPI) {
         await updateInvoice(editingInvoiceFromAPI._id, formData, token);
       } else {

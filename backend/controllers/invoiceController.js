@@ -18,6 +18,11 @@ const {
 
 // ✅ Create Invoice - UPDATED
 exports.createInvoice = async (req, res) => {
+  console.log("🚨 CREATE INVOICE HIT");
+
+  console.log("customerName:", req.body.customerName);
+
+  console.log("items raw:", req.body.items);
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
@@ -405,6 +410,13 @@ exports.deleteInvoice = async (req, res) => {
 
 // ✅ Update Invoice - Safe DateTime Version
 exports.updateInvoice = async (req, res) => {
+  console.log("🟢 UPDATE INVOICE HIT");
+
+  console.log("invoice id:", req.params.id);
+
+  console.log("customerName:", req.body.customerName);
+
+  console.log("items raw:", req.body.items);
   try {
     const userId = req.user?.id || req.userId;
     const invoice = await Invoice.findOne({

@@ -191,6 +191,14 @@ exports.getProducts = async (req, res) => {
 
 // ✏️ Update Product
 exports.updateProduct = async (req, res) => {
+  console.log("🔥 UPDATE PRODUCT HIT");
+
+  console.log("req.params.id:", req.params.id);
+
+  console.log("req.body:", req.body);
+
+  console.log("req.body.name:", req.body.name);
+
   try {
     const updateData = {
       name: req.body.name,

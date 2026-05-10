@@ -458,7 +458,7 @@ exports.getSupplierDetailedLedger = async (req, res) => {
 
       totalDebit += debit;
       totalCredit += credit;
-      balance += credit - debit;
+      balance += debit - credit;
 
       const row = {
         _id: entry._id,

@@ -55,12 +55,7 @@ const ReceivePaymentForm = () => {
   useEffect(() => {
     async function fetchData() {
       try {
-        let cData = JSON.parse(localStorage.getItem('customers') || 'null');
-
-        if (!cData) {
-          cData = await fetchCustomers();
-          localStorage.setItem('customers', JSON.stringify(cData));
-        }
+        const cData = await fetchCustomers();
 
         let aData = JSON.parse(localStorage.getItem('accounts') || 'null');
 
@@ -315,28 +310,6 @@ const ReceivePaymentForm = () => {
     paymentEntries,
   };
 
-  useEffect(() => {
-    const saved = localStorage.getItem('app_state_receive_payment_draft');
-
-    if (!saved) return;
-
-    try {
-      const parsed = JSON.parse(saved);
-
-      const data = parsed.data;
-
-      if (!data) return;
-
-      setFormData(data.formData || {});
-
-      setCustomerName(data.customerName || '');
-
-      setPaymentEntries(data.paymentEntries || [{ account: '', amount: '', paymentType: 'Cash' }]);
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
-
   const { clear } = useFormPersist('receive_payment_draft', formState, () => {});
 
   const handleSubmit = async (e, type = 'close') => {
@@ -439,7 +412,7 @@ const ReceivePaymentForm = () => {
                 }}
               >
                 {customers
-                  .filter((c) => c.name.toLowerCase().includes(customerName.toLowerCase()))
+                  .filter((c) => (c.name || '').toLowerCase().includes(customerName.toLowerCase()))
                   .slice(0, 10)
                   .map((c) => (
                     <div

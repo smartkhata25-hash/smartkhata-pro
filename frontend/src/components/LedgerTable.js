@@ -274,13 +274,13 @@ const LedgerTable = ({
                     if (col === 'debit')
                       return (
                         <td key={col} className="amount-debit">
-                          {(e.debit || 0).toFixed(2)}
+                          {(e.credit || 0).toFixed(2)}
                         </td>
                       );
                     if (col === 'credit')
                       return (
                         <td key={col} className="amount-credit">
-                          {(e.credit || 0).toFixed(2)}
+                          {(e.debit || 0).toFixed(2)}
                         </td>
                       );
                     if (col === 'balance')
@@ -330,14 +330,14 @@ const LedgerTable = ({
                   if (col === 'debit')
                     return (
                       <td key={col} className="amount-debit">
-                        {ledgerData.reduce((s, e) => s + (e.debit || 0), 0).toFixed(2)}
+                        {ledgerData.reduce((s, e) => s + (e.credit || 0), 0).toFixed(2)}
                       </td>
                     );
 
                   if (col === 'credit')
                     return (
                       <td key={col} className="amount-credit">
-                        {ledgerData.reduce((s, e) => s + (e.credit || 0), 0).toFixed(2)}
+                        {ledgerData.reduce((s, e) => s + (e.debit || 0), 0).toFixed(2)}
                       </td>
                     );
 

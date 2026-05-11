@@ -161,7 +161,13 @@ const menuConfig = [
         title: 'menu.analytics',
         items: [
           { label: 'dashboard.monthlyCashFlow', path: '/cashflow' },
+
           { label: 'dashboard.monthlySales', path: '/monthly-sales' },
+
+          {
+            label: 'stockValueReport',
+            path: '/stock-value-report',
+          },
         ],
       },
     ],

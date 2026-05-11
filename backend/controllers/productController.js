@@ -31,8 +31,30 @@ exports.bulkCreateProducts = async (req, res) => {
         .status(400)
         .json({ error: `Duplicate products: ${existingNames.join(", ")}` });
     }
-
     const created = await Product.insertMany(products);
+
+    // ✅ Opening Stock Transactions
+    const stockTransactions = [];
+
+    created.forEach((product, index) => {
+      const stock = Number(req.body[index]?.stock || 0);
+
+      if (stock > 0) {
+        stockTransactions.push({
+          productId: product._id,
+          type: "IN",
+          quantity: stock,
+          note: "Opening Stock",
+          userId: new mongoose.Types.ObjectId(userId),
+          date: new Date(),
+        });
+      }
+    });
+
+    // ✅ Bulk stock entries create
+    if (stockTransactions.length > 0) {
+      await InventoryTransaction.insertMany(stockTransactions);
+    }
 
     // 🔥 NEW: populate کر کے واپس بھیجو
     const populated = await Product.find({

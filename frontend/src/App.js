@@ -31,6 +31,7 @@ import ProductLedgerPage from './pages/ProductLedgerPage';
 import AccountDetailPage from './pages/AccountDetailPage';
 import CashFlowPage from './pages/CashFlowPage';
 import MonthlySalesPage from './pages/MonthlySalesPage';
+import StockValueReportPage from './pages/StockValueReportPage';
 import CategoryManagement from './pages/CategoryManagement';
 import InventoryAdjustPage from './pages/InventoryAdjustPage';
 import PurchaseInvoicePage from './pages/PurchaseInvoicePage';
@@ -260,6 +261,7 @@ function App() {
           <Route path="/aging-report" element={<AgingReport />} />
           <Route path="/cashflow" element={<CashFlowPage />} />
           <Route path="/monthly-sales" element={<MonthlySalesPage />} />
+          <Route path="/stock-value-report" element={<StockValueReportPage />} />
 
           {/* Inventory */}
           <Route path="/inventory" element={<InventoryPage />} />

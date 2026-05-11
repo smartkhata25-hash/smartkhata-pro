@@ -915,5 +915,7 @@
   "price": "قیمت",
   "print.noItems": "کوئی آئٹم موجود نہیں",
   "payment.none": "کوئی ادائیگی موجود نہیں",
-  "back": "واپس"
+  "back": "واپس",
+  "reports.stockValue": "اسٹاک ویلیو رپورٹ",
+  "stockValueReport": "اسٹاک ویلیو رپورٹ"
 }

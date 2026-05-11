@@ -915,5 +915,7 @@
   "price": "Price",
   "print.noItems": "No items",
   "payment.none": "No payments",
-  "back": "Back"
+  "back": "Back",
+  "stockValue": "Stock Value Report",
+  "stockValueReport": "Stock Value Report"
 }

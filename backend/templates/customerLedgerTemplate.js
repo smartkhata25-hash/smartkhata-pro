@@ -10,6 +10,7 @@ const { t } = require("../i18n/i18n");
  */
 
 const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
+  const lang = data?.lang || "ur";
   const { documentTitle, customer, period, summary, rows } = data;
 
   return `
@@ -134,23 +135,23 @@ td.left {
 
   <!-- ===== HEADER ===== -->
   <div class="header">
-    <h2>${documentTitle}</h2>
+   <h2>${t("ledger.customerLedger", lang)}</h2>
 
     <div class="sub-info">
-      ${t("customer")}: ${customer.name}
+      ${t("customer", lang)}: ${customer.name}
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("common.from")}: ${period.from}
+      ${t("common.from", lang)}: ${period.from}
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("common.to")}: ${period.to}
+      ${t("common.to", lang)}: ${period.to}
     </div>
   </div>
 
   <!-- ===== SUMMARY ===== -->
   <div class="summary">
-    ${t("ledger.opening")}: ${summary.opening.toFixed(2)} |
-    ${t("ledger.totalDebit")}: ${summary.totalDebit.toFixed(2)} |
-    ${t("ledger.totalCredit")}: ${summary.totalCredit.toFixed(2)} |
-    ${t("ledger.closing")}: ${
+    ${t("ledger.opening", lang)}: ${summary.opening.toFixed(2)} |
+    ${t("ledger.totalDebit", lang)}: ${summary.totalDebit.toFixed(2)} |
+    ${t("ledger.totalCredit", lang)}: ${summary.totalCredit.toFixed(2)} |
+    ${t("ledger.closing", lang)}: ${
       summary.closingBalance < 0
         ? `(${Math.abs(summary.closingBalance).toFixed(2)})`
         : summary.closingBalance.toFixed(2)
@@ -161,12 +162,12 @@ td.left {
   <table>
     <thead>
       <tr>
-        <th style="width:15%">${t("date")}</th>
-        <th style="width:15%">${t("billNo")}</th>
-        <th style="width:25%">${t("source")}</th>
-        <th style="width:15%">${t("debit")}</th>
-        <th style="width:15%">${t("credit")}</th>
-        <th style="width:15%">${t("balance")}</th>
+        <th style="width:15%">${t("date", lang)}</th>
+        <th style="width:15%">${t("billNo", lang)}</th>
+        <th style="width:25%">${t("source", lang)}</th>
+        <th style="width:15%">${t("debit", lang)}</th>
+        <th style="width:15%">${t("credit", lang)}</th>
+        <th style="width:15%">${t("balance", lang)}</th>
       </tr>
     </thead>
 
@@ -190,14 +191,14 @@ td.left {
               .join("")
           : `
         <tr>
-          <td colspan="6">${t("ledger.noTransactions")}</td>
+          <td colspan="6">${t("ledger.noTransactions", lang)}</td>
         </tr>
       `
       }
 
       <!-- ===== TOTALS ===== -->
       <tr class="totals-row">
-        <td colspan="3" class="right">${t("totals")}:</td>
+        <td colspan="3" class="right">${t("totals", lang)}:</td>
         <td>${summary.totalDebit.toFixed(2)}</td>
         <td>${summary.totalCredit.toFixed(2)}</td>
         <td>${summary.closingBalance.toFixed(2)}</td>
@@ -208,7 +209,7 @@ td.left {
 
   <!-- ===== FOOTER ===== -->
   <div class="footer">
-    ${t("app.name")} • ${new Date().toLocaleDateString("en-GB")}
+    ${t("app.name", lang)} • ${new Date().toLocaleDateString("en-GB")}
   </div>
 
 </div>

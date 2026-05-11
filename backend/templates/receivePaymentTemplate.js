@@ -234,7 +234,7 @@ ${documentTitle}
 
 <div class="info-left">
 
-<div><strong>${party?.label || t("customer", lang)}:</strong> ${party?.name || "-"}</div>
+<div><strong>${t("customer", lang)}:</strong> ${party?.name || "-"}</div>
 
 <div><strong>${t("phone", lang)}:</strong> ${party?.phone || "-"}</div>
 

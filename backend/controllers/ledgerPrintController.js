@@ -129,6 +129,8 @@ const getCustomerLedgerHtml = async (req, res) => {
       ledger: rawData.ledger,
     });
 
+    built.lang = req.query.lang || "ur";
+
     const html = generateCustomerLedgerHTML(built, size || "A5");
 
     res.set({ "Content-Type": "text/html" });
@@ -163,6 +165,8 @@ const generateCustomerLedgerPdf = async (req, res) => {
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
     });
+
+    built.lang = req.query.lang || "ur";
 
     const html = generateCustomerLedgerHTML(built, size || "A5");
 

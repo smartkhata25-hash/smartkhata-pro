@@ -9,7 +9,7 @@ import PageLayout from '../components/PageLayout';
 import { getLedgerByCustomerAccount, deleteJournalEntry } from '../services/customerLedgerService';
 
 import LedgerTable from '../components/LedgerTable';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -165,6 +165,7 @@ export default function CustomerLedgerPage() {
       startDate: start || '',
       endDate: end || '',
       size: printSize,
+      lang: getCurrentLanguage(),
     }).toString();
     try {
       const response = await fetch(
@@ -421,6 +422,7 @@ export default function CustomerLedgerPage() {
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize,
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -631,6 +633,7 @@ export default function CustomerLedgerPage() {
             startDate: start || '',
             endDate: end || '',
             size: printSize,
+            lang: getCurrentLanguage(),
           }).toString();
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-ledger/${cid}/pdf?${query}`;

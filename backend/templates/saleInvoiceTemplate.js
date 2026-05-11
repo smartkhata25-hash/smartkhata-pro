@@ -1,5 +1,6 @@
 const { t } = require("../i18n/i18n");
 const generateSaleInvoiceHTML = (data) => {
+  const lang = data?.lang || "ur";
   if (!data) {
   }
 
@@ -274,15 +275,15 @@ ${
 
 <div class="info-section">
   <div class="info-left">
-    <div><strong>${t("customer")}:</strong> ${party?.name || "-"}</div>
-    <div><strong>${t("phone")}:</strong> ${party?.phone || "-"}</div>
-    ${party?.by ? `<div><strong>${t("invoice.by")}:</strong> ${party.by}</div>` : ""}
+    <div><strong>${t("customer", lang)}:</strong> ${party?.name || "-"}</div>
+    <div><strong>${t("phone", lang)}:</strong> ${party?.phone || "-"}</div>
+    ${party?.by ? `<div><strong>${t("invoice.by", lang)}:</strong> ${party.by}</div>` : ""}
   </div>
 
   <div class="info-right">
-    <div><strong>${t("billNo")}:</strong> ${documentInfo?.billNo || "-"}</div>
-    <div><strong>${t("date")}:</strong> ${documentInfo?.date || ""} ${documentInfo?.time || ""}</div>
-    <div><strong>${t("common.type")}:</strong> ${documentInfo?.type || "-"}</div>
+    <div><strong>${t("billNo", lang)}:</strong> ${documentInfo?.billNo || "-"}</div>
+    <div><strong>${t("date", lang)}:</strong> ${documentInfo?.date || ""} ${documentInfo?.time || ""}</div>
+    <div><strong>${t("common.type", lang)}:</strong> ${documentInfo?.type || "-"}</div>
   </div>
 </div>
 
@@ -290,16 +291,16 @@ ${
 <thead>
 <tr>
   <th style="width:5%">#</th>
-  <th style="${widthStyle("name")}; text-align:left;">${t("item")}</th>
+  <th style="${widthStyle("name")}; text-align:left;">${t("item", lang)}</th>
   ${
     columns?.showDescription
-      ? `<th style="${widthStyle("description")}">${t("description")}</th>`
+      ? `<th style="${widthStyle("description")}">${t("description", lang)}</th>`
       : ""
   }
-  ${columns?.showUOM ? `<th style="${widthStyle("uom")}">${t("print.showUom")}</th>` : ""}
-  <th style="${widthStyle("quantity")}">${t("qty")}</th>
-  <th style="${widthStyle("price")}">${t("rate")}</th>
-  <th style="${widthStyle("total")}">${t("amount")}</th>
+  ${columns?.showUOM ? `<th style="${widthStyle("uom")}">${t("print.showUom", lang)}</th>` : ""}
+  <th style="${widthStyle("quantity")}">${t("qty", lang)}</th>
+  <th style="${widthStyle("price")}">${t("rate", lang)}</th>
+  <th style="${widthStyle("total")}">${t("amount", lang)}</th>
 </tr>
 </thead>
 
@@ -320,38 +321,38 @@ ${
 </tr>`,
         )
         .join("")
-    : `<tr><td colspan="${totalColumns}">${t("print.noItems")}</td></tr>`
+    : `<tr><td colspan="${totalColumns}">${t("print.noItems", lang)}</td></tr>`
 }
 </tbody>
 </table>
 
 <div class="totals">
   <div class="totals-row">
-    <span>${t("total")}:</span>
+    <span>${t("total", lang)}:</span>
     <span>${total}</span>
   </div>
 
   ${
     totals?.discountAmount
       ? `<div class="totals-row">
-           <span>${t("discount")}:</span>
+           <span>${t("discount", lang)}:</span>
            <span>${totals.discountAmount}</span>
          </div>`
       : ""
   }
 
   <div class="totals-row">
-    <span>${t("netTotal")}:</span>
+    <span>${t("netTotal", lang)}:</span>
     <span>${totals?.grandTotal || total}</span>
   </div>
 
   <div class="totals-row">
-    <span>${t("paid")}:</span>
+    <span>${t("paid", lang)}:</span>
     <span>${paid}</span>
   </div>
 
   <div class="totals-row">
-    <span>${t("balance")}:</span>
+    <span>${t("balance", lang)}:</span>
     <span>${balance}</span>
   </div>
 </div>
@@ -366,13 +367,13 @@ ${
   <button 
     onclick="history.back()" 
     style="padding:6px 14px;font-size:13px;cursor:pointer;">
-    ← ${t("back")}
+    ← ${t("back", lang)}
   </button>
 
   <button 
     onclick="window.print()" 
     style="padding:6px 14px;font-size:13px;cursor:pointer;">
-    ${t("print")}
+    ${t("print", lang)}
   </button>
 
 </div>

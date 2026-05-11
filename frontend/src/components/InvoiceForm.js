@@ -34,7 +34,7 @@ const InvoiceForm = ({
   const printRef = useRef();
   const customerInputRef = useRef(null);
   const fileInputRef = useRef();
-  const location = useLocation(); // ✅ location setup
+  const location = useLocation();
 
   const [editingInvoiceFromAPI, setEditingInvoiceFromAPI] = useState(null);
 
@@ -317,14 +317,6 @@ const InvoiceForm = ({
     if (!editingInvoiceFromAPI) return;
 
     const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
-      console.log('🔍 MATCHING PRODUCT');
-
-      console.log('item.productId:', item.productId);
-
-      console.log(
-        'ALL PRODUCT IDS:',
-        products.map((p) => p._id)
-      );
       const matchedProduct = products.find((p) => p._id === item.productId);
       console.log('MATCHED PRODUCT:', matchedProduct);
       return {
@@ -363,24 +355,12 @@ const InvoiceForm = ({
     }
 
     fetchProductsWithToken(token).then((data) => {
-      console.log('🟢 PRODUCTS LOADED');
-
-      console.log('TOTAL PRODUCTS:', data.length);
-
-      console.log(
-        'FIRST 5 PRODUCTS:',
-        data.slice(0, 5).map((p) => ({
-          id: p._id,
-          name: p.name,
-        }))
-      );
       setProducts(data);
 
       localStorage.setItem('products', JSON.stringify(data));
     });
 
     getAccounts(token).then((all) => {
-      console.log('🔥 ACCOUNTS FROM API:', all);
       setAccounts(all);
     });
   }, [token, onProductChange]);
@@ -390,7 +370,7 @@ const InvoiceForm = ({
     if (!customerName || customers.length === 0) return;
 
     const matchedCustomer = customers.find((c) => c.name === customerName);
-    console.log('🔁 Auto matched customer:', matchedCustomer?._id, customerName);
+
     if (matchedCustomer) {
       onCustomerChange && onCustomerChange(matchedCustomer._id);
     }
@@ -1187,6 +1167,7 @@ const InvoiceForm = ({
                             state: {
                               isPreview: true,
                               invoiceData: {
+                                lang: localStorage.getItem('lang'),
                                 invoiceDate,
                                 invoiceTime,
                                 billNo,

@@ -6,13 +6,7 @@ const translations = {
   ur,
 };
 
-const getCurrentLanguage = () => {
-  return process.env.DEFAULT_LANG || "ur";
-};
-
-const t = (key) => {
-  const lang = getCurrentLanguage();
-
+const t = (key, lang = "ur") => {
   const langPack = translations[lang] || translations.en;
 
   return langPack[key] || key;

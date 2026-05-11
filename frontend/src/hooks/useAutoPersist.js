@@ -64,7 +64,7 @@ export default function useAutoPersist(key, state, setState) {
   const clear = () => {
     clearTimeout(debounceTimer.current);
 
-    saveState(key, null);
+    localStorage.removeItem(`app_state_${key}`);
   };
 
   return { clear };

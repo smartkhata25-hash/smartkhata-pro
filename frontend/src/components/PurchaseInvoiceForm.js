@@ -569,10 +569,11 @@ const PurchaseInvoiceForm = () => {
 
     if (paidAmount > 0 && (!selectedAccountId || selectedAccountId.trim() === '')) {
       alert(t('alerts.selectAccount'));
+
+      document.querySelector('select[name="selectedAccountId"]')?.focus();
+
       return;
     }
-
-    document.querySelector('select[name="selectedAccountId"]')?.focus();
 
     const selectedSupplier = suppliers.find((s) => s.name === supplierName);
     const supplierAccountId = selectedSupplier?.account || '';
@@ -895,6 +896,7 @@ const PurchaseInvoiceForm = () => {
                       </select>
 
                       <select
+                        name="selectedAccountId"
                         value={selectedAccountId}
                         onChange={(e) => setSelectedAccountId(e.target.value)}
                         disabled={paidAmount === 0}

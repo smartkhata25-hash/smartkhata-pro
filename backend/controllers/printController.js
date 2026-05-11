@@ -101,6 +101,8 @@ const salePreview = async (req, res) => {
 
     const invoice = req.body;
 
+    console.log("LANG RECEIVED:", invoice.lang);
+
     let printSetting = await PrintSetting.findOne({ userId });
 
     if (!printSetting || !printSetting.sales) {
@@ -115,6 +117,8 @@ const salePreview = async (req, res) => {
     }
 
     const built = buildSaleInvoicePrint(invoice, printSetting);
+
+    built.lang = invoice.lang;
 
     const html = generateSaleInvoiceHTML(built);
 
@@ -162,7 +166,9 @@ const saleReturnPreview = async (req, res) => {
 const generateSalePdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
     const invoice = req.body;
+    console.log("LANG RECEIVED:", invoice.lang);
 
     let printSetting = await PrintSetting.findOne({ userId });
 
@@ -173,6 +179,8 @@ const generateSalePdf = async (req, res) => {
     }
 
     const built = buildSaleInvoicePrint(invoice, printSetting);
+
+    built.lang = invoice.lang;
 
     const html = generateSaleInvoiceHTML(built);
 
@@ -242,6 +250,7 @@ const getSaleInvoiceHtml = async (req, res) => {
     if (!invoice) {
       return res.status(404).send("Sale invoice not found");
     }
+    console.log("DB LANG:", invoice.lang);
 
     let printSetting = await PrintSetting.findOne({ userId });
 
@@ -250,6 +259,8 @@ const getSaleInvoiceHtml = async (req, res) => {
     }
 
     const built = buildSaleInvoicePrint(invoice, printSetting);
+
+    built.lang = invoice.lang;
 
     const html = generateSaleInvoiceHTML(built);
 

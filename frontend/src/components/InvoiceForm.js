@@ -431,8 +431,6 @@ const InvoiceForm = ({
   };
 
   const handleCustomerSelect = (name, phone, id) => {
-    console.log('👤 Customer SELECTED:', id, name);
-    console.log('👤 Selected Customer:', id, name);
     setCustomerName(name);
     setCustomerPhone(phone);
 
@@ -562,25 +560,14 @@ const InvoiceForm = ({
     if (editingInvoiceFromAPI) return;
 
     const saved = localStorage.getItem('app_state_sale_invoice_draft');
-    console.log('📦 RAW DRAFT:', saved);
 
     if (!saved) return;
 
     try {
       const parsed = JSON.parse(saved);
+      if (!parsed || !parsed.data) return;
 
       const data = parsed.data;
-
-      console.log('📦 RESTORED DRAFT DATA:', data);
-
-      console.log(
-        '📦 RESTORED ITEMS:',
-        data.items?.map((i) => ({
-          productId: i.productId,
-          name: i.name,
-          search: i.search,
-        }))
-      );
 
       if (!data) return;
       setBillNo(data.billNo || 'Auto');
@@ -719,24 +706,6 @@ const InvoiceForm = ({
     formData.append('items', JSON.stringify(mappedItems));
 
     try {
-      console.log('🔥 SUBMIT MODE CHECK');
-
-      console.log('editingInvoiceFromAPI:', editingInvoiceFromAPI);
-
-      console.log('editingInvoiceFromAPI._id:', editingInvoiceFromAPI?._id);
-
-      console.log('billNo:', billNo);
-
-      console.log(
-        'FINAL ITEMS:',
-        items.map((i) => ({
-          productId: i.productId,
-          name: i.name,
-          search: i.search,
-          quantity: i.quantity,
-          rate: i.rate,
-        }))
-      );
       if (editingInvoiceFromAPI) {
         await updateInvoice(editingInvoiceFromAPI._id, formData, token);
       } else {

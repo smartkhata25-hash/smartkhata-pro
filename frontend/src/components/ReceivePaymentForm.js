@@ -11,7 +11,7 @@ import { fetchCustomers } from '../services/customerService';
 import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 
 const ReceivePaymentForm = () => {
@@ -261,6 +261,8 @@ const ReceivePaymentForm = () => {
     const previewData = {
       ...formData,
 
+      lang: getCurrentLanguage(),
+
       customer: formData.customer,
 
       customerName: customers.find((c) => c._id === formData.customer)?.name || '',
@@ -288,6 +290,8 @@ const ReceivePaymentForm = () => {
 
     const previewData = {
       ...formData,
+
+      lang: getCurrentLanguage(),
 
       customerName: customers.find((c) => c._id === formData.customer)?.name || '',
 

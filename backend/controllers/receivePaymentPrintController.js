@@ -212,6 +212,7 @@ const previewReceivePaymentHtml = async (req, res) => {
       pageWidth: size,
       previousBalance: previousBalance,
     });
+    built.lang = parsed.lang;
     const html = generateReceivePaymentHTML(built);
 
     res.set({
@@ -268,6 +269,8 @@ const previewReceivePaymentPdf = async (req, res) => {
       pageWidth: size,
       previousBalance: previousBalance,
     });
+
+    built.lang = parsed.lang;
 
     const html = generateReceivePaymentHTML({
       ...built,

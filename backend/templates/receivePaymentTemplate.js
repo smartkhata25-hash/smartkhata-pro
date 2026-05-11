@@ -1,6 +1,7 @@
 const { t } = require("../i18n/i18n");
 
 const generateReceivePaymentHTML = (data = {}) => {
+  const lang = data?.lang || "ur";
   const {
     documentTitle = "Receive Payment Receipt",
     header = {},
@@ -216,9 +217,9 @@ ${header.companyName ? `<h2>${header.companyName}</h2>` : ""}
 
 ${header.address ? `<p>${header.address}</p>` : ""}
 
-${header.phone ? `<p>${t("phone")}: ${header.phone}</p>` : ""}
+${header.phone ? `<p>${t("phone", lang)}: ${header.phone}</p>` : ""}
 
-${header.taxNumber ? `<p>${t("business.taxOptional")}: ${header.taxNumber}</p>` : ""}
+${header.taxNumber ? `<p>${t("business.taxOptional", lang)}: ${header.taxNumber}</p>` : ""}
 
 </div>
 `
@@ -233,19 +234,19 @@ ${documentTitle}
 
 <div class="info-left">
 
-<div><strong>${party?.label || t("customer")}:</strong> ${party?.name || "-"}</div>
+<div><strong>${party?.label || t("customer", lang)}:</strong> ${party?.name || "-"}</div>
 
-<div><strong>${t("phone")}:</strong> ${party?.phone || "-"}</div>
+<div><strong>${t("phone", lang)}:</strong> ${party?.phone || "-"}</div>
 
-<div><strong>${t("billNo")}:</strong> ${documentInfo?.receiptNo || "-"}</div>
+<div><strong>${t("billNo", lang)}:</strong> ${documentInfo?.receiptNo || "-"}</div>
 
 </div>
 
 <div class="info-right">
 
-<div><strong>${t("date")}:</strong> ${documentInfo?.date || "-"}</div>
+<div><strong>${t("date", lang)}:</strong> ${documentInfo?.date || "-"}</div>
 
-<div><strong>${t("time")}:</strong> ${documentInfo?.time || "-"}</div>
+<div><strong>${t("time", lang)}:</strong> ${documentInfo?.time || "-"}</div>
 
 </div>
 
@@ -258,9 +259,9 @@ ${documentTitle}
 <tr>
 
 <th style="width:10%">#</th>
-<th>${t("account")}</th>
-<th style="width:25%">${t("paymentType")}</th>
-<th style="width:25%">${t("amount")}</th>
+<th>${t("account", lang)}</th>
+<th style="width:25%">${t("paymentType", lang)}</th>
+<th style="width:25%">${t("amount", lang)}</th>
 
 </tr>
 
@@ -289,7 +290,7 @@ ${
         .join("")
     : `
 <tr>
-<td colspan="4" class="center">${t("payment.none")}</td>
+<td colspan="4" class="center">${t("payment.none", lang)}</td>
 </tr>
 `
 }
@@ -301,17 +302,17 @@ ${
 <div class="summary">
 
 <div class="summary-row">
-<span>${t("ledger.openingBalance")}</span>
+<span>${t("ledger.openingBalance", lang)}</span>
 <span>${previousBalance}</span>
 </div>
 
 <div class="summary-row">
-<span>${t("receivePayment")}</span>
+<span>${t("receivePayment", lang)}</span>
 <span>${receivedAmount}</span>
 </div>
 
 <div class="summary-row total">
-<span>${t("balance")}</span>
+<span>${t("balance", lang)}</span>
 <span>${remainingBalance}</span>
 </div>
 
@@ -321,7 +322,7 @@ ${
   extra?.description
     ? `
 <div class="description">
-<strong>${t("description")}:</strong> ${extra.description}
+<strong>${t("description", lang)}:</strong> ${extra.description}
 </div>
 `
     : ""
@@ -351,13 +352,13 @@ ${
   <button 
     onclick="window.close()" 
     style="padding:6px 14px;font-size:13px;cursor:pointer;">
-    ← ${t("back")}
+    ← ${t("back", lang)}
   </button>
 
   <button 
     onclick="window.print()" 
     style="padding:6px 14px;font-size:13px;cursor:pointer;">
-    ${t("print")}
+    ${t("print", lang)}
   </button>
 
 </div>

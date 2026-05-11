@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { bulkCreateProducts } from '../services/inventoryService';
+import { bulkCreateProducts, fetchProducts } from '../services/inventoryService';
 import { getCategories } from '../services/categoryService';
 import { t } from '../i18n/i18n';
 
 import CategoryDropdown from '../components/CategoryDropdown';
 import HighlightWrapper from '../components/HighlightWrapper';
+import ProductDropdown from '../components/ProductDropdown';
 
 const MultipleProductForm = ({ onBulkAdd, onClose }) => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
   const [activeCell, setActiveCell] = useState(null);
 
   const scrollRef = useRef();
@@ -27,11 +29,21 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
     const defaultRows = Array.from({ length: 20 }, () => blankProduct());
     setProducts(defaultRows);
 
-    loadCategories(); // 👈 یہ add کریں
+    loadCategories();
+    loadAllProducts();
   }, []);
   const loadCategories = async () => {
     const data = await getCategories();
     setCategories(data);
+  };
+
+  const loadAllProducts = async () => {
+    try {
+      const data = await fetchProducts();
+      setAllProducts(data || []);
+    } catch (err) {
+      console.error('Failed to load products');
+    }
   };
 
   const blankProduct = () => ({
@@ -303,6 +315,51 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                           <option value="dozen">{t('units.dozen')}</option>
                           <option value="packet">{t('units.packet')}</option>
                         </select>
+                      ) : field === 'name' ? (
+                        <div>
+                          <ProductDropdown
+                            productList={allProducts}
+                            value={p.name}
+                            showAddOption={false}
+                            inputStyle={inputStyle(isMobile)}
+                            onChange={(value) => {
+                              const updated = [...products];
+                              updated[rowIndex].name = value;
+
+                              if (rowIndex === products.length - 1 && value.trim() !== '') {
+                                updated.push(blankProduct());
+
+                                setTimeout(() => {
+                                  scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                                }, 100);
+                              }
+
+                              setProducts(updated);
+                            }}
+                            onSelect={(product) => {
+                              const updated = [...products];
+                              updated[rowIndex].name = product.name;
+                              setProducts(updated);
+                            }}
+                          />
+
+                          {allProducts.some(
+                            (x) => x.name.trim().toLowerCase() === p.name.trim().toLowerCase()
+                          ) &&
+                            p.name.trim() !== '' && (
+                              <div
+                                style={{
+                                  color: '#dc2626',
+                                  fontSize: '10px',
+                                  marginTop: '2px',
+                                  fontWeight: 600,
+                                  textAlign: 'center',
+                                }}
+                              >
+                                Exists
+                              </div>
+                            )}
+                        </div>
                       ) : (
                         <input
                           name={field}

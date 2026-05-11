@@ -3,7 +3,15 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
-const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
+const ProductDropdown = ({
+  productList,
+  value = '',
+  onSelect,
+  onChange,
+  rowIndex,
+  showAddOption = true,
+  inputStyle = {},
+}) => {
   const [query, setQuery] = useState(value);
 
   // 🔁 Sync value from parent (Edit / Refund case)
@@ -123,6 +131,9 @@ const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
+
+            onChange && onChange(e.target.value);
+
             setShowList(true);
             setHighlightIndex(-1);
           }}
@@ -134,6 +145,7 @@ const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
           onKeyDown={handleKeyDown}
           placeholder={t('product.search')}
           className="w-full border p-1 text-sm"
+          style={inputStyle}
           autoComplete="off"
           onBlur={() => {
             setTimeout(() => {
@@ -168,7 +180,7 @@ const ProductDropdown = ({ productList, value = '', onSelect, rowIndex }) => {
             ))}
 
             {/* ➕ Show Add Option */}
-            {filtered.length === 0 && query.trim() !== '' && (
+            {showAddOption && filtered.length === 0 && query.trim() !== '' && (
               <li
                 onPointerDown={(e) => {
                   e.preventDefault();

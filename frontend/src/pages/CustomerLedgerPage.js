@@ -180,12 +180,27 @@ export default function CustomerLedgerPage() {
       const html = await response.text();
 
       const newWindow = window.open('', '_blank');
+
       newWindow.document.write(html);
       newWindow.document.close();
 
-      // ✅ یہ add کریں
       newWindow.onload = function () {
+        newWindow.focus();
+
+        // ✅ Print dialog open
         newWindow.print();
+
+        // ✅ Print ke baad close
+        newWindow.onafterprint = function () {
+          newWindow.close();
+        };
+
+        // ✅ Fallback for browsers jahan onafterprint work nahi karta
+        setTimeout(() => {
+          if (!newWindow.closed) {
+            newWindow.close();
+          }
+        }, 1000);
       };
     } catch (error) {
       alert(t('alerts.printFailed'));

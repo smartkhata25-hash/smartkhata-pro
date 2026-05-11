@@ -16,8 +16,6 @@ export default function useAutoPersist(key, state, setState) {
     clearTimeout(debounceTimer.current);
 
     debounceTimer.current = setTimeout(() => {
-      console.log('💾 SAVING STATE FULL:', JSON.stringify(value, null, 2));
-
       saveState(key, value);
     }, 500);
   };
@@ -25,8 +23,6 @@ export default function useAutoPersist(key, state, setState) {
   // 🔹 LOAD (پہلی بار)
   useEffect(() => {
     const saved = loadState(key, null);
-
-    console.log('📥 LOADED STATE FULL:', JSON.stringify(saved, null, 2));
 
     if (saved && typeof saved === 'object') {
       setState((prev) => deepMerge(prev || {}, saved));

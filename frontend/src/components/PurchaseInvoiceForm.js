@@ -66,6 +66,7 @@ const PurchaseInvoiceForm = () => {
   const [paymentType, setPaymentType] = useState('cash');
 
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [accountError, setAccountError] = useState('');
   // 📊 Item History States
 
   const [itemHistory, setItemHistory] = useState([]);
@@ -336,6 +337,15 @@ const PurchaseInvoiceForm = () => {
     setAttachment(e.target.files[0]);
   };
   const savePurchaseInvoice = async () => {
+    if (paidAmount > 0 && (!selectedAccountId || selectedAccountId.trim() === '')) {
+      setAccountError('Please select payment account');
+
+      document.querySelector('select[name="selectedAccountId"]')?.focus();
+      return false;
+    }
+
+    setAccountError('');
+
     const selectedSupplier = suppliers.find((s) => s.name === supplierName);
     const supplierAccountId = selectedSupplier?.account || '';
 
@@ -394,11 +404,14 @@ const PurchaseInvoiceForm = () => {
       await purchaseInvoiceService.addPurchaseInvoice(formData);
       localStorage.removeItem('app_state_purchase_invoice_draft');
     }
+    return true;
   };
 
   const handleSaveAndClose = async () => {
     try {
-      await savePurchaseInvoice();
+      const saved = await savePurchaseInvoice();
+
+      if (!saved) return;
 
       navigate('/dashboard');
     } catch (err) {
@@ -407,7 +420,9 @@ const PurchaseInvoiceForm = () => {
   };
   const handleSaveAndNew = async () => {
     try {
-      await savePurchaseInvoice();
+      const saved = await savePurchaseInvoice();
+
+      if (!saved) return;
 
       setBillNo('');
       setSupplierName('');
@@ -898,9 +913,17 @@ const PurchaseInvoiceForm = () => {
                       <select
                         name="selectedAccountId"
                         value={selectedAccountId}
-                        onChange={(e) => setSelectedAccountId(e.target.value)}
+                        onChange={(e) => {
+                          setSelectedAccountId(e.target.value);
+
+                          if (e.target.value) {
+                            setAccountError('');
+                          }
+                        }}
                         disabled={paidAmount === 0}
-                        className="border px-2 py-1 h-8 w-28 text-sm cursor-pointer"
+                        className={`px-2 py-1 h-8 w-28 text-sm cursor-pointer border ${
+                          accountError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                        }`}
                       >
                         <option value="">{t('alerts.selectAccount')}</option>
                         {accounts.map((acc) => (
@@ -909,6 +932,7 @@ const PurchaseInvoiceForm = () => {
                           </option>
                         ))}
                       </select>
+                      {accountError && <p className="text-red-600 text-xs mt-1">{accountError}</p>}
 
                       <input
                         type="file"

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createProduct, updateProduct } from '../services/inventoryService';
+import { createProduct, updateProduct, fetchProducts } from '../services/inventoryService';
 import { getCategories, createCategory } from '../services/categoryService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import ProductDropdown from './ProductDropdown';
 
 const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMobile }) => {
   const navigate = useNavigate();
@@ -25,12 +26,14 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
   });
 
   const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
   const [newCategory, setNewCategory] = useState('');
   const nameInputRef = useRef(null);
 
-  // 🔁 Load categories
+  // 🔁 Load categories + products
   useEffect(() => {
     loadCategories();
+    loadProducts();
   }, []);
 
   useEffect(() => {
@@ -45,6 +48,15 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
       setCategories(data);
     } catch (err) {
       console.error(t('alerts.categoryLoadFailed'));
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      const data = await fetchProducts();
+      setProducts(data || []);
+    } catch (err) {
+      console.error('Failed to load products');
     }
   };
 
@@ -164,20 +176,45 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
           gap: isMobile ? '8px' : '12px',
         }}
       >
-        <input
-          ref={nameInputRef}
-          name="name"
-          value={form.name}
-          onChange={handleChange}
-          placeholder={t('inventory.product')}
-          required
-          style={{
-            padding: isMobile ? '6px' : '8px',
-            fontSize: isMobile ? 12 : 14,
-            borderRadius: '6px',
-            border: '1px solid #ccc',
-          }}
-        />
+        <div>
+          <ProductDropdown
+            productList={products}
+            value={form.name}
+            showAddOption={false}
+            inputStyle={{
+              padding: isMobile ? '6px' : '8px',
+              fontSize: isMobile ? 12 : 14,
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+            }}
+            onChange={(value) => {
+              setForm((prev) => ({
+                ...prev,
+                name: value,
+              }));
+            }}
+            onSelect={(product) => {
+              setForm((prev) => ({
+                ...prev,
+                name: product.name,
+              }));
+            }}
+          />
+
+          {products.some((p) => p.name.trim().toLowerCase() === form.name.trim().toLowerCase()) &&
+            form.name.trim() !== '' && (
+              <div
+                style={{
+                  color: '#dc2626',
+                  fontSize: '12px',
+                  marginTop: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                ⚠️ Product already exists
+              </div>
+            )}
+        </div>
         <input
           name="rackNo"
           value={form.rackNo}

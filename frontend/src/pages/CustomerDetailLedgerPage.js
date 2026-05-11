@@ -419,11 +419,27 @@ export default function CustomerDetailLedgerPage() {
                 const html = await response.text();
 
                 const newWindow = window.open('', '_blank');
+
                 newWindow.document.write(html);
                 newWindow.document.close();
 
                 newWindow.onload = function () {
+                  newWindow.focus();
+
+                  // ✅ Open print dialog
                   newWindow.print();
+
+                  // ✅ Close after print
+                  newWindow.onafterprint = function () {
+                    newWindow.close();
+                  };
+
+                  // ✅ Fallback for Edge/other browsers
+                  setTimeout(() => {
+                    if (!newWindow.closed) {
+                      newWindow.close();
+                    }
+                  }, 1000);
                 };
               } catch (error) {
                 alert(t('alerts.printFailed'));

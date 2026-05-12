@@ -70,7 +70,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         unit: editProduct.unit || 'piece',
         unitCost: editProduct.unitCost || '',
         salePrice: editProduct.salePrice || '',
-        stock: '',
+        stock: editProduct.stock || '',
         lowStockThreshold: editProduct.lowStockThreshold || '',
         description: editProduct.description || '',
       });
@@ -83,15 +83,20 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleSubmit(e, true); // Save & New
+      handleSubmit(e, true);
     }
   };
   const handleSubmit = async (e, saveNew = false) => {
     e.preventDefault();
     try {
       if (editProduct) {
-        const updated = await updateProduct(editProduct._id, form);
-        onUpdate?.(updated);
+        await updateProduct(editProduct._id, form);
+
+        // ✅ Fresh updated products load کرو
+        const refreshedProducts = await fetchProducts();
+
+        onUpdate?.(refreshedProducts);
+
         clearEdit?.();
       } else {
         const created = await createProduct(form);

@@ -57,8 +57,11 @@ const InventoryPage = () => {
     }
   };
   // ✏️ Update Product
-  const handleUpdate = (updatedProduct) => {
-    setProducts(products.map((p) => (p._id === updatedProduct._id ? updatedProduct : p)));
+  const handleUpdate = (updatedProducts) => {
+    setProducts(updatedProducts);
+
+    sessionStorage.setItem('products', JSON.stringify(updatedProducts));
+
     setShowModal(false);
   };
 

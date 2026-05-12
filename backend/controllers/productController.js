@@ -237,6 +237,76 @@ exports.updateProduct = async (req, res) => {
       updateData.categoryId = req.body.categoryId || null;
     }
 
+    // ✅ Current stock نکالو
+    const stockResult = await InventoryTransaction.aggregate([
+      {
+        $match: {
+          productId: new mongoose.Types.ObjectId(req.params.id),
+          userId: new mongoose.Types.ObjectId(req.user.id),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          stock: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$type", "IN"] }, then: "$quantity" },
+                  {
+                    case: { $eq: ["$type", "OUT"] },
+                    then: { $multiply: ["$quantity", -1] },
+                  },
+                  {
+                    case: { $eq: ["$type", "ADJUST_IN"] },
+                    then: "$quantity",
+                  },
+                  {
+                    case: { $eq: ["$type", "ADJUST_OUT"] },
+                    then: { $multiply: ["$quantity", -1] },
+                  },
+                ],
+                default: 0,
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    const currentStock = stockResult[0]?.stock || 0;
+    const newStock =
+      req.body.stock === "" || req.body.stock === undefined
+        ? currentStock
+        : Number(req.body.stock);
+
+    // ✅ فرق نکالو
+    const difference = newStock - currentStock;
+
+    // ✅ اگر فرق ہے تو transaction بنا دو
+    if (difference > 0) {
+      await InventoryTransaction.create({
+        productId: req.params.id,
+        type: "ADJUST_IN",
+        quantity: difference,
+        note: "Stock Edited From Product Form",
+        userId: new mongoose.Types.ObjectId(req.user.id),
+        date: new Date(),
+      });
+    }
+
+    if (difference < 0) {
+      await InventoryTransaction.create({
+        productId: req.params.id,
+        type: "ADJUST_OUT",
+        quantity: Math.abs(difference),
+        note: "Stock Edited From Product Form",
+        userId: new mongoose.Types.ObjectId(req.user.id),
+        date: new Date(),
+      });
+    }
+
+    // ✅ Product update
     const updated = await Product.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id },
       updateData,

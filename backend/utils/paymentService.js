@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
+const { recalculateAccountBalance } = require("./accountHelper");
 
 const createPaymentEntry = async ({
   userId,

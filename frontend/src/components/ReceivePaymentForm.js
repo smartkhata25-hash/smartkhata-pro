@@ -57,12 +57,7 @@ const ReceivePaymentForm = () => {
       try {
         const cData = await fetchCustomers();
 
-        let aData = JSON.parse(localStorage.getItem('accounts') || 'null');
-
-        if (!aData) {
-          aData = await getAccounts();
-          localStorage.setItem('accounts', JSON.stringify(aData));
-        }
+        const aData = await getAccounts();
 
         // ✅ Sirf Receive Payment ke liye valid accounts
         const paymentAccounts = aData.filter(
@@ -73,6 +68,8 @@ const ReceivePaymentForm = () => {
 
         setCustomers(cData);
         setAccounts(paymentAccounts);
+
+        const loadedCustomers = cData;
 
         // ✅🔥 Default HANDCASH select
         const handCashAccount = paymentAccounts.find(
@@ -130,7 +127,16 @@ const ReceivePaymentForm = () => {
                 ]
           );
 
-          loadLedger(existing.customer);
+          const selectedCustomer = loadedCustomers.find(
+            (c) => String(c._id) === String(existing.customer)
+          );
+
+          const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+
+          if (accountId) {
+            const res = await getLedgerByCustomerAccount(accountId);
+            setCustomerLedger(res.ledger || []);
+          }
         }
       } catch (err) {
         console.error('❌ Error fetching accounts/customers:', err.message);
@@ -143,11 +149,9 @@ const ReceivePaymentForm = () => {
 
   const loadLedger = async (customerId) => {
     if (customerId) {
-      const customer = customers.find((c) => c._id === customerId);
+      const customer = customers.find((c) => String(c._id) === String(customerId));
 
       const accountId = customer?.account?._id || customer?.account;
-
-      console.log('ACCOUNT ID:', accountId);
 
       const res = await getLedgerByCustomerAccount(accountId);
 
@@ -341,6 +345,7 @@ const ReceivePaymentForm = () => {
     Object.entries(formData).forEach(([key, value]) => {
       if (value !== null) data.append(key, value);
     });
+
     data.append('paymentEntries', JSON.stringify(paymentEntries));
 
     try {

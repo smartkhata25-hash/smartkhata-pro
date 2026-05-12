@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-import PageLayout from '../components/PageLayout';
-
 import { fetchStockValueReport } from '../services/stockValueService';
 
 import { getCategories } from '../services/categoryService';
@@ -9,6 +7,7 @@ import { getCategories } from '../services/categoryService';
 import { t } from '../i18n/i18n';
 
 const StockValueReportPage = () => {
+  const isMobile = window.innerWidth < 768;
   const [loading, setLoading] = useState(false);
 
   const [rows, setRows] = useState([]);
@@ -209,31 +208,41 @@ const StockValueReportPage = () => {
       style={{
         background: 'linear-gradient(135deg, #ffffff, #f8fafc)',
         border: '1px solid #e5e7eb',
-        borderRadius: 14,
-        padding: 14,
+        borderRadius: isMobile ? 10 : 14,
+        padding: isMobile ? 5 : 8,
         boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
       }}
     >
-      <div className="flex flex-wrap gap-3 items-end">
+      <div className={`flex flex-wrap items-center ${isMobile ? 'gap-1' : 'gap-3'}`}>
         {/* SEARCH */}
-        <div className="min-w-[220px] flex-1">
+        <div className={isMobile ? 'min-w-[95px] flex-1' : 'min-w-[220px] flex-1'}>
           <input
             type="text"
             value={filters.search}
             onChange={(e) => handleChange('search', e.target.value)}
-            placeholder="Search product..."
-            style={inputStyle}
+            placeholder={isMobile ? '🔍' : 'Search product...'}
+            style={{
+              ...inputStyle,
+              height: isMobile ? 28 : 42,
+              fontSize: isMobile ? 11 : 14,
+              padding: isMobile ? '0 8px' : '10px 12px',
+            }}
           />
         </div>
 
         {/* CATEGORY */}
-        <div className="min-w-[180px]">
+        <div className={isMobile ? 'w-[85px]' : 'min-w-[180px]'}>
           <select
             value={filters.categoryId}
             onChange={(e) => handleChange('categoryId', e.target.value)}
-            style={inputStyle}
+            style={{
+              ...inputStyle,
+              height: isMobile ? 28 : 42,
+              fontSize: isMobile ? 11 : 14,
+              padding: isMobile ? '0 4px' : '10px 12px',
+            }}
           >
-            <option value="">All Categories</option>
+            <option value="">{isMobile ? '📂' : 'All Categories'}</option>
 
             {categories.map((cat) => (
               <option key={cat._id} value={cat._id}>
@@ -244,23 +253,41 @@ const StockValueReportPage = () => {
         </div>
 
         {/* CHECKBOXES */}
-        <div className="flex flex-col gap-2 pb-1">
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+        <div className={`flex ${isMobile ? 'flex-row gap-1' : 'flex-col gap-2'}`}>
+          <label
+            className="flex items-center gap-1 text-gray-700"
+            style={{
+              fontSize: isMobile ? 10 : 14,
+            }}
+          >
             <input
               type="checkbox"
               checked={filters.hideZero}
               onChange={(e) => handleChange('hideZero', e.target.checked)}
+              style={{
+                width: isMobile ? 12 : 16,
+                height: isMobile ? 12 : 16,
+              }}
             />
-            Hide Zero
+            {isMobile ? '0' : 'Hide Zero'}
           </label>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label
+            className="flex items-center gap-1 text-gray-700"
+            style={{
+              fontSize: isMobile ? 10 : 14,
+            }}
+          >
             <input
               type="checkbox"
               checked={filters.negativeOnly}
               onChange={(e) => handleChange('negativeOnly', e.target.checked)}
+              style={{
+                width: isMobile ? 12 : 16,
+                height: isMobile ? 12 : 16,
+              }}
             />
-            Negative
+            {isMobile ? '-' : 'Negative'}
           </label>
         </div>
 
@@ -270,7 +297,15 @@ const StockValueReportPage = () => {
             type="date"
             value={filters.startDate}
             onChange={(e) => handleChange('startDate', e.target.value)}
-            style={inputStyle}
+            style={{
+              height: isMobile ? 28 : 42,
+              width: isMobile ? 38 : 160,
+              border: '1px solid #d1d5db',
+              borderRadius: 8,
+              padding: isMobile ? '0 2px' : '0 10px',
+              background: '#fff',
+              fontSize: isMobile ? 10 : 14,
+            }}
           />
         </div>
 
@@ -280,20 +315,53 @@ const StockValueReportPage = () => {
             type="date"
             value={filters.endDate}
             onChange={(e) => handleChange('endDate', e.target.value)}
-            style={inputStyle}
+            style={{
+              height: isMobile ? 28 : 42,
+              width: isMobile ? 38 : 160,
+              border: '1px solid #d1d5db',
+              borderRadius: 8,
+              padding: isMobile ? '0 2px' : '0 10px',
+              background: '#fff',
+              fontSize: isMobile ? 10 : 14,
+            }}
           />
         </div>
 
         {/* BUTTONS */}
-        <div className="flex gap-2">
-          <button onClick={handleApplyFilters} style={primaryBtn}>
+        <div className={`flex ${isMobile ? 'gap-1' : 'gap-2'}`}>
+          <button
+            onClick={handleApplyFilters}
+            style={{
+              ...primaryBtn,
+              height: isMobile ? 28 : 42,
+              padding: isMobile ? '0 8px' : '10px 18px',
+              fontSize: isMobile ? 11 : 14,
+            }}
+          >
             🔎
           </button>
 
-          <button onClick={handlePrint} style={printBtn}>
+          <button
+            onClick={handlePrint}
+            style={{
+              ...printBtn,
+              height: isMobile ? 28 : 42,
+              padding: isMobile ? '0 8px' : '10px 18px',
+              fontSize: isMobile ? 11 : 14,
+            }}
+          >
             🖨
           </button>
-          <button onClick={handleClearFilters} style={clearBtn}>
+
+          <button
+            onClick={handleClearFilters}
+            style={{
+              ...clearBtn,
+              height: isMobile ? 28 : 42,
+              padding: isMobile ? '0 8px' : '10px 18px',
+              fontSize: isMobile ? 11 : 14,
+            }}
+          >
             ✖
           </button>
         </div>
@@ -302,10 +370,32 @@ const StockValueReportPage = () => {
   );
 
   return (
-    <PageLayout
-      headerCards={<div className="w-full">{headerCards}</div>}
-      headerContent={<div className="w-full mt-2">{headerContent}</div>}
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#f9fafb',
+        height: '100%',
+        minHeight: 0,
+      }}
     >
+      {/* 🔹 ROW 1 — SUMMARY CARDS */}
+      <div
+        style={{
+          padding: '12px 12px 6px 12px',
+        }}
+      >
+        {headerCards}
+      </div>
+
+      {/* 🔹 ROW 2 — FILTERS */}
+      <div
+        style={{
+          padding: '0px 12px 0px 12px',
+        }}
+      >
+        {headerContent}
+      </div>
       {/* =========================================================
          📦 MAIN CONTENT
       ========================================================= */}
@@ -316,7 +406,7 @@ const StockValueReportPage = () => {
           flexDirection: 'column',
           height: '100%',
           overflow: 'hidden',
-          padding: '0px 12px 12px 12px',
+          padding: '0px 12px 0px 12px',
         }}
       >
         {/* =========================================================
@@ -485,7 +575,7 @@ const StockValueReportPage = () => {
           )}
         </div>
       </div>
-    </PageLayout>
+    </div>
   );
 };
 
@@ -493,38 +583,43 @@ const StockValueReportPage = () => {
    🎨 SUMMARY CARD
 ========================================================= */
 
-const SummaryCard = ({ title, value, gradient }) => (
-  <div
-    style={{
-      background: gradient,
-      minWidth: 140,
-      borderRadius: 14,
-      padding: '12px 16px',
-      color: '#fff',
-      boxShadow: '0 8px 18px rgba(0,0,0,0.12)',
-    }}
-  >
-    <div
-      style={{
-        fontSize: 12,
-        opacity: 0.85,
-        marginBottom: 6,
-      }}
-    >
-      {title}
-    </div>
+const SummaryCard = ({ title, value, gradient }) => {
+  const isMobile = window.innerWidth < 768;
 
+  return (
     <div
       style={{
-        fontSize: 20,
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
+        background: gradient,
+        minWidth: isMobile ? 88 : 140,
+        borderRadius: isMobile ? 10 : 14,
+        padding: isMobile ? '7px 10px' : '12px 16px',
+        color: '#fff',
+        boxShadow: '0 8px 18px rgba(0,0,0,0.12)',
       }}
     >
-      {value}
+      <div
+        style={{
+          fontSize: isMobile ? 10 : 12,
+          opacity: 0.85,
+          marginBottom: isMobile ? 3 : 6,
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize: isMobile ? 13 : 20,
+          fontWeight: 700,
+          whiteSpace: 'nowrap',
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* =========================================================
    🎨 STYLES

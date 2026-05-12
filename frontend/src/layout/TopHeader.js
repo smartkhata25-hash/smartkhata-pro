@@ -266,18 +266,30 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
           </button>
         )}
 
-        {/* Notification */}
-        <div
-          onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-          className="relative cursor-pointer text-lg hover:text-blue-600 transition"
-        >
-          🔔
-          {/* Badge (alerts count) */}
-          {alertCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-pink-500 text-white text-[9px] px-1.5 py-[0px] rounded-full min-w-[16px] text-center shadow">
-              {alertCount}
-            </span>
-          )}
+        {/* Notification + Refresh */}
+        <div className="flex items-center gap-3">
+          {/* Refresh */}
+          <div
+            onClick={() => window.location.reload()}
+            className="cursor-pointer text-lg hover:text-green-600 transition"
+            title="Refresh"
+          >
+            🔄
+          </div>
+
+          {/* Notification */}
+          <div
+            onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+            className="relative cursor-pointer text-lg hover:text-blue-600 transition"
+          >
+            🔔
+            {/* Badge (alerts count) */}
+            {alertCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-pink-500 text-white text-[9px] px-1.5 py-[0px] rounded-full min-w-[16px] text-center shadow">
+                {alertCount}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* USER MENU */}

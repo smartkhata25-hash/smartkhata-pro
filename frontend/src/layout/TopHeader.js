@@ -305,6 +305,25 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
             <div className="absolute right-0 mt-2 w-44 bg-white border rounded shadow-lg z-50">
               <div
                 onClick={() => {
+                  navigate('/personal-info');
+                  setShowUserMenu(false);
+                }}
+                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+              >
+                👤 {t('auth.personalInfo')}
+              </div>
+
+              <div
+                onClick={() => {
+                  navigate('/business-info');
+                  setShowUserMenu(false);
+                }}
+                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+              >
+                🏢 {t('business.title')}
+              </div>
+              <div
+                onClick={() => {
                   navigate('/backup');
                   setShowUserMenu(false);
                 }}

@@ -100,9 +100,12 @@ const getProfile = async (req, res) => {
 
     res.json({
       fullName: user.fullName,
-      businessName: user.businessName,
+      cnic: user.cnic,
       mobile: user.mobile,
       address: user.address,
+
+      businessName: user.businessName,
+      businessType: user.businessType,
       currency: user.currency,
       taxNumber: user.taxNumber,
     });

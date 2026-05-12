@@ -917,5 +917,8 @@
   "payment.none": "No payments",
   "back": "Back",
   "stockValue": "Stock Value Report",
-  "stockValueReport": "Stock Value Report"
+  "stockValueReport": "Stock Value Report",
+  "auth.personalInfoDescription": "Please enter your personal details",
+  "business.setupDescription": "Setup your business profile",
+  "common.saving": "Saving..."
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
@@ -12,6 +12,31 @@ export default function PersonalInfoForm() {
 
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/users/profile`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        });
+
+        const data = await res.json();
+
+        setForm({
+          fullName: data.fullName || '',
+          cnic: data.cnic || '',
+          mobile: data.mobile || '',
+          address: data.address || '',
+        });
+      } catch (err) {
+        console.log(err);
+      }
+    };
+
+    fetchProfile();
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -63,7 +88,7 @@ export default function PersonalInfoForm() {
         {/* Header */}
         <div style={{ marginBottom: '20px', textAlign: 'center' }}>
           <h2 style={{ marginBottom: '5px' }}>{t('auth.personalInfo')}</h2>
-          <p style={{ fontSize: '13px', color: '#6b7280' }}>Please enter your personal details</p>
+          <p style={{ fontSize: '13px', color: '#6b7280' }}>{t('auth.personalInfoDescription')}</p>
         </div>
 
         <form onSubmit={handleSubmit}>

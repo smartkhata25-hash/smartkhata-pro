@@ -917,5 +917,8 @@
   "payment.none": "کوئی ادائیگی موجود نہیں",
   "back": "واپس",
   "reports.stockValue": "اسٹاک ویلیو رپورٹ",
-  "stockValueReport": "اسٹاک ویلیو رپورٹ"
+  "stockValueReport": "اسٹاک ویلیو رپورٹ",
+  "auth.personalInfoDescription": "اپنی ذاتی معلومات درج کریں",
+  "business.setupDescription": "اپنے کاروبار کی معلومات مکمل کریں",
+  "common.saving": "محفوظ کیا جا رہا ہے..."
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
@@ -16,6 +16,31 @@ export default function BusinessInfoForm() {
 
   const businessTypes = ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Freelancing'];
   const currencies = ['PKR', 'USD', 'INR', 'SAR', 'AED'];
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/users/profile`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        });
+
+        const data = await res.json();
+
+        setForm({
+          businessName: data.businessName || '',
+          businessType: data.businessType || '',
+          currency: data.currency || '',
+          taxNumber: data.taxNumber || '',
+        });
+      } catch (err) {
+        console.log(err);
+      }
+    };
+
+    fetchProfile();
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -920,5 +920,8 @@
   "stockValueReport": "اسٹاک ویلیو رپورٹ",
   "auth.personalInfoDescription": "اپنی ذاتی معلومات درج کریں",
   "business.setupDescription": "اپنے کاروبار کی معلومات مکمل کریں",
-  "common.saving": "محفوظ کیا جا رہا ہے..."
+  "common.saving": "محفوظ کیا جا رہا ہے...",
+  "pdf.preparing": "پی ڈی ایف تیار کی جا رہی ہے...",
+  "customerTotalBalance": "کسٹمر کل بیلنس",
+  "showCustomerTotalBalance": "کسٹمر کل بیلنس دکھائیں"
 }

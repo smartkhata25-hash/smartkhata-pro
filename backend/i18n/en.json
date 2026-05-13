@@ -915,5 +915,6 @@
   "price": "Price",
   "print.noItems": "No items",
   "payment.none": "No payments",
-  "back": "Back"
+  "back": "Back",
+  "customerTotalBalance": "Customer Total Balance"
 }

@@ -82,12 +82,20 @@ const buildInvoice = (data, docConfig, title) => {
       name: data.customerName || "",
       phone: data.customerPhone || "",
       by: setting.showBy ? data.by || "" : "",
+      customerTotalBalance:
+        setting.showCustomerTotalBalance &&
+        data.customerTotalBalance !== undefined
+          ? safeNumber(data.customerTotalBalance)
+          : null,
     },
 
     /* ================= TABLE STRUCTURE ================= */
     columns: {
       showDescription: setting.showDescription,
       showUOM: setting.showUOM,
+
+      showCustomerTotalBalance: setting.showCustomerTotalBalance,
+
       rowHeight: layout?.rowHeight || "medium",
       tableDensity: layout?.tableDensity || "standard",
 

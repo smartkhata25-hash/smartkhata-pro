@@ -1,5 +1,8 @@
 const chromium = require("@sparticuz/chromium");
-const puppeteer = require("puppeteer-core");
+
+const puppeteerCore = require("puppeteer-core");
+
+const puppeteer = require("puppeteer");
 
 let browserInstance = null;
 
@@ -15,16 +18,31 @@ const getBrowser = async () => {
 
       console.log("🔥 BEFORE BROWSER LAUNCH");
 
-      const executablePath = await chromium.executablePath();
+      /* ================= PRODUCTION ================= */
+      if (process.env.NODE_ENV === "production") {
+        const executablePath = await chromium.executablePath();
 
-      console.log("📍 Chromium Path:", executablePath);
+        console.log("📍 Production Chromium Path:", executablePath);
 
-      browserInstance = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath,
-        headless: chromium.headless,
-      });
+        browserInstance = await puppeteerCore.launch({
+          args: chromium.args,
+          defaultViewport: chromium.defaultViewport,
+          executablePath,
+          headless: chromium.headless,
+        });
+
+        console.log("🌍 Production Browser Started");
+      } else {
+
+      /* ================= LOCAL DEVELOPMENT ================= */
+        console.log("💻 Local Puppeteer Launch");
+
+        browserInstance = await puppeteer.launch({
+          headless: true,
+        });
+
+        console.log("💻 Local Browser Started");
+      }
 
       console.log("🔥 AFTER BROWSER LAUNCH");
 

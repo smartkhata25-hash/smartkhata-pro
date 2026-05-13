@@ -22,6 +22,7 @@ const ReceivePaymentForm = () => {
   const [customerLedger, setCustomerLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [pdfLoading, setPdfLoading] = React.useState(false);
   const printRef = useRef();
 
   const [formData, setFormData] = useState({
@@ -673,10 +674,24 @@ const ReceivePaymentForm = () => {
 
             <button
               type="button"
-              onClick={handleExportPDF}
-              className="bg-gradient-to-r from-red-500 to-red-700 text-white px-3 py-1.5 rounded-xl shadow"
+              disabled={pdfLoading}
+              onClick={async () => {
+                try {
+                  setPdfLoading(true);
+
+                  await handleExportPDF();
+                } finally {
+                  setPdfLoading(false);
+                }
+              }}
+              className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
+              style={{
+                cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                opacity: pdfLoading ? 0.7 : 1,
+                background: pdfLoading ? '#9ca3af' : 'linear-gradient(to right, #ef4444, #b91c1c)',
+              }}
             >
-              PDF
+              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
             </button>
           </div>
         </form>

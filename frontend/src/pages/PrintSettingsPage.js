@@ -24,6 +24,29 @@ const PrintSettingsPage = () => {
   const fetchSettings = async () => {
     try {
       const data = await getPrintSettings();
+      const defaultVisibility = {
+        showHeader: true,
+        showFooter: true,
+        showDescription: false,
+        showUOM: false,
+        showPaid: true,
+        showStatus: true,
+        showPaymentType: true,
+        showBalance: true,
+        showCustomerTotalBalance: true,
+        showStamp: true,
+        showBy: true,
+      };
+
+      Object.keys(data).forEach((docType) => {
+        if (data[docType]?.settings) {
+          data[docType].settings = {
+            ...defaultVisibility,
+            ...data[docType].settings,
+          };
+        }
+      });
+
       setSettings(data);
     } catch (err) {
       console.error(err);
@@ -212,7 +235,7 @@ const PrintSettingsPage = () => {
                 checked={currentDoc.settings[key]}
                 onChange={() => handleCheckbox(key)}
               />
-              {key}
+              {t(`print.${key}`)}
             </label>
           ))}
         </div>

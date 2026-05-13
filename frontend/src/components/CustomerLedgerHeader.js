@@ -31,6 +31,7 @@ const CustomerLedgerHeader = ({
   printSize,
 }) => {
   const [showShareModal, setShowShareModal] = React.useState(false);
+  const [pdfLoading, setPdfLoading] = React.useState(false);
   return (
     <>
       <div
@@ -167,9 +168,9 @@ const CustomerLedgerHeader = ({
 
             {/* PDF */}
             <button
-              className="btn btn-primary"
+              className={`btn ${pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'btn-primary'}`}
               style={{ height: 32, padding: '0 6px', fontSize: 11 }}
-              disabled={!cid}
+              disabled={!cid || pdfLoading}
               onClick={async () => {
                 if (!cid) return;
 
@@ -182,6 +183,8 @@ const CustomerLedgerHeader = ({
                 }).toString();
 
                 try {
+                  setPdfLoading(true);
+
                   const response = await fetch(
                     `${API}/api/print/customer-ledger/${cid}/pdf?${query}`,
                     {
@@ -205,12 +208,16 @@ const CustomerLedgerHeader = ({
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
+
+                  window.URL.revokeObjectURL(url);
                 } catch (error) {
                   alert('PDF generate failed');
+                } finally {
+                  setPdfLoading(false);
                 }
               }}
             >
-              PDF
+              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : t('pdf')}
             </button>
 
             {/* Detail */}
@@ -401,9 +408,9 @@ const CustomerLedgerHeader = ({
             </button>
 
             <button
-              className="btn btn-primary"
+              className={`btn ${pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'btn-primary'}`}
               style={{ height: 36 }}
-              disabled={!cid}
+              disabled={!cid || pdfLoading}
               onClick={async () => {
                 if (!cid) return;
 
@@ -416,6 +423,8 @@ const CustomerLedgerHeader = ({
                 }).toString();
 
                 try {
+                  setPdfLoading(true);
+
                   const response = await fetch(
                     `${API}/api/print/customer-ledger/${cid}/pdf?${query}`,
                     {
@@ -439,12 +448,16 @@ const CustomerLedgerHeader = ({
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
+
+                  window.URL.revokeObjectURL(url);
                 } catch (error) {
                   alert('PDF generate failed');
+                } finally {
+                  setPdfLoading(false);
                 }
               }}
             >
-              {t('pdf')}
+              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : t('pdf')}
             </button>
 
             <input

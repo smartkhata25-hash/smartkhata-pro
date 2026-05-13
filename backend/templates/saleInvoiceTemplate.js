@@ -351,10 +351,18 @@ ${
     <span>${paid}</span>
   </div>
 
-  <div class="totals-row">
-    <span>${t("balance", lang)}:</span>
-    <span>${balance}</span>
-  </div>
+ ${
+   columns?.showCustomerTotalBalance !== false &&
+   party?.customerTotalBalance !== null &&
+   party?.customerTotalBalance !== undefined
+     ? `
+<div class="totals-row">
+  <span>${t("customerTotalBalance", lang)}:</span>
+  <span>${party.customerTotalBalance}</span>
+</div>
+`
+     : ""
+ }
 </div>
 
 ${footer?.message ? `<div class="footer">${footer.message}</div>` : ""}
@@ -368,12 +376,6 @@ ${
     onclick="history.back()" 
     style="padding:6px 14px;font-size:13px;cursor:pointer;">
     ← ${t("back", lang)}
-  </button>
-
-  <button 
-    onclick="window.print()" 
-    style="padding:6px 14px;font-size:13px;cursor:pointer;">
-    ${t("print", lang)}
   </button>
 
 </div>

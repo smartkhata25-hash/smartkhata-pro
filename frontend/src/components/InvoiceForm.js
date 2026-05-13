@@ -12,6 +12,7 @@ import {
 import { fetchProductsWithToken } from '../services/inventoryService';
 
 import { getAccounts } from '../services/accountService';
+import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 
 import InvoiceTable from './InvoiceTable';
 import { useLocation } from 'react-router-dom';
@@ -69,6 +70,7 @@ const InvoiceForm = ({
 
   const [previewHtml, setPreviewHtml] = useState('');
   const [showHistoryPopup, setShowHistoryPopup] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const [historyAutoMode, setHistoryAutoMode] = useState(
     localStorage.getItem('mobileHistoryMode') === 'on'
@@ -204,6 +206,8 @@ const InvoiceForm = ({
   const [selectedAccountId, setSelectedAccountId] = useState('');
 
   const [accounts, setAccounts] = useState([]);
+  const [, setCustomerLedger] = useState([]);
+  const [customerBalance, setCustomerBalance] = useState(0);
 
   useEffect(() => {
     if (paidAmount > 0 && paymentType === 'credit') {
@@ -382,7 +386,34 @@ const InvoiceForm = ({
   };
 
   const debounceTimer = useRef(null);
+  useEffect(() => {
+    const restoreCustomerBalance = async () => {
+      if (!customerName || customers.length === 0) return;
 
+      const matchedCustomer = customers.find(
+        (c) => c.name.toLowerCase() === customerName.toLowerCase()
+      );
+
+      if (!matchedCustomer) return;
+
+      try {
+        const accountId = matchedCustomer?.account?._id || matchedCustomer?.account;
+
+        if (!accountId) return;
+
+        const res = await getLedgerByCustomerAccount(accountId);
+
+        const closingBalance =
+          res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].balance || 0 : 0;
+
+        setCustomerBalance(closingBalance);
+      } catch (err) {
+        console.error('Restore balance failed', err);
+      }
+    };
+
+    restoreCustomerBalance();
+  }, [customerName, customers]);
   const handleCustomerInput = (e) => {
     const value = e.target.value;
     setCustomerName(value);
@@ -430,7 +461,7 @@ const InvoiceForm = ({
     }
   };
 
-  const handleCustomerSelect = (name, phone, id) => {
+  const handleCustomerSelect = async (name, phone, id) => {
     setCustomerName(name);
     setCustomerPhone(phone);
 
@@ -439,6 +470,37 @@ const InvoiceForm = ({
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
     setShowCustomerAddOptions(false);
+
+    try {
+      const selectedCustomer = customers.find((c) => c._id === id);
+
+      const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+
+      if (!accountId) {
+        setCustomerBalance(0);
+        return;
+      }
+
+      const res = await getLedgerByCustomerAccount(accountId);
+
+      console.log('SELECTED CUSTOMER:', selectedCustomer);
+
+      console.log('ACCOUNT ID:', accountId);
+
+      console.log('LEDGER RESPONSE:', res);
+
+      console.log('LAST LEDGER ENTRY:', res.ledger[res.ledger.length - 1]);
+
+      setCustomerLedger(res.ledger || []);
+
+      const closingBalance =
+        res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].balance || 0 : 0;
+
+      setCustomerBalance(closingBalance);
+    } catch (err) {
+      console.error('Customer ledger load failed', err);
+      setCustomerBalance(0);
+    }
   };
 
   const quickAddCustomer = async (name) => {
@@ -1112,13 +1174,63 @@ const InvoiceForm = ({
                     {editingInvoiceFromAPI ? t('common.revert') : t('clear')}
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    {/* PRINT BUTTON */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* 👁️ PREVIEW */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const previewItems = items
+                          .filter((i) => i.productId && i.quantity > 0)
+                          .map((i) => ({
+                            productId: i.productId,
+                            name: i.name,
+                            description: i.description,
+                            uom: i.uom,
+                            quantity: i.quantity,
+                            price: i.rate,
+                            total: i.amount,
+                          }));
+
+                        navigate(`/print/sale/preview`, {
+                          state: {
+                            isPreview: true,
+                            type: 'sale',
+                            invoiceData: {
+                              lang: localStorage.getItem('lang'),
+                              invoiceDate,
+                              invoiceTime,
+                              billNo,
+                              customerName: customerName || '-',
+                              customerPhone: customerPhone || '',
+                              by,
+                              items: previewItems,
+                              totalAmount,
+                              discountAmount: finalDiscount,
+                              grandTotal,
+                              paidAmount,
+                              paymentType,
+                              customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                            },
+                          },
+                        });
+                      }}
+                      className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm shadow-md"
+                    >
+                      👁️ {t('preview')}
+                    </button>
+
+                    {/* 🖨️ PRINT */}
                     <button
                       type="button"
                       onClick={() => {
                         if (editingInvoiceFromAPI?._id) {
-                          navigate(`/print/sale/${editingInvoiceFromAPI._id}`);
+                          navigate(`/print/sale/${editingInvoiceFromAPI._id}?autoprint=true`, {
+                            state: {
+                              autoPrint: true,
+                              isPreview: true,
+                              type: 'sale',
+                            },
+                          });
                         } else {
                           const previewItems = items
                             .filter((i) => i.productId && i.quantity > 0)
@@ -1133,8 +1245,11 @@ const InvoiceForm = ({
                             }));
 
                           navigate(`/print/sale/preview`, {
+                            replace: true,
                             state: {
+                              autoPrint: true,
                               isPreview: true,
+                              type: 'sale',
                               invoiceData: {
                                 lang: localStorage.getItem('lang'),
                                 invoiceDate,
@@ -1149,6 +1264,7 @@ const InvoiceForm = ({
                                 grandTotal,
                                 paidAmount,
                                 paymentType,
+                                customerTotalBalance: customerBalance + (grandTotal - paidAmount),
                               },
                             },
                           });
@@ -1156,7 +1272,93 @@ const InvoiceForm = ({
                       }}
                       className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm shadow-md"
                     >
-                      🖨️ {t('printInvoice')}
+                      🖨️ {t('print')}
+                    </button>
+
+                    {/* 📄 PDF */}
+                    <button
+                      type="button"
+                      disabled={pdfLoading}
+                      onClick={async () => {
+                        try {
+                          setPdfLoading(true);
+                          const token = localStorage.getItem('token');
+                          let res;
+
+                          const previewItems = items
+                            .filter((i) => i.productId && i.quantity > 0)
+                            .map((i) => ({
+                              productId: i.productId,
+                              name: i.name,
+                              description: i.description,
+                              uom: i.uom,
+                              quantity: i.quantity,
+                              price: i.rate,
+                              total: i.amount,
+                            }));
+
+                          const payload = {
+                            lang: localStorage.getItem('lang'),
+                            invoiceDate,
+                            invoiceTime,
+                            billNo,
+                            customerName: customerName || '-',
+                            customerPhone: customerPhone || '',
+                            by,
+                            items: previewItems,
+                            totalAmount,
+                            discountAmount: finalDiscount,
+                            grandTotal,
+                            paidAmount,
+                            paymentType,
+                            customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                          };
+
+                          if (editingInvoiceFromAPI?._id) {
+                            res = await fetch(
+                              `${API}/api/print/sale-pdf/${editingInvoiceFromAPI._id}`,
+                              {
+                                headers: {
+                                  Authorization: `Bearer ${token}`,
+                                },
+                              }
+                            );
+                          } else {
+                            res = await fetch(`${API}/api/print/sale-pdf`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify(payload),
+                            });
+                          }
+
+                          const blob = await res.blob();
+                          const url = window.URL.createObjectURL(blob);
+
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `Invoice-${billNo || 'Preview'}.pdf`;
+
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+
+                          window.URL.revokeObjectURL(url);
+                        } catch (err) {
+                          alert(t('alerts.pdfFailed'));
+                        } finally {
+                          setPdfLoading(false);
+                        }
+                      }}
+                      className={`text-white px-4 py-2 rounded text-sm shadow-md ${
+                        pdfLoading
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700'
+                      }`}
+                    >
+                      {pdfLoading ? `⏳ ${t('pdf.preparing')}` : `📄 ${t('pdf.download')}`}
                     </button>
                   </div>
 
@@ -1197,6 +1399,12 @@ const InvoiceForm = ({
                 <p className="text-red-600 font-semibold">
                   {t('remaining')}: Rs. {(grandTotal - paidAmount).toFixed(2)}
                 </p>
+                {printSettings?.sales?.settings?.showCustomerTotalBalance !== false && (
+                  <p className="text-blue-600 font-semibold">
+                    {t('customerTotalBalance')}: Rs.{' '}
+                    {(customerBalance + (grandTotal - paidAmount)).toFixed(2)}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1423,6 +1631,25 @@ const InvoiceForm = ({
                   />
 
                   {t('print.showFooter')}
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={printSettings.sales.settings.showCustomerTotalBalance ?? true}
+                    onChange={(e) =>
+                      setPrintSettings({
+                        ...printSettings,
+                        sales: {
+                          ...printSettings.sales,
+                          settings: {
+                            ...printSettings.sales.settings,
+                            showCustomerTotalBalance: e.target.checked,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  Show Customer Total Balance
                 </label>
               </div>
 

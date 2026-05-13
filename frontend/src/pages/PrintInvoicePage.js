@@ -7,7 +7,10 @@ const API = process.env.REACT_APP_API_BASE_URL;
 const PrintInvoicePage = () => {
   const { type, id } = useParams();
   const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const autoPrint = queryParams.get('autoprint') === 'true' || location.state?.autoPrint;
   const [html, setHtml] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -77,6 +80,24 @@ const PrintInvoicePage = () => {
     fetchHtml();
   }, [id, type, isPreview, location.state]);
 
+  useEffect(() => {
+    if (!html || !autoPrint) return;
+
+    const timer = setTimeout(() => {
+      const handleAfterPrint = () => {
+        window.removeEventListener('afterprint', handleAfterPrint);
+
+        navigate('/create-sale');
+      };
+
+      window.addEventListener('afterprint', handleAfterPrint);
+
+      window.print();
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [html, autoPrint, navigate]);
+
   if (loading) {
     return <div className="p-6 text-center text-gray-600">{t('print.preparingPreview')}</div>;
   }
@@ -89,9 +110,11 @@ const PrintInvoicePage = () => {
           onClick={() => {
             window.print();
 
-            setTimeout(() => {
-              navigate('/create-sale');
-            }, 500);
+            if (isPreview) {
+              setTimeout(() => {
+                navigate('/create-sale');
+              }, 500);
+            }
           }}
           className="px-5 py-2 bg-gray-700 text-white rounded shadow"
         >
@@ -99,8 +122,11 @@ const PrintInvoicePage = () => {
         </button>
 
         <button
+          disabled={pdfLoading}
           onClick={async () => {
             try {
+              setPdfLoading(true);
+
               const token = localStorage.getItem('token');
               let res;
 
@@ -161,11 +187,15 @@ const PrintInvoicePage = () => {
               window.URL.revokeObjectURL(url);
             } catch (err) {
               alert(t('alerts.pdfFailed'));
+            } finally {
+              setPdfLoading(false);
             }
           }}
-          className="px-5 py-2 bg-blue-600 text-white rounded shadow"
+          className={`px-5 py-2 text-white rounded shadow ${
+            pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+          }`}
         >
-          {t('pdf.download')}
+          {pdfLoading ? `⏳ ${t('pdf.preparing')}` : `📄 ${t('pdf.download')}`}
         </button>
       </div>
 

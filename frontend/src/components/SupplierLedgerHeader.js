@@ -34,6 +34,7 @@ const SupplierLedgerHeader = ({
   setShowSuggestions,
   onShareClick,
 }) => {
+  const [pdfLoading, setPdfLoading] = React.useState(false);
   return (
     <>
       <div
@@ -167,11 +168,20 @@ const SupplierLedgerHeader = ({
               🖨️
             </button>
 
-            {/* PDF (FULL ORIGINAL LOGIC — SAFE) */}
+            {/* PDF */}
             <button
-              className="btn btn-primary"
-              style={{ height: 32, padding: '0 6px', fontSize: 11 }}
-              disabled={!sid}
+              className=""
+              style={{
+                height: 32,
+                padding: '0 6px',
+                fontSize: 11,
+                borderRadius: 6,
+                border: 'none',
+                cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                opacity: pdfLoading ? 0.7 : 1,
+                background: pdfLoading ? '#9ca3af' : 'linear-gradient(135deg,#2563eb,#1d4ed8)',
+              }}
+              disabled={!sid || pdfLoading}
               onClick={async () => {
                 if (!sid) return;
 
@@ -182,6 +192,8 @@ const SupplierLedgerHeader = ({
                 }).toString();
 
                 try {
+                  setPdfLoading(true);
+
                   const response = await fetch(
                     `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/pdf?${query}`,
                     {
@@ -205,12 +217,16 @@ const SupplierLedgerHeader = ({
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
+
+                  window.URL.revokeObjectURL(url);
                 } catch (error) {
                   alert(t('alerts.pdfFailed'));
+                } finally {
+                  setPdfLoading(false);
                 }
               }}
             >
-              PDF
+              {pdfLoading ? '⏳' : 'PDF'}
             </button>
 
             {/* Detail */}
@@ -391,9 +407,16 @@ const SupplierLedgerHeader = ({
             </button>
 
             <button
-              className="btn btn-primary"
-              style={{ height: 36 }}
-              disabled={!sid}
+              className=""
+              style={{
+                height: 36,
+                borderRadius: 8,
+                border: 'none',
+                cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                opacity: pdfLoading ? 0.7 : 1,
+                background: pdfLoading ? '#9ca3af' : 'linear-gradient(135deg,#2563eb,#1d4ed8)',
+              }}
+              disabled={!sid || pdfLoading}
               onClick={async () => {
                 if (!sid) return;
 
@@ -404,6 +427,8 @@ const SupplierLedgerHeader = ({
                 }).toString();
 
                 try {
+                  setPdfLoading(true);
+
                   const response = await fetch(
                     `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/pdf?${query}`,
                     {
@@ -427,12 +452,16 @@ const SupplierLedgerHeader = ({
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
+
+                  window.URL.revokeObjectURL(url);
                 } catch (error) {
                   alert(t('alerts.pdfFailed'));
+                } finally {
+                  setPdfLoading(false);
                 }
               }}
             >
-              {t('pdf')}
+              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : t('pdf')}
             </button>
 
             <input

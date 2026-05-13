@@ -182,6 +182,11 @@ const generateSalePdf = async (req, res) => {
 
     built.lang = invoice.lang;
 
+    built.page = {
+      ...built.page,
+      isPdf: true,
+    };
+
     const html = generateSaleInvoiceHTML(built);
 
     const pdfBuffer = await generatePdfFromHtml(html);
@@ -328,6 +333,7 @@ const generatePreviewSettingsHtml = async (req, res) => {
       customerName: "Preview Customer",
       customerPhone: "03000000000",
       by: "Admin User",
+      customerTotalBalance: 2500,
       items: [
         {
           productId: null,

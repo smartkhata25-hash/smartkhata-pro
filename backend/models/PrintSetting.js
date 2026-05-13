@@ -17,6 +17,7 @@ const documentSettingSchema = new mongoose.Schema({
   showStatus: { type: Boolean, default: true },
   showPaymentType: { type: Boolean, default: true },
   showBalance: { type: Boolean, default: true },
+  showCustomerTotalBalance: { type: Boolean, default: true },
 
   // 🔹 Extra
   showStamp: { type: Boolean, default: true },

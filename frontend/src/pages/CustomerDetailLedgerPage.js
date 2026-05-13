@@ -29,6 +29,7 @@ export default function CustomerDetailLedgerPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // ✅ Print Size (Default A5, Remembered)
   const [printSize, setPrintSize] = useState(localStorage.getItem('detailLedgerPrintSize') || 'A5');
@@ -461,7 +462,7 @@ export default function CustomerDetailLedgerPage() {
             {window.innerWidth < 768 ? '🖨️' : `🖨 ${t('common.print')}`}
           </button>
           <button
-            disabled={!selectedCustomerId}
+            disabled={!selectedCustomerId || pdfLoading}
             onClick={async () => {
               if (!selectedCustomerId) return;
 
@@ -472,6 +473,8 @@ export default function CustomerDetailLedgerPage() {
               }).toString();
 
               try {
+                setPdfLoading(true);
+
                 const response = await fetch(
                   `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-detail-ledger/${selectedCustomerId}/pdf?${query}`,
                   {
@@ -493,8 +496,12 @@ export default function CustomerDetailLedgerPage() {
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
+
+                window.URL.revokeObjectURL(url);
               } catch (error) {
                 alert(t('alerts.pdfFailed'));
+              } finally {
+                setPdfLoading(false);
               }
             }}
             style={{
@@ -505,12 +512,18 @@ export default function CustomerDetailLedgerPage() {
               border: 'none',
               fontWeight: 700,
               color: '#fff',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg,#f59e0b,#d97706)',
+              cursor: pdfLoading ? 'not-allowed' : 'pointer',
+              opacity: pdfLoading ? 0.7 : 1,
+              transition: 'all 0.2s ease',
+              background: pdfLoading ? '#9ca3af' : 'linear-gradient(135deg,#f59e0b,#d97706)',
               boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
             }}
           >
-            {window.innerWidth < 768 ? '📄' : `📄 ${t('common.pdf')}`}
+            {pdfLoading
+              ? `⏳ ${t('pdf.preparing')}`
+              : window.innerWidth < 768
+                ? '📄'
+                : `📄 ${t('common.pdf')}`}
           </button>
           <button
             disabled={!selectedCustomerId}

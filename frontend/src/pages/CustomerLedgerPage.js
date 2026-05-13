@@ -45,6 +45,7 @@ export default function CustomerLedgerPage() {
   const [end, setEnd] = useState(`${currentYear}-12-31`);
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [pdfLoading, setPdfLoading] = React.useState(false);
 
   const [printSize, setPrintSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
 
@@ -427,9 +428,11 @@ export default function CustomerLedgerPage() {
               {t('print')}
             </button>
             <button
-              className="btn btn-primary text-xs md:text-sm"
+              className={`btn text-xs md:text-sm ${
+                pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'btn-primary'
+              }`}
               style={{ height: window.innerWidth < 768 ? 32 : 36 }}
-              disabled={!cid}
+              disabled={!cid || pdfLoading}
               onClick={async () => {
                 if (!cid) return;
 
@@ -441,6 +444,8 @@ export default function CustomerLedgerPage() {
                 }).toString();
 
                 try {
+                  setPdfLoading(true);
+
                   const response = await fetch(
                     `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-ledger/${cid}/pdf?${query}`,
                     {
@@ -464,12 +469,16 @@ export default function CustomerLedgerPage() {
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
+
+                  window.URL.revokeObjectURL(url);
                 } catch (error) {
                   alert(t('alerts.pdfFailed'));
+                } finally {
+                  setPdfLoading(false);
                 }
               }}
             >
-              PDF
+              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : t('pdf')}
             </button>
 
             <button

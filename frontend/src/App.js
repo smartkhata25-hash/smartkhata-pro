@@ -304,7 +304,7 @@ function App() {
           <Route path="/edit-expense/:id" element={<ExpenseForm />} />
         </Route>
         <Route
-          path="/print/preview"
+          path="/print/:type/preview"
           element={
             <ProtectedRoute>
               <PrintInvoicePage />

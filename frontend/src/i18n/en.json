@@ -920,5 +920,8 @@
   "stockValueReport": "Stock Value Report",
   "auth.personalInfoDescription": "Please enter your personal details",
   "business.setupDescription": "Setup your business profile",
-  "common.saving": "Saving..."
+  "common.saving": "Saving...",
+  "pdf.preparing": "Preparing PDF...",
+  "customerTotalBalance": "Customer Total Balance",
+  "showCustomerTotalBalance": "Show Customer Total Balance"
 }

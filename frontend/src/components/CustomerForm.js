@@ -24,6 +24,23 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
     }
   }, [initialData]);
 
+  useEffect(() => {
+    const handleQuickFill = (e) => {
+      if (!e.detail) return;
+
+      setFormData((prev) => ({
+        ...prev,
+        ...e.detail,
+      }));
+    };
+
+    window.addEventListener('quick-customer-fill', handleQuickFill);
+
+    return () => {
+      window.removeEventListener('quick-customer-fill', handleQuickFill);
+    };
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({

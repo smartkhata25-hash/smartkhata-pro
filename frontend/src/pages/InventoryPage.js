@@ -129,8 +129,10 @@ const InventoryPage = () => {
       {/* 🧾 Bulk Add Products */}
       {showMultipleForm && (
         <MultipleProductForm
-          onBulkAdd={(newProducts) => {
-            setProducts((prev) => [...prev, ...newProducts]);
+          onBulkAdd={(updatedProducts) => {
+            setProducts(updatedProducts);
+
+            sessionStorage.setItem('products', JSON.stringify(updatedProducts));
           }}
           onClose={() => setShowMultipleForm(false)}
         />

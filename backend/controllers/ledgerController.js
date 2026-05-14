@@ -38,7 +38,7 @@ const getCustomerLedger = async (req, res) => {
     const matchFilter = {
       createdBy: userId,
       isDeleted: false,
-      isReversal: { $ne: true },
+      sourceType: { $ne: "reversal" },
       "lines.account": objectId,
     };
 
@@ -66,7 +66,7 @@ const getCustomerLedger = async (req, res) => {
           $match: {
             createdBy: userId,
             isDeleted: false,
-            isReversal: { $ne: true },
+            sourceType: { $ne: "reversal" },
             "lines.account": objectId,
             date: { $lt: new Date(startDate) },
           },

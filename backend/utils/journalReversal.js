@@ -6,7 +6,7 @@ const createReversalEntry = async (originalEntry, userId) => {
     account: line.account,
     amount: line.amount,
     type: line.type === "debit" ? "credit" : "debit",
-    paymentType: line.paymentType || "",
+    paymentType: line.paymentType || undefined,
   }));
 
   const reversalEntry = new JournalEntry({
@@ -14,7 +14,7 @@ const createReversalEntry = async (originalEntry, userId) => {
     description: `Reversal of entry ${originalEntry._id}`,
     lines: reversedLines,
     sourceType: "reversal",
-    createdBy: new mongoose.Types.ObjectId(userId),
+    createdBy: userId,
     isDeleted: false,
     isReversed: false,
     reversalOf: originalEntry._id,

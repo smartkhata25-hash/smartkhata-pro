@@ -79,6 +79,7 @@ const journalEntrySchema = new mongoose.Schema(
         "refund_invoice",
         "manual",
         "expense",
+        "reversal",
       ],
       default: "manual",
     },

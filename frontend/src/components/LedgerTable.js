@@ -301,12 +301,11 @@ const LedgerTable = ({
                           <button className="btn btn-primary" onClick={() => onEdit && onEdit(e)}>
                             ✏️ {t('common.edit')}
                           </button>{' '}
-                          <button
-                            className="btn btn-danger"
-                            onClick={() => onDelete && onDelete(e._id)}
-                          >
-                            🗑 {t('common.delete')}
-                          </button>
+                          {onDelete && (
+                            <button className="btn btn-danger" onClick={() => onDelete(e._id)}>
+                              🗑 {t('common.delete')}
+                            </button>
+                          )}
                         </td>
                       );
                     return null;

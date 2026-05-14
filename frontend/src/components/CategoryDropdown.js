@@ -109,6 +109,11 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
             onFocus && onFocus(e);
             setShowList(true);
           }}
+          onBlur={() => {
+            setTimeout(() => {
+              setShowList(false);
+            }, 150);
+          }}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

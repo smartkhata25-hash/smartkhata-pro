@@ -347,8 +347,10 @@ exports.deleteEntry = async (req, res) => {
       reversalEntryId: reversal._id,
     });
   } catch (err) {
+    console.error("REVERSAL ERROR:", err);
+
     res.status(500).json({
-      message: "Failed to reverse journal entry.",
+      message: err.message,
       error: err.message,
     });
   }

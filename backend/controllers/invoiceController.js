@@ -396,10 +396,17 @@ exports.deleteInvoice = async (req, res) => {
   });
 
   // 🟡 Soft Delete Related Journal
-  await JournalEntry.deleteMany({
-    referenceId: invoice._id,
-    sourceType: "sale_invoice",
-  });
+  await JournalEntry.updateMany(
+    {
+      referenceId: invoice._id,
+      isDeleted: false,
+    },
+    {
+      $set: {
+        isDeleted: true,
+      },
+    },
+  );
 
   if (invoice.accountId) {
     await recalculateAccountBalance(invoice.accountId);
@@ -410,13 +417,6 @@ exports.deleteInvoice = async (req, res) => {
 
 // ✅ Update Invoice - Safe DateTime Version
 exports.updateInvoice = async (req, res) => {
-  console.log("🟢 UPDATE INVOICE HIT");
-
-  console.log("invoice id:", req.params.id);
-
-  console.log("customerName:", req.body.customerName);
-
-  console.log("items raw:", req.body.items);
   try {
     const userId = req.user?.id || req.userId;
     const invoice = await Invoice.findOne({
@@ -502,8 +502,15 @@ exports.updateInvoice = async (req, res) => {
 
     // ✅ Remove old journal entries
     await JournalEntry.updateMany(
-      { referenceId: invoice._id, sourceType: "sale_invoice" },
-      { isDeleted: true },
+      {
+        referenceId: invoice._id,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
     );
 
     // 🧮 COGS calculate (mal ki lagat)

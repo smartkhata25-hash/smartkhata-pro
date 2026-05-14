@@ -6,7 +6,7 @@ import axios from 'axios';
 
 import PageLayout from '../components/PageLayout';
 
-import { getLedgerByCustomerAccount, deleteJournalEntry } from '../services/customerLedgerService';
+import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 
 import LedgerTable from '../components/LedgerTable';
 import { t, getCurrentLanguage } from '../i18n/i18n';
@@ -147,17 +147,6 @@ export default function CustomerLedgerPage() {
     setCid(customerId);
     load(customerId, start, end);
   }, [customerId, customers, load, start, end]);
-
-  const del = async (id) => {
-    if (window.confirm(t('alerts.deleteTransaction'))) {
-      try {
-        await deleteJournalEntry(id);
-        load();
-      } catch (err) {
-        alert(err?.response?.data?.message || 'Delete allowed nahi hai');
-      }
-    }
-  };
 
   const print = async () => {
     if (!cid) return;
@@ -623,7 +612,7 @@ export default function CustomerLedgerPage() {
             ledgerData={dateFilteredLedger}
             search={search}
             openingBalance={opening}
-            onDelete={del}
+            onDelete={null}
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
 

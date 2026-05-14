@@ -60,6 +60,13 @@ const SuppliersPage = () => {
     ledgerStartDate,
     ledgerEndDate,
     ledgerSearch,
+
+    // ✅ Filters persist
+    searchTerm,
+    balanceFilter,
+    nameSort,
+    balanceSort,
+    activeTab,
   };
   useFormPersist('suppliers_page_state', persistState, () => {});
 
@@ -134,6 +141,11 @@ const SuppliersPage = () => {
       setLedgerStartDate(data.ledgerStartDate || '');
       setLedgerEndDate(data.ledgerEndDate || '');
       setLedgerSearch(data.ledgerSearch || '');
+      setSearchTerm(data.searchTerm || '');
+      setBalanceFilter(data.balanceFilter || 'all');
+      setNameSort(data.nameSort || 'none');
+      setBalanceSort(data.balanceSort || 'none');
+      setActiveTab(data.activeTab || 'active');
 
       if (data.selectedSupplierId) {
         loadSupplierLedger(data.selectedSupplierId);
@@ -143,47 +155,6 @@ const SuppliersPage = () => {
       console.error(err);
     }
   }, [suppliers, loadSupplierLedger]);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const list =
-        activeTab === 'active'
-          ? suppliers.filter((s) => s.supplierType !== 'blocked')
-          : suppliers.filter((s) => s.supplierType === 'blocked');
-
-      if (!list.length) return;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.min(prev + 1, list.length - 1);
-          const supplier = list[next];
-          setSelectedSupplierId(supplier._id);
-          return next;
-        });
-      }
-
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.max(prev - 1, 0);
-          const supplier = list[next];
-          setSelectedSupplierId(supplier._id);
-          return next;
-        });
-      }
-
-      if (e.key === 'Enter') {
-        if (selectedIndex >= 0) {
-          const supplier = list[selectedIndex];
-          loadSupplierLedger(supplier._id);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [suppliers, activeTab, selectedIndex, loadSupplierLedger]);
 
   const handleAddClick = () => {
     setEditingSupplier(null);
@@ -306,6 +277,70 @@ const SuppliersPage = () => {
 
   const hiddenSuppliers = filteredSuppliers.filter((s) => s.supplierType === 'blocked');
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const list = activeTab === 'active' ? activeSuppliers : hiddenSuppliers;
+
+      if (!list.length) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+
+        setSelectedIndex((prev) => {
+          const next = prev < 0 ? 0 : Math.min(prev + 1, list.length - 1);
+
+          const supplier = list[next];
+
+          setSelectedSupplierId(supplier._id);
+
+          setTimeout(() => {
+            const selectedEl = document.getElementById(`supplier-${supplier._id}`);
+
+            selectedEl?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }, 0);
+
+          return next;
+        });
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+
+        setSelectedIndex((prev) => {
+          const next = prev <= 0 ? 0 : prev - 1;
+
+          const supplier = list[next];
+
+          setSelectedSupplierId(supplier._id);
+
+          setTimeout(() => {
+            const selectedEl = document.getElementById(`supplier-${supplier._id}`);
+
+            selectedEl?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }, 0);
+
+          return next;
+        });
+      }
+
+      if (e.key === 'Enter') {
+        if (selectedIndex >= 0) {
+          const supplier = list[selectedIndex];
+          loadSupplierLedger(supplier._id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, selectedIndex, loadSupplierLedger, activeSuppliers, hiddenSuppliers]);
+
   const closing = ledgerData?.ledger?.length
     ? Number(ledgerData.ledger[ledgerData.ledger.length - 1].balance || 0)
     : Number(ledgerData?.openingBalance || 0);
@@ -338,8 +373,11 @@ const SuppliersPage = () => {
             minWidth: isMobile ? '100%' : 260,
             borderRight: isMobile ? 'none' : '1px solid #e5e7eb',
             padding: 12,
-            overflowY: 'auto',
-            display: isMobile && selectedSupplierId ? 'none' : 'block',
+
+            overflow: 'hidden',
+
+            display: isMobile && selectedSupplierId ? 'none' : 'flex',
+            flexDirection: 'column',
           }}
         >
           {/* 🟣 ACTION BUTTONS MOVED FROM HEADER */}
@@ -396,6 +434,30 @@ const SuppliersPage = () => {
               }}
             >
               {t('status.blocked')}
+            </button>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setBalanceFilter('all');
+                setNameSort('none');
+                setBalanceSort('none');
+                setActiveTab('active');
+
+                localStorage.removeItem('app_state_suppliers_page_state');
+              }}
+              style={{
+                height: 30,
+                padding: '0 10px',
+                borderRadius: 6,
+                border: '1px solid #dc2626',
+                background: '#fef2f2',
+                color: '#dc2626',
+                fontSize: 12,
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Clear
             </button>
           </div>
 
@@ -474,131 +536,150 @@ const SuppliersPage = () => {
             }}
           />
 
-          {(activeTab === 'active' ? activeSuppliers : hiddenSuppliers).map((supplier) => {
-            const balance = Number(supplier.balance ?? supplier.openingBalance) || 0;
-            const balanceColor = balance > 0 ? '#dc2626' : balance < 0 ? '#16a34a' : '#6b7280';
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+            }}
+          >
+            {(activeTab === 'active' ? activeSuppliers : hiddenSuppliers).map((supplier) => {
+              const balance = Number(supplier.balance ?? supplier.openingBalance) || 0;
+              const balanceColor = balance > 0 ? '#dc2626' : balance < 0 ? '#16a34a' : '#6b7280';
 
-            return (
+              return (
+                <div
+                  key={supplier._id}
+                  id={`supplier-${supplier._id}`}
+                  onClick={() => {
+                    setSelectedSupplierId(supplier._id);
+
+                    setSupplierName(supplier.name);
+
+                    const list = activeTab === 'active' ? activeSuppliers : hiddenSuppliers;
+
+                    setSelectedIndex(list.findIndex((s) => s._id === supplier._id));
+
+                    loadSupplierLedger(supplier._id);
+                  }}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    marginBottom: 6,
+                    cursor: 'pointer',
+                    position: 'relative',
+                    background: selectedSupplierId === supplier._id ? '#f3e8ff' : '#ffffff',
+                    border:
+                      selectedSupplierId === supplier._id
+                        ? '1px solid #7c3aed'
+                        : '1px solid #e5e7eb',
+                  }}
+                >
+                  {/* LEFT */}
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{supplier.name}</div>
+
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 800,
+                        color: balanceColor,
+                        marginTop: 2,
+                      }}
+                    >
+                      Rs. {balance.toFixed(2)}
+                    </div>
+                  </div>
+
+                  {/* RIGHT ACTIONS */}
+                  {(selectedSupplierId === supplier._id || isMobile) && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 6,
+                        position: 'absolute',
+                        right: 8,
+                        bottom: 6,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={(e) => handleEditClick(e, supplier)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: '1px solid #7c3aed',
+                          background: '#f3e8ff',
+                          color: '#6b21a8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <FaEdit size={12} />
+                      </button>
+
+                      <button
+                        onClick={(e) => handleDeleteClick(e, supplier._id)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: '1px solid #ef4444',
+                          background: '#fef2f2',
+                          color: '#b91c1c',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <FaTrash size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {activeTab === 'active' && searchTerm.trim() !== '' && activeSuppliers.length === 0 && (
               <div
-                key={supplier._id}
-                onClick={() => {
-                  setSelectedSupplierId(supplier._id);
-
-                  // 🔥 YE LINE MISSING THI
-                  setSupplierName(supplier.name);
-
-                  const list = activeTab === 'active' ? activeSuppliers : hiddenSuppliers;
-
-                  setSelectedIndex(list.findIndex((s) => s._id === supplier._id));
-
-                  loadSupplierLedger(supplier._id);
-                }}
                 style={{
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  marginBottom: 6,
+                  marginTop: 12,
+                  padding: '10px',
+                  borderRadius: 8,
+                  border: '1px dashed #a78bfa',
+                  textAlign: 'center',
                   cursor: 'pointer',
-                  position: 'relative', // 🔴 IMPORTANT
-                  background: selectedSupplierId === supplier._id ? '#f3e8ff' : '#ffffff',
-                  border:
-                    selectedSupplierId === supplier._id ? '1px solid #7c3aed' : '1px solid #e5e7eb',
+                  background: '#faf5ff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#7c3aed',
+                }}
+                onClick={() => {
+                  setEditingSupplier(null);
+
+                  setShowForm(true);
+
+                  setTimeout(() => {
+                    const event = new CustomEvent('quick-supplier-fill', {
+                      detail: {
+                        name: searchTerm,
+                        supplierType: 'vendor',
+                        openingBalance: 0,
+                      },
+                    });
+
+                    window.dispatchEvent(event);
+                  }, 50);
                 }}
               >
-                {/* LEFT */}
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{supplier.name}</div>
-
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 800,
-                      color: balanceColor,
-                      marginTop: 2,
-                    }}
-                  >
-                    Rs. {balance.toFixed(2)}
-                  </div>
-                </div>
-
-                {/* RIGHT ACTIONS */}
-                {(selectedSupplierId === supplier._id || isMobile) && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 6,
-                      position: 'absolute',
-                      right: 8,
-                      bottom: 6,
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={(e) => handleEditClick(e, supplier)}
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        border: '1px solid #7c3aed',
-                        background: '#f3e8ff',
-                        color: '#6b21a8',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <FaEdit size={12} />
-                    </button>
-
-                    <button
-                      onClick={(e) => handleDeleteClick(e, supplier._id)}
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        border: '1px solid #ef4444',
-                        background: '#fef2f2',
-                        color: '#b91c1c',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <FaTrash size={12} />
-                    </button>
-                  </div>
-                )}
+                + {t('supplier.addNew')} “{searchTerm}”
               </div>
-            );
-          })}
-
-          {activeTab === 'active' && searchTerm.trim() !== '' && activeSuppliers.length === 0 && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: '10px',
-                borderRadius: 8,
-                border: '1px dashed #a78bfa',
-                textAlign: 'center',
-                cursor: 'pointer',
-                background: '#faf5ff',
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#7c3aed',
-              }}
-              onClick={() => {
-                setEditingSupplier({
-                  name: searchTerm,
-                  supplierType: 'vendor',
-                  openingBalance: 0,
-                });
-                setShowForm(true);
-              }}
-            >
-              + {t('supplier.addNew')} “{searchTerm}”
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div
@@ -867,8 +948,8 @@ const SuppliersPage = () => {
 
                     setShowMergeConfirm(false);
                     setMergeData(null);
-                    setShowForm(false); // 🔥 ADD
-                    setEditingSupplier(null); // 🔥 ADD
+                    setShowForm(false);
+                    setEditingSupplier(null);
 
                     loadSuppliers();
 

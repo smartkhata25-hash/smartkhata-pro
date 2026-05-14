@@ -663,7 +663,32 @@ const InvoiceForm = ({
 
   const { clear } = useFormPersist('sale_invoice_draft', formState, () => {});
 
-  const handleClear = () => {
+  const handleClear = async () => {
+    // ✅ EDIT MODE → restore original invoice
+    if (editingInvoiceFromAPI?._id) {
+      try {
+        const freshInvoice = await getInvoiceById(editingInvoiceFromAPI._id, token);
+
+        setItems(Array.from({ length: 20 }, () => blankRow()));
+
+        setTimeout(() => {
+          setEditingInvoiceFromAPI(freshInvoice);
+        }, 0);
+        setShowPreview(false);
+
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+
+        return;
+      } catch (err) {
+        console.error('Failed to restore invoice:', err);
+        alert('Invoice restore failed');
+        return;
+      }
+    }
+
+    // ✅ NEW MODE → clear form
     localStorage.removeItem('app_state_sale_invoice_draft');
 
     setCustomerName('');
@@ -675,10 +700,12 @@ const InvoiceForm = ({
     setPaymentType('credit');
     setSelectedAccountId('');
     setBy('');
+
     const now = new Date();
 
     setInvoiceDate(now.toISOString().split('T')[0]);
     setInvoiceTime(now.toTimeString().slice(0, 5));
+
     setAttachment(null);
     setShowPreview(false);
 

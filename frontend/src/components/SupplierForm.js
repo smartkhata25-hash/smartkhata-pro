@@ -26,6 +26,21 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
     }
   }, [initialData]);
 
+  useEffect(() => {
+    const handleQuickFill = (e) => {
+      setFormData((prev) => ({
+        ...prev,
+        ...e.detail,
+      }));
+    };
+
+    window.addEventListener('quick-supplier-fill', handleQuickFill);
+
+    return () => {
+      window.removeEventListener('quick-supplier-fill', handleQuickFill);
+    };
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
 

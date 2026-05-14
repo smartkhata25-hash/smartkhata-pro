@@ -85,7 +85,9 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
       if (created) {
         const newProducts = Array.isArray(created) ? created : [created];
 
-        onBulkAdd(newProducts);
+        const refreshedProducts = await fetchProducts();
+
+        onBulkAdd(refreshedProducts);
 
         // 🔥 NEW: categories بھی update کرو
         setCategories((prev) => {

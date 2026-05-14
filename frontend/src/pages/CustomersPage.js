@@ -19,7 +19,6 @@ import { t } from '../i18n/i18n';
 import { sendWhatsAppReminder } from '../utils/whatsapp';
 import { FaWhatsapp } from 'react-icons/fa';
 import { FaEdit, FaTrash } from 'react-icons/fa';
-import { deleteJournalEntry } from '../services/customerLedgerService';
 
 import { getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
@@ -149,6 +148,11 @@ const CustomersPage = () => {
       setLedgerStartDate(data.ledgerStartDate || '');
       setLedgerEndDate(data.ledgerEndDate || '');
       setLedgerSearch(data.ledgerSearch || '');
+      setSearchTerm(data.searchTerm || '');
+      setActiveTab(data.activeTab || 'active');
+      setBalanceFilter(data.balanceFilter || 'all');
+      setNameSort(data.nameSort || 'none');
+      setBalanceSort(data.balanceSort || 'none');
 
       if (data.selectedCustomerId) {
         loadCustomerLedger(data.selectedCustomerId);
@@ -158,49 +162,6 @@ const CustomersPage = () => {
       console.error(err);
     }
   }, [customers, loadCustomerLedger]);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const list =
-        activeTab === 'active'
-          ? customers.filter((c) => c.isActive !== false)
-          : customers.filter((c) => c.isActive === false);
-
-      if (!list.length) return;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.min(prev + 1, list.length - 1);
-          const customer = list[next];
-          setSelectedCustomerId(customer._id);
-          setCustomerName(customer.name);
-          return next;
-        });
-      }
-
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.max(prev - 1, 0);
-          const customer = list[next];
-          setSelectedCustomerId(customer._id);
-          setCustomerName(customer.name);
-          return next;
-        });
-      }
-
-      if (e.key === 'Enter') {
-        if (selectedIndex >= 0) {
-          const customer = list[selectedIndex];
-          loadCustomerLedger(customer._id);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [customers, activeTab, selectedIndex, loadCustomerLedger]);
 
   const handleAddClick = () => {
     setEditingCustomer(null);
@@ -327,6 +288,71 @@ const CustomersPage = () => {
     });
 
   const hiddenCustomers = filteredCustomers.filter((c) => c.isActive === false);
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const list = activeTab === 'active' ? activeCustomers : hiddenCustomers;
+
+      if (!list.length) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+
+        setSelectedIndex((prev) => {
+          const next = prev < 0 ? 0 : Math.min(prev + 1, list.length - 1);
+
+          const customer = list[next];
+
+          setSelectedCustomerId(customer._id);
+          setCustomerName(customer.name);
+
+          setTimeout(() => {
+            const selectedEl = document.getElementById(`customer-${customer._id}`);
+
+            selectedEl?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }, 0);
+
+          return next;
+        });
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+
+        setSelectedIndex((prev) => {
+          const next = prev <= 0 ? 0 : prev - 1;
+
+          const customer = list[next];
+
+          setSelectedCustomerId(customer._id);
+          setCustomerName(customer.name);
+
+          setTimeout(() => {
+            const selectedEl = document.getElementById(`customer-${customer._id}`);
+
+            selectedEl?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }, 0);
+
+          return next;
+        });
+      }
+
+      if (e.key === 'Enter') {
+        if (selectedIndex >= 0) {
+          const customer = list[selectedIndex];
+          loadCustomerLedger(customer._id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, selectedIndex, loadCustomerLedger, activeCustomers, hiddenCustomers]);
 
   const closing = ledgerData?.ledger?.length
     ? Number(ledgerData.ledger[ledgerData.ledger.length - 1].balance || 0)
@@ -340,6 +366,12 @@ const CustomersPage = () => {
     ledgerStartDate,
     ledgerEndDate,
     ledgerSearch,
+
+    searchTerm,
+    activeTab,
+    balanceFilter,
+    nameSort,
+    balanceSort,
   };
 
   useFormPersist('customers_page_state', persistState, () => {});
@@ -433,6 +465,30 @@ const CustomersPage = () => {
             >
               {t('common.hidden')}
             </button>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setBalanceFilter('all');
+                setNameSort('none');
+                setBalanceSort('none');
+                setActiveTab('active');
+
+                localStorage.removeItem('app_state_customers_page_state');
+              }}
+              style={{
+                height: 30,
+                padding: '0 10px',
+                borderRadius: 6,
+                border: '1px solid #dc2626',
+                background: '#fef2f2',
+                color: '#dc2626',
+                fontSize: 12,
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Clear
+            </button>
           </div>
 
           {/* 🔽 SORT DROPDOWN — YAHAN ADD KARNA HAI */}
@@ -520,6 +576,41 @@ const CustomersPage = () => {
               minHeight: 0,
             }}
           >
+            {activeTab === 'active' && searchTerm.trim() !== '' && activeCustomers.length === 0 && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: '10px',
+                  borderRadius: 8,
+                  border: '1px dashed #94a3b8',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: '#f8fafc',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#2563eb',
+                }}
+                onClick={() => {
+                  setEditingCustomer(null);
+
+                  setShowForm(true);
+
+                  setTimeout(() => {
+                    const event = new CustomEvent('quick-customer-fill', {
+                      detail: {
+                        name: searchTerm,
+                        type: 'regular',
+                        openingBalance: 0,
+                      },
+                    });
+
+                    window.dispatchEvent(event);
+                  }, 50);
+                }}
+              >
+                + {t('customer.addNew')} “{searchTerm}”
+              </div>
+            )}
             {(activeTab === 'active' ? activeCustomers : hiddenCustomers).map((customer) => {
               const balance = Number(customer.balance) || 0;
               const balanceColor = balance > 0 ? '#16a34a' : balance < 0 ? '#dc2626' : '#6b7280';
@@ -531,6 +622,7 @@ const CustomersPage = () => {
                     : '#3b82f6';
               return (
                 <div
+                  id={`customer-${customer._id}`}
                   key={customer._id}
                   onClick={() => {
                     setSelectedCustomerId(customer._id);
@@ -669,33 +761,6 @@ const CustomersPage = () => {
               );
             })}
           </div>
-
-          {activeTab === 'active' && searchTerm.trim() !== '' && activeCustomers.length === 0 && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: '10px',
-                borderRadius: 8,
-                border: '1px dashed #94a3b8',
-                textAlign: 'center',
-                cursor: 'pointer',
-                background: '#f8fafc',
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#2563eb',
-              }}
-              onClick={() => {
-                setEditingCustomer({
-                  name: searchTerm,
-                  type: 'regular',
-                  openingBalance: 0,
-                });
-                setShowForm(true);
-              }}
-            >
-              + {t('customer.addNew')} “{searchTerm}”
-            </div>
-          )}
         </div>
         {/* ========= RIGHT: LEDGER PLACEHOLDER (FIXED) ========= */}
         <div
@@ -775,16 +840,7 @@ const CustomersPage = () => {
                   ledgerData={ledgerData.ledger || []}
                   search={ledgerSearch}
                   openingBalance={ledgerData.openingBalance || 0}
-                  onDelete={async (id) => {
-                    if (!window.confirm('Delete karna hai?')) return;
-
-                    try {
-                      await deleteJournalEntry(id);
-                      loadCustomerLedger(selectedCustomerId);
-                    } catch (err) {
-                      alert(err?.response?.data?.message || 'Delete failed');
-                    }
-                  }}
+                  onDelete={null}
                   onEdit={(entry) => {
                     const type = entry.sourceType?.toLowerCase();
 

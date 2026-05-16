@@ -5,6 +5,8 @@ const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
 const { getProductStock } = require("../utils/stockHelper");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const Customer = require("../models/Customer");
+const Supplier = require("../models/Supplier");
 
 // ✅ Dashboard Summary – Professional Version
 const getDashboardSummary = async (req, res) => {
@@ -29,6 +31,13 @@ const getDashboardSummary = async (req, res) => {
        1️⃣ SALES & EXPENSES (WITH FILTER)
     ====================================================== */
 
+    // ✅ ONLY ACTIVE SUPPLIER ACCOUNTS
+    const activeSupplierAccounts = await Account.find({
+      userId,
+      category: "supplier",
+      isActive: true,
+    }).select("_id");
+
     const combinedData = await JournalEntry.aggregate([
       {
         $match: {
@@ -37,6 +46,7 @@ const getDashboardSummary = async (req, res) => {
           ...dateFilter,
         },
       },
+
       { $unwind: "$lines" },
 
       {
@@ -47,15 +57,49 @@ const getDashboardSummary = async (req, res) => {
           as: "accountInfo",
         },
       },
+
       { $unwind: "$accountInfo" },
 
+      // ✅ hidden customer accounts ignore
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerId",
+          foreignField: "_id",
+          as: "customerInfo",
+        },
+      },
+
+      {
+        $unwind: {
+          path: "$customerInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
+      {
+        $match: {
+          $or: [
+            {
+              "accountInfo.category": { $ne: "customer" },
+            },
+
+            {
+              "accountInfo.category": "customer",
+              "customerInfo.isActive": true,
+            },
+          ],
+        },
+      },
       {
         $group: {
           _id: {
+            account: "$lines.account",
             type: "$accountInfo.type",
             category: "$accountInfo.category",
             lineType: "$lines.type",
           },
+
           total: { $sum: "$lines.amount" },
         },
       },
@@ -101,12 +145,11 @@ const getDashboardSummary = async (req, res) => {
         else totalBank -= amount;
       }
 
-      // Customer
+      // ✅ ONLY ACTIVE CUSTOMER RECEIVABLES
       if (type === "Asset" && category === "customer") {
         if (lineType === "debit") customerNet += amount;
         else customerNet -= amount;
       }
-
       // Payable
       if (type === "Liability") {
         if (lineType === "credit") totalPayable += amount;
@@ -346,12 +389,27 @@ const getDashboardAlerts = async (req, res) => {
     }
 
     /* ======================================================
-       1️⃣ OVERDUE INVOICES
-    ====================================================== */
+   ✅ ACTIVE CUSTOMERS ONLY
+====================================================== */
+
+    const activeCustomers = await Customer.find({
+      createdBy: userId,
+      isActive: true,
+    }).select("_id");
+
+    const activeCustomerIds = activeCustomers.map((c) => c._id);
+
+    /* ======================================================
+   1️⃣ OVERDUE INVOICES
+====================================================== */
 
     const overdueQuery = {
       createdBy: userId,
       isDeleted: { $ne: true },
+
+      // ✅ hidden customer invoices ignore
+      customerId: { $in: activeCustomerIds },
+
       status: { $ne: "Paid" },
       dueDate: { $lt: today },
       ...invoiceDateFilter,
@@ -363,12 +421,16 @@ const getDashboardAlerts = async (req, res) => {
         : Invoice.countDocuments(overdueQuery);
 
     /* ======================================================
-       2️⃣ PENDING PAYMENTS
-    ====================================================== */
+   2️⃣ PENDING PAYMENTS
+====================================================== */
 
     const pendingQuery = {
       createdBy: userId,
       isDeleted: { $ne: true },
+
+      // ✅ hidden customer invoices ignore
+      customerId: { $in: activeCustomerIds },
+
       status: { $in: ["Unpaid", "Partial"] },
       ...invoiceDateFilter,
     };

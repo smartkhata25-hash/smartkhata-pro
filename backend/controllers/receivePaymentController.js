@@ -19,7 +19,10 @@ exports.createReceivePayment = async (req, res) => {
       return res.status(400).json({ error: "User ID is required." });
     }
 
-    const payments = JSON.parse(paymentEntries || "[]");
+    const payments =
+      typeof paymentEntries === "string"
+        ? JSON.parse(paymentEntries || "[]")
+        : paymentEntries || [];
 
     const totalAmount = payments.reduce(
       (sum, p) => sum + Number(p.amount || 0),
@@ -163,7 +166,10 @@ exports.updateReceivePayment = async (req, res) => {
 
     const userId = req.user?.id || req.userId;
 
-    const payments = JSON.parse(paymentEntries || "[]");
+    const payments =
+      typeof paymentEntries === "string"
+        ? JSON.parse(paymentEntries || "[]")
+        : paymentEntries || [];
 
     const totalAmount = payments.reduce(
       (sum, p) => sum + Number(p.amount || 0),
@@ -238,7 +244,9 @@ exports.updateReceivePayment = async (req, res) => {
     // 🧹 Delete old journal entries
     await JournalEntry.deleteMany({
       referenceId: payment._id,
-      sourceType: "receive_payment",
+      sourceType: {
+        $in: ["receive_payment", "refund_payment"],
+      },
     });
 
     // 🔄 Recalculate old accounts

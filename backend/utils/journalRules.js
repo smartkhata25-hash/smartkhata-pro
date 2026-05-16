@@ -10,15 +10,15 @@ const JOURNAL_RULES = {
     normal: "credit",
   },
   Equity: {
-    allowed: ["credit"],
+    allowed: ["debit", "credit"],
     normal: "credit",
   },
   Income: {
-    allowed: ["credit"],
+    allowed: ["debit", "credit"],
     normal: "credit",
   },
   Expense: {
-    allowed: ["debit"],
+    allowed: ["debit", "credit"],
     normal: "debit",
   },
 };

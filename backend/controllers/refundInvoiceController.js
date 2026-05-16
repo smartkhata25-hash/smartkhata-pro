@@ -31,13 +31,26 @@ exports.createRefundInvoice = async (req, res) => {
       accountId,
       notes,
       originalInvoiceId,
+      isOpening,
     } = req.body;
 
-    const items = JSON.parse(req.body.items || "[]");
+    const items =
+      typeof req.body.items === "string"
+        ? JSON.parse(req.body.items || "[]")
+        : req.body.items || [];
+
+    // ✅ Normal refund needs items
+    if ((!isOpening || isOpening === "false") && items.length === 0) {
+      return res.status(400).json({
+        error: "Refund items required",
+      });
+    }
 
     // ✅ Basic validation
-    if (!customerId || items.length === 0) {
-      return res.status(400).json({ error: "Customer ID and items required" });
+    if (!customerId) {
+      return res.status(400).json({
+        error: "Customer ID required",
+      });
     }
 
     // ✅ Customer
@@ -114,9 +127,10 @@ exports.createRefundInvoice = async (req, res) => {
       customerPhone,
       totalAmount,
       paidAmount,
-      paymentType,
+      paymentType: isOpening ? "credit" : paymentType,
       accountId: paymentType === "cash" ? accountId : null,
       notes,
+      isOpening: isOpening || false,
       items,
       createdBy: userId,
       attachmentUrl: req.file?.filename || "",
@@ -176,36 +190,71 @@ exports.createRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ JOURNAL LINES (FINAL & CORRECT)
-    const lines = [
-      // 🔴 Customer refund (ledger entry – balance kam)
-      {
-        account: customerAccountId,
-        type: "credit",
-        amount: totalAmount,
-      },
+    // ✅ Calculate refund cost (IMPORTANT FIX)
+    let totalRefundCost = 0;
 
-      // 🟢 Sales return
-      {
-        account: salesReturnAccount._id,
-        type: "debit",
-        amount: totalAmount,
-      },
+    if (!isOpening || isOpening === "false") {
+      for (const item of items) {
+        const product = await Product.findById(item.productId);
 
-      // 🟢 Inventory back
-      {
-        account: inventoryAccount._id,
-        type: "debit",
-        amount: totalAmount,
-      },
+        if (product) {
+          const cost = Number(product.unitCost || 0);
 
-      // 🔴 COGS reverse
-      {
-        account: cogsAccount._id,
-        type: "credit",
-        amount: totalAmount,
-      },
-    ];
+          totalRefundCost += cost * Number(item.quantity || 0);
+        }
+      }
+    }
+
+    // ✅ JOURNAL LINES
+    const lines = isOpening
+      ? [
+          // ✅ Opening Refund Entry
+          {
+            account: (
+              await Account.findOne({
+                code: "OPENING_BALANCE",
+                userId,
+              })
+            )._id,
+            type: "debit",
+            amount: totalAmount,
+          },
+
+          {
+            account: customerAccountId,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ]
+      : [
+          // 🔴 Customer refund
+          {
+            account: customerAccountId,
+            type: "credit",
+            amount: totalAmount,
+          },
+
+          // 🟢 Sales return
+          {
+            account: salesReturnAccount._id,
+            type: "debit",
+            amount: totalAmount,
+          },
+
+          // 🟢 Inventory back (COST BASED)
+          {
+            account: inventoryAccount._id,
+            type: "debit",
+            amount: totalRefundCost,
+          },
+
+          // 🔴 COGS reverse (COST BASED)
+          {
+            account: cogsAccount._id,
+            type: "credit",
+            amount: totalRefundCost,
+          },
+        ];
 
     // ✅ Journal Entry
     const journal = new JournalEntry({
@@ -213,10 +262,10 @@ exports.createRefundInvoice = async (req, res) => {
       time: invoiceTime || "",
       description: notes || "",
 
-      sourceType: "refund_invoice",
+      sourceType: isOpening ? "opening_refund_invoice" : "refund_invoice",
       referenceId: refundInvoice._id,
       invoiceId: refundInvoice._id,
-      billNo,
+      billNo: refundBillNo,
       paymentType,
       createdBy: userId,
       customerId: customer._id,
@@ -226,7 +275,7 @@ exports.createRefundInvoice = async (req, res) => {
     });
 
     await journal.save();
-    if (paymentType && accountId) {
+    if ((!isOpening || isOpening === "false") && paymentType && accountId) {
       await createPaymentEntry({
         userId,
         referenceId: refundInvoice._id,
@@ -242,17 +291,19 @@ exports.createRefundInvoice = async (req, res) => {
       if (accountId) await recalculateAccountBalance(accountId);
     }
 
-    // ✅ Inventory transactions via stockHelper
-    for (const item of items) {
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "IN",
-        quantity: item.quantity,
-        note: `Refund Invoice #${refundInvoice.billNo}`,
-        invoiceId: refundInvoice._id,
-        invoiceModel: "RefundInvoice",
-        userId,
-      });
+    // ✅ Inventory transactions
+    if (!isOpening || isOpening === "false") {
+      for (const item of items) {
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "IN",
+          quantity: item.quantity,
+          note: `Refund Invoice #${refundInvoice.billNo}`,
+          invoiceId: refundInvoice._id,
+          invoiceModel: "RefundInvoice",
+          userId,
+        });
+      }
     }
 
     res.status(201).json({
@@ -285,7 +336,9 @@ exports.getRefundById = async (req, res) => {
     // 🔍 Journal Entry نکالیں
     const journal = await JournalEntry.findOne({
       referenceId: refund._id,
-      sourceType: "refund_invoice",
+      sourceType: {
+        $in: ["refund_invoice", "opening_refund_invoice"],
+      },
     }).populate("lines.account", "name");
 
     // 💡 Payment line (credit side)
@@ -332,9 +385,20 @@ exports.updateRefundInvoice = async (req, res) => {
       accountId,
       notes,
       originalInvoiceId,
+      isOpening,
     } = req.body;
 
-    const items = JSON.parse(req.body.items || "[]");
+    const items =
+      typeof req.body.items === "string"
+        ? JSON.parse(req.body.items || "[]")
+        : req.body.items || [];
+
+    // ✅ Normal refund needs items
+    if ((!isOpening || isOpening === "false") && items.length === 0) {
+      return res.status(400).json({
+        error: "Refund items required",
+      });
+    }
 
     // ✅ Customer
     const customer = await Customer.findOne({
@@ -383,8 +447,6 @@ exports.updateRefundInvoice = async (req, res) => {
 
     // ✅ Update refund invoice
 
-    const oldItems = refund.items;
-
     refund.billNo = billNo;
     refund.invoiceDate = invoiceDate;
     refund.invoiceTime = invoiceTime;
@@ -393,9 +455,11 @@ exports.updateRefundInvoice = async (req, res) => {
     refund.customerPhone = customerPhone;
     refund.totalAmount = totalAmount;
     refund.paidAmount = paidAmount;
-    refund.paymentType = paymentType;
+    refund.paymentType = isOpening ? "credit" : paymentType;
     refund.accountId = paymentType === "cash" ? accountId : null;
     refund.notes = notes;
+    refund.isOpening = isOpening || false;
+
     refund.items = items;
 
     if (req.file) {
@@ -452,18 +516,22 @@ exports.updateRefundInvoice = async (req, res) => {
     await refund.save();
 
     // ✅ Delete old journal
-    await JournalEntry.deleteOne({
+    await JournalEntry.deleteMany({
       referenceId: refund._id,
-      sourceType: "refund_invoice",
+      sourceType: {
+        $in: ["refund_invoice", "opening_refund_invoice"],
+      },
       createdBy: userId,
     });
 
     // ✅ Delete old inventory transactions
-    await deleteTransactionsByReference({
-      referenceId: refund._id,
-      invoiceModel: "RefundInvoice",
-      userId,
-    });
+    if (!refund.isOpening) {
+      await deleteTransactionsByReference({
+        referenceId: refund._id,
+        invoiceModel: "RefundInvoice",
+        userId,
+      });
+    }
 
     // ✅ Date handling
     let refundDateTime = new Date(`${invoiceDate}T${invoiceTime}`);
@@ -471,47 +539,82 @@ exports.updateRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ JOURNAL LINES (FINAL & CORRECT)
-    const lines = [
-      // 🔴 Customer refund (ledger)
-      {
-        account: customerAccountId,
-        type: "credit",
-        amount: totalAmount,
-      },
+    // ✅ Calculate refund cost (IMPORTANT FIX)
+    let totalRefundCost = 0;
 
-      // 🟢 Sales return
-      {
-        account: salesReturnAccount._id,
-        type: "debit",
-        amount: totalAmount,
-      },
+    if (!isOpening || isOpening === "false") {
+      for (const item of items) {
+        const product = await Product.findById(item.productId);
 
-      // 🟢 Inventory back
-      {
-        account: inventoryAccount._id,
-        type: "debit",
-        amount: totalAmount,
-      },
+        if (product) {
+          const cost = Number(product.unitCost || 0);
 
-      // 🔴 COGS reverse
-      {
-        account: cogsAccount._id,
-        type: "credit",
-        amount: totalAmount,
-      },
-    ];
+          totalRefundCost += cost * Number(item.quantity || 0);
+        }
+      }
+    }
+
+    // ✅ JOURNAL LINES
+    const lines = isOpening
+      ? [
+          // ✅ Opening Refund Entry
+          {
+            account: (
+              await Account.findOne({
+                code: "OPENING_BALANCE",
+                userId,
+              })
+            )._id,
+            type: "debit",
+            amount: totalAmount,
+          },
+
+          {
+            account: customerAccountId,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ]
+      : [
+          // 🔴 Customer refund
+          {
+            account: customerAccountId,
+            type: "credit",
+            amount: totalAmount,
+          },
+
+          // 🟢 Sales return
+          {
+            account: salesReturnAccount._id,
+            type: "debit",
+            amount: totalAmount,
+          },
+
+          // 🟢 Inventory back (COST BASED)
+          {
+            account: inventoryAccount._id,
+            type: "debit",
+            amount: totalRefundCost,
+          },
+
+          // 🔴 COGS reverse (COST BASED)
+          {
+            account: cogsAccount._id,
+            type: "credit",
+            amount: totalRefundCost,
+          },
+        ];
 
     // ✅ New journal entry
     const journal = new JournalEntry({
       date: refundDateTime,
       time: invoiceTime || "",
       description: notes || "",
-      sourceType: "refund_invoice",
+      sourceType: isOpening ? "opening_refund_invoice" : "refund_invoice",
       referenceId: refund._id,
       invoiceId: refund._id,
       billNo: refund.billNo,
-      paymentType,
+      paymentType: isOpening ? "credit" : paymentType,
       createdBy: userId,
       customerId: customer._id,
       attachmentUrl: refund.attachmentUrl || "",
@@ -520,8 +623,7 @@ exports.updateRefundInvoice = async (req, res) => {
     });
 
     await journal.save();
-
-    if (paymentType && accountId) {
+    if ((!isOpening || isOpening === "false") && paymentType && accountId) {
       await createPaymentEntry({
         userId,
         referenceId: refund._id,
@@ -538,16 +640,18 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ New inventory transactions
-    for (const item of items) {
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "IN",
-        quantity: item.quantity,
-        note: `Updated Refund Invoice #${refund.billNo}`,
-        invoiceId: refund._id,
-        invoiceModel: "RefundInvoice",
-        userId,
-      });
+    if (!isOpening || isOpening === "false") {
+      for (const item of items) {
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "IN",
+          quantity: item.quantity,
+          note: `Updated Refund Invoice #${refund.billNo}`,
+          invoiceId: refund._id,
+          invoiceModel: "RefundInvoice",
+          userId,
+        });
+      }
     }
 
     res.json({
@@ -567,7 +671,6 @@ exports.updateRefundInvoice = async (req, res) => {
 exports.getAllRefunds = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-
     const refunds = await RefundInvoice.find({ createdBy: userId })
       .sort({ createdAt: -1 })
       .lean();
@@ -577,7 +680,9 @@ exports.getAllRefunds = async (req, res) => {
     for (const r of refunds) {
       const journal = await JournalEntry.findOne({
         referenceId: r._id,
-        sourceType: "refund_invoice",
+        sourceType: {
+          $in: ["refund_invoice", "opening_refund_invoice"],
+        },
       }).populate("lines.account", "name");
 
       const paymentLine = journal?.lines?.find(
@@ -617,16 +722,20 @@ exports.deleteRefundInvoice = async (req, res) => {
     }
 
     // 🗑️ Step 2: Delete InventoryTransaction
-    await deleteTransactionsByReference({
-      referenceId: id,
-      invoiceModel: "RefundInvoice",
-      userId,
-    });
+    if (!refundInvoice.isOpening) {
+      await deleteTransactionsByReference({
+        referenceId: id,
+        invoiceModel: "RefundInvoice",
+        userId,
+      });
+    }
 
     // 🧾 Step 3: Delete journal entry
-    await JournalEntry.deleteOne({
+    await JournalEntry.deleteMany({
       referenceId: id,
-      sourceType: "refund_invoice",
+      sourceType: {
+        $in: ["refund_invoice", "opening_refund_invoice"],
+      },
       createdBy: userId,
     });
 

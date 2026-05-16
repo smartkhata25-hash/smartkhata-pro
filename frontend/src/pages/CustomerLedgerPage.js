@@ -111,25 +111,11 @@ export default function CustomerLedgerPage() {
 
         let openingBalance = data.openingBalance || 0;
 
-        if (start && Array.isArray(data.ledger) && data.ledger.length > 0) {
-          const firstRow = data.ledger[0];
-          openingBalance = (firstRow.balance || 0) - (firstRow.debit || 0) + (firstRow.credit || 0);
-        }
-
-        const openingRow = {
-          _id: 'opening-row',
-          isOpening: true,
-          date: s,
-          billNo: '-',
-          sourceType: 'opening',
-          description: t('ledger.openingBalance'),
-          debit: 0,
-          credit: Math.abs(openingBalance),
-          balance: openingBalance,
-        };
+        setOpening(data.openingBalance || 0);
 
         const ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
-        setLedger([openingRow, ...ledgerRows]);
+
+        setLedger(ledgerRows);
         setOpening(openingBalance);
       } catch (err) {
         console.error('LEDGER LOAD ERROR:', err);
@@ -228,7 +214,7 @@ export default function CustomerLedgerPage() {
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {totalDebit.toFixed(2)}
+              Rs. {totalCredit.toFixed(2)}
             </div>
           </div>
 
@@ -252,7 +238,7 @@ export default function CustomerLedgerPage() {
               {t('ledger.totalCredit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {totalCredit.toFixed(2)}
+              Rs. {totalDebit.toFixed(2)}
             </div>
           </div>
 
@@ -372,6 +358,7 @@ export default function CustomerLedgerPage() {
                       <div
                         key={c._id}
                         onClick={() => {
+                          console.log('🔥 CUSTOMER SELECT =>', c);
                           setCustomerName(c.name);
                           setCid(c._id);
                           setShowSuggestions(false);
@@ -616,13 +603,37 @@ export default function CustomerLedgerPage() {
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
 
-              if ((type === 'sale_invoice' || type === 'invoice') && entry.invoiceId) {
+              alert(
+                `TYPE: ${type}
+REFERENCE: ${entry.referenceId}
+INVOICE: ${entry.invoiceId}`
+              );
+
+              // ✅ Sale Invoice + Opening Sale Invoice
+              if (
+                ['sale_invoice', 'invoice', 'opening_sale_invoice'].includes(type) &&
+                entry.invoiceId
+              ) {
                 navigate(`/sales?invoiceId=${entry.invoiceId}`);
-              } else if (type === 'receive_payment' && entry.referenceId) {
-                navigate(`/receive-payments/edit/${entry.referenceId}`);
-              } else if (type === 'refund_invoice' && entry.referenceId) {
-                navigate(`/refunds/edit/${entry.referenceId}`);
-              } else {
+              }
+
+              // ✅ Refund Invoice + Opening Refund Invoice
+              else if (
+                ['refund_invoice', 'opening_refund_invoice'].includes(type) &&
+                entry.invoiceId
+              ) {
+                navigate(`/refunds/edit/${entry.invoiceId}`);
+              }
+
+              // ✅ Receive Payment
+              else if (type === 'receive_payment') {
+                alert(`referenceId: ${entry.referenceId}\n_id: ${entry._id}`);
+
+                navigate(`/receive-payments/edit/${entry.referenceId || entry._id}`);
+              }
+
+              // ❌ Unknown
+              else {
                 alert(t('alerts.entryNotEditable'));
               }
             }}

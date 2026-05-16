@@ -13,6 +13,8 @@ const createPaymentEntry = async ({
   paymentType,
   description = "",
 }) => {
+  amount = Number(amount);
+
   if (!accountId || !counterPartyAccountId || !amount) {
     throw new Error("Missing required payment fields");
   }
@@ -105,12 +107,31 @@ const createPaymentEntry = async ({
     billNo,
     createdBy: userId,
     description,
-    customerId: counterPartyAccountId,
+
+    customerId:
+      sourceType === "receive_payment" || sourceType === "refund_payment"
+        ? counterPartyAccountId
+        : null,
+
+    supplierId:
+      sourceType === "pay_bill" ||
+      sourceType === "purchase_payment" ||
+      sourceType === "purchase_return_payment"
+        ? counterPartyAccountId
+        : null,
 
     lines,
   });
 
   await journal.save();
+
+  const uniqueAccounts = [
+    ...new Set(lines.map((line) => line.account.toString())),
+  ];
+
+  for (const accId of uniqueAccounts) {
+    await recalculateAccountBalance(accId);
+  }
 
   return journal;
 };

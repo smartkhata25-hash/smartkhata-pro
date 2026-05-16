@@ -8,18 +8,24 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
     phone: '',
     address: '',
     type: 'regular',
-    openingBalance: 0,
+    openingBalance: '',
+    openingType: 'receivable',
   });
 
   useEffect(() => {
     if (initialData) {
+      const opening = Number(initialData.openingBalance) || 0;
+
       setFormData({
         name: initialData.name || '',
         email: initialData.email || '',
         phone: initialData.phone || '',
         address: initialData.address || '',
         type: initialData.type || 'regular',
-        openingBalance: Number(initialData.openingBalance) || 0,
+
+        openingBalance: Math.abs(opening),
+
+        openingType: opening < 0 ? 'payable' : 'receivable',
       });
     }
   }, [initialData]);
@@ -43,9 +49,10 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'openingBalance' ? parseFloat(value) || 0 : value,
+      [name]: name === 'openingBalance' ? Math.abs(parseFloat(value) || 0) : value,
     }));
   };
 
@@ -57,7 +64,15 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
       return;
     }
 
-    onSubmit(formData);
+    const finalOpening =
+      formData.openingType === 'payable'
+        ? -Math.abs(formData.openingBalance || 0)
+        : Math.abs(formData.openingBalance || 0);
+
+    onSubmit({
+      ...formData,
+      openingBalance: finalOpening,
+    });
   };
 
   useEffect(() => {
@@ -90,15 +105,36 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
             <option value="blocked">{t('customer.blocked')}</option>
           </select>
 
-          <input
-            type="number"
-            name="openingBalance"
-            placeholder={t('customer.openingBalance')}
-            value={formData.openingBalance}
-            onChange={handleChange}
-            style={input}
-          />
+          {!initialData?._id && (
+            <div className="flex gap-2">
+              <select
+                name="openingType"
+                value={formData.openingType}
+                onChange={handleChange}
+                style={{
+                  ...input,
+                  width: '40%',
+                }}
+              >
+                <option value="receivable">Receivable</option>
+                <option value="payable">Advance / Payable</option>
+              </select>
 
+              <input
+                type="number"
+                min="0"
+                name="openingBalance"
+                className="no-spinner"
+                placeholder={t('customer.openingBalance')}
+                value={formData.openingBalance}
+                onChange={handleChange}
+                style={{
+                  ...input,
+                  width: '60%',
+                }}
+              />
+            </div>
+          )}
           <input
             type="email"
             name="email"
@@ -136,7 +172,8 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
                   phone: '',
                   address: '',
                   type: 'regular',
-                  openingBalance: 0,
+                  openingBalance: '',
+                  openingType: 'receivable',
                 })
               }
               style={{

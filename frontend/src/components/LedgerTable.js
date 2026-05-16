@@ -69,7 +69,7 @@ const LedgerTable = ({
 
   /* 🔍 Filter Ledger */
   const filteredData = ledgerData
-    .filter((e) => !e.isOpening && e.sourceType !== 'opening_balance' && e.sourceType !== 'opening')
+    .filter((e) => e.sourceType !== 'opening_balance')
     .filter((e) => {
       const s = search.toLowerCase().trim();
       if (!s) return true;
@@ -130,19 +130,6 @@ const LedgerTable = ({
     if (t === 'refund_invoice') return '#fef2f2';
     if (e.runningBalance < 0) return '#f0fdf4';
     return 'transparent';
-  };
-
-  /* 🟦 Opening Row */
-  const openingRow = {
-    _id: 'opening-balance',
-    isOpening: true,
-    date: ledgerData[0]?.date || null,
-    description: t('ledger.openingBalance'),
-    sourceType: 'opening_balance',
-    debit: openingBalance > 0 ? openingBalance : 0,
-    credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
-    balance: openingBalance,
-    runningBalance: openingBalance,
   };
 
   useEffect(() => {
@@ -231,7 +218,7 @@ const LedgerTable = ({
         >
           <table className="table w-full md:min-w-[900px] mobile-ledger">
             <tbody>
-              {[openingRow, ...filteredData].map((e, index) => (
+              {filteredData.map((e, index) => (
                 <tr
                   key={`${e._id}-${index}`}
                   className="ledger-row text-xs md:text-sm"
@@ -257,7 +244,9 @@ const LedgerTable = ({
                     if (col === 'billNo') return <td key={col}>{e.billNo || '-'}</td>;
                     if (col === 'source')
                       return (
-                        <td key={col}>{e.isOpening ? t('ledger.openingBalance') : e.sourceType}</td>
+                        <td key={col}>
+                          {e.isOpening ? t('ledger.openingBalance') : e.sourceLabel || e.sourceType}
+                        </td>
                       );
                     if (col === 'via')
                       return (
@@ -298,7 +287,14 @@ const LedgerTable = ({
                     if (col === 'actions')
                       return (
                         <td key={col} className="no-print">
-                          <button className="btn btn-primary" onClick={() => onEdit && onEdit(e)}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => {
+                              if (onEdit) {
+                                onEdit(e);
+                              }
+                            }}
+                          >
                             ✏️ {t('common.edit')}
                           </button>{' '}
                           {onDelete && (

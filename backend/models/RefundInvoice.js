@@ -4,14 +4,24 @@ const RefundItemSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Product",
-    required: true,
+    required: false,
   },
+
   quantity: {
     type: Number,
-    required: true,
+    required: false,
+    default: 0,
   },
-  price: Number,
-  total: Number,
+
+  price: {
+    type: Number,
+    default: 0,
+  },
+
+  total: {
+    type: Number,
+    default: 0,
+  },
 });
 
 const RefundInvoiceSchema = new mongoose.Schema(
@@ -19,7 +29,7 @@ const RefundInvoiceSchema = new mongoose.Schema(
     billNo: {
       type: String,
       required: true,
-      unique: true,
+      trim: true,
     },
     invoiceDate: {
       type: Date,
@@ -71,10 +81,18 @@ const RefundInvoiceSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
+    // ✅ Opening balance refund
+    isOpening: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
   },
 );
+
+RefundInvoiceSchema.index({ createdBy: 1, billNo: 1 }, { unique: true });
 
 module.exports = mongoose.model("RefundInvoice", RefundInvoiceSchema);

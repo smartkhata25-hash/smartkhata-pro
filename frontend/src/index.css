@@ -723,3 +723,17 @@ thead {
     padding: 4px 6px;
   }
 }
+
+/* 🔒 Remove number input arrows/spinners */
+
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner {
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

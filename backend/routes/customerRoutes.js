@@ -7,7 +7,7 @@ const {
   updateCustomer,
   deleteCustomer,
   confirmMergeCustomers,
-  getCustomerLedger,
+
   getCustomerDetailedLedger,
 } = require("../controllers/customerController");
 
@@ -27,9 +27,6 @@ router.delete("/:id", protect, deleteCustomer);
 
 // ✅ CONFIRM MERGE
 router.post("/merge/confirm", protect, confirmMergeCustomers);
-
-// 📒 Customer Ledger
-router.get("/:id/ledger", protect, getCustomerLedger);
 
 // 📘 Customer Detailed Ledger (Invoice + Payment + Refund)
 router.get("/:id/detailed-ledger", protect, getCustomerDetailedLedger);

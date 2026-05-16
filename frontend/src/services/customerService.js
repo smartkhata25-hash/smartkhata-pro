@@ -40,15 +40,6 @@ export const deleteCustomer = async (id, token) => {
   return response.data;
 };
 
-// ✅ Fetch Customer Ledger
-export const fetchCustomerLedger = async (customerId, token) => {
-  const response = await axios.get(
-    `${BASE_URL}/api/customers/${customerId}/ledger`,
-    getAuthHeaders(token)
-  );
-
-  return response.data;
-};
 // ✅ Search Customer by Name (for Refund Invoice)
 export const fetchCustomerByName = async (name, token = null) => {
   const response = await axios.get(

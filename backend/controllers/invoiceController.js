@@ -18,11 +18,6 @@ const {
 
 // ✅ Create Invoice - UPDATED
 exports.createInvoice = async (req, res) => {
-  console.log("🚨 CREATE INVOICE HIT");
-
-  console.log("customerName:", req.body.customerName);
-
-  console.log("items raw:", req.body.items);
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
@@ -38,6 +33,7 @@ exports.createInvoice = async (req, res) => {
       notes,
       paymentType,
       accountId,
+      isOpening,
     } = req.body;
 
     const parsedInvoiceDate = new Date(invoiceDate);
@@ -52,6 +48,16 @@ exports.createInvoice = async (req, res) => {
       typeof req.body.items === "string"
         ? JSON.parse(req.body.items)
         : req.body.items;
+
+    // ✅ Normal invoice needs items
+    if (
+      (!isOpening || isOpening === "false") &&
+      (!items || items.length === 0)
+    ) {
+      return res.status(400).json({
+        message: "Invoice items are required",
+      });
+    }
 
     // 🔥 ATOMIC BILL NUMBER GENERATION
     let counter = await Counter.findOne({
@@ -91,6 +97,7 @@ exports.createInvoice = async (req, res) => {
       notes,
       paymentType,
       accountId,
+      isOpening: isOpening || false,
       createdBy: userId,
     });
 
@@ -98,8 +105,7 @@ exports.createInvoice = async (req, res) => {
       name: customerName,
       createdBy: userId,
     });
-
-    console.log("🟡 Customer FOUND:", customer?._id, customer?.name);
+    const customerAccount = await Account.findById(customer?.account);
 
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
@@ -119,21 +125,22 @@ exports.createInvoice = async (req, res) => {
       }
     }
     invoice.customerId = customer._id;
-    console.log("🟢 Saving customerId in invoice:", customer._id);
 
     const saved = await invoice.save();
-    console.log("✅ SAVED invoice customerId:", saved.customerId);
-    // ✅ Stock Updates...
-    for (let item of items) {
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "OUT",
-        quantity: item.quantity,
-        note: `Sale Invoice #${billNo}`,
-        invoiceId: saved._id,
-        invoiceModel: "Invoice",
-        userId: userId,
-      });
+
+    // ✅ Stock Updates (skip for opening invoice)
+    if (!isOpening || isOpening === "false") {
+      for (let item of items) {
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "OUT",
+          quantity: item.quantity,
+          note: `Sale Invoice #${billNo}`,
+          invoiceId: saved._id,
+          invoiceModel: "Invoice",
+          userId: userId,
+        });
+      }
     }
 
     const allIncomeAccounts = await Account.find({
@@ -178,13 +185,16 @@ exports.createInvoice = async (req, res) => {
       }
     }
 
-    // 🧮 COGS calculate (mal ki lagat)
+    // 🧮 COGS calculate (skip for opening invoice)
     let totalCogs = 0;
 
-    for (let item of items) {
-      const product = await Product.findById(item.productId);
-      if (product) {
-        totalCogs += product.unitCost * item.quantity;
+    if (!isOpening || isOpening === "false") {
+      for (let item of items) {
+        const product = await Product.findById(item.productId);
+
+        if (product) {
+          totalCogs += product.unitCost * item.quantity;
+        }
       }
     }
 
@@ -230,7 +240,7 @@ exports.createInvoice = async (req, res) => {
       date: invoiceDateTime,
       time: invoiceTime || "",
       description: notes || "",
-      sourceType: "sale_invoice",
+      sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
       referenceId: saved._id,
       invoiceId: saved._id,
       billNo,
@@ -239,40 +249,63 @@ exports.createInvoice = async (req, res) => {
       customerId: customer._id,
       attachmentUrl: req.file?.filename || "",
       attachmentType: req.file?.mimetype?.split("/")[0] || "",
-      lines: [
-        // 👤 Customer debit
-        {
-          account: new mongoose.Types.ObjectId(customer.account),
-          type: "debit",
-          amount: totalAmount,
-        },
+      lines: isOpening
+        ? [
+            // ✅ Opening Balance Entry
+            {
+              account: new mongoose.Types.ObjectId(customer.account),
+              type: "debit",
+              amount: totalAmount,
+            },
 
-        // 💰 Sales credit
-        {
-          account: new mongoose.Types.ObjectId(incomeAccount._id),
-          type: "credit",
-          amount: totalAmount,
-        },
+            {
+              account: new mongoose.Types.ObjectId(
+                (
+                  await Account.findOne({
+                    code: "OPENING_BALANCE",
+                    userId,
+                  })
+                )._id,
+              ),
+              type: "credit",
+              amount: totalAmount,
+            },
+          ]
+        : [
+            // 👤 Customer debit
+            {
+              account: new mongoose.Types.ObjectId(customer.account),
+              type: "debit",
+              amount: totalAmount,
+            },
 
-        // 📉 COGS (expense)
-        {
-          account: new mongoose.Types.ObjectId(finalCogsAccount._id),
-          type: "debit",
-          amount: totalCogs,
-        },
+            // 💰 Sales credit
+            {
+              account: new mongoose.Types.ObjectId(incomeAccount._id),
+              type: "credit",
+              amount: totalAmount,
+            },
 
-        // 📦 Inventory kam
-        {
-          account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
-          type: "credit",
-          amount: totalCogs,
-        },
-      ],
+            // 📉 COGS (expense)
+            {
+              account: new mongoose.Types.ObjectId(finalCogsAccount._id),
+              type: "debit",
+              amount: totalCogs,
+            },
+
+            // 📦 Inventory kam
+            {
+              account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
+              type: "credit",
+              amount: totalCogs,
+            },
+          ],
     });
 
     try {
       await journal.save();
-      if (paidAmount > 0) {
+
+      if ((!isOpening || isOpening === "false") && paidAmount > 0) {
         await createPaymentEntry({
           userId: userId,
           referenceId: saved._id,
@@ -297,8 +330,11 @@ exports.createInvoice = async (req, res) => {
     if (accountId && paidAmount > 0) {
       await recalculateAccountBalance(accountId);
     }
-    await recalculateAccountBalance(finalInventoryAccount._id);
-    await recalculateAccountBalance(finalCogsAccount._id);
+
+    if (!isOpening || isOpening === "false") {
+      await recalculateAccountBalance(finalInventoryAccount._id);
+      await recalculateAccountBalance(finalCogsAccount._id);
+    }
 
     res.status(201).json({
       invoice: saved,
@@ -321,9 +357,20 @@ exports.getInvoices = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
+    // ✅ sirf active customers
+    const activeCustomers = await Customer.find({
+      createdBy: userId,
+      isActive: true,
+    }).select("_id");
+
+    const activeCustomerIds = activeCustomers.map((c) => c._id);
+
     const invoices = await Invoice.find({
       createdBy: userId,
       isDeleted: { $ne: true },
+
+      // ✅ hidden customer invoices hide
+      customerId: { $in: activeCustomerIds },
     })
       .populate("items.productId", "name unit")
       .sort({ createdAt: -1 })
@@ -389,11 +436,13 @@ exports.deleteInvoice = async (req, res) => {
   await invoice.save();
 
   // ❗ Delete related inventory transactions
-  await deleteTransactionsByReference({
-    referenceId: invoice._id,
-    invoiceModel: "Invoice",
-    userId,
-  });
+  if (!invoice.isOpening) {
+    await deleteTransactionsByReference({
+      referenceId: invoice._id,
+      invoiceModel: "Invoice",
+      userId,
+    });
+  }
 
   // 🟡 Soft Delete Related Journal
   await JournalEntry.updateMany(
@@ -438,9 +487,23 @@ exports.updateInvoice = async (req, res) => {
       notes,
       paymentType,
       accountId,
+      isOpening,
     } = req.body;
 
-    const items = JSON.parse(req.body.items);
+    const items =
+      typeof req.body.items === "string"
+        ? JSON.parse(req.body.items)
+        : req.body.items;
+
+    // ✅ Normal invoice needs items
+    if (
+      (!isOpening || isOpening === "false") &&
+      (!items || items.length === 0)
+    ) {
+      return res.status(400).json({
+        message: "Invoice items are required",
+      });
+    }
 
     if (req.file && invoice.attachmentUrl) {
       const oldPath = path.join(
@@ -451,12 +514,13 @@ exports.updateInvoice = async (req, res) => {
       if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    await deleteTransactionsByReference({
-      referenceId: invoice._id,
-      invoiceModel: "Invoice",
-      userId,
-    });
-
+    if (!invoice.isOpening) {
+      await deleteTransactionsByReference({
+        referenceId: invoice._id,
+        invoiceModel: "Invoice",
+        userId,
+      });
+    }
     // ✅ Update invoice fields
 
     invoice.customerName = customerName;
@@ -478,6 +542,8 @@ exports.updateInvoice = async (req, res) => {
     invoice.notes = notes;
     invoice.paymentType = paymentType;
     invoice.accountId = accountId;
+    invoice.isOpening = isOpening || false;
+
     const finalPaid = invoice.paidAmount;
 
     invoice.status =
@@ -488,17 +554,37 @@ exports.updateInvoice = async (req, res) => {
       invoice.attachmentType = req.file.mimetype?.split("/")[0] || "";
     }
 
-    for (let item of items) {
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "OUT",
-        quantity: item.quantity,
-        note: `Updated Sale Invoice #${invoice.billNo}`,
-        invoiceId: invoice._id,
-        invoiceModel: "Invoice",
-        userId: userId,
-      });
+    // ✅ Skip stock for opening invoice
+    if (!isOpening || isOpening === "false") {
+      for (let item of items) {
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "OUT",
+          quantity: item.quantity,
+          note: `Updated Sale Invoice #${invoice.billNo}`,
+          invoiceId: invoice._id,
+          invoiceModel: "Invoice",
+          userId: userId,
+        });
+      }
     }
+
+    console.log("========== BEFORE SOFT DELETE ==========");
+
+    const oldEntries = await JournalEntry.find({
+      referenceId: invoice._id,
+      isDeleted: false,
+    });
+
+    console.log(
+      oldEntries.map((e) => ({
+        id: e._id,
+        sourceType: e.sourceType,
+        isDeleted: e.isDeleted,
+        debitLines: e.lines.filter((l) => l.type === "debit"),
+        creditLines: e.lines.filter((l) => l.type === "credit"),
+      })),
+    );
 
     // ✅ Remove old journal entries
     await JournalEntry.updateMany(
@@ -513,13 +599,16 @@ exports.updateInvoice = async (req, res) => {
       },
     );
 
-    // 🧮 COGS calculate (mal ki lagat)
+    // 🧮 COGS calculate (skip for opening invoice)
     let totalCogs = 0;
 
-    for (let item of items) {
-      const product = await Product.findById(item.productId);
-      if (product) {
-        totalCogs += product.unitCost * item.quantity;
+    if (!isOpening || isOpening === "false") {
+      for (let item of items) {
+        const product = await Product.findById(item.productId);
+
+        if (product) {
+          totalCogs += product.unitCost * item.quantity;
+        }
       }
     }
 
@@ -600,7 +689,7 @@ exports.updateInvoice = async (req, res) => {
         date: journalDateTime,
         time: invoiceTime || "",
         description: "Updated Sale Invoice",
-        sourceType: "sale_invoice",
+        sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
         referenceId: invoice._id,
         invoiceId: invoice._id,
         billNo: invoice.billNo,
@@ -608,42 +697,80 @@ exports.updateInvoice = async (req, res) => {
 
         customerId: customer._id,
 
-        lines: [
-          // 👤 Customer debit (sale total)
-          {
-            account: new mongoose.Types.ObjectId(customer.account),
-            type: "debit",
-            amount: totalAmount,
-          },
+        lines: isOpening
+          ? [
+              // ✅ Opening Balance Entry
+              {
+                account: new mongoose.Types.ObjectId(customer.account),
+                type: "debit",
+                amount: totalAmount,
+              },
 
-          // 💰 Sales credit
-          {
-            account: new mongoose.Types.ObjectId(incomeAccount._id),
-            type: "credit",
-            amount: totalAmount,
-          },
+              {
+                account: new mongoose.Types.ObjectId(
+                  (
+                    await Account.findOne({
+                      code: "OPENING_BALANCE",
+                      userId,
+                    })
+                  )._id,
+                ),
+                type: "credit",
+                amount: totalAmount,
+              },
+            ]
+          : [
+              // 👤 Customer debit (sale total)
+              {
+                account: new mongoose.Types.ObjectId(customer.account),
+                type: "debit",
+                amount: totalAmount,
+              },
 
-          // 📉 COGS (expense)
-          {
-            account: new mongoose.Types.ObjectId(finalCogsAccount._id),
-            type: "debit",
-            amount: totalCogs,
-          },
+              // 💰 Sales credit
+              {
+                account: new mongoose.Types.ObjectId(incomeAccount._id),
+                type: "credit",
+                amount: totalAmount,
+              },
 
-          // 📦 Inventory kam
-          {
-            account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
-            type: "credit",
-            amount: totalCogs,
-          },
-        ],
+              // 📉 COGS (expense)
+              {
+                account: new mongoose.Types.ObjectId(finalCogsAccount._id),
+                type: "debit",
+                amount: totalCogs,
+              },
+
+              // 📦 Inventory kam
+              {
+                account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
+                type: "credit",
+                amount: totalCogs,
+              },
+            ],
 
         attachmentUrl: invoice.attachmentUrl || "",
         attachmentType: invoice.attachmentType || "",
       });
 
       await journal.save();
-      if (paidAmount > 0) {
+
+      console.log("========== AFTER NEW JOURNAL SAVE ==========");
+
+      const allEntries = await JournalEntry.find({
+        referenceId: invoice._id,
+      });
+
+      console.log(
+        allEntries.map((e) => ({
+          id: e._id,
+          sourceType: e.sourceType,
+          isDeleted: e.isDeleted,
+          debitLines: e.lines.filter((l) => l.type === "debit"),
+          creditLines: e.lines.filter((l) => l.type === "credit"),
+        })),
+      );
+      if ((!isOpening || isOpening === "false") && paidAmount > 0) {
         await createPaymentEntry({
           userId: userId,
           referenceId: invoice._id,
@@ -660,8 +787,10 @@ exports.updateInvoice = async (req, res) => {
 
       invoice.journalEntryId = journal._id;
 
-      await recalculateAccountBalance(finalInventoryAccount._id);
-      await recalculateAccountBalance(finalCogsAccount._id);
+      if (!isOpening || isOpening === "false") {
+        await recalculateAccountBalance(finalInventoryAccount._id);
+        await recalculateAccountBalance(finalCogsAccount._id);
+      }
 
       if (accountId) {
         await recalculateAccountBalance(accountId);

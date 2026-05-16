@@ -63,7 +63,10 @@ exports.getAccounts = async (req, res) => {
       filter,
     } = req.query;
 
-    const query = { userId };
+    const query = {
+      userId,
+      isActive: { $ne: false },
+    };
 
     if (filter === "payment") {
       query.type = "Asset";

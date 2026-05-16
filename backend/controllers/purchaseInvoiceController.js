@@ -418,9 +418,20 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
 const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
 
+  // ✅ ONLY ACTIVE SUPPLIERS
+  const activeSuppliers = await Supplier.find({
+    userId,
+    isActive: true,
+  }).select("_id");
+
+  const activeSupplierIds = activeSuppliers.map((s) => s._id);
+
   const invoices = await PurchaseInvoice.find({
     userId,
     isDeleted: false,
+
+    // ✅ hidden supplier invoices hide
+    supplier: { $in: activeSupplierIds },
   })
     .populate("supplier", "name")
     .sort({ createdAt: -1 })
@@ -428,6 +439,7 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
 
   const formatted = invoices.map((inv) => {
     let status = "Unpaid";
+
     if (inv.paidAmount >= inv.grandTotal) status = "Paid";
     else if (inv.paidAmount > 0) status = "Partial";
 
@@ -487,6 +499,10 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
   const invoices = await PurchaseInvoice.find({
     userId,
     isDeleted: false,
+
+    // ✅ hidden supplier invoices hide
+    supplier: { $in: activeSupplierIds },
+
     $and: conditions,
   })
     .populate("items.productId")

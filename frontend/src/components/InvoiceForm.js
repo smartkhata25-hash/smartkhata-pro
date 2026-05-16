@@ -71,6 +71,7 @@ const InvoiceForm = ({
   const [previewHtml, setPreviewHtml] = useState('');
   const [showHistoryPopup, setShowHistoryPopup] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
 
   const [historyAutoMode, setHistoryAutoMode] = useState(
     localStorage.getItem('mobileHistoryMode') === 'on'
@@ -208,6 +209,7 @@ const InvoiceForm = ({
   const [accounts, setAccounts] = useState([]);
   const [, setCustomerLedger] = useState([]);
   const [customerBalance, setCustomerBalance] = useState(0);
+  const [openingBalanceAmount, setOpeningBalanceAmount] = useState(0);
 
   useEffect(() => {
     if (paidAmount > 0 && paymentType === 'credit') {
@@ -316,18 +318,21 @@ const InvoiceForm = ({
     setPaidAmount(editingInvoiceFromAPI.paidAmount || 0);
     setPaymentType(editingInvoiceFromAPI.paymentType || 'credit');
     setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
+    if (editingInvoiceFromAPI.isOpening) {
+      setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
+    }
   }, [editingInvoiceFromAPI]);
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
 
     const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
       const matchedProduct = products.find((p) => p._id === item.productId);
-      console.log('MATCHED PRODUCT:', matchedProduct);
+
       return {
         itemNo: i + 1,
-        search: matchedProduct?.name || '',
-        productId: item.productId,
-        name: matchedProduct?.name || '',
+        search: matchedProduct?.name || item.name || '',
+        productId: item.productId || '',
+        name: matchedProduct?.name || item.name || '',
         description: matchedProduct?.description || '',
         cost: matchedProduct?.unitCost || 0,
         quantity: item.quantity,
@@ -404,7 +409,7 @@ const InvoiceForm = ({
         const res = await getLedgerByCustomerAccount(accountId);
 
         const closingBalance =
-          res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].balance || 0 : 0;
+          res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].runningBalance || 0 : 0;
 
         setCustomerBalance(closingBalance);
       } catch (err) {
@@ -483,14 +488,6 @@ const InvoiceForm = ({
 
       const res = await getLedgerByCustomerAccount(accountId);
 
-      console.log('SELECTED CUSTOMER:', selectedCustomer);
-
-      console.log('ACCOUNT ID:', accountId);
-
-      console.log('LEDGER RESPONSE:', res);
-
-      console.log('LAST LEDGER ENTRY:', res.ledger[res.ledger.length - 1]);
-
       setCustomerLedger(res.ledger || []);
 
       const closingBalance =
@@ -524,6 +521,8 @@ const InvoiceForm = ({
       // ✅ customer set
       setCustomerName(data.name);
       setCustomerPhone(data.phone || '');
+
+      onCustomerChange && onCustomerChange(data._id);
 
       // ✅ dropdown hide
       setCustomerSuggestions([]);
@@ -566,7 +565,11 @@ const InvoiceForm = ({
     if (newValue !== null) setter(newValue);
   };
 
-  const totalAmount = items.reduce((sum, i) => sum + i.amount, 0);
+  const isOpeningInvoice = editingInvoiceFromAPI?.isOpening === true;
+
+  const totalAmount = isOpeningInvoice
+    ? Number(openingBalanceAmount || 0)
+    : items.reduce((sum, i) => sum + i.amount, 0);
 
   const generateLivePreview = useCallback(async () => {
     try {
@@ -598,7 +601,9 @@ const InvoiceForm = ({
   }, [printSettings, showPrintSettings, generateLivePreview]);
   const finalDiscount =
     discountPercent > 0 ? (totalAmount * discountPercent) / 100 : discountAmount;
-  const grandTotal = totalAmount - finalDiscount;
+  const grandTotal = isOpeningInvoice
+    ? Number(openingBalanceAmount || 0)
+    : totalAmount - finalDiscount;
 
   const handleFileChange = (e) => {
     setAttachment(e.target.files[0]);
@@ -716,6 +721,10 @@ const InvoiceForm = ({
   const handleSubmit = async (e, mode = 'close') => {
     e.preventDefault();
 
+    if (saveLoading) return;
+
+    setSaveLoading(true);
+
     if (!customerName.trim()) {
       alert(t('alerts.customerRequired'));
       return;
@@ -727,16 +736,16 @@ const InvoiceForm = ({
     }
 
     const mappedItems = items
-      .filter((i) => i.productId && i.quantity > 0 && i.rate > 0)
+      .filter((i) => i.quantity > 0 && i.rate > 0)
       .map((i) => ({
-        productId: i.productId,
+        productId: i.productId || null,
         quantity: i.quantity,
         price: i.rate,
         total: i.quantity * i.rate,
       }));
 
-    if (mappedItems.length === 0) {
-      alert(t('alerts.addProduct'));
+    if (mappedItems.length === 0 && !isOpeningInvoice) {
+      alert('Please add at least one item');
       return;
     }
 
@@ -775,7 +784,8 @@ const InvoiceForm = ({
     formData.append('customerName', customerName);
     formData.append('customerPhone', customerPhone);
     formData.append('by', by);
-    formData.append('totalAmount', grandTotal);
+    const finalOpeningAmount = isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal;
+    formData.append('totalAmount', finalOpeningAmount);
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', finalDiscount);
     formData.append('grandTotal', grandTotal);
@@ -793,6 +803,10 @@ const InvoiceForm = ({
 
     if (attachment) formData.append('attachment', attachment);
     formData.append('items', JSON.stringify(mappedItems));
+
+    if (isOpeningInvoice) {
+      formData.append('isOpening', true);
+    }
 
     try {
       if (editingInvoiceFromAPI) {
@@ -852,6 +866,8 @@ const InvoiceForm = ({
     } catch (err) {
       console.error('Save error:', err);
       alert(t('alerts.invoiceSaveFailed'));
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -1036,19 +1052,39 @@ const InvoiceForm = ({
               />
             </div>
           </div>
+          {isOpeningInvoice && (
+            <div className="mb-2 px-3 py-2 rounded bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm font-semibold">
+              ⚠️ Opening Balance Entry Invoice
+            </div>
+          )}
 
-          <div className="mb-0">
-            <InvoiceTable
-              items={items}
-              setItems={setItems}
-              products={products}
-              handleQtyRateChange={handleQtyRateChange}
-              clearOnFocus={clearOnFocus}
-              onProductChange={onProductChange}
-              historyAutoMode={historyAutoMode}
-              hideCost={hideCost}
-            />
-          </div>
+          {isOpeningInvoice && (
+            <div className="mb-3 p-3 border rounded bg-blue-50">
+              <label className="block text-sm font-semibold mb-2">Opening Balance Amount</label>
+
+              <input
+                type="number"
+                value={openingBalanceAmount}
+                onChange={(e) => setOpeningBalanceAmount(e.target.value)}
+                className="border px-3 py-2 w-64 rounded no-spinner"
+              />
+            </div>
+          )}
+
+          {!isOpeningInvoice && (
+            <div className="mb-0">
+              <InvoiceTable
+                items={items}
+                setItems={setItems}
+                products={products}
+                handleQtyRateChange={handleQtyRateChange}
+                clearOnFocus={clearOnFocus}
+                onProductChange={onProductChange}
+                historyAutoMode={historyAutoMode}
+                hideCost={hideCost}
+              />
+            </div>
+          )}
 
           {/* Totals + Buttons */}
           <div className="bg-gray-100 p-3 md:p-4 rounded mt-4 text-xs md:text-sm">
@@ -1056,114 +1092,116 @@ const InvoiceForm = ({
               {/* 🔹 LEFT SIDE */}
               <div className="col-span-8 flex flex-col gap-2">
                 {/* Discount / Payment / Attachment */}
-                <div className="flex gap-3 items-center flex-wrap">
-                  {/* Discount % */}
-                  <input
-                    type="number"
-                    placeholder={t('discountPercent')}
-                    value={discountPercent === 0 ? '' : discountPercent}
-                    onChange={(e) => {
-                      setDiscountPercent(+e.target.value || 0);
-                      setDiscountAmount(0);
-                    }}
-                    className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
-                  />
-
-                  {/* Discount Amount */}
-                  <input
-                    type="number"
-                    placeholder={t('discountRS')}
-                    value={discountAmount === 0 ? '' : discountAmount}
-                    onChange={(e) => {
-                      setDiscountAmount(+e.target.value || 0);
-                      setDiscountPercent(0);
-                    }}
-                    className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
-                  />
-                  {/* Paid Amount */}
-                  <input
-                    type="number"
-                    placeholder={t('amount')}
-                    value={paidAmount === 0 ? '' : paidAmount}
-                    onChange={(e) => setPaidAmount(+e.target.value || 0)}
-                    className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
-                  />
-
-                  {/* Payment Type */}
-                  <select
-                    className="border px-2 py-1 h-8 text-sm cursor-pointer"
-                    value={paymentType}
-                    onChange={(e) => {
-                      setPaymentType(e.target.value);
-                      setSelectedAccountId('');
-                    }}
-                  >
-                    <option value="cash">{t('payment.cash')}</option>
-
-                    <option value="online">{t('payment.online')}</option>
-                    <option value="cheque">{t('payment.cheque')}</option>
-                  </select>
-
-                  {/* Account dropdown صرف تب */}
-                  {paidAmount > 0 && (
-                    <select
-                      value={selectedAccountId}
-                      onChange={(e) => setSelectedAccountId(e.target.value)}
-                      className="border px-2 py-1 h-8 w-32 cursor-pointer"
-                    >
-                      <option value="">{t('account')}</option>
-
-                      {accounts
-                        .filter((acc) => {
-                          return (
-                            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-                            !acc.name?.toLowerCase().startsWith('customer:')
-                          );
-                        })
-                        .map((acc) => (
-                          <option key={acc._id} value={acc._id}>
-                            {acc.name}
-                          </option>
-                        ))}
-                    </select>
-                  )}
-
-                  {/* Attachment + Preview + Remove */}
-                  <div className="flex items-center gap-2">
+                {!isOpeningInvoice && (
+                  <div className="flex gap-3 items-center flex-wrap">
+                    {/* Discount % */}
                     <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      className="border px-2 py-0 text-sm h-8 w-28 relative z-10"
+                      type="number"
+                      placeholder={t('discountPercent')}
+                      value={discountPercent === 0 ? '' : discountPercent}
+                      onChange={(e) => {
+                        setDiscountPercent(+e.target.value || 0);
+                        setDiscountAmount(0);
+                      }}
+                      className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
                     />
 
-                    {attachment && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowPreview((prev) => !prev)}
-                          className="text-blue-600 text-xs underline"
-                        >
-                          {showPreview ? t('hide') : t('preview')}
-                        </button>
+                    {/* Discount Amount */}
+                    <input
+                      type="number"
+                      placeholder={t('discountRS')}
+                      value={discountAmount === 0 ? '' : discountAmount}
+                      onChange={(e) => {
+                        setDiscountAmount(+e.target.value || 0);
+                        setDiscountPercent(0);
+                      }}
+                      className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
+                    />
+                    {/* Paid Amount */}
+                    <input
+                      type="number"
+                      placeholder={t('amount')}
+                      value={paidAmount === 0 ? '' : paidAmount}
+                      onChange={(e) => setPaidAmount(+e.target.value || 0)}
+                      className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
+                    />
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm(t('alerts.removeAttachment'))) {
-                              setAttachment(null);
-                              setShowPreview(false);
-                              if (fileInputRef.current) fileInputRef.current.value = '';
-                            }
-                          }}
-                          className="text-red-500 text-xs"
-                        >
-                          ✖
-                        </button>
-                      </>
+                    {/* Payment Type */}
+                    <select
+                      className="border px-2 py-1 h-8 text-sm cursor-pointer"
+                      value={paymentType}
+                      onChange={(e) => {
+                        setPaymentType(e.target.value);
+                        setSelectedAccountId('');
+                      }}
+                    >
+                      <option value="cash">{t('payment.cash')}</option>
+
+                      <option value="online">{t('payment.online')}</option>
+                      <option value="cheque">{t('payment.cheque')}</option>
+                    </select>
+
+                    {/* Account dropdown صرف تب */}
+                    {paidAmount > 0 && (
+                      <select
+                        value={selectedAccountId}
+                        onChange={(e) => setSelectedAccountId(e.target.value)}
+                        className="border px-2 py-1 h-8 w-32 cursor-pointer"
+                      >
+                        <option value="">{t('account')}</option>
+
+                        {accounts
+                          .filter((acc) => {
+                            return (
+                              ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
+                              !acc.name?.toLowerCase().startsWith('customer:')
+                            );
+                          })
+                          .map((acc) => (
+                            <option key={acc._id} value={acc._id}>
+                              {acc.name}
+                            </option>
+                          ))}
+                      </select>
                     )}
+
+                    {/* Attachment + Preview + Remove */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        className="border px-2 py-0 text-sm h-8 w-28 relative z-10"
+                      />
+
+                      {attachment && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setShowPreview((prev) => !prev)}
+                            className="text-blue-600 text-xs underline"
+                          >
+                            {showPreview ? t('hide') : t('preview')}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(t('alerts.removeAttachment'))) {
+                                setAttachment(null);
+                                setShowPreview(false);
+                                if (fileInputRef.current) fileInputRef.current.value = '';
+                              }
+                            }}
+                            className="text-red-500 text-xs"
+                          >
+                            ✖
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Attachment Preview */}
                 {attachment && showPreview && (
@@ -1180,17 +1218,27 @@ const InvoiceForm = ({
                 <div className="flex flex-wrap gap-2 md:gap-3 no-print mt-6 md:mt-8">
                   <button
                     type="submit"
-                    className="bg-green-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm"
+                    disabled={saveLoading}
+                    className={`text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm ${
+                      saveLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600'
+                    }`}
                   >
-                    {editingInvoiceFromAPI ? t('updateClose') : t('saveClose')}
+                    {saveLoading
+                      ? '⏳ Saving...'
+                      : editingInvoiceFromAPI
+                        ? t('updateClose')
+                        : t('saveClose')}
                   </button>
 
                   <button
                     type="button"
+                    disabled={saveLoading}
                     onClick={(e) => handleSubmit(e, 'new')}
-                    className="bg-blue-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm"
+                    className={`text-white px-3 py-1.5 md:px-4 md:py-2 rounded text-xs md:text-sm ${
+                      saveLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600'
+                    }`}
                   >
-                    {t('saveNew')}
+                    {saveLoading ? '⏳ Saving...' : t('saveNew')}
                   </button>
 
                   <button
@@ -1249,59 +1297,74 @@ const InvoiceForm = ({
                     {/* 🖨️ PRINT */}
                     <button
                       type="button"
-                      onClick={() => {
-                        if (editingInvoiceFromAPI?._id) {
-                          navigate(`/print/sale/${editingInvoiceFromAPI._id}?autoprint=true`, {
-                            state: {
-                              autoPrint: true,
-                              isPreview: true,
-                              type: 'sale',
-                            },
-                          });
-                        } else {
-                          const previewItems = items
-                            .filter((i) => i.productId && i.quantity > 0)
-                            .map((i) => ({
-                              productId: i.productId,
-                              name: i.name,
-                              description: i.description,
-                              uom: i.uom,
-                              quantity: i.quantity,
-                              price: i.rate,
-                              total: i.amount,
-                            }));
+                      disabled={saveLoading}
+                      onClick={async (e) => {
+                        if (saveLoading) return;
 
-                          navigate(`/print/sale/preview`, {
-                            replace: true,
-                            state: {
-                              autoPrint: true,
-                              isPreview: true,
-                              type: 'sale',
-                              invoiceData: {
-                                lang: localStorage.getItem('lang'),
-                                invoiceDate,
-                                invoiceTime,
-                                billNo,
-                                customerName: customerName || '-',
-                                customerPhone: customerPhone || '',
-                                by,
-                                items: previewItems,
-                                totalAmount,
-                                discountAmount: finalDiscount,
-                                grandTotal,
-                                paidAmount,
-                                paymentType,
-                                customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                        // ✅ پہلے print data save کریں
+                        const previewItems = items
+                          .filter((i) => i.productId && i.quantity > 0)
+                          .map((i) => ({
+                            productId: i.productId,
+                            name: i.name,
+                            description: i.description,
+                            uom: i.uom,
+                            quantity: i.quantity,
+                            price: i.rate,
+                            total: i.amount,
+                          }));
+
+                        const printData = {
+                          lang: localStorage.getItem('lang'),
+                          invoiceDate,
+                          invoiceTime,
+                          billNo,
+                          customerName: customerName || '-',
+                          customerPhone: customerPhone || '',
+                          by,
+                          items: previewItems,
+                          totalAmount,
+                          discountAmount: finalDiscount,
+                          grandTotal,
+                          paidAmount,
+                          paymentType,
+                          customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                        };
+
+                        // ✅ invoice save کریں
+                        await handleSubmit(e, 'new');
+
+                        // ✅ پھر print کھولیں
+                        setTimeout(() => {
+                          if (editingInvoiceFromAPI?._id) {
+                            navigate(`/print/sale/${editingInvoiceFromAPI._id}?autoprint=true`, {
+                              state: {
+                                autoPrint: true,
+                                isPreview: true,
+                                type: 'sale',
                               },
-                            },
-                          });
-                        }
+                            });
+                          } else {
+                            navigate(`/print/sale/preview`, {
+                              replace: true,
+                              state: {
+                                autoPrint: true,
+                                isPreview: true,
+                                type: 'sale',
+                                invoiceData: printData,
+                              },
+                            });
+                          }
+                        }, 500);
                       }}
-                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm shadow-md"
+                      className={`text-white px-4 py-2 rounded text-sm shadow-md ${
+                        saveLoading
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-purple-600 hover:bg-purple-700'
+                      }`}
                     >
-                      🖨️ {t('print')}
+                      {saveLoading ? '⏳ Saving...' : `🖨️ ${t('print')}`}
                     </button>
-
                     {/* 📄 PDF */}
                     <button
                       type="button"
@@ -1909,6 +1972,8 @@ const InvoiceForm = ({
 
             setCustomerName(data.name);
             setCustomerPhone(data.phone || '');
+
+            onCustomerChange && onCustomerChange(data._id);
 
             setShowCustomerForm(false);
             setShowCustomerAddOptions(false);

@@ -6,7 +6,7 @@ const Supplier = require("../models/Supplier");
 /**
  * 🔄 Reusable helper to calculate balance from journal entries
  */
-const calculateBalanceFromJournal = async (accountId, userId, label = "") => {
+const calculateBalanceFromJournal = async (accountId, userId) => {
   if (!accountId) return 0;
 
   const result = await JournalEntry.aggregate([
@@ -51,11 +51,7 @@ const getCustomerBalanceFromJournal = async (customerId, userId) => {
     return 0;
   }
 
-  return calculateBalanceFromJournal(
-    customer.account,
-    userId,
-    `Customer(${customer.name})`,
-  );
+  return calculateBalanceFromJournal(customer.account, userId);
 };
 
 /**

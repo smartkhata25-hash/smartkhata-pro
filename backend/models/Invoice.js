@@ -5,11 +5,26 @@ const invoiceItemSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Product",
-    required: true,
+    required: false,
   },
-  quantity: { type: Number, required: true },
-  price: { type: Number, required: true },
-  total: { type: Number, required: true },
+
+  quantity: {
+    type: Number,
+    required: false,
+    default: 0,
+  },
+
+  price: {
+    type: Number,
+    required: false,
+    default: 0,
+  },
+
+  total: {
+    type: Number,
+    required: false,
+    default: 0,
+  },
 });
 
 // Main Invoice Schema
@@ -122,6 +137,11 @@ const invoiceSchema = new mongoose.Schema(
     },
 
     isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    isOpening: {
       type: Boolean,
       default: false,
     },

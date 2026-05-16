@@ -23,7 +23,7 @@ const InvoiceTable = ({
     productId: '',
     description: '',
     cost: 0,
-    quantity: 1,
+    quantity: '',
     rate: 0,
     amount: 0,
   });
@@ -89,7 +89,11 @@ const InvoiceTable = ({
                       onProductChange && onProductChange(product._id);
                       console.log('📦 Product ID SENT TO PARENT:', product._id);
 
-                      if (index === items.length - 1) {
+                      const hasEmptyRow = updated.some(
+                        (row) => !row.productId && !row.search && !row.quantity && !row.rate
+                      );
+
+                      if (index === items.length - 1 && !hasEmptyRow) {
                         updated.push(blankRow());
                       }
 
@@ -124,7 +128,7 @@ const InvoiceTable = ({
                         value={item.cost || ''}
                         onChange={(e) => handleQtyRateChange(index, 'cost', e.target.value)}
                         onFocus={clearOnFocus}
-                        className="w-full border-0 p-0 text-center h-6"
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
                       />
                     ) : item.cost ? (
                       item.cost.toFixed(2)
@@ -140,7 +144,11 @@ const InvoiceTable = ({
                     ref={(el) => (qtyRefs.current[index] = el)}
                     type="number"
                     value={item.quantity || ''}
-                    onChange={(e) => handleQtyRateChange(index, 'quantity', e.target.value)}
+                    onChange={(e) => {
+                      if (!item.productId && !item.search) return;
+
+                      handleQtyRateChange(index, 'quantity', e.target.value);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -149,7 +157,7 @@ const InvoiceTable = ({
                       }
                     }}
                     onFocus={clearOnFocus}
-                    className="w-full border-0 p-0 text-center h-6"
+                    className="w-full border-0 p-0 text-center h-6 no-spinner"
                   />
                 </td>
 
@@ -159,7 +167,11 @@ const InvoiceTable = ({
                     ref={(el) => (rateRefs.current[index] = el)}
                     type="number"
                     value={item.rate || ''}
-                    onChange={(e) => handleQtyRateChange(index, 'rate', e.target.value)}
+                    onChange={(e) => {
+                      if (!item.productId && !item.search) return;
+
+                      handleQtyRateChange(index, 'rate', e.target.value);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -167,7 +179,7 @@ const InvoiceTable = ({
                       }
                     }}
                     onFocus={clearOnFocus}
-                    className="w-full border-0 p-0 text-center"
+                    className="w-full border-0 p-0 text-center no-spinner"
                   />
                 </td>
 

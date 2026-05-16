@@ -11,7 +11,8 @@ const createReversalEntry = async (originalEntry, userId) => {
 
   const reversalEntry = new JournalEntry({
     date: new Date(),
-    description: `Reversal of entry ${originalEntry._id}`,
+    time: new Date().toTimeString().slice(0, 8),
+    description: `Reversal of ${originalEntry.sourceType || "journal"} entry`,
     lines: reversedLines,
     sourceType: "reversal",
     createdBy: userId,

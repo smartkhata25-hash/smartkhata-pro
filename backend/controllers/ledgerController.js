@@ -12,8 +12,12 @@ const getCustomerLedger = async (req, res) => {
 
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
-    // ✅ Step 1: Fetch customer with populated account
-    const customer = await Customer.findById(customerId).populate("account");
+    // ✅ Step 1: Fetch customer using ACCOUNT ID
+    const customer = await Customer.findOne({
+      account: customerId,
+      createdBy: userId,
+    }).populate("account");
+
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
     }
@@ -43,9 +47,15 @@ const getCustomerLedger = async (req, res) => {
     };
 
     if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
       matchFilter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
+        $gte: start,
+        $lte: end,
       };
     }
 
@@ -68,7 +78,9 @@ const getCustomerLedger = async (req, res) => {
             isDeleted: false,
             sourceType: { $ne: "reversal" },
             "lines.account": objectId,
-            date: { $lt: new Date(startDate) },
+            date: {
+              $lt: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
+            },
           },
         },
         { $unwind: "$lines" },
@@ -107,6 +119,13 @@ const getCustomerLedger = async (req, res) => {
           const credit = line.type === "credit" ? line.amount : 0;
           balance += debit - credit;
 
+          console.log("🔥 ENTRY BEFORE PUSH:", {
+            sourceType: entry.sourceType,
+            referenceId: entry.referenceId,
+            invoiceId: entry.invoiceId,
+            id: entry._id,
+          });
+
           ledger.push({
             _id: entry._id,
             date: entry.date,
@@ -117,18 +136,22 @@ const getCustomerLedger = async (req, res) => {
             sourceLabel:
               entry.sourceType === "sale_invoice"
                 ? "Sale Invoice"
-                : entry.sourceType === "receive_payment"
-                  ? "Receive Payment"
-                  : entry.sourceType === "refund_invoice"
-                    ? "Refund Invoice"
-                    : "-",
+                : entry.sourceType === "opening_sale_invoice"
+                  ? "Opening Invoice"
+                  : entry.sourceType === "receive_payment"
+                    ? "Receive Payment"
+                    : entry.sourceType === "refund_invoice"
+                      ? "Refund Invoice"
+                      : entry.sourceType === "opening_refund_invoice"
+                        ? "Opening Refund"
+                        : "-",
             debit,
             credit,
 
             paymentType: line.paymentType || entry.paymentType || "-",
 
             balance,
-            runningBalance: balance,
+            runningBalance: Number(balance.toFixed(2)),
             attachmentUrl: entry.attachmentUrl || "",
             attachmentType: entry.attachmentType || "",
             invoiceId: entry.invoiceId || null,

@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 
-// ✅ 1. Manual Adjustment (صرف خاص حالات میں استعمال کریں)
+// ⚠️ LEGACY HELPER — avoid using in journal-based accounting
 exports.updateAccountBalance = async (accountId, amount, operation = "add") => {
   const account = await Account.findById(accountId);
   if (!account) throw new Error("Account not found");

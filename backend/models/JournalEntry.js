@@ -66,17 +66,24 @@ const journalEntrySchema = new mongoose.Schema(
       type: String,
       enum: [
         "opening_balance",
+
         "sale_invoice",
+        "opening_sale_invoice",
+
+        "refund_invoice",
+        "opening_refund_invoice",
+
         "purchase_invoice",
         "purchase_return",
+
         "receive_payment",
         "pay_bill",
         "purchase_payment",
         "refund_payment",
         "purchase_return_payment",
+
         "payment",
         "adjustment",
-        "refund_invoice",
         "manual",
         "expense",
         "reversal",

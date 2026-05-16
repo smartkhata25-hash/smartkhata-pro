@@ -2,9 +2,10 @@
 import axios from 'axios';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
-const API_URL = `${BASE_URL}/api/journal`;
 
 const getToken = () => localStorage.getItem('token');
+
+const API_URL = `${BASE_URL}/api/customer-ledger`;
 
 // ✅ ONLY & FINAL: Get ledger by CUSTOMER ACCOUNT (CORRECT ACCOUNTING)
 export const getLedgerByCustomerAccount = async (accountId, start, end) => {
@@ -12,7 +13,7 @@ export const getLedgerByCustomerAccount = async (accountId, start, end) => {
     throw new Error('AccountId is required for ledger');
   }
 
-  let url = `${API_URL}/ledger/${accountId}`;
+  let url = `${API_URL}/${accountId}`;
 
   if (start && end) {
     url += `?startDate=${start}&endDate=${end}`;
@@ -26,10 +27,6 @@ export const getLedgerByCustomerAccount = async (accountId, start, end) => {
 
   return res.data;
 };
-
-// ❌ REMOVED ON PURPOSE
-// ❌ getLedgerByCustomerId (customer-based ledger is WEAK & WRONG)
-
 // ✅ Add new journal entry
 export const addJournalEntry = async (entryData) => {
   const res = await axios.post(API_URL, entryData, {

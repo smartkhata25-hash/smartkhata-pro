@@ -5,6 +5,7 @@ const { getCustomerBalanceFromJournal } = require("../utils/balanceHelper");
 const { recalculateAccountBalance } = require("../utils/balanceHelper");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
+const Counter = require("../models/Counter");
 const mongoose = require("mongoose");
 
 // ✅ 1. Get all customers with balance
@@ -132,8 +133,9 @@ const addCustomer = async (req, res) => {
       normalBalance: "debit",
       code: newCode,
       category: "customer",
+      isActive: true,
 
-      openingBalance: Number(openingBalance) || 0,
+      openingBalance: 0,
     });
 
     // 👤 Create customer
@@ -143,48 +145,141 @@ const addCustomer = async (req, res) => {
       phone,
       address,
       type,
-      openingBalance,
+      openingBalance: Number(openingBalance) || 0,
       account: account._id,
       createdBy: userId,
     });
 
     await customer.save();
 
-    // 💰 Journal Entry for opening balance
-    if (openingBalance && Number(openingBalance) !== 0) {
-      let openingBalanceAccount = await Account.findOne({
+    // ✅ Opening Sale Invoice
+    if (openingBalance && Number(openingBalance) > 0) {
+      let counter = await Counter.findOne({
+        type: "sale_invoice",
+        userId,
+      });
+
+      if (!counter) {
+        counter = await Counter.create({
+          type: "sale_invoice",
+          userId,
+          seq: 1000,
+        });
+      }
+
+      counter.seq += 1;
+      await counter.save();
+
+      const openingInvoice = await Invoice.create({
+        billNo: counter.seq.toString(),
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        invoiceDate: new Date(),
+        items: [],
+        totalAmount: Number(openingBalance),
+        paidAmount: 0,
+        status: "Unpaid",
+        notes: "Opening Balance",
+        isOpening: true,
+        createdBy: userId,
+
+        accountId: account._id,
+        customerId: customer._id,
+      });
+
+      const openingBalanceAccount = await Account.findOne({
         userId,
         code: "OPENING_BALANCE",
       });
 
-      if (!openingBalanceAccount) {
-        openingBalanceAccount = await Account.create({
-          userId,
-          name: "opening balance equity",
-          type: "Equity",
-          category: "other",
-          code: "OPENING_BALANCE",
-          normalBalance: "credit",
-          isSystem: true,
-          openingBalance: 0,
-        });
-      }
-      await JournalEntry.create({
+      const journal = await JournalEntry.create({
         date: new Date(),
-        description: "Opening Balance - Customer",
+        description: "Opening Balance Customer Invoice",
         createdBy: userId,
-        sourceType: "opening_balance",
         customerId: customer._id,
+        sourceType: "opening_sale_invoice",
+        invoiceId: openingInvoice._id,
+
+        billNo: openingInvoice.billNo,
+
         lines: [
           {
             account: account._id,
             type: "debit",
-            amount: openingBalance,
+            amount: Number(openingBalance),
           },
+
           {
             account: openingBalanceAccount._id,
             type: "credit",
-            amount: openingBalance,
+            amount: Number(openingBalance),
+          },
+        ],
+      });
+
+      openingInvoice.journalEntryId = journal._id;
+      await openingInvoice.save();
+    }
+
+    // ✅ Opening Refund Invoice
+    if (openingBalance && Number(openingBalance) < 0) {
+      let counter = await Counter.findOne({
+        type: "refund_invoice",
+        userId,
+      });
+
+      if (!counter) {
+        counter = await Counter.create({
+          type: "refund_invoice",
+          userId,
+          seq: 1000,
+        });
+      }
+
+      counter.seq += 1;
+      await counter.save();
+
+      const openingRefund = await RefundInvoice.create({
+        billNo: counter.seq.toString(),
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        invoiceDate: new Date(),
+        items: [],
+        totalAmount: Math.abs(Number(openingBalance)),
+        paidAmount: 0,
+        status: "Unpaid",
+        paymentType: "credit",
+        notes: "Opening Balance",
+        isOpening: true,
+        createdBy: userId,
+        accountId: account._id,
+        customerId: customer._id,
+      });
+
+      const openingBalanceAccount = await Account.findOne({
+        userId,
+        code: "OPENING_BALANCE",
+      });
+
+      await JournalEntry.create({
+        date: new Date(),
+        description: "Opening Balance Customer Refund",
+        createdBy: userId,
+        customerId: customer._id,
+        sourceType: "opening_refund_invoice",
+        invoiceId: openingRefund._id,
+
+        lines: [
+          {
+            account: openingBalanceAccount._id,
+            type: "debit",
+            amount: Math.abs(Number(openingBalance)),
+          },
+
+          {
+            account: account._id,
+            type: "credit",
+            amount: Math.abs(Number(openingBalance)),
           },
         ],
       });
@@ -202,8 +297,7 @@ const updateCustomer = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const customerId = req.params.id;
 
-    const { name } = req.body;
-
+    const { name, email, phone, address, type, openingBalance } = req.body;
     // 1️⃣ جس customer کو edit کر رہے ہیں، وہ نکالو
     const currentCustomer = await Customer.findOne({
       _id: customerId,
@@ -256,10 +350,11 @@ const updateCustomer = async (req, res) => {
 
     // 6️⃣ Safe update
     currentCustomer.name = name || currentCustomer.name;
-    currentCustomer.email = req.body.email || currentCustomer.email;
-    currentCustomer.phone = req.body.phone || currentCustomer.phone;
-    currentCustomer.address = req.body.address || currentCustomer.address;
-    currentCustomer.type = req.body.type || currentCustomer.type;
+    currentCustomer.email = email || currentCustomer.email;
+    currentCustomer.phone = phone || currentCustomer.phone;
+    currentCustomer.address = address || currentCustomer.address;
+    currentCustomer.type = type || currentCustomer.type;
+    currentCustomer.openingBalance = Number(openingBalance) || 0;
 
     await currentCustomer.save();
 
@@ -278,6 +373,7 @@ const deleteCustomer = async (req, res) => {
     const customer = await Customer.findOne({
       _id: customerId,
       createdBy: userId,
+      isActive: true,
     });
 
     if (!customer) {
@@ -290,10 +386,20 @@ const deleteCustomer = async (req, res) => {
       isDeleted: false,
     });
 
-    // 🟥 CASE 1: Ledger exists → सिर्फ Hide
+    // 🟥 CASE 1: Ledger exists → Hide only
     if (hasLedger) {
       customer.isActive = false;
       await customer.save();
+
+      // ✅ deactivate linked account also
+      await Account.updateOne(
+        { _id: customer.account },
+        {
+          $set: {
+            isActive: false,
+          },
+        },
+      );
 
       return res.json({
         message: "Customer has transactions, marked as inactive",
@@ -302,10 +408,36 @@ const deleteCustomer = async (req, res) => {
     }
 
     // 🟢 CASE 2: No ledger → Proper delete
-    await Customer.deleteOne({ _id: customer._id });
 
-    // delete linked account also
-    await Account.deleteOne({ _id: customer.account });
+    // ✅ delete opening invoices
+    await Invoice.deleteMany({
+      customerId: customer._id,
+      isOpening: true,
+    });
+
+    // ✅ delete opening refunds
+    await RefundInvoice.deleteMany({
+      customerId: customer._id,
+      isOpening: true,
+    });
+
+    // ✅ delete related opening journals
+    await JournalEntry.deleteMany({
+      customerId: customer._id,
+      sourceType: {
+        $in: ["opening_sale_invoice", "opening_refund_invoice"],
+      },
+    });
+
+    // ✅ delete customer
+    await Customer.deleteOne({
+      _id: customer._id,
+    });
+
+    // ✅ delete linked account
+    await Account.deleteOne({
+      _id: customer.account,
+    });
 
     return res.json({
       message: "Customer deleted permanently (no transactions)",
@@ -393,111 +525,11 @@ const confirmMergeCustomers = async (req, res) => {
   }
 };
 
-// 📒 CUSTOMER LEDGER (DISABLED – NOT USED ANYMORE)
-
-const getCustomerLedger = async (req, res) => {
-  try {
-    const userId = req.user?.id || req.userId;
-    const customerId = req.params.id;
-    const { startDate, endDate } = req.query;
-
-    const customer = await Customer.findOne({
-      _id: customerId,
-      createdBy: userId,
-      isActive: true,
-    }).populate("account");
-
-    if (!customer || !customer.account) {
-      return res.status(404).json({ message: "Customer not found" });
-    }
-
-    const accountId = customer.account._id.toString();
-
-    const matchFilter = {
-      createdBy: userId,
-      customerId: customer._id,
-      isDeleted: false,
-    };
-
-    if (startDate && endDate) {
-      const s = new Date(startDate);
-      s.setHours(0, 0, 0, 0);
-
-      const e = new Date(endDate);
-      e.setHours(23, 59, 59, 999);
-
-      matchFilter.date = { $gte: s, $lte: e };
-    }
-
-    const journals = await JournalEntry.find(matchFilter)
-      .sort({ date: 1, time: 1 })
-      .lean();
-
-    let openingBalance = 0;
-
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(23, 59, 59, 999);
-
-      const prevJournals = await JournalEntry.find({
-        createdBy: userId,
-        customerId: customer._id,
-        isDeleted: false,
-        date: { $lte: start },
-      }).lean();
-
-      prevJournals.forEach((entry) => {
-        entry.lines.forEach((line) => {
-          if (line.account?.toString() === accountId) {
-            openingBalance +=
-              line.type === "debit" ? line.amount : -line.amount;
-          }
-        });
-      });
-    }
-
-    let balance = openingBalance;
-    const ledger = [];
-
-    for (const entry of journals) {
-      for (const line of entry.lines) {
-        if (line.account?.toString() !== accountId) continue;
-
-        const debit = line.type === "debit" ? line.amount : 0;
-        const credit = line.type === "credit" ? line.amount : 0;
-
-        balance += debit - credit;
-
-        ledger.push({
-          _id: entry._id,
-          date: entry.date,
-          time: entry.time || "",
-          billNo: entry.billNo || "",
-          description: entry.description || "",
-          sourceType: entry.sourceType || "",
-          debit,
-          credit,
-          balance,
-          runningBalance: balance,
-        });
-      }
-    }
-
-    res.json({
-      customerName: customer.name,
-      openingBalance,
-      ledger,
-      closingBalance: balance,
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Ledger fetch failed" });
-  }
-};
-
 // 📘 CUSTOMER DETAILED LEDGER (Invoice + Payment + Refund)
 
 const getCustomerDetailedLedger = async (req, res) => {
   try {
+    console.log("🔥 CUSTOMER LEDGER API HIT");
     const userId = req.user?.id || req.userId;
     const { id: customerId } = req.params;
     const { startDate, endDate } = req.query;
@@ -620,7 +652,11 @@ const getCustomerDetailedLedger = async (req, res) => {
       };
 
       // 🟡 SALE INVOICE (RESTORED)
-      if (entry.sourceType === "sale_invoice" && entry.invoiceId) {
+      if (
+        (entry.sourceType === "sale_invoice" ||
+          entry.sourceType === "opening_sale_invoice") &&
+        entry.invoiceId
+      ) {
         const invoice = await Invoice.findById(entry.invoiceId).populate(
           "items.productId",
           "name",
@@ -638,7 +674,11 @@ const getCustomerDetailedLedger = async (req, res) => {
       }
 
       // 🔴 REFUND INVOICE (RESTORED)
-      if (entry.sourceType === "refund_invoice" && entry.invoiceId) {
+      if (
+        (entry.sourceType === "refund_invoice" ||
+          entry.sourceType === "opening_refund_invoice") &&
+        entry.invoiceId
+      ) {
         const refund = await RefundInvoice.findById(entry.invoiceId).populate(
           "items.productId",
           "name",
@@ -680,6 +720,6 @@ module.exports = {
   updateCustomer,
   deleteCustomer,
   confirmMergeCustomers,
-  getCustomerLedger,
+
   getCustomerDetailedLedger,
 };

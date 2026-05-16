@@ -1,23 +1,12 @@
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const mongoose = require("mongoose");
-const Invoice = require("../models/Invoice");
 const Account = require("../models/Account");
 const JOURNAL_RULES = require("../utils/journalRules");
 const { createReversalEntry } = require("../utils/journalReversal");
+const { isBalanced } = require("../utils/journalHelper");
 const { logAudit } = require("../utils/auditHelper");
 const { isPeriodLocked } = require("../utils/periodLockHelper");
-
-// ✅ Helper: Check if entry is balanced
-const isBalanced = (lines) => {
-  const debit = lines
-    .filter((l) => l.type === "debit")
-    .reduce((sum, l) => sum + l.amount, 0);
-  const credit = lines
-    .filter((l) => l.type === "credit")
-    .reduce((sum, l) => sum + l.amount, 0);
-  return debit === credit;
-};
 
 // ✅ Helper: Recalculate all involved accounts
 const recalculateInvolvedAccounts = async (lines) => {
@@ -94,6 +83,8 @@ exports.createEntry = async (req, res) => {
           message: `${account.type} اکاؤنٹ کو ${line.type} نہیں کیا جا سکتا`,
         });
       }
+
+      line.amount = Number(line.amount);
 
       if (!line.amount || line.amount <= 0) {
         return res.status(400).json({
@@ -203,7 +194,8 @@ exports.updateEntry = async (req, res) => {
         });
       }
 
-      // ❌ zero / negative amount protection
+      line.amount = Number(line.amount);
+
       if (!line.amount || line.amount <= 0) {
         return res.status(400).json({
           message: "رقم صفر یا منفی نہیں ہو سکتی",
@@ -501,8 +493,7 @@ exports.getLedgerByAccount = async (req, res) => {
     // 🔢 All matching entries for date range
     const entries = await JournalEntry.find(filter)
       .populate("lines.account")
-      .sort({ date: 1 })
-      .limit(500);
+      .sort({ date: 1 });
 
     let balance = 0;
     const ledger = [];

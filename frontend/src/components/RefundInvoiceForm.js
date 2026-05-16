@@ -34,28 +34,32 @@ const RefundInvoiceForm = ({
       setBillNo(data.billNo || '');
       setCustomerName(data.customerName || '');
       setCustomerPhone(data.customerPhone || '');
+      setCustomerId(data.customerId?._id || data.customerId || '');
       setInvoiceDate(data.invoiceDate?.slice(0, 10) || '');
-      setInvoiceTime(data.invoiceTime || '');
+      setInvoiceTime(data.invoiceTime || getCurrentTime());
       setNotes(data.notes || '');
       setRefundMethod(data.paymentType === 'cash' ? 'cash' : 'credit');
       setPaymentType(data.paymentType || 'cash');
 
       setAccountId(data.accountId || data.account?._id || '');
 
-      setItems(
-        (data.items || []).map((i) => {
-          const matchedProduct = productList.find(
-            (p) => p._id === (i.productId?._id || i.productId)
-          );
-          return {
-            productId: i.productId,
-            name: matchedProduct?.name || i.name || '',
-            quantity: i.quantity,
-            price: i.price,
-            total: (i.quantity * i.price).toFixed(2),
-          };
-        })
+      const loadedItems = (data.items || []).map((i) => {
+        const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
+
+        return {
+          productId: i.productId,
+          name: matchedProduct?.name || i.name || '',
+          quantity: i.quantity,
+          price: i.price,
+          total: (i.quantity * i.price).toFixed(2),
+        };
+      });
+
+      const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
+        blankRow()
       );
+
+      setItems([...loadedItems, ...emptyRows]);
     },
     [productList]
   );
@@ -201,11 +205,18 @@ const RefundInvoiceForm = ({
 
     setItems(updated);
 
-    if (index === items.length - 1 && field === 'name' && value.trim() !== '') {
-      setItems([...items, blankRow()]);
+    const hasEmptyRow = updated.some(
+      (row) => !row.productId && !row.name && !row.quantity && !row.price
+    );
+
+    if (index === items.length - 1 && field === 'name' && value.trim() !== '' && !hasEmptyRow) {
+      setItems([...updated, blankRow()]);
+
       setTimeout(() => {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }, 100);
+    } else {
+      setItems(updated);
     }
   };
 
@@ -238,6 +249,9 @@ const RefundInvoiceForm = ({
   };
 
   const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
+
+  const isOpeningRefund =
+    id && originalInvoiceId === '' && items.every((i) => !i.productId && !i.quantity);
 
   const formState = {
     items,
@@ -277,7 +291,7 @@ const RefundInvoiceForm = ({
       setBillNo(data.billNo || '');
 
       setInvoiceDate(data.invoiceDate || '');
-      setInvoiceTime(data.invoiceTime || '');
+      setInvoiceTime(data.invoiceTime || getCurrentTime());
 
       setCustomerName(data.customerName || '');
       setCustomerPhone(data.customerPhone || '');
@@ -288,7 +302,7 @@ const RefundInvoiceForm = ({
 
       setAccountId(data.accountId || '');
 
-      setCustomerId(data.customerId || '');
+      setCustomerId(data.customerId?._id || data.customerId || '');
 
       setPaymentType(data.paymentType || 'cash');
 
@@ -307,7 +321,11 @@ const RefundInvoiceForm = ({
     if (!invoiceDate) return alert(t('alerts.fillRequiredFields'));
     if (!customerName.trim()) return alert(t('alerts.customerRequired'));
 
-    if (filteredItems.length === 0) return alert(t('alerts.addProduct'));
+    const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
+
+    if (filteredItems.length === 0 && !isOpeningRefund) {
+      return alert(t('alerts.addProduct'));
+    }
     if (refundMethod === 'cash' && !accountId) return alert(t('alerts.selectAccount'));
 
     try {
@@ -344,6 +362,9 @@ const RefundInvoiceForm = ({
       );
 
       if (attachment) formData.append('attachment', attachment);
+      if (isOpeningRefund) {
+        formData.append('isOpening', true);
+      }
 
       if (id) {
         await updateRefund(id, formData, token);
@@ -431,7 +452,7 @@ const RefundInvoiceForm = ({
       e.preventDefault();
       const selected = customerSuggestions[selectedCustomerIndex];
       if (selected) {
-        handleCustomerSelect(selected.name, selected.phone);
+        handleCustomerSelect(selected.name, selected.phone, selected._id);
       }
     }
   };
@@ -569,6 +590,12 @@ const RefundInvoiceForm = ({
         />
       </div>
 
+      {isOpeningRefund && (
+        <div className="mb-2 px-3 py-2 rounded bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm font-semibold">
+          ⚠️ Opening Refund Entry
+        </div>
+      )}
+
       <div
         ref={scrollRef}
         className="border overflow-y-auto mb-4"
@@ -620,7 +647,8 @@ const RefundInvoiceForm = ({
                     type="number"
                     value={item.quantity || ''}
                     onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                    className="w-full text-center"
+                    onWheel={(e) => e.target.blur()}
+                    className="w-full text-center no-spinner"
                   />
                 </td>
                 <td className="border p-1">
@@ -630,6 +658,7 @@ const RefundInvoiceForm = ({
                     onChange={(e) => {
                       handleItemChange(idx, 'price', e.target.value);
                     }}
+                    onWheel={(e) => e.target.blur()}
                     onBlur={() => {
                       const updated = [...items];
                       const q = parseFloat(updated[idx].quantity) || 0;
@@ -637,7 +666,7 @@ const RefundInvoiceForm = ({
                       updated[idx].total = (q * p).toFixed(2);
                       setItems(updated);
                     }}
-                    className="w-full text-center"
+                    className="w-full text-center no-spinner"
                   />
                 </td>
                 <td className="border p-1 text-center">{item.total || '0.00'}</td>

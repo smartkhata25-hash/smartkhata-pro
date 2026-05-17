@@ -31,12 +31,15 @@ const getDashboardSummary = async (req, res) => {
        1️⃣ SALES & EXPENSES (WITH FILTER)
     ====================================================== */
 
-    // ✅ ONLY ACTIVE SUPPLIER ACCOUNTS
-    const activeSupplierAccounts = await Account.find({
+    // ✅ ONLY ACTIVE SUPPLIERS
+    const activeSuppliers = await Supplier.find({
       userId,
-      category: "supplier",
-      isActive: true,
-    }).select("_id");
+      isDeleted: { $ne: true },
+    }).select("account");
+
+    const activeSupplierAccountIds = activeSuppliers
+      .map((s) => s.account)
+      .filter(Boolean);
 
     const combinedData = await JournalEntry.aggregate([
       {
@@ -150,8 +153,14 @@ const getDashboardSummary = async (req, res) => {
         if (lineType === "debit") customerNet += amount;
         else customerNet -= amount;
       }
-      // Payable
-      if (type === "Liability") {
+      // ✅ ONLY ACTIVE SUPPLIER PAYABLES
+      if (
+        type === "Liability" &&
+        category === "supplier" &&
+        activeSupplierAccountIds.some(
+          (id) => id.toString() === item._id.account.toString(),
+        )
+      ) {
         if (lineType === "credit") totalPayable += amount;
         else totalPayable -= amount;
       }

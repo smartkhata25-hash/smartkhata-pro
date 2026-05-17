@@ -242,21 +242,25 @@ exports.updateSupplier = async (req, res) => {
   }
 };
 
-// ✅ CONFIRM MERGE SUPPLIER (FINAL PRO VERSION)
+// ✅ CONFIRM MERGE SUPPLIER (SAFE ACCOUNTING VERSION)
 exports.confirmMergeSupplier = async (req, res) => {
   try {
     const userId = req.user.id;
     const { sourceSupplierId, targetSupplierId } = req.body;
 
     if (!sourceSupplierId || !targetSupplierId) {
-      return res.status(400).json({ message: "Invalid merge request" });
+      return res.status(400).json({
+        message: "Invalid merge request",
+      });
     }
 
     if (sourceSupplierId === targetSupplierId) {
-      return res.status(400).json({ message: "Cannot merge same supplier" });
+      return res.status(400).json({
+        message: "Cannot merge same supplier",
+      });
     }
 
-    // 1️⃣ Fetch suppliers
+    // ✅ Fetch suppliers
     const sourceSupplier = await Supplier.findOne({
       _id: sourceSupplierId,
       userId,
@@ -270,51 +274,92 @@ exports.confirmMergeSupplier = async (req, res) => {
     });
 
     if (!sourceSupplier || !targetSupplier) {
-      return res.status(404).json({ message: "Supplier not found" });
+      return res.status(404).json({
+        message: "Supplier not found",
+      });
     }
 
-    // 2️⃣ Move ALL Journal Entries (IMPORTANT FIX: referenceId)
-    const updateResult = await JournalEntry.updateMany(
-      {
-        supplierId: sourceSupplier._id,
-        createdBy: userId,
-        isDeleted: false,
-      },
-      {
-        $set: { supplierId: targetSupplier._id },
-      },
-    );
-
-    // 3️⃣ Recalculate BOTH accounts (very important for accounting safety)
-    if (targetSupplier.account) {
-      await recalculateAccountBalance(targetSupplier.account);
+    // ✅ Safety checks
+    if (!sourceSupplier.account || !targetSupplier.account) {
+      return res.status(400).json({
+        message: "Supplier account missing",
+      });
     }
 
-    if (sourceSupplier.account) {
-      await recalculateAccountBalance(sourceSupplier.account);
+    // =====================================================
+    // ✅ MOVE ALL JOURNAL ENTRIES SAFELY
+    // =====================================================
+
+    const journals = await JournalEntry.find({
+      supplierId: sourceSupplier._id,
+      createdBy: userId,
+      isDeleted: false,
+    });
+
+    let movedTransactions = 0;
+
+    for (const journal of journals) {
+      // ✅ Change supplierId
+      journal.supplierId = targetSupplier._id;
+
+      // ✅ IMPORTANT:
+      // Replace old supplier account inside journal lines
+      journal.lines = journal.lines.map((line) => {
+        if (line.account?.toString() === sourceSupplier.account.toString()) {
+          return {
+            ...line.toObject(),
+            account: targetSupplier.account,
+          };
+        }
+
+        return line;
+      });
+
+      await journal.save();
+      movedTransactions++;
     }
 
-    // 4️⃣ Deactivate source supplier
+    // =====================================================
+    // ✅ RECALCULATE BOTH ACCOUNTS
+    // =====================================================
+
+    await recalculateAccountBalance(targetSupplier.account);
+    await recalculateAccountBalance(sourceSupplier.account);
+
+    // =====================================================
+    // ✅ DEACTIVATE OLD SUPPLIER
+    // =====================================================
+
     sourceSupplier.isDeleted = true;
     sourceSupplier.supplierType = "blocked";
+
     await sourceSupplier.save();
 
-    // 5️⃣ Deactivate source account
-    if (sourceSupplier.account) {
-      await Account.updateOne(
-        { _id: sourceSupplier.account },
-        { $set: { isActive: false } },
-      );
-    }
+    // =====================================================
+    // ✅ DEACTIVATE OLD ACCOUNT
+    // =====================================================
+
+    await Account.updateOne(
+      { _id: sourceSupplier.account },
+      {
+        $set: {
+          isActive: false,
+        },
+      },
+    );
 
     return res.json({
       message: "Suppliers merged successfully",
       mergedInto: targetSupplier._id,
-      movedTransactions: updateResult.modifiedCount,
+      movedTransactions,
     });
   } catch (error) {
     console.error("❌ Confirm Merge Supplier Error:", error);
-    res.status(500).json({ message: "Merge failed" });
+
+    res.status(500).json({
+      message: "Merge failed",
+      error: error.message,
+    });
   }
 };
 

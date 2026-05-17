@@ -1,6 +1,6 @@
 // 📁 src/pages/SupplierLedgerPage.js
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
@@ -9,6 +9,7 @@ import { t } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
+import useFormPersist from '../hooks/useFormPersist';
 
 import { fetchSuppliers, fetchSupplierLedger } from '../services/supplierService';
 
@@ -33,6 +34,17 @@ export default function SupplierLedgerPage() {
   const [end, setEnd] = useState(`${currentYear}-12-31`);
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  const restoredRef = useRef(false);
+
+  const persistState = {
+    sid,
+    search,
+    start,
+    end,
+  };
+
+  useFormPersist('supplier_ledger_page_state', persistState, () => {});
 
   // ✅ Print Size (Default A5, Remembered)
   const [printSize, setPrintSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
@@ -139,6 +151,53 @@ export default function SupplierLedgerPage() {
   /* ===============================
      LOAD FROM URL
   =============================== */
+
+  useEffect(() => {
+    const saved = localStorage.getItem('app_state_supplier_ledger_page_state');
+
+    if (!saved || suppliers.length === 0 || restoredRef.current) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      const data = parsed.data;
+
+      if (!data) return;
+
+      setSid(data.sid || '');
+      setSearch(data.search || '');
+
+      setStart(data.start || `${currentYear}-01-01`);
+      setEnd(data.end || `${currentYear}-12-31`);
+
+      if (data.sid) {
+        const selectedSupplier = suppliers.find((s) => s._id === data.sid);
+
+        if (selectedSupplier) {
+          setSupplierName(selectedSupplier.name);
+
+          load(data.sid, data.start, data.end);
+        }
+      }
+
+      restoredRef.current = true;
+    } catch (err) {
+      console.error(err);
+    }
+  }, [suppliers, load, currentYear]);
+
+  useEffect(() => {
+    if (!sid) return;
+    if (suppliers.length === 0) return;
+
+    const selectedSupplier = suppliers.find((s) => s._id === sid);
+
+    if (selectedSupplier) {
+      setSupplierName(selectedSupplier.name);
+
+      load(sid, start, end);
+    }
+  }, [sid, suppliers, load, start, end]);
+
   useEffect(() => {
     if (!supplierId) return;
     if (suppliers.length === 0) return;
@@ -185,10 +244,28 @@ export default function SupplierLedgerPage() {
   const handleRowClick = (entry) => {
     if (!entry || entry.isOpening) return;
 
-    if (entry.sourceType === 'purchase_invoice' && entry.invoiceId) {
-      navigate(`/purchase-invoice/${entry.invoiceId}`);
-    } else if (entry.sourceType === 'payment' && entry.referenceId) {
-      navigate(`/pay-bill?edit=true&id=${entry.referenceId}`);
+    console.log('SUPPLIER EDIT ENTRY =>', entry);
+
+    const type = entry.sourceType?.toLowerCase();
+
+    // ✅ Purchase Invoice
+    if (type === 'purchase_invoice') {
+      navigate(`/purchase-invoice/${entry.referenceId || entry._id}`);
+    }
+
+    // ✅ Pay Bill
+    else if (type === 'pay_bill') {
+      navigate(`/pay-bills/edit/${entry.referenceId || entry._id}`);
+    }
+
+    // ✅ Purchase Return
+    else if (type === 'purchase_return') {
+      navigate(`/purchase-returns/edit/${entry.referenceId || entry._id}`);
+    }
+
+    // ❌ Unknown
+    else {
+      console.log('UNKNOWN TYPE =>', type);
     }
   };
 
@@ -339,10 +416,10 @@ export default function SupplierLedgerPage() {
                         key={s._id}
                         onClick={() => {
                           setSupplierName(s.name);
-                          setSid(s._id);
-                          setShowSuggestions(false);
 
-                          load(s._id);
+                          setSid(s._id);
+
+                          setShowSuggestions(false);
                         }}
                         style={{
                           padding: '8px 10px',

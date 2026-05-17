@@ -293,6 +293,7 @@ const PurchaseInvoiceForm = () => {
   };
 
   useEffect(() => {
+    if (isEdit) return;
     const saved = localStorage.getItem('app_state_purchase_invoice_draft');
 
     if (!saved) return;
@@ -324,8 +325,9 @@ const PurchaseInvoiceForm = () => {
     } catch (err) {
       console.error(err);
     }
-  }, []);
-  useFormPersist('purchase_invoice_draft', formState, () => {});
+  }, [isEdit]);
+
+  useFormPersist(!isEdit ? 'purchase_invoice_draft' : null, formState, () => {});
   // 📊 Product select ہونے پر صرف ID محفوظ کریں
   const handleProductHistory = (productId) => {
     if (!productId) return;

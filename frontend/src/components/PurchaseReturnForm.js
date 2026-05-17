@@ -166,6 +166,7 @@ const PurchaseReturnForm = ({ token }) => {
     originalInvoiceId,
   };
   useEffect(() => {
+    if (id) return;
     const saved = localStorage.getItem('app_state_purchase_return_draft');
 
     if (!saved) return;
@@ -209,8 +210,8 @@ const PurchaseReturnForm = ({ token }) => {
     } catch (err) {
       console.error(err);
     }
-  }, []);
-  useFormPersist('purchase_return_draft', formState, () => {});
+  }, [id]);
+  useFormPersist(!id ? 'purchase_return_draft' : null, formState, () => {});
 
   const handleRevert = async () => {
     if (!id) {
@@ -241,7 +242,21 @@ const PurchaseReturnForm = ({ token }) => {
     if (filteredItems.length === 0) return alert(t('alerts.addProduct'));
     if (returnMethod === 'cash' && !accountId) return alert(t('alerts.selectAccount'));
 
-    const supplier = suppliers.find((s) => s._id === supplierId);
+    // 🔥 Auto match supplier by name in edit mode
+    let finalSupplierId = supplierId;
+
+    if (!finalSupplierId && supplierName.trim()) {
+      const matchedSupplier = suppliers.find(
+        (s) => s.name.trim().toLowerCase() === supplierName.trim().toLowerCase()
+      );
+
+      if (matchedSupplier) {
+        finalSupplierId = matchedSupplier._id;
+        setSupplierId(matchedSupplier._id);
+      }
+    }
+
+    const supplier = suppliers.find((s) => s._id === finalSupplierId);
     if (!supplier) return alert(t('alerts.supplierAddFailed'));
 
     const formData = new FormData();
@@ -302,6 +317,8 @@ const PurchaseReturnForm = ({ token }) => {
   const handleSupplierInput = (e) => {
     const value = e.target.value;
     setSupplierName(value);
+
+    setSupplierId('');
 
     if (!value.trim()) {
       setSupplierSuggestions([]);

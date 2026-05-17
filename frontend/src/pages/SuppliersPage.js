@@ -347,6 +347,32 @@ const SuppliersPage = () => {
 
   const closingColor = closing > 0 ? '#dc2626' : closing < 0 ? '#16a34a' : '#6b7280';
 
+  const handleRowClick = (entry) => {
+    if (!entry || entry.isOpening) return;
+
+    const type = entry.sourceType?.toLowerCase();
+
+    // ✅ Purchase Invoice
+    if (type === 'purchase_invoice') {
+      navigate(`/purchase-invoice/${entry.referenceId || entry._id}`);
+    }
+
+    // ✅ Pay Bill
+    else if (type === 'pay_bill') {
+      navigate(`/pay-bills/edit/${entry.referenceId || entry._id}`);
+    }
+
+    // ✅ Purchase Return
+    else if (type === 'purchase_return') {
+      navigate(`/purchase-returns/edit/${entry.referenceId || entry._id}`);
+    }
+
+    // ❌ Unknown
+    else {
+      console.log('UNKNOWN TYPE =>', type);
+    }
+  };
+
   return (
     <PageLayout>
       {showForm && (
@@ -752,6 +778,8 @@ const SuppliersPage = () => {
                   ledgerData={ledgerData?.ledger || []}
                   search={ledgerSearch}
                   openingBalance={ledgerData?.openingBalance || 0}
+                  onRowClick={handleRowClick}
+                  onEdit={handleRowClick}
                 />
               </div>
             </>

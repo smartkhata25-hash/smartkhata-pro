@@ -89,8 +89,19 @@ exports.getAllReceivePayments = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
+    // ✅ Sirf active customers
+    const activeCustomers = await Customer.find({
+      createdBy: userId,
+      isActive: true,
+    }).select("_id");
+
+    const activeCustomerIds = activeCustomers.map((c) => c._id);
+
     // 🔹 Receive payments لائیں
-    const payments = await ReceivePayment.find({ userId })
+    const payments = await ReceivePayment.find({
+      userId,
+      customer: { $in: activeCustomerIds },
+    })
       .populate("customer", "name")
       .sort({ createdAt: -1 });
 

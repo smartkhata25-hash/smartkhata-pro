@@ -144,25 +144,30 @@ exports.getPayBillById = async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    // 🔍 Journal se payment accounts nikaalna
-    const journal = await JournalEntry.findOne({
+    const journals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
     });
 
     let paymentEntries = [];
 
-    if (journal?.lines?.length) {
-      paymentEntries = journal.lines
-        .filter((line) => line.type === "credit")
-        .map((line) => ({
-          account: line.account,
-          amount: line.amount,
-          paymentType: line.paymentType,
-        }));
+    for (const journal of journals) {
+      if (journal?.lines?.length) {
+        const entries = journal.lines
+          .filter((line) => line.type === "credit")
+          .map((line) => ({
+            account: line.account,
+            amount: line.amount,
+            paymentType: line.paymentType,
+          }));
+
+        paymentEntries.push(...entries);
+      }
     }
 
     // ✅ Frontend ko complete data
+    console.log("🔥 paymentEntries backend", paymentEntries);
+
     res.json({
       ...bill.toObject(),
       paymentEntries,

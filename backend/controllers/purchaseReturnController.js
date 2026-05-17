@@ -177,14 +177,16 @@ exports.createPurchaseReturn = async (req, res) => {
 
     const lines = [];
 
+    // ✅ Supplier payable decrease
     lines.push({
       account: supplierAccountId,
       type: "debit",
       amount: totalAmount,
     });
 
+    // ✅ Inventory decrease (stock going out)
     lines.push({
-      account: purchaseReturnAccount._id,
+      account: inventoryAccount._id,
       type: "credit",
       amount: totalAmount,
     });
@@ -263,6 +265,7 @@ exports.getPurchaseReturnById = async (req, res) => {
     const pr = await PurchaseReturn.findOne({
       _id: req.params.id,
       createdBy: userId,
+      isDeleted: false,
     });
 
     if (!pr) {
@@ -314,6 +317,7 @@ exports.getAllPurchaseReturns = async (req, res) => {
     ============================== */
     const returns = await PurchaseReturn.find({
       createdBy: userId,
+      isDeleted: false,
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -357,7 +361,7 @@ exports.getAllPurchaseReturns = async (req, res) => {
 };
 
 /* =========================================================
-   ✅ UPDATE PURCHASE RETURN
+   ✅ UPDATE PURCHASE RETURN (SAFE PRO VERSION)
 ========================================================= */
 exports.updatePurchaseReturn = async (req, res) => {
   try {
@@ -384,6 +388,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     const pr = await PurchaseReturn.findOne({
       _id: req.params.id,
       createdBy: userId,
+      isDeleted: false,
     });
 
     if (!pr) {
@@ -393,7 +398,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     }
 
     /* =============================
-       VALIDATION
+       BASIC VALIDATION
     ============================== */
     if (!supplierId || items.length === 0) {
       return res.status(400).json({
@@ -418,11 +423,14 @@ exports.updatePurchaseReturn = async (req, res) => {
     ============================== */
     const supplier = await Supplier.findOne({
       _id: supplierId,
-      createdBy: userId,
+      userId,
+      isDeleted: false,
     });
 
     if (!supplier) {
-      return res.status(404).json({ error: "Supplier not found" });
+      return res.status(404).json({
+        error: "Supplier not found",
+      });
     }
 
     const supplierAccountId =
@@ -437,27 +445,80 @@ exports.updatePurchaseReturn = async (req, res) => {
     }
 
     /* =============================
-       ACCOUNTS VALIDATION
+       ACCOUNT VALIDATION
     ============================== */
-    const purchaseReturnAccount = await Account.findOne({
-      code: "PURCHASE_RETURN",
-
-      userId,
-    });
-
     const inventoryAccount = await Account.findOne({
       code: "INVENTORY",
       userId,
     });
 
-    if (!purchaseReturnAccount || !inventoryAccount) {
+    if (!inventoryAccount) {
       return res.status(400).json({
-        error: "Required accounts not found",
+        error: "Inventory account not found",
       });
     }
 
     /* =============================
-       🔁 STEP 2: DELETE OLD LOGS
+       ORIGINAL INVOICE VALIDATION
+    ============================== */
+    if (pr.originalInvoiceId) {
+      const invoice = await PurchaseInvoice.findById(pr.originalInvoiceId);
+
+      if (!invoice) {
+        return res.status(404).json({
+          error: "Original invoice not found",
+        });
+      }
+
+      const originalQtyMap = {};
+
+      invoice.items.forEach((item) => {
+        originalQtyMap[item.productId.toString()] = item.quantity;
+      });
+
+      const previousReturns = await PurchaseReturn.find({
+        originalInvoiceId: pr.originalInvoiceId,
+        _id: { $ne: pr._id },
+        isDeleted: false,
+      });
+
+      const returnedQtyMap = {};
+
+      previousReturns.forEach((ret) => {
+        ret.items.forEach((item) => {
+          const key =
+            typeof item.productId === "object"
+              ? item.productId._id?.toString()
+              : item.productId.toString();
+
+          if (!returnedQtyMap[key]) {
+            returnedQtyMap[key] = 0;
+          }
+
+          returnedQtyMap[key] += item.quantity;
+        });
+      });
+
+      for (const item of items) {
+        const key =
+          typeof item.productId === "object"
+            ? item.productId._id?.toString()
+            : item.productId.toString();
+
+        const originalQty = originalQtyMap[key] || 0;
+
+        const alreadyReturned = returnedQtyMap[key] || 0;
+
+        if (item.quantity + alreadyReturned > originalQty) {
+          return res.status(400).json({
+            error: "Return quantity exceeds original invoice quantity",
+          });
+        }
+      }
+    }
+
+    /* =============================
+       REMOVE OLD STOCK ENTRIES
     ============================== */
     await deleteTransactionsByReference({
       referenceId: pr._id,
@@ -465,17 +526,36 @@ exports.updatePurchaseReturn = async (req, res) => {
       userId,
     });
 
-    await JournalEntry.deleteOne({
-      referenceId: pr._id,
-      sourceType: "purchase_return",
-      createdBy: userId,
-    });
+    /* =============================
+       SOFT DELETE OLD JOURNALS
+    ============================== */
+    await JournalEntry.updateMany(
+      {
+        referenceId: pr._id,
+        sourceType: "purchase_return",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
-    await JournalEntry.deleteMany({
-      referenceId: pr._id,
-      sourceType: "purchase_return_payment",
-      createdBy: userId,
-    });
+    await JournalEntry.updateMany(
+      {
+        referenceId: pr._id,
+        sourceType: "purchase_return_payment",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
     /* =============================
        UPDATE MAIN DOCUMENT
@@ -504,30 +584,24 @@ exports.updatePurchaseReturn = async (req, res) => {
        DATE SAFE
     ============================== */
     let dateTime = new Date(`${returnDate}T${returnTime}`);
+
     if (isNaN(dateTime.getTime())) {
       dateTime = new Date(returnDate);
     }
 
     /* =============================
-       REBUILD JOURNAL
+       CREATE JOURNAL ENTRY
     ============================== */
     const lines = [];
 
-    // 🟢 Supplier Debit
+    // ✅ Supplier payable decrease
     lines.push({
       account: supplierAccountId,
       type: "debit",
       amount: totalAmount,
     });
 
-    // 🔴 Purchase Return
-    lines.push({
-      account: purchaseReturnAccount._id,
-      type: "credit",
-      amount: totalAmount,
-    });
-
-    // 🔴 Inventory
+    // ✅ Inventory decrease
     lines.push({
       account: inventoryAccount._id,
       type: "credit",
@@ -551,8 +625,9 @@ exports.updatePurchaseReturn = async (req, res) => {
 
     await journal.save();
 
-    await recalculateAccountBalance(supplierAccountId);
-
+    /* =============================
+       CREATE PAYMENT ENTRY
+    ============================== */
     if (paidAmount > 0 && paymentType && accountId) {
       await createPaymentEntry({
         userId,
@@ -565,13 +640,10 @@ exports.updatePurchaseReturn = async (req, res) => {
         paymentType,
         description: `Purchase Return Payment - ${pr.billNo}`,
       });
-
-      await recalculateAccountBalance(supplierAccountId);
-      if (accountId) await recalculateAccountBalance(accountId);
     }
 
     /* =============================
-       🔁 STEP 3: APPLY NEW STOCK
+       APPLY STOCK OUT
     ============================== */
     for (const item of items) {
       await createInventoryEntry({
@@ -585,22 +657,29 @@ exports.updatePurchaseReturn = async (req, res) => {
       });
     }
 
+    /* =============================
+       RECALCULATE BALANCES
+    ============================== */
+    await recalculateAccountBalance(supplierAccountId);
+
+    if (accountId) {
+      await recalculateAccountBalance(accountId);
+    }
+
     return res.json({
       message: "✅ Purchase Return updated successfully",
       purchaseReturn: pr,
     });
   } catch (err) {
     console.error("❌ Update Purchase Return Error:", err);
+
     return res.status(500).json({
       error: "Server Error",
       detail: err.message,
     });
   }
 };
-
-/* =========================================================
-   ✅ DELETE PURCHASE RETURN
-========================================================= */
+// ✅ DELETE PURCHASE RETURN (SAFE ACCOUNTING VERSION)
 exports.deletePurchaseReturn = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -612,6 +691,7 @@ exports.deletePurchaseReturn = async (req, res) => {
     const pr = await PurchaseReturn.findOne({
       _id: id,
       createdBy: userId,
+      isDeleted: false,
     });
 
     if (!pr) {
@@ -621,7 +701,7 @@ exports.deletePurchaseReturn = async (req, res) => {
     }
 
     /* =============================
-       🔁 STEP 1: REVERSE STOCK
+       REVERSE STOCK ENTRIES
     ============================== */
     await deleteTransactionsByReference({
       referenceId: id,
@@ -630,48 +710,68 @@ exports.deletePurchaseReturn = async (req, res) => {
     });
 
     /* =============================
-       🔁 STEP 3: DELETE JOURNAL ENTRY
+       SOFT DELETE MAIN JOURNAL
     ============================== */
-    await JournalEntry.deleteOne({
-      referenceId: id,
-      sourceType: "purchase_return",
-      createdBy: userId,
-    });
+    await JournalEntry.updateMany(
+      {
+        referenceId: id,
+        sourceType: "purchase_return",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
-    await JournalEntry.deleteMany({
-      referenceId: pr._id,
-      sourceType: "purchase_return_payment",
-      createdBy: userId,
-    });
+    /* =============================
+       SOFT DELETE PAYMENT JOURNALS
+    ============================== */
+    await JournalEntry.updateMany(
+      {
+        referenceId: pr._id,
+        sourceType: "purchase_return_payment",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
+    /* =============================
+       RECALCULATE PAYMENT ACCOUNT
+    ============================== */
     if (pr.accountId) {
       await recalculateAccountBalance(pr.accountId);
     }
 
+    /* =============================
+       RECALCULATE SUPPLIER ACCOUNT
+    ============================== */
     const supplier = await Supplier.findById(pr.supplierId);
+
     if (supplier?.account) {
       await recalculateAccountBalance(supplier.account);
     }
 
     /* =============================
-       🔁 STEP 4: DELETE MAIN DOCUMENT
+       SOFT DELETE PURCHASE RETURN
     ============================== */
-    const result = await PurchaseReturn.deleteOne({
-      _id: id,
-      createdBy: userId,
-    });
+    pr.isDeleted = true;
 
-    if (result.deletedCount === 0) {
-      return res.status(404).json({
-        error: "Delete failed",
-      });
-    }
+    await pr.save();
 
     return res.json({
       message: "✅ Purchase Return deleted successfully",
     });
   } catch (err) {
     console.error("❌ Delete Purchase Return Error:", err);
+
     return res.status(500).json({
       error: "Server Error",
       detail: err.message,

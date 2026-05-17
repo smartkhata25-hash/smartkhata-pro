@@ -269,6 +269,7 @@ const RefundInvoiceForm = ({
   };
 
   useEffect(() => {
+    if (id) return;
     const saved = localStorage.getItem('app_state_refund_invoice_draft');
 
     if (!saved) return;
@@ -310,9 +311,9 @@ const RefundInvoiceForm = ({
     } catch (err) {
       console.error(err);
     }
-  }, []);
+  }, [id]);
 
-  useFormPersist('refund_invoice_draft', formState, () => {});
+  useFormPersist(!id ? 'refund_invoice_draft' : null, formState, () => {});
 
   const handleSubmit = async (action) => {
     const filteredItems = items.filter((item) => item.name && item.quantity > 0);

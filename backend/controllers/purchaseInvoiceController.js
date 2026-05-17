@@ -53,7 +53,13 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   // 🔍 Find or Create Supplier with Account
-  let supplier = await Supplier.findOne({ name: supplierName, userId });
+  let supplier = await Supplier.findOne({
+    name: {
+      $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
+    },
+    userId,
+    isDeleted: false,
+  });
   if (!supplier) {
     const account = await Account.create({
       name: supplierName,
@@ -190,9 +196,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
 // ✅ Get invoice
 const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
-  const invoice = await PurchaseInvoice.findById(req.params.id).populate(
-    "items.productId",
-  );
+  const invoice = await PurchaseInvoice.findOne({
+    _id: req.params.id,
+    isDeleted: false,
+  }).populate("items.productId");
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
@@ -200,9 +207,13 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
   res.status(200).json(invoice);
 });
 
-// ✅ Update invoice
+// ✅ UPDATE PURCHASE INVOICE (SAFE PRO VERSION)
 const updatePurchaseInvoice = asyncHandler(async (req, res) => {
-  const invoice = await PurchaseInvoice.findById(req.params.id);
+  const invoice = await PurchaseInvoice.findOne({
+    _id: req.params.id,
+    isDeleted: false,
+  });
+
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
@@ -227,12 +238,25 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   const parsedInvoiceDate = new Date(invoiceDate);
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
+
   parsedItems = parsedItems.filter(
     (i) => i.productId && i.quantity > 0 && i.price > 0,
   );
 
   const userId = req.user?.id || req.userId;
 
+  /* =============================
+     SAVE OLD ACCOUNTS
+  ============================== */
+  const oldSupplier = await Supplier.findById(invoice.supplier);
+
+  const oldSupplierAccount = oldSupplier?.account || null;
+
+  const oldPaymentAccount = invoice.accountId || null;
+
+  /* =============================
+     ATTACHMENT HANDLING
+  ============================== */
   let attachmentPath = invoice.attachment;
   let attachmentType = "";
 
@@ -240,39 +264,81 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     if (invoice.attachment && fs.existsSync(invoice.attachment)) {
       fs.unlinkSync(invoice.attachment);
     }
+
     attachmentPath = req.file.path.replace(/\\/g, "/");
+
     attachmentType = req.file.mimetype?.split("/")[0] || "";
   } else {
     attachmentType = invoice.attachmentType || "";
   }
 
+  /* =============================
+     REMOVE OLD STOCK
+  ============================== */
   await deleteTransactionsByReference({
     referenceId: invoice._id,
     invoiceModel: "PurchaseInvoice",
     userId,
   });
 
+  /* =============================
+     SOFT DELETE OLD JOURNALS
+  ============================== */
   await JournalEntry.updateMany(
     {
       referenceId: invoice._id,
       sourceType: "purchase_invoice",
+      isDeleted: false,
     },
-    { isDeleted: true },
+    {
+      $set: {
+        isDeleted: true,
+      },
+    },
   );
 
   await JournalEntry.updateMany(
     {
       referenceId: invoice._id,
       sourceType: "purchase_payment",
+      isDeleted: false,
     },
-    { isDeleted: true },
+    {
+      $set: {
+        isDeleted: true,
+      },
+    },
   );
 
-  const supplier = await Supplier.findOne({ name: supplierName, userId });
+  /* =============================
+     FIND SUPPLIER
+  ============================== */
+  const supplier = await Supplier.findOne({
+    name: {
+      $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
+    },
+    userId,
+    isDeleted: false,
+  });
+
   if (!supplier || !supplier.account) {
-    throw new Error("Supplier or account not found");
+    throw new Error("Supplier or supplier account not found");
   }
 
+  /* =============================
+     STATUS CALCULATION
+  ============================== */
+  let status = "Unpaid";
+
+  if (paidAmount >= grandTotal) {
+    status = "Paid";
+  } else if (paidAmount > 0) {
+    status = "Partial";
+  }
+
+  /* =============================
+     UPDATE INVOICE
+  ============================== */
   Object.assign(invoice, {
     billNo,
     invoiceDate: parsedInvoiceDate,
@@ -286,17 +352,18 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     grandTotal,
     paidAmount,
     paymentType,
+    status,
     accountId: paidAmount > 0 ? accountId : null,
     attachment: attachmentPath,
     attachmentType,
     items: parsedItems,
   });
 
-  invoice.status =
-    paidAmount >= grandTotal ? "Paid" : paidAmount > 0 ? "Partial" : "Unpaid";
-
   await invoice.save();
 
+  /* =============================
+     INVENTORY ACCOUNT
+  ============================== */
   const inventoryAccount = await Account.findOne({
     code: "INVENTORY",
     userId,
@@ -306,6 +373,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     throw new Error("Inventory account not found");
   }
 
+  /* =============================
+     CREATE JOURNAL ENTRY
+  ============================== */
   const lines = [
     {
       account: inventoryAccount._id,
@@ -326,15 +396,18 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     description: req.body.description || "",
     createdBy: userId,
     sourceType: "purchase_invoice",
-    referenceId: invoice._id,
     supplierId: supplier._id,
     invoiceId: invoice._id,
     invoiceModel: "PurchaseInvoice",
+    referenceId: invoice._id,
     lines,
     attachmentUrl: attachmentPath,
     attachmentType,
   });
 
+  /* =============================
+     CREATE PAYMENT ENTRY
+  ============================== */
   if (paidAmount > 0 && accountId) {
     await createPaymentEntry({
       userId,
@@ -349,6 +422,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
+  /* =============================
+     RE-APPLY STOCK
+  ============================== */
   for (const item of parsedItems) {
     await createInventoryEntry({
       productId: item.productId,
@@ -361,8 +437,35 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
+  /* =============================
+     RECALCULATE NEW ACCOUNTS
+  ============================== */
   await recalculateAccountBalance(supplier.account);
-  if (accountId) await recalculateAccountBalance(accountId);
+
+  if (accountId) {
+    await recalculateAccountBalance(accountId);
+  }
+
+  /* =============================
+     RECALCULATE OLD SUPPLIER ACCOUNT
+  ============================== */
+  if (
+    oldSupplierAccount &&
+    oldSupplierAccount.toString() !== supplier.account.toString()
+  ) {
+    await recalculateAccountBalance(oldSupplierAccount);
+  }
+
+  /* =============================
+     RECALCULATE OLD PAYMENT ACCOUNT
+  ============================== */
+  if (
+    oldPaymentAccount &&
+    accountId &&
+    oldPaymentAccount.toString() !== accountId.toString()
+  ) {
+    await recalculateAccountBalance(oldPaymentAccount);
+  }
 
   res.status(200).json({
     success: true,
@@ -373,13 +476,23 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
 // ✅ Delete invoice
 const deletePurchaseInvoice = asyncHandler(async (req, res) => {
-  const invoice = await PurchaseInvoice.findById(req.params.id);
+  const invoice = await PurchaseInvoice.findOne({
+    _id: req.params.id,
+    isDeleted: false,
+  });
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
   }
 
   const userId = req.user?.id || req.userId;
+
+  // ✅ Save old accounts
+  const supplier = await Supplier.findById(invoice.supplier);
+
+  const supplierAccount = supplier?.account || null;
+
+  const paymentAccount = invoice.accountId || null;
 
   // ✅ STOCK ROLLBACK
   await deleteTransactionsByReference({
@@ -409,6 +522,16 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   invoice.isDeleted = true;
   await invoice.save();
 
+  // ✅ Recalculate supplier account
+  if (supplierAccount) {
+    await recalculateAccountBalance(supplierAccount);
+  }
+
+  // ✅ Recalculate payment account
+  if (paymentAccount) {
+    await recalculateAccountBalance(paymentAccount);
+  }
+
   res.status(200).json({
     success: true,
     message: "Purchase invoice and related records deleted.",
@@ -421,7 +544,7 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
   // ✅ ONLY ACTIVE SUPPLIERS
   const activeSuppliers = await Supplier.find({
     userId,
-    isActive: true,
+    isDeleted: false,
   }).select("_id");
 
   const activeSupplierIds = activeSuppliers.map((s) => s._id);
@@ -452,6 +575,13 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
 const searchPurchaseInvoices = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
   const { query } = req.query;
+
+  // ✅ ONLY ACTIVE SUPPLIERS
+  const activeSuppliers = await Supplier.find({
+    userId,
+    isDeleted: false,
+  }).select("_id");
+  const activeSupplierIds = activeSuppliers.map((s) => s._id);
 
   if (!query || !query.trim()) {
     return res.status(400).json({

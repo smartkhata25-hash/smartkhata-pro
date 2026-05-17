@@ -671,7 +671,18 @@ exports.updateRefundInvoice = async (req, res) => {
 exports.getAllRefunds = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const refunds = await RefundInvoice.find({ createdBy: userId })
+
+    // ✅ Sirf active customers
+    const activeCustomers = await Customer.find({
+      createdBy: userId,
+      isActive: true,
+    }).select("_id");
+
+    const activeCustomerIds = activeCustomers.map((c) => c._id);
+    const refunds = await RefundInvoice.find({
+      createdBy: userId,
+      customerId: { $in: activeCustomerIds },
+    })
       .sort({ createdAt: -1 })
       .lean();
 

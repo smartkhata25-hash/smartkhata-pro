@@ -666,7 +666,11 @@ const InvoiceForm = ({
     }
   }, [editingInvoiceFromAPI]);
 
-  const { clear } = useFormPersist('sale_invoice_draft', formState, () => {});
+  const { clear } = useFormPersist(
+    !editingInvoiceFromAPI ? 'sale_invoice_draft' : null,
+    formState,
+    () => {}
+  );
 
   const handleClear = async () => {
     // ✅ EDIT MODE → restore original invoice

@@ -289,7 +289,11 @@ const LedgerTable = ({
                         <td key={col} className="no-print">
                           <button
                             className="btn btn-primary"
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
+
+                              console.log('EDIT BUTTON CLICKED', e);
+
                               if (onEdit) {
                                 onEdit(e);
                               }

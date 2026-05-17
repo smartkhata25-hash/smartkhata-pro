@@ -12,10 +12,6 @@ const PayBillForm = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [accounts, setAccounts] = useState([]);
   // ✅ Sirf payment walay accounts (Cash / Bank / Asset)
-  const paymentAccounts = accounts.filter(
-    (a) =>
-      ['Cash', 'Bank', 'Asset'].includes(a.type) && !a.name?.toLowerCase().startsWith('customer:')
-  );
 
   const [supplierLedger, setSupplierLedger] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -46,21 +42,7 @@ const PayBillForm = () => {
   useEffect(() => {
     async function fetchData() {
       if (id) {
-        let sData = JSON.parse(localStorage.getItem('suppliers') || 'null');
-        let aData = JSON.parse(localStorage.getItem('accounts') || 'null');
-
-        if (!sData || !aData) {
-          const [freshSuppliers, freshAccounts] = await Promise.all([
-            getSuppliers(),
-            getAccounts(),
-          ]);
-
-          sData = freshSuppliers;
-          aData = freshAccounts;
-
-          localStorage.setItem('suppliers', JSON.stringify(sData));
-          localStorage.setItem('accounts', JSON.stringify(aData));
-        }
+        const [sData, aData] = await Promise.all([getSuppliers(), getAccounts()]);
 
         let existing = JSON.parse(localStorage.getItem(`paybill_${id}`) || 'null');
 
@@ -70,7 +52,16 @@ const PayBillForm = () => {
         }
 
         setSuppliers(sData);
-        setAccounts(aData);
+        const paymentAccounts = aData.filter(
+          (acc) =>
+            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
+            !acc.name?.toLowerCase().startsWith('customer:')
+        );
+
+        setAccounts(paymentAccounts);
+
+        console.log('🔥 existing.paymentEntries', existing.paymentEntries);
+        console.log('🔥 accounts', paymentAccounts);
 
         setFormData({
           supplier: existing.supplier?._id || '',
@@ -84,7 +75,7 @@ const PayBillForm = () => {
         setPaymentEntries(
           existing.paymentEntries && existing.paymentEntries.length > 0
             ? existing.paymentEntries.map((p) => ({
-                account: p.account || '',
+                account: typeof p.account === 'object' ? p.account._id : p.account || '',
                 amount: p.amount || '',
                 paymentType:
                   (p.paymentType || existing.paymentType) === 'online'
@@ -112,7 +103,14 @@ const PayBillForm = () => {
         const [sData, aData] = await Promise.all([getSuppliers(), getAccounts()]);
 
         setSuppliers(sData);
-        setAccounts(aData);
+
+        const paymentAccounts = aData.filter(
+          (acc) =>
+            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
+            !acc.name?.toLowerCase().startsWith('customer:')
+        );
+
+        setAccounts(paymentAccounts);
       }
     }
     fetchData();
@@ -186,7 +184,7 @@ const PayBillForm = () => {
       setPaymentEntries(
         existing.paymentEntries && existing.paymentEntries.length > 0
           ? existing.paymentEntries.map((p) => ({
-              account: p.account || '',
+              account: typeof p.account === 'object' ? p.account._id : p.account || '',
               amount: p.amount || '',
               paymentType:
                 p.paymentType === 'online'
@@ -229,7 +227,7 @@ const PayBillForm = () => {
     }
   }, []);
 
-  useFormPersist('pay_bill_draft', formState, () => {});
+  useFormPersist(!id ? 'pay_bill_draft' : null, formState, () => {});
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
@@ -421,7 +419,7 @@ const PayBillForm = () => {
               required
             >
               <option value="">{t('account.selectAccount')}</option>
-              {paymentAccounts.map((a) => (
+              {accounts.map((a) => (
                 <option key={a._id} value={a._id}>
                   {a.name}
                 </option>

@@ -94,6 +94,8 @@ const buildInvoice = (data, docConfig, title) => {
       showDescription: setting.showDescription,
       showUOM: setting.showUOM,
 
+      showNetTotal: setting.showNetTotal,
+
       showCustomerTotalBalance: setting.showCustomerTotalBalance,
 
       rowHeight: layout?.rowHeight || "medium",

@@ -17,6 +17,7 @@ const defaultDocumentSettings = {
   showStatus: true,
   showPaymentType: true,
   showBalance: true,
+  showNetTotal: true,
   showCustomerTotalBalance: true,
 
   showStamp: true,

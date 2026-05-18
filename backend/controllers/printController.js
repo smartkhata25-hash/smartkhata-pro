@@ -320,13 +320,14 @@ const getSaleReturnHtml = async (req, res) => {
 ========================================================= */
 const generatePreviewSettingsHtml = async (req, res) => {
   try {
-    const { type, settings } = req.body;
+    const { type, settings, lang } = req.body;
 
     if (!type || !settings) {
       return res.status(400).send("Invalid preview data");
     }
 
     const previewInvoice = {
+      lang: lang || "en",
       invoiceDate: new Date(),
       invoiceTime: new Date().toLocaleTimeString(),
       billNo: "PREVIEW",
@@ -378,6 +379,8 @@ const generatePreviewSettingsHtml = async (req, res) => {
     } else {
       return res.status(400).send("Unsupported preview type");
     }
+
+    built.lang = lang || "en";
 
     const html = generateSaleInvoiceHTML(built);
 

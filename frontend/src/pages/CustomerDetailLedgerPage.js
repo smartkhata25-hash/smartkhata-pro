@@ -596,12 +596,12 @@ export default function CustomerDetailLedgerPage() {
           </div>
 
           <div className="card">
-            <div style={{ fontSize: 12, color: '#16a34a' }}>{t('debit')}</div>
+            <div style={{ fontSize: 12, color: '#16a34a' }}>{t('credit')}</div>
             <div style={{ fontWeight: 800 }}>Rs. {summary.debit.toFixed(2)}</div>
           </div>
 
           <div className="card">
-            <div style={{ fontSize: 12, color: '#dc2626' }}>{t('credit')}</div>
+            <div style={{ fontSize: 12, color: '#dc2626' }}>{t('debit')}</div>
             <div style={{ fontWeight: 800 }}>Rs. {summary.credit.toFixed(2)}</div>
           </div>
 
@@ -677,19 +677,25 @@ export default function CustomerDetailLedgerPage() {
                   <table className="table" style={{ marginBottom: 4 }}>
                     <thead>
                       <tr>
-                        <th>{t('inventory.product')}</th>
-                        <th>{t('qty')}</th>
-                        <th>{t('rate')}</th>
-                        <th>{t('total')}</th>
+                        <th style={{ width: '55%' }}>{t('inventory.product')}</th>
+
+                        <th style={{ width: '10%' }}>{t('qty')}</th>
+
+                        <th style={{ width: '15%' }}>{t('rate')}</th>
+
+                        <th style={{ width: '20%' }}>{t('total')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {blk.items.map((it, idx) => (
                         <tr key={idx}>
-                          <td>{it.productName}</td>
-                          <td>{it.quantity}</td>
-                          <td>{it.rate.toFixed(2)}</td>
-                          <td>{it.total.toFixed(2)}</td>
+                          <td style={{ width: '55%' }}>{it.productName}</td>
+
+                          <td style={{ width: '10%' }}>{it.quantity}</td>
+
+                          <td style={{ width: '15%' }}>{it.rate.toFixed(2)}</td>
+
+                          <td style={{ width: '20%' }}>{it.total.toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -700,14 +706,14 @@ export default function CustomerDetailLedgerPage() {
                 <table className="table">
                   <tbody>
                     <tr>
-                      <td align="right">{t('debit')}:</td>
+                      <td align="right">{t('credit')}:</td>
                       <td align="right" className="amount-debit">
                         {blk.debit ? blk.debit.toFixed(2) : '—'}
                       </td>
                     </tr>
 
                     <tr>
-                      <td align="right">{t('credit')}:</td>
+                      <td align="right">{t('debit')}:</td>
                       <td align="right" className="amount-credit">
                         {blk.credit ? blk.credit.toFixed(2) : '—'}
                       </td>

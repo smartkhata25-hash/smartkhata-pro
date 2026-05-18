@@ -183,10 +183,10 @@ ${
 <table>
 <thead>
 <tr>
-<th style="width:40%">Product</th>
-<th style="width:15%">Qty</th>
-<th style="width:20%">Rate</th>
-<th style="width:25%">Total</th>
+<th style="width:60%">Product</th>
+<th style="width:10%">Qty</th>
+<th style="width:12%">Rate</th>
+<th style="width:18%">Total</th>
 </tr>
 </thead>
 

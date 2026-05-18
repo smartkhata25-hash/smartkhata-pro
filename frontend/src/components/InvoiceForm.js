@@ -584,6 +584,7 @@ const InvoiceForm = ({
         body: JSON.stringify({
           type: 'sales',
           settings: printSettings.sales,
+          lang: localStorage.getItem('lang') || 'en',
         }),
       });
 
@@ -1288,7 +1289,12 @@ const InvoiceForm = ({
                               grandTotal,
                               paidAmount,
                               paymentType,
-                              customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                              customerTotalBalance: editingInvoiceFromAPI
+                                ? customerBalance -
+                                  ((editingInvoiceFromAPI.totalAmount || 0) -
+                                    (editingInvoiceFromAPI.paidAmount || 0)) +
+                                  (grandTotal - paidAmount)
+                                : customerBalance + (grandTotal - paidAmount),
                             },
                           },
                         });
@@ -1332,7 +1338,12 @@ const InvoiceForm = ({
                           grandTotal,
                           paidAmount,
                           paymentType,
-                          customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                          customerTotalBalance: editingInvoiceFromAPI
+                            ? customerBalance -
+                              ((editingInvoiceFromAPI.totalAmount || 0) -
+                                (editingInvoiceFromAPI.paidAmount || 0)) +
+                              (grandTotal - paidAmount)
+                            : customerBalance + (grandTotal - paidAmount),
                         };
 
                         // ✅ invoice save کریں
@@ -1405,7 +1416,12 @@ const InvoiceForm = ({
                             grandTotal,
                             paidAmount,
                             paymentType,
-                            customerTotalBalance: customerBalance + (grandTotal - paidAmount),
+                            customerTotalBalance: editingInvoiceFromAPI
+                              ? customerBalance -
+                                ((editingInvoiceFromAPI.totalAmount || 0) -
+                                  (editingInvoiceFromAPI.paidAmount || 0)) +
+                                (grandTotal - paidAmount)
+                              : customerBalance + (grandTotal - paidAmount),
                           };
 
                           if (editingInvoiceFromAPI?._id) {
@@ -1496,7 +1512,13 @@ const InvoiceForm = ({
                 {printSettings?.sales?.settings?.showCustomerTotalBalance !== false && (
                   <p className="text-blue-600 font-semibold">
                     {t('customerTotalBalance')}: Rs.{' '}
-                    {(customerBalance + (grandTotal - paidAmount)).toFixed(2)}
+                    {(editingInvoiceFromAPI
+                      ? customerBalance -
+                        ((editingInvoiceFromAPI.totalAmount || 0) -
+                          (editingInvoiceFromAPI.paidAmount || 0)) +
+                        (grandTotal - paidAmount)
+                      : customerBalance + (grandTotal - paidAmount)
+                    ).toFixed(2)}
                   </p>
                 )}
               </div>
@@ -1744,6 +1766,26 @@ const InvoiceForm = ({
                     }
                   />
                   Show Customer Total Balance
+                </label>
+
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={printSettings.sales.settings.showNetTotal ?? true}
+                    onChange={(e) =>
+                      setPrintSettings({
+                        ...printSettings,
+                        sales: {
+                          ...printSettings.sales,
+                          settings: {
+                            ...printSettings.sales.settings,
+                            showNetTotal: e.target.checked,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  Show Net Total
                 </label>
               </div>
 

@@ -67,10 +67,10 @@ const generateSaleInvoiceHTML = (data) => {
   /* ================= COLUMN WIDTH SYSTEM (UNCHANGED) ================= */
 
   const sizeToPercent = {
-    small: 8,
-    compact: 12,
-    medium: 18,
-    large: 25,
+    small: 5,
+    compact: 8,
+    medium: 15,
+    large: 40,
   };
 
   const columnSizes = columns?.columnSizes || {};
@@ -233,16 +233,28 @@ td.left {
 
 .totals {
   margin-top: ${blockSpacing}px;
-  width: 180px; /* یہاں سے آپ چوڑائی کنٹرول کریں گے */
+  width: 260px;
   margin-left: auto;
   font-weight: 700;
 }
 
 .totals-row {
   display: grid;
-  grid-template-columns: 1fr 80px;
-  border-bottom: 2px solid black; /* اوپر کی جگہ نیچے لائن */
-  padding: 2px 0; /* gap کم */
+  grid-template-columns: auto 70px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 2px solid black;
+  padding: 2px 0;
+}
+
+.totals-row span:first-child {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.totals-row span:last-child {
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* ================= FOOTER ================= */
@@ -341,10 +353,16 @@ ${
       : ""
   }
 
-  <div class="totals-row">
-    <span>${t("netTotal", lang)}:</span>
-    <span>${totals?.grandTotal || total}</span>
-  </div>
+  ${
+    columns?.showNetTotal !== false
+      ? `
+<div class="totals-row">
+  <span>${t("netTotal", lang)}:</span>
+  <span>${totals?.grandTotal || total}</span>
+</div>
+`
+      : ""
+  }
 
   <div class="totals-row">
     <span>${t("paid", lang)}:</span>

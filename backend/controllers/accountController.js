@@ -100,16 +100,6 @@ exports.getAccounts = async (req, res) => {
 
     const accounts = await Account.find(query).sort(sort);
 
-    console.log(
-      "🔥 FILTERED PAYMENT ACCOUNTS",
-      accounts.map((a) => ({
-        id: a._id.toString(),
-        name: a.name,
-        type: a.type,
-        category: a.category,
-      })),
-    );
-
     res.status(200).json(accounts);
   } catch (error) {
     res.status(500).json({ message: "Fetch failed", error: error.message });

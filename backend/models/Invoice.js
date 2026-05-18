@@ -107,6 +107,10 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    lang: {
+      type: String,
+      default: "en",
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

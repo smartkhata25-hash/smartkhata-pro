@@ -265,7 +265,7 @@ const getSaleInvoiceHtml = async (req, res) => {
 
     const built = buildSaleInvoicePrint(invoice, printSetting);
 
-    built.lang = invoice.lang;
+    built.lang = req.query.lang || "en";
 
     const html = generateSaleInvoiceHTML(built);
 

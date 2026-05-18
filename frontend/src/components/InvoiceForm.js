@@ -795,6 +795,7 @@ const InvoiceForm = ({
     formData.append('discountAmount', finalDiscount);
     formData.append('grandTotal', grandTotal);
     formData.append('paidAmount', paidAmount);
+    formData.append('lang', localStorage.getItem('lang') || 'en');
 
     // ✅ FINAL paymentType decision
     const finalPaymentType = paidAmount > 0 ? paymentType : 'credit';
@@ -1311,7 +1312,7 @@ const InvoiceForm = ({
                       onClick={async (e) => {
                         if (saveLoading) return;
 
-                        // ✅ پہلے print data save کریں
+                        // ✅ پہلے print data تیار کریں
                         const previewItems = items
                           .filter((i) => i.productId && i.quantity > 0)
                           .map((i) => ({
@@ -1349,27 +1350,17 @@ const InvoiceForm = ({
                         // ✅ invoice save کریں
                         await handleSubmit(e, 'new');
 
-                        // ✅ پھر print کھولیں
+                        // ✅ پھر print preview کھولیں
                         setTimeout(() => {
-                          if (editingInvoiceFromAPI?._id) {
-                            navigate(`/print/sale/${editingInvoiceFromAPI._id}?autoprint=true`, {
-                              state: {
-                                autoPrint: true,
-                                isPreview: true,
-                                type: 'sale',
-                              },
-                            });
-                          } else {
-                            navigate(`/print/sale/preview`, {
-                              replace: true,
-                              state: {
-                                autoPrint: true,
-                                isPreview: true,
-                                type: 'sale',
-                                invoiceData: printData,
-                              },
-                            });
-                          }
+                          navigate(`/print/sale/preview`, {
+                            replace: true,
+                            state: {
+                              autoPrint: true,
+                              isPreview: true,
+                              type: 'sale',
+                              invoiceData: printData,
+                            },
+                          });
                         }, 500);
                       }}
                       className={`text-white px-4 py-2 rounded text-sm shadow-md ${

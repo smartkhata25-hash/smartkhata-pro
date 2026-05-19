@@ -133,7 +133,7 @@ const PurchaseInvoiceForm = () => {
           search: product?.name || '',
           name: product?.name || '',
           description: product?.description || '',
-          cost: Number(item.price ?? 0),
+          cost: Number(item.salePrice ?? product?.salePrice ?? 0),
           rate: Number(item.price ?? 0),
           quantity: Number(item.quantity ?? 1),
           amount: Number(item.total ?? 0),
@@ -260,16 +260,11 @@ const PurchaseInvoiceForm = () => {
 
   const handleQtyRateChange = (index, field, value) => {
     const updated = [...items];
+
     updated[index][field] = Number(value);
 
-    if (field === 'cost') {
-      updated[index].amount = updated[index].quantity * updated[index].cost;
-    } else if (field === 'rate') {
-      updated[index].amount = updated[index].quantity * updated[index].rate;
-    } else if (field === 'quantity') {
-      const price = updated[index].cost || updated[index].rate;
-      updated[index].amount = updated[index].quantity * price;
-    }
+    // 🔥 Amount ہمیشہ Cost (rate field) سے بنے گا
+    updated[index].amount = (updated[index].quantity || 0) * (updated[index].rate || 0);
 
     setItems(updated);
   };
@@ -357,6 +352,7 @@ const PurchaseInvoiceForm = () => {
         productId: i.productId,
         quantity: i.quantity,
         price: i.rate,
+        salePrice: i.cost,
         total: i.amount || i.quantity * i.rate,
       }));
 
@@ -461,6 +457,7 @@ const PurchaseInvoiceForm = () => {
         productId: i.productId,
         quantity: i.quantity,
         price: i.rate,
+        salePrice: i.cost,
         total: i.amount || i.quantity * i.rate,
       }));
 
@@ -538,7 +535,7 @@ const PurchaseInvoiceForm = () => {
           search: product?.name || '',
           name: product?.name || '',
           description: product?.description || '',
-          cost: Number(item.price ?? 0),
+          cost: Number(item.salePrice ?? product?.salePrice ?? 0),
           rate: Number(item.price ?? 0),
           quantity: Number(item.quantity ?? 1),
           amount: Number(item.total ?? 0),
@@ -602,6 +599,7 @@ const PurchaseInvoiceForm = () => {
         productId: i.productId,
         quantity: i.quantity,
         price: i.rate,
+        salePrice: i.cost,
         total: i.amount,
       }));
 
@@ -1105,7 +1103,7 @@ const PurchaseInvoiceForm = () => {
                 search: product?.name || '',
                 name: product?.name || '',
                 description: product?.description || '',
-                cost: Number(item.price ?? 0),
+                cost: Number(item.salePrice ?? product?.salePrice ?? 0),
                 rate: Number(item.price ?? 0),
                 quantity: Number(item.quantity ?? 1),
                 amount: Number(item.total ?? 0),

@@ -27,11 +27,6 @@ const InvoiceTable = ({
     rate: 0,
     amount: 0,
   });
-  const focusItem = (index) => {
-    setTimeout(() => {
-      itemRefs.current[index]?.focus();
-    }, 50);
-  };
 
   return (
     <div className="overflow-x-auto mt-2" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -40,16 +35,37 @@ const InvoiceTable = ({
           <thead className="bg-gray-100 sticky top-0">
             <tr>
               <th className="border px-2 py-1 md:p-1">#</th>
+
               <th className="border px-2 py-1 md:p-1 w-[35%]">{t('item')}</th>
+
               <th className="border px-2 py-1 md:p-1 hidden md:table-cell">{t('description')}</th>
-              {!hideCost && <th className="border px-2 py-1 md:p-1">{t('cost')}</th>}
-              <th className="border px-2 py-1 md:p-1">{t('qty')}</th>
-              <th className="border px-2 py-1 md:p-1">{t('rate')}</th>
-              <th className="border px-2 py-1 md:p-1">
-                <div className="flex items-center justify-between">
-                  <span>{t('amount')}</span>
-                </div>
-              </th>
+
+              {/* 🔥 PURCHASE MODE */}
+              {mode === 'purchase' ? (
+                <>
+                  <th className="border px-2 py-1 md:p-1">{t('qty')}</th>
+
+                  {!hideCost && <th className="border px-2 py-1 md:p-1">Cost</th>}
+
+                  <th className="border px-2 py-1 md:p-1">{t('amount')}</th>
+
+                  <th className="border px-2 py-1 md:p-1">Sale Price</th>
+                </>
+              ) : (
+                <>
+                  {!hideCost && <th className="border px-2 py-1 md:p-1">{t('cost')}</th>}
+
+                  <th className="border px-2 py-1 md:p-1">{t('qty')}</th>
+
+                  <th className="border px-2 py-1 md:p-1">{t('rate')}</th>
+
+                  <th className="border px-2 py-1 md:p-1">
+                    <div className="flex items-center justify-between">
+                      <span>{t('amount')}</span>
+                    </div>
+                  </th>
+                </>
+              )}
             </tr>
           </thead>
 
@@ -70,24 +86,36 @@ const InvoiceTable = ({
                       const updated = [...items];
                       const qty = Number(updated[index].quantity) || 1;
 
-                      // ✅ Sale vs Purchase price logic
-                      const price =
-                        mode === 'purchase' ? product.unitCost || 0 : product.salePrice || 0;
-
                       updated[index] = {
                         ...updated[index],
                         search: product.name,
                         name: product.name,
                         productId: product._id,
                         description: product.description || '',
-                        cost: product.unitCost || 0,
-                        rate: price,
+
+                        // ✅ SALE MODE
+                        ...(mode !== 'purchase' && {
+                          cost: product.unitCost || 0,
+                          rate: product.salePrice || 0,
+                          amount: qty * (product.salePrice || 0),
+                        }),
+
+                        // ✅ PURCHASE MODE
+                        ...(mode === 'purchase' && {
+                          // Sale Price
+                          cost: product.salePrice || 0,
+
+                          // Purchase Cost
+                          rate: product.unitCost || 0,
+
+                          // Qty × Cost
+                          amount: qty * (product.unitCost || 0),
+                        }),
+
                         quantity: qty,
-                        amount: qty * price,
                       };
 
                       onProductChange && onProductChange(product._id);
-                      console.log('📦 Product ID SENT TO PARENT:', product._id);
 
                       const hasEmptyRow = updated.some(
                         (row) => !row.productId && !row.search && !row.quantity && !row.rate
@@ -119,74 +147,107 @@ const InvoiceTable = ({
                   />
                 </td>
 
-                {/* Cost */}
-                {!hideCost && (
-                  <td className="border px-2 py-1 md:p-1 text-center">
-                    {mode === 'purchase' ? (
+                {/* 🔥 PURCHASE MODE ROW */}
+                {mode === 'purchase' ? (
+                  <>
+                    {/* Qty */}
+                    <td className="border p-0">
                       <input
+                        ref={(el) => (qtyRefs.current[index] = el)}
                         type="number"
-                        value={item.cost || ''}
-                        onChange={(e) => handleQtyRateChange(index, 'cost', e.target.value)}
+                        value={item.quantity || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          handleQtyRateChange(index, 'quantity', e.target.value);
+                        }}
                         onFocus={clearOnFocus}
                         className="w-full border-0 p-0 text-center h-6 no-spinner"
                       />
-                    ) : item.cost ? (
-                      item.cost.toFixed(2)
-                    ) : (
-                      '0.00'
+                    </td>
+
+                    {/* Cost */}
+                    <td className="border p-0">
+                      <input
+                        type="number"
+                        value={item.rate || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          handleQtyRateChange(index, 'rate', e.target.value);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
+                      />
+                    </td>
+
+                    {/* Amount */}
+                    <td className="border px-0 py-0 md:p-0 text-center font-semibold">
+                      {item.amount ? item.amount.toFixed(2) : '0.00'}
+                    </td>
+
+                    {/* Sale Price */}
+                    <td className="border p-0">
+                      <input
+                        type="number"
+                        value={item.cost || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          handleQtyRateChange(index, 'cost', e.target.value);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
+                      />
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    {/* Cost */}
+                    {!hideCost && (
+                      <td className="border px-2 py-1 md:p-1 text-center">
+                        {item.cost ? item.cost.toFixed(2) : '0.00'}
+                      </td>
                     )}
-                  </td>
+
+                    {/* Qty */}
+                    <td className="border p-0">
+                      <input
+                        ref={(el) => (qtyRefs.current[index] = el)}
+                        type="number"
+                        value={item.quantity || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          handleQtyRateChange(index, 'quantity', e.target.value);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
+                      />
+                    </td>
+
+                    {/* Rate */}
+                    <td className="border p-0">
+                      <input
+                        ref={(el) => (rateRefs.current[index] = el)}
+                        type="number"
+                        value={item.rate || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          handleQtyRateChange(index, 'rate', e.target.value);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center no-spinner"
+                      />
+                    </td>
+
+                    {/* Amount */}
+                    <td className="border px-0 py-0 md:p-0 text-center font-semibold">
+                      {item.amount ? item.amount.toFixed(2) : '0.00'}
+                    </td>
+                  </>
                 )}
-
-                {/* Qty */}
-                <td className="border p-0">
-                  <input
-                    ref={(el) => (qtyRefs.current[index] = el)}
-                    type="number"
-                    value={item.quantity || ''}
-                    onChange={(e) => {
-                      if (!item.productId && !item.search) return;
-
-                      handleQtyRateChange(index, 'quantity', e.target.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        window.dispatchEvent(new CustomEvent('close-history'));
-                        rateRefs.current[index]?.focus();
-                      }
-                    }}
-                    onFocus={clearOnFocus}
-                    className="w-full border-0 p-0 text-center h-6 no-spinner"
-                  />
-                </td>
-
-                {/* Rate */}
-                <td className="border p-0">
-                  <input
-                    ref={(el) => (rateRefs.current[index] = el)}
-                    type="number"
-                    value={item.rate || ''}
-                    onChange={(e) => {
-                      if (!item.productId && !item.search) return;
-
-                      handleQtyRateChange(index, 'rate', e.target.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        focusItem(index + 1);
-                      }
-                    }}
-                    onFocus={clearOnFocus}
-                    className="w-full border-0 p-0 text-center no-spinner"
-                  />
-                </td>
-
-                {/* Amount */}
-                <td className="border px-0 py-0 md:p-0 text-center font-semibold">
-                  {item.amount ? item.amount.toFixed(2) : '0.00'}
-                </td>
               </tr>
             ))}
           </tbody>

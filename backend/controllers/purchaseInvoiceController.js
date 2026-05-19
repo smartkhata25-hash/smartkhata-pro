@@ -173,6 +173,13 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
   // 📦 Stock via stockHelper
   for (const item of parsedItems) {
+    // ✅ Update Product Prices
+    await Product.findByIdAndUpdate(item.productId, {
+      unitCost: item.price || 0,
+      salePrice: item.salePrice || 0,
+    });
+
+    // ✅ Inventory Entry
     await createInventoryEntry({
       productId: item.productId,
       type: "IN",
@@ -181,6 +188,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       invoiceId: invoice._id,
       invoiceModel: "PurchaseInvoice",
       userId,
+      rate: item.price || 0,
     });
   }
 
@@ -426,6 +434,13 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
      RE-APPLY STOCK
   ============================== */
   for (const item of parsedItems) {
+    // ✅ Update Product Prices
+    await Product.findByIdAndUpdate(item.productId, {
+      unitCost: item.price || 0,
+      salePrice: item.salePrice || 0,
+    });
+
+    // ✅ Re-Apply Stock
     await createInventoryEntry({
       productId: item.productId,
       type: "IN",
@@ -434,6 +449,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       invoiceId: invoice._id,
       invoiceModel: "PurchaseInvoice",
       userId,
+      rate: item.price || 0,
     });
   }
 

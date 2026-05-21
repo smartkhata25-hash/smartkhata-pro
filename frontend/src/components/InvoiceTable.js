@@ -28,6 +28,69 @@ const InvoiceTable = ({
     amount: 0,
   });
 
+  // ✅ Keyboard Arrow Navigation
+  const handleArrowNavigation = (e, rowIndex, field) => {
+    // ⬇️ DOWN
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+
+      if (field === 'item') {
+        itemRefs.current[rowIndex + 1]?.focus();
+      }
+
+      if (field === 'qty') {
+        qtyRefs.current[rowIndex + 1]?.focus();
+      }
+
+      if (field === 'rate') {
+        rateRefs.current[rowIndex + 1]?.focus();
+      }
+    }
+
+    // ⬆️ UP
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+
+      if (field === 'item') {
+        itemRefs.current[rowIndex - 1]?.focus();
+      }
+
+      if (field === 'qty') {
+        qtyRefs.current[rowIndex - 1]?.focus();
+      }
+
+      if (field === 'rate') {
+        rateRefs.current[rowIndex - 1]?.focus();
+      }
+    }
+
+    // ➡️ RIGHT
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+
+      if (field === 'item') {
+        qtyRefs.current[rowIndex]?.focus();
+      }
+
+      if (field === 'qty') {
+        rateRefs.current[rowIndex]?.focus();
+      }
+    }
+
+    // ⬅️ LEFT
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+
+      if (field === 'qty') {
+        itemRefs.current[rowIndex]?.focus();
+      }
+
+      if (field === 'rate') {
+        qtyRefs.current[rowIndex]?.focus();
+      }
+    }
+  };
+
   return (
     <div className="overflow-x-auto mt-2" style={{ WebkitOverflowScrolling: 'touch' }}>
       <div className="max-h-[35vh] md:max-h-[50vh] overflow-y-auto border rounded">
@@ -78,6 +141,7 @@ const InvoiceTable = ({
                 <td className="border px-1 py-0 md:p-0">
                   <ProductDropdown
                     inputRef={(el) => (itemRefs.current[index] = el)}
+                    onKeyDown={(e) => handleArrowNavigation(e, index, 'item')}
                     productList={products}
                     value={item.search}
                     rowIndex={index}
@@ -154,6 +218,7 @@ const InvoiceTable = ({
                     <td className="border p-0">
                       <input
                         ref={(el) => (qtyRefs.current[index] = el)}
+                        onKeyDown={(e) => handleArrowNavigation(e, index, 'qty')}
                         type="number"
                         value={item.quantity || ''}
                         onChange={(e) => {
@@ -169,6 +234,8 @@ const InvoiceTable = ({
                     {/* Cost */}
                     <td className="border p-0">
                       <input
+                        ref={(el) => (rateRefs.current[index] = el)}
+                        onKeyDown={(e) => handleArrowNavigation(e, index, 'rate')}
                         type="number"
                         value={item.rate || ''}
                         onChange={(e) => {
@@ -189,6 +256,8 @@ const InvoiceTable = ({
                     {/* Sale Price */}
                     <td className="border p-0">
                       <input
+                        ref={(el) => (rateRefs.current[index] = el)}
+                        onKeyDown={(e) => handleArrowNavigation(e, index, 'rate')}
                         type="number"
                         value={item.cost || ''}
                         onChange={(e) => {
@@ -214,6 +283,7 @@ const InvoiceTable = ({
                     <td className="border p-0">
                       <input
                         ref={(el) => (qtyRefs.current[index] = el)}
+                        onKeyDown={(e) => handleArrowNavigation(e, index, 'qty')}
                         type="number"
                         value={item.quantity || ''}
                         onChange={(e) => {
@@ -230,6 +300,7 @@ const InvoiceTable = ({
                     <td className="border p-0">
                       <input
                         ref={(el) => (rateRefs.current[index] = el)}
+                        onKeyDown={(e) => handleArrowNavigation(e, index, 'rate')}
                         type="number"
                         value={item.rate || ''}
                         onChange={(e) => {

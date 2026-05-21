@@ -13,6 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import './ReceivePaymentForm.css';
 
 const ReceivePaymentForm = () => {
   const [customers, setCustomers] = useState([]);
@@ -31,6 +32,7 @@ const ReceivePaymentForm = () => {
     time: dayjs().format('HH:mm'),
     amount: '',
     paymentType: 'Cash',
+    discountAmount: '',
     account: '',
     description: '',
     attachment: null,
@@ -95,6 +97,7 @@ const ReceivePaymentForm = () => {
             date: existing.date,
             time: existing.time,
             paymentType: existing.paymentType || 'Cash',
+            discountAmount: existing.discountAmount || '',
             description: existing.description || '',
             attachment: null,
           });
@@ -182,6 +185,7 @@ const ReceivePaymentForm = () => {
       date: dayjs().format('YYYY-MM-DD'),
       time: dayjs().format('HH:mm'),
       amount: '',
+      discountAmount: '',
       paymentType: 'Cash',
       account: '',
       description: '',
@@ -221,6 +225,7 @@ const ReceivePaymentForm = () => {
         time: existing.time,
         paymentType: existing.paymentType || '',
         description: existing.description || '',
+        discountAmount: existing.discountAmount || '',
         attachment: null,
       });
 
@@ -263,8 +268,17 @@ const ReceivePaymentForm = () => {
       return;
     }
 
+    const lastBill =
+      customerLedger.filter((e) => e.billNo?.startsWith('RCV-')).slice(-1)[0]?.billNo || 'RCV-1000';
+
+    const lastNumber = Number(lastBill.replace('RCV-', ''));
+
     const previewData = {
       ...formData,
+
+      billNo: `RCV-${lastNumber + 1}`,
+
+      discountAmount: Number(formData.discountAmount || 0),
 
       lang: getCurrentLanguage(),
 
@@ -293,8 +307,17 @@ const ReceivePaymentForm = () => {
       return;
     }
 
+    const lastBill =
+      customerLedger.filter((e) => e.billNo?.startsWith('RCV-')).slice(-1)[0]?.billNo || 'RCV-1000';
+
+    const lastNumber = Number(lastBill.replace('RCV-', ''));
+
     const previewData = {
       ...formData,
+
+      billNo: `RCV-${lastNumber + 1}`,
+
+      discountAmount: Number(formData.discountAmount || 0),
 
       lang: getCurrentLanguage(),
 
@@ -335,7 +358,11 @@ const ReceivePaymentForm = () => {
 
     const totalAmount = paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-    if (currentBalance <= 0 && totalAmount > 0) {
+    const discountAmount = Number(formData.discountAmount || 0);
+
+    const finalAmount = totalAmount + discountAmount;
+
+    if (currentBalance <= 0 && finalAmount > 0) {
       const ok = window.confirm(
         '⚠️ This customer has no pending balance. This payment will be recorded as advance. Do you want to continue?'
       );
@@ -349,6 +376,8 @@ const ReceivePaymentForm = () => {
 
     data.append('paymentEntries', JSON.stringify(paymentEntries));
 
+    data.append('discountAmount', formData.discountAmount || 0);
+
     try {
       setLoading(true);
       if (id) {
@@ -357,6 +386,9 @@ const ReceivePaymentForm = () => {
         alert(t('alerts.paymentUpdated'));
       } else {
         await createReceivePayment(data);
+
+        await loadLedger(formData.customer);
+
         clear();
       }
 
@@ -574,9 +606,10 @@ const ReceivePaymentForm = () => {
                 </select>
 
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   placeholder={t('amount')}
-                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm"
+                  className="col-span-2 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm no-spinner"
                   value={entry.amount}
                   onChange={(e) =>
                     setPaymentEntries((prev) =>
@@ -611,12 +644,27 @@ const ReceivePaymentForm = () => {
               + {t('payment.addAnother')}
             </button>
 
+            <div className="flex justify-end mt-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Discount"
+                className="w-32 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 text-xs md:text-sm text-right shadow-sm no-spinner"
+                name="discountAmount"
+                value={formData.discountAmount || ''}
+                onChange={handleChange}
+              />
+            </div>
+
             <div className="flex justify-end mt-4">
               <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
                 <div className="flex justify-between font-semibold text-sm">
                   <span>{t('total')}</span>
                   <span>
-                    {paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0).toFixed(2)}
+                    {(
+                      paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
+                      Number(formData.discountAmount || 0)
+                    ).toFixed(2)}
                   </span>
                 </div>
               </div>

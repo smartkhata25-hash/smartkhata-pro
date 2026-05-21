@@ -316,7 +316,13 @@ const InvoiceForm = ({
     setCustomerPhone(editingInvoiceFromAPI.customerPhone);
     setBy(editingInvoiceFromAPI.by || '');
     setPaidAmount(editingInvoiceFromAPI.paidAmount || 0);
+
+    setDiscountAmount(editingInvoiceFromAPI.discountAmount || 0);
+
+    setDiscountPercent(0);
+
     setPaymentType(editingInvoiceFromAPI.paymentType || 'credit');
+
     setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
     if (editingInvoiceFromAPI.isOpening) {
       setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
@@ -732,6 +738,7 @@ const InvoiceForm = ({
 
     if (!customerName.trim()) {
       alert(t('alerts.customerRequired'));
+      setSaveLoading(false);
       return;
     }
 
@@ -751,14 +758,15 @@ const InvoiceForm = ({
 
     if (mappedItems.length === 0 && !isOpeningInvoice) {
       alert('Please add at least one item');
+      setSaveLoading(false);
       return;
     }
-
     const remaining = grandTotal - paidAmount;
 
     if (remaining < 0 && !showOverpayModal) {
       setOverpayAmount(Math.abs(remaining));
       setShowOverpayModal(true);
+      setSaveLoading(false);
       return;
     }
 
@@ -766,18 +774,21 @@ const InvoiceForm = ({
       // payment type required
       if (!paymentType) {
         alert(t('alerts.selectPaymentType'));
+        setSaveLoading(false);
         return;
       }
 
       // credit not allowed when paid amount exists
       if (paymentType === 'credit') {
         alert(t('alerts.creditNotAllowed'));
+        setSaveLoading(false);
         return;
       }
 
       // cash has auto account, others need manual account
       if (paymentType !== 'cash' && !selectedAccountId) {
         alert(t('alerts.selectAccount'));
+        setSaveLoading(false);
         return;
       }
     }
@@ -791,9 +802,16 @@ const InvoiceForm = ({
     formData.append('by', by);
     const finalOpeningAmount = isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal;
     formData.append('totalAmount', finalOpeningAmount);
+
+    formData.append('subTotal', isOpeningInvoice ? Number(openingBalanceAmount || 0) : totalAmount);
+
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', finalDiscount);
-    formData.append('grandTotal', grandTotal);
+
+    formData.append(
+      'grandTotal',
+      isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal
+    );
     formData.append('paidAmount', paidAmount);
     formData.append('lang', localStorage.getItem('lang') || 'en');
 

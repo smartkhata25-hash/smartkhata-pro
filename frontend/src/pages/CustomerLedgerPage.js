@@ -185,8 +185,11 @@ export default function CustomerLedgerPage() {
   const handleRowClick = (entry) => {
     if (!entry || entry.isOpening) return;
 
-    if (entry.sourceType === 'sale_invoice' && entry.invoiceId) {
-      navigate(`/sales?invoiceId=${entry.invoiceId}`);
+    if (
+      ['sale_invoice', 'invoice', 'opening_sale_invoice'].includes(entry.sourceType) &&
+      entry.invoiceId
+    ) {
+      navigate(`/create-sale?invoiceId=${entry.invoiceId}`);
     }
   };
 
@@ -614,7 +617,7 @@ INVOICE: ${entry.invoiceId}`
                 ['sale_invoice', 'invoice', 'opening_sale_invoice'].includes(type) &&
                 entry.invoiceId
               ) {
-                navigate(`/sales?invoiceId=${entry.invoiceId}`);
+                navigate(`/create-sale?invoiceId=${entry.invoiceId}`);
               }
 
               // ✅ Refund Invoice + Opening Refund Invoice
@@ -627,9 +630,22 @@ INVOICE: ${entry.invoiceId}`
 
               // ✅ Receive Payment
               else if (type === 'receive_payment') {
-                alert(`referenceId: ${entry.referenceId}\n_id: ${entry._id}`);
+                // ✅ Invoice se aayi payment
+                if (entry.originModule === 'sale_invoice') {
+                  navigate(`/create-sale?invoiceId=${entry.referenceId}`);
 
-                navigate(`/receive-payments/edit/${entry.referenceId || entry._id}`);
+                  return;
+                }
+
+                // ✅ Standalone Receive Payment
+                if (entry.originModule === 'receive_payment_form') {
+                  navigate(`/receive-payments/edit/${entry.referenceId || entry._id}`);
+
+                  return;
+                }
+
+                // ❌ Unknown
+                alert(t('alerts.entryNotEditable'));
               }
 
               // ❌ Unknown

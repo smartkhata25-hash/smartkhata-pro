@@ -18,12 +18,16 @@ const formatPaymentType = (type) => {
 };
 
 const generateReceiptNo = (payment) => {
-  // اگر ID ہے تو original receipt
+  // Ledger والا original نمبر
+  if (payment && payment.billNo) {
+    return payment.billNo;
+  }
+
+  // fallback
   if (payment && payment._id) {
     return `RCV-${payment._id.toString().slice(-6)}`;
   }
 
-  // اگر preview ہے تو بھی clean receipt number دیں
   return `RCV-${Date.now().toString().slice(-6)}`;
 };
 /* =========================================================
@@ -45,6 +49,8 @@ const buildReceivePaymentPrint = (
 
   const safePayment = payment || {};
 
+  const discountAmount = safeNumber(safePayment.discountAmount);
+
   const totalAmount = safeNumber(safePayment.amount);
 
   const receiptNo = generateReceiptNo(safePayment);
@@ -53,7 +59,7 @@ const buildReceivePaymentPrint = (
 
   const prevBalance = safeNumber(previousBalance);
 
-  const remainingBalance = prevBalance - receivedAmount;
+  const remainingBalance = prevBalance - receivedAmount - discountAmount;
 
   /* ================= PAYMENTS ================= */
 
@@ -116,8 +122,9 @@ const buildReceivePaymentPrint = (
     totals: {
       previousBalance: prevBalance,
       receivedAmount: receivedAmount,
+      discountAmount: discountAmount,
       remainingBalance: remainingBalance,
-      totalAmount: receivedAmount,
+      totalAmount: receivedAmount + discountAmount,
     },
 
     /* ================= EXTRA INFO ================= */

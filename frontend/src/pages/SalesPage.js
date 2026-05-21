@@ -29,6 +29,7 @@ export default function SalesPage() {
       }
 
       try {
+        console.log('🔥 fetchSalesHistory FUNCTION CALLED');
         setLoadingHistory(true);
         console.log('🧠 Sending IDs:', customerId, productId);
         const res = await fetch(
@@ -41,6 +42,8 @@ export default function SalesPage() {
         );
 
         const data = await res.json();
+        console.log('✅ fetchSalesHistory FUNCTION FINISHED');
+
         console.log('📥 API RESPONSE:', data);
 
         if (res.ok) {

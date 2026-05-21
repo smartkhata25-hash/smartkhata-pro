@@ -20,6 +20,23 @@ const createBaseAccountsForUser = async (userId) => {
       isSystem: true,
     },
     {
+      name: "sales discount",
+      type: "Expense",
+      category: "discount",
+      code: "SALES_DISCOUNT",
+      normalBalance: "debit",
+      isSystem: true,
+    },
+
+    {
+      name: "receive payment discount",
+      type: "Expense",
+      category: "discount",
+      code: "RECEIVE_PAYMENT_DISCOUNT",
+      normalBalance: "debit",
+      isSystem: true,
+    },
+    {
       name: "sales return",
       type: "Income",
       category: "other",
@@ -33,6 +50,14 @@ const createBaseAccountsForUser = async (userId) => {
       category: "purchase",
       code: "PURCHASE",
       normalBalance: "debit",
+      isSystem: true,
+    },
+    {
+      name: "purchase discount",
+      type: "Income",
+      category: "discount",
+      code: "PURCHASE_DISCOUNT",
+      normalBalance: "credit",
       isSystem: true,
     },
     {
@@ -67,7 +92,7 @@ const createBaseAccountsForUser = async (userId) => {
       category: "utility",
       code: "UTILITY_EXP",
       normalBalance: "debit",
-      isSystem: false, // ✅ IMPORTANT
+      isSystem: false,
     },
     {
       name: "Rent Expense",

@@ -3,7 +3,10 @@ const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
-const { createPaymentEntry } = require("../utils/paymentService");
+const {
+  createPaymentEntry,
+  createReceivePaymentDiscountEntry,
+} = require("../utils/paymentService");
 
 const fs = require("fs");
 const path = require("path");
@@ -11,8 +14,15 @@ const path = require("path");
 // ✅ Create Receive Payment (CENTRALIZED VERSION)
 exports.createReceivePayment = async (req, res) => {
   try {
-    const { customer, date, time, description, paymentType, paymentEntries } =
-      req.body;
+    const {
+      customer,
+      date,
+      time,
+      description,
+      paymentType,
+      paymentEntries,
+      discountAmount,
+    } = req.body;
 
     const userId = req.user?.id || req.userId;
     if (!userId) {
@@ -28,6 +38,14 @@ exports.createReceivePayment = async (req, res) => {
       (sum, p) => sum + Number(p.amount || 0),
       0,
     );
+
+    const rawDiscount = Array.isArray(discountAmount)
+      ? discountAmount[0]
+      : discountAmount;
+
+    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+
+    const finalAmount = totalAmount + parsedDiscount;
 
     if (totalAmount <= 0) {
       return res.status(400).json({ error: "Invalid payment amount" });
@@ -47,12 +65,18 @@ exports.createReceivePayment = async (req, res) => {
 
     const customerAccountId = customerData.account._id;
 
+    const count = await ReceivePayment.countDocuments({ userId });
+
+    const billNo = `RCV-${1001 + count}`;
+
     // ✅ Save ReceivePayment
     const newPayment = await ReceivePayment.create({
       customer,
       date,
       time,
       amount: totalAmount,
+      discountAmount: parsedDiscount,
+      finalAmount,
       paymentType: cleanPaymentType,
       description,
       attachment: attachmentPath,
@@ -65,12 +89,25 @@ exports.createReceivePayment = async (req, res) => {
         userId,
         referenceId: newPayment._id,
         sourceType: "receive_payment",
-        billNo: `RCV-${newPayment._id.toString().slice(-6)}`,
-        accountId: p.account, // Cash / Bank
-        counterPartyAccountId: customerAccountId, // Customer
+        originModule: "receive_payment_form",
+        billNo,
+        accountId: p.account,
+        counterPartyAccountId: customerAccountId,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || cleanPaymentType || "cash",
         description: description || "Receive Payment",
+      });
+    }
+
+    if (parsedDiscount > 0) {
+      await createReceivePaymentDiscountEntry({
+        userId,
+        referenceId: newPayment._id,
+        billNo,
+        customerAccountId: customerAccountId,
+        discountAmount: parsedDiscount,
+        description: "Receive Payment Discount",
+        originModule: "receive_payment_form",
       });
     }
 
@@ -172,8 +209,15 @@ exports.getReceivePaymentById = async (req, res) => {
 // ✅ Update Receive Payment (CENTRALIZED VERSION)
 exports.updateReceivePayment = async (req, res) => {
   try {
-    const { customer, date, time, description, paymentType, paymentEntries } =
-      req.body;
+    const {
+      customer,
+      date,
+      time,
+      description,
+      paymentType,
+      paymentEntries,
+      discountAmount,
+    } = req.body;
 
     const userId = req.user?.id || req.userId;
 
@@ -186,6 +230,14 @@ exports.updateReceivePayment = async (req, res) => {
       (sum, p) => sum + Number(p.amount || 0),
       0,
     );
+
+    const rawDiscount = Array.isArray(discountAmount)
+      ? discountAmount[0]
+      : discountAmount;
+
+    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+
+    const finalAmount = totalAmount + parsedDiscount;
 
     if (totalAmount <= 0) {
       return res.status(400).json({ error: "Invalid payment amount" });
@@ -228,6 +280,13 @@ exports.updateReceivePayment = async (req, res) => {
 
     const customerAccountId = customerData.account._id;
 
+    const existingJournal = await JournalEntry.findOne({
+      referenceId: payment._id,
+      sourceType: "receive_payment",
+    });
+
+    const billNo = existingJournal?.billNo || "RCV-1001";
+
     // 🧹 Remove old attachment if replaced
     if (req.file && payment.attachment) {
       try {
@@ -246,6 +305,8 @@ exports.updateReceivePayment = async (req, res) => {
     payment.date = date;
     payment.time = time;
     payment.amount = totalAmount;
+    payment.discountAmount = parsedDiscount;
+    payment.finalAmount = finalAmount;
     payment.paymentType = paymentType?.toLowerCase() || "";
     payment.description = description;
     payment.attachment = attachmentPath;
@@ -256,7 +317,7 @@ exports.updateReceivePayment = async (req, res) => {
     await JournalEntry.deleteMany({
       referenceId: payment._id,
       sourceType: {
-        $in: ["receive_payment", "refund_payment"],
+        $in: ["receive_payment", "refund_payment", "receive_payment_discount"],
       },
     });
 
@@ -273,13 +334,26 @@ exports.updateReceivePayment = async (req, res) => {
         userId,
         referenceId: payment._id,
         sourceType: "receive_payment",
-        billNo: `RCV-${payment._id.toString().slice(-6)}`,
+        originModule: "receive_payment_form",
+        billNo,
         accountId: p.account,
         counterPartyAccountId: customerAccountId,
         amount: Number(p.amount),
         paymentType:
           p.paymentType?.toLowerCase() || payment.paymentType || "cash",
         description: description || "Receive Payment",
+      });
+    }
+
+    if (parsedDiscount > 0) {
+      await createReceivePaymentDiscountEntry({
+        userId,
+        referenceId: payment._id,
+        billNo,
+        customerAccountId: customerAccountId,
+        discountAmount: parsedDiscount,
+        description: "Updated Receive Payment Discount",
+        originModule: "receive_payment_form",
       });
     }
 
@@ -324,7 +398,9 @@ exports.deleteReceivePayment = async (req, res) => {
     // 🔍 Get all related journal entries
     const journals = await JournalEntry.find({
       referenceId: payment._id,
-      sourceType: "receive_payment",
+      sourceType: {
+        $in: ["receive_payment", "receive_payment_discount"],
+      },
     });
 
     // 🧹 Remove attachment if exists
@@ -339,7 +415,9 @@ exports.deleteReceivePayment = async (req, res) => {
     // 🧹 Delete journal entries
     await JournalEntry.deleteMany({
       referenceId: payment._id,
-      sourceType: "receive_payment",
+      sourceType: {
+        $in: ["receive_payment", "receive_payment_discount"],
+      },
     });
 
     // 🔄 Recalculate all involved accounts

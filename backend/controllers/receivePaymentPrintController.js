@@ -190,11 +190,14 @@ const previewReceivePaymentHtml = async (req, res) => {
     const payment = {
       date: parsed.date,
       time: parsed.time,
+      billNo: parsed.billNo,
       description: parsed.description,
       amount: parsed.paymentEntries?.reduce(
         (sum, p) => sum + Number(p.amount || 0),
         0,
       ),
+      discountAmount: Number(parsed.discountAmount || 0),
+
       customer: {
         name: parsed.customerName || "",
         phone: parsed.customerPhone || "",
@@ -247,11 +250,15 @@ const previewReceivePaymentPdf = async (req, res) => {
     const payment = {
       date: parsed.date,
       time: parsed.time,
+      billNo: parsed.billNo,
       description: parsed.description,
       amount: parsed.paymentEntries?.reduce(
         (sum, p) => sum + Number(p.amount || 0),
         0,
       ),
+
+      discountAmount: Number(parsed.discountAmount || 0),
+
       customer: {
         name: parsed.customerName || "",
         phone: parsed.customerPhone || "",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { t } from '../i18n/i18n';
+import './LedgerTable.css';
 
 const FILE_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
@@ -126,6 +127,11 @@ const LedgerTable = ({
   const getRowColor = (e) => {
     const t = (e.sourceType || '').toLowerCase();
     if (t === 'receive_payment') return '#f0fdfd';
+
+    if (t === 'sale_invoice' && e.description?.includes('Discount')) return '#fef3c7';
+
+    if (t === 'sale_invoice' && e.description?.includes('Payment')) return '#dcfce7';
+
     if (t === 'sale_invoice') return '#fffbeb';
     if (t === 'refund_invoice') return '#fef2f2';
     if (e.runningBalance < 0) return '#f0fdf4';
@@ -256,8 +262,20 @@ const LedgerTable = ({
                       );
                     if (col === 'description')
                       return (
-                        <td key={col} className="no-print">
-                          {e.description || '-'}
+                        <td
+                          key={col}
+                          className="no-print max-w-[220px]"
+                          title={e.description || '-'}
+                        >
+                          <div
+                            className="overflow-x-auto whitespace-nowrap"
+                            style={{
+                              scrollbarWidth: 'none',
+                              msOverflowStyle: 'none',
+                            }}
+                          >
+                            {e.description || '-'}
+                          </div>
                         </td>
                       );
                     if (col === 'debit')
@@ -287,20 +305,27 @@ const LedgerTable = ({
                     if (col === 'actions')
                       return (
                         <td key={col} className="no-print">
-                          <button
-                            className="btn btn-primary"
-                            onClick={(event) => {
-                              event.stopPropagation();
+                          {!(
+                            e.originModule === 'sale_invoice' &&
+                            ['receive_payment', 'sale_discount'].includes(
+                              e.sourceType?.toLowerCase()
+                            )
+                          ) && (
+                            <button
+                              className="btn btn-primary"
+                              onClick={(event) => {
+                                event.stopPropagation();
 
-                              console.log('EDIT BUTTON CLICKED', e);
+                                console.log('EDIT BUTTON CLICKED', e);
 
-                              if (onEdit) {
-                                onEdit(e);
-                              }
-                            }}
-                          >
-                            ✏️ {t('common.edit')}
-                          </button>{' '}
+                                if (onEdit) {
+                                  onEdit(e);
+                                }
+                              }}
+                            >
+                              ✏️ {t('common.edit')}
+                            </button>
+                          )}{' '}
                           {onDelete && (
                             <button className="btn btn-danger" onClick={() => onDelete(e._id)}>
                               🗑 {t('common.delete')}

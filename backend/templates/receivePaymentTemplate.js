@@ -16,6 +16,7 @@ const generateReceivePaymentHTML = (data = {}) => {
 
   const previousBalance = totals?.previousBalance ?? 0;
   const receivedAmount = totals?.receivedAmount ?? 0;
+  const discountAmount = totals?.discountAmount ?? 0;
   const remainingBalance = totals?.remainingBalance ?? 0;
 
   /* ================= PAGE SIZE ================= */
@@ -269,14 +270,26 @@ ${documentTitle}
 
 <tbody>
 
+<tr>
+
+<td class="center">1</td>
+
+<td class="left">${t("customerTotalBalance", lang)}</td>
+
+<td class="center">-</td>
+
+<td class="right">${previousBalance}</td>
+
+</tr>
+
 ${
   payments.length
     ? payments
         .map(
-          (p) => `
+          (p, index) => `
 <tr>
 
-<td class="center">${p.index || ""}</td>
+<td class="center">${index + 2}</td>
 
 <td class="left">${p.accountName || "-"}</td>
 
@@ -288,11 +301,25 @@ ${
 `,
         )
         .join("")
-    : `
+    : ""
+}
+
+${
+  Number(discountAmount) > 0
+    ? `
 <tr>
-<td colspan="4" class="center">${t("payment.none", lang)}</td>
+
+<td class="center">${payments.length + 2}</td>
+
+<td class="left">${t("receivePaymentDiscount", lang)}</td>
+
+<td class="center">-</td>
+
+<td class="right">${discountAmount}</td>
+
 </tr>
 `
+    : ""
 }
 
 </tbody>
@@ -301,18 +328,8 @@ ${
 
 <div class="summary">
 
-<div class="summary-row">
-<span>${t("ledger.openingBalance", lang)}</span>
-<span>${previousBalance}</span>
-</div>
-
-<div class="summary-row">
-<span>${t("receivePayment", lang)}</span>
-<span>${receivedAmount}</span>
-</div>
-
 <div class="summary-row total">
-<span>${t("balance", lang)}</span>
+<span>${t("customerRemainingBalance", lang)}</span>
 <span>${remainingBalance}</span>
 </div>
 

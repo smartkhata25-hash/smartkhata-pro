@@ -81,6 +81,8 @@ const journalEntrySchema = new mongoose.Schema(
         "purchase_payment",
         "refund_payment",
         "purchase_return_payment",
+        "sale_discount",
+        "receive_payment_discount",
 
         "payment",
         "adjustment",
@@ -89,6 +91,11 @@ const journalEntrySchema = new mongoose.Schema(
         "reversal",
       ],
       default: "manual",
+    },
+
+    originModule: {
+      type: String,
+      default: "",
     },
 
     attachmentUrl: {

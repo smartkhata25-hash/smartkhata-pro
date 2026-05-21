@@ -62,7 +62,7 @@ const getCustomerLedger = async (req, res) => {
     // ✅ Step 4: Get entries
     const entries = await JournalEntry.find(matchFilter)
       .select(
-        "date time billNo description sourceType lines paymentType attachmentUrl attachmentType invoiceId referenceId",
+        "date time billNo description sourceType originModule lines paymentType attachmentUrl attachmentType invoiceId referenceId",
       )
       .sort({ date: 1, time: 1 })
       .lean();
@@ -119,13 +119,6 @@ const getCustomerLedger = async (req, res) => {
           const credit = line.type === "credit" ? line.amount : 0;
           balance += debit - credit;
 
-          console.log("🔥 ENTRY BEFORE PUSH:", {
-            sourceType: entry.sourceType,
-            referenceId: entry.referenceId,
-            invoiceId: entry.invoiceId,
-            id: entry._id,
-          });
-
           ledger.push({
             _id: entry._id,
             date: entry.date,
@@ -133,18 +126,25 @@ const getCustomerLedger = async (req, res) => {
             billNo: entry.billNo || "",
             description: entry.description || "",
             sourceType: entry.sourceType || "",
+            originModule: entry.originModule || "",
             sourceLabel:
               entry.sourceType === "sale_invoice"
-                ? "Sale Invoice"
+                ? entry.description?.includes("Discount")
+                  ? "Discount"
+                  : entry.description?.includes("Payment")
+                    ? "Payment"
+                    : "Sale Invoice"
                 : entry.sourceType === "opening_sale_invoice"
                   ? "Opening Invoice"
                   : entry.sourceType === "receive_payment"
                     ? "Receive Payment"
-                    : entry.sourceType === "refund_invoice"
-                      ? "Refund Invoice"
-                      : entry.sourceType === "opening_refund_invoice"
-                        ? "Opening Refund"
-                        : "-",
+                    : entry.sourceType === "receive_payment_discount"
+                      ? "Receive Payment Discount"
+                      : entry.sourceType === "refund_invoice"
+                        ? "Refund Invoice"
+                        : entry.sourceType === "opening_refund_invoice"
+                          ? "Opening Refund"
+                          : "-",
             debit,
             credit,
 

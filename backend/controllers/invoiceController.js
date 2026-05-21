@@ -9,7 +9,10 @@ const fs = require("fs");
 const path = require("path");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getCustomerBalanceFromJournal } = require("../utils/journalHelper");
-const { createPaymentEntry } = require("../utils/paymentService");
+const {
+  createPaymentEntry,
+  createDiscountEntry,
+} = require("../utils/paymentService");
 const Counter = require("../models/Counter");
 const {
   createInventoryEntry,
@@ -29,6 +32,8 @@ exports.createInvoice = async (req, res) => {
       invoiceTime,
       dueDate,
       totalAmount,
+      subTotal,
+      discountAmount,
       paidAmount,
       notes,
       paymentType,
@@ -91,7 +96,11 @@ exports.createInvoice = async (req, res) => {
       invoiceTime,
       dueDate,
       items,
-      totalAmount,
+
+      totalAmount: Number(totalAmount),
+      subTotal: Number(subTotal || totalAmount),
+      discountAmount: Number(discountAmount || 0),
+
       paidAmount,
       status,
       notes,
@@ -127,6 +136,8 @@ exports.createInvoice = async (req, res) => {
     invoice.customerId = customer._id;
 
     const saved = await invoice.save();
+
+    console.log("✅ Invoice Saved:", saved._id);
 
     // ✅ Stock Updates (skip for opening invoice)
     if (!isOpening || isOpening === "false") {
@@ -239,8 +250,12 @@ exports.createInvoice = async (req, res) => {
     const journal = new JournalEntry({
       date: invoiceDateTime,
       time: invoiceTime || "",
-      description: notes || "",
+      description:
+        Number(discountAmount || 0) > 0
+          ? `${notes || "Sale Invoice"} (Disc: ${discountAmount})`
+          : notes || "Sale Invoice",
       sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
+      originModule: "sale_invoice",
       referenceId: saved._id,
       invoiceId: saved._id,
       billNo,
@@ -276,14 +291,14 @@ exports.createInvoice = async (req, res) => {
             {
               account: new mongoose.Types.ObjectId(customer.account),
               type: "debit",
-              amount: totalAmount,
+              amount: Number(subTotal || totalAmount),
             },
 
             // 💰 Sales credit
             {
               account: new mongoose.Types.ObjectId(incomeAccount._id),
               type: "credit",
-              amount: totalAmount,
+              amount: Number(subTotal || totalAmount),
             },
 
             // 📉 COGS (expense)
@@ -303,24 +318,38 @@ exports.createInvoice = async (req, res) => {
     });
 
     try {
-      await journal.save();
+      const savedJournal = await journal.save();
+
+      if (
+        (!isOpening || isOpening === "false") &&
+        Number(discountAmount || 0) > 0
+      ) {
+        await createDiscountEntry({
+          userId,
+          referenceId: saved._id,
+          billNo: saved.billNo,
+          customerAccountId: customer.account,
+          discountAmount: Number(discountAmount),
+          description: "Sale Invoice Discount",
+          originModule: "sale_invoice",
+        });
+      }
 
       if ((!isOpening || isOpening === "false") && paidAmount > 0) {
         await createPaymentEntry({
           userId: userId,
           referenceId: saved._id,
           sourceType: "receive_payment",
+          originModule: "sale_invoice",
           billNo: saved.billNo,
           accountId,
           counterPartyAccountId: customer.account,
           amount: paidAmount,
           paymentType,
-          description: `Payment against Sale Invoice ${invoice.billNo}`,
+          description: "Sale Invoice Payment",
           customerId: customer._id,
         });
       }
-
-      console.log("✅ Journal SAVED successfully. ID:", journal._id);
     } catch (err) {
       console.error("❌ Journal SAVE FAILED");
       console.error("Message:", err.message);
@@ -483,6 +512,8 @@ exports.updateInvoice = async (req, res) => {
       invoiceTime,
       dueDate,
       totalAmount,
+      subTotal,
+      discountAmount,
       paidAmount,
       notes,
       paymentType,
@@ -536,7 +567,9 @@ exports.updateInvoice = async (req, res) => {
     invoice.invoiceTime = invoiceTime;
     invoice.dueDate = dueDate;
     invoice.items = items;
-    invoice.totalAmount = totalAmount;
+    invoice.totalAmount = Number(totalAmount);
+    invoice.subTotal = Number(subTotal || totalAmount);
+    invoice.discountAmount = Number(discountAmount || 0);
     invoice.paidAmount =
       paidAmount !== undefined ? Number(paidAmount) : invoice.paidAmount;
     invoice.notes = notes;
@@ -568,8 +601,6 @@ exports.updateInvoice = async (req, res) => {
         });
       }
     }
-
-    console.log("========== BEFORE SOFT DELETE ==========");
 
     const oldEntries = await JournalEntry.find({
       referenceId: invoice._id,
@@ -688,8 +719,12 @@ exports.updateInvoice = async (req, res) => {
       const journal = new JournalEntry({
         date: journalDateTime,
         time: invoiceTime || "",
-        description: "Updated Sale Invoice",
+        description:
+          Number(discountAmount || 0) > 0
+            ? `Updated Sale Invoice (Disc: ${discountAmount})`
+            : "Updated Sale Invoice",
         sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
+        originModule: "sale_invoice",
         referenceId: invoice._id,
         invoiceId: invoice._id,
         billNo: invoice.billNo,
@@ -720,20 +755,20 @@ exports.updateInvoice = async (req, res) => {
               },
             ]
           : [
-              // 👤 Customer debit (sale total)
+              // 👤 Customer debit
+
               {
                 account: new mongoose.Types.ObjectId(customer.account),
                 type: "debit",
-                amount: totalAmount,
+                amount: Number(subTotal || totalAmount),
               },
 
               // 💰 Sales credit
               {
                 account: new mongoose.Types.ObjectId(incomeAccount._id),
                 type: "credit",
-                amount: totalAmount,
+                amount: Number(subTotal || totalAmount),
               },
-
               // 📉 COGS (expense)
               {
                 account: new mongoose.Types.ObjectId(finalCogsAccount._id),
@@ -755,7 +790,20 @@ exports.updateInvoice = async (req, res) => {
 
       await journal.save();
 
-      console.log("========== AFTER NEW JOURNAL SAVE ==========");
+      if (
+        (!isOpening || isOpening === "false") &&
+        Number(discountAmount || 0) > 0
+      ) {
+        await createDiscountEntry({
+          userId,
+          referenceId: invoice._id,
+          billNo: invoice.billNo,
+          customerAccountId: customer.account,
+          discountAmount: Number(discountAmount),
+          description: "Updated Sale Invoice Discount",
+          originModule: "sale_invoice",
+        });
+      }
 
       const allEntries = await JournalEntry.find({
         referenceId: invoice._id,
@@ -775,12 +823,13 @@ exports.updateInvoice = async (req, res) => {
           userId: userId,
           referenceId: invoice._id,
           sourceType: "receive_payment",
+          originModule: "sale_invoice",
           billNo: invoice.billNo,
           accountId,
           counterPartyAccountId: customer.account,
           amount: paidAmount,
           paymentType,
-          description: `Payment against Sale Invoice ${invoice.billNo}`,
+          description: "Sale Invoice Payment",
           customerId: customer._id,
         });
       }
@@ -834,6 +883,7 @@ exports.recordPayment = async (req, res) => {
         userId,
         referenceId: invoice._id,
         sourceType: "receive_payment",
+        originModule: "sale_invoice",
         billNo: invoice.billNo,
         accountId,
         counterPartyAccountId: customer.account,

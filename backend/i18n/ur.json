@@ -916,5 +916,7 @@
   "print.noItems": "کوئی آئٹم موجود نہیں",
   "payment.none": "کوئی ادائیگی موجود نہیں",
   "back": "واپس",
-  "customerTotalBalance": "کسٹمر کل بیلنس"
+  "customerTotalBalance": "کسٹمر کل بیلنس",
+  "receivePaymentDiscount": "رعایت",
+  "customerRemainingBalance": "کسٹمر باقی رقم"
 }

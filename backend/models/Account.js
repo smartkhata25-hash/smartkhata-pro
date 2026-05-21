@@ -62,6 +62,7 @@ const accountSchema = new mongoose.Schema({
       "sales",
       "service",
       "discount_income",
+      "discount",
       "other_income",
       "customer",
 

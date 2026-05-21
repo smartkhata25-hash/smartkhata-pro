@@ -20,10 +20,27 @@ const receivePaymentSchema = new mongoose.Schema(
       required: true,
       min: 0.01,
     },
+
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    finalAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     paymentType: {
       type: String,
       enum: ["cash", "cheque", "bank", "online", "other"],
       required: true,
+    },
+
+    billNo: {
+      type: String,
+      default: "",
     },
 
     account: {

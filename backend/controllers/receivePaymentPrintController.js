@@ -1,6 +1,7 @@
 const ReceivePayment = require("../models/ReceivePayment");
 const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
+const PrintSetting = require("../models/PrintSetting");
 
 const {
   buildReceivePaymentPrint,
@@ -71,9 +72,33 @@ const calculatePreviousBalance = async (customerId, paymentDate) => {
    BUILD RECEIPT DATA (SHARED ENGINE)
 ========================================================= */
 
-const buildReceiptData = async (payment, size = "standard") => {
+const buildReceiptData = async (payment, size = "standard", userId = null) => {
+  let company = {};
+
+  // ✅ Load Sales Print Header
+  if (userId) {
+    const printSetting = await PrintSetting.findOne({ userId });
+
+    if (printSetting?.sales?.header) {
+      company = {
+        companyName: printSetting.sales.header.companyName || "",
+        address: printSetting.sales.header.showCompanyAddress
+          ? printSetting.sales.header.address || ""
+          : "",
+        phone: printSetting.sales.header.showCompanyPhone
+          ? printSetting.sales.header.phone || ""
+          : "",
+        taxNumber: printSetting.sales.header.showTaxNumber
+          ? printSetting.sales.header.taxNumber || ""
+          : "",
+        showLogo: printSetting.sales.header.showLogo || false,
+      };
+    }
+  }
+
   if (!payment) {
     return buildReceivePaymentPrint({}, [], {
+      company,
       pageWidth: size,
       previousBalance: 0,
     });
@@ -87,6 +112,7 @@ const buildReceiptData = async (payment, size = "standard") => {
   );
 
   return buildReceivePaymentPrint(payment, paymentEntries, {
+    company,
     pageWidth: size,
     previousBalance,
   });
@@ -108,7 +134,7 @@ const getReceivePaymentHtml = async (req, res) => {
       return res.status(404).send("Receive payment not found");
     }
 
-    const built = await buildReceiptData(payment, size);
+    const built = await buildReceiptData(payment, size, userId);
 
     const html = generateReceivePaymentHTML(built);
 
@@ -145,7 +171,7 @@ const generateReceivePaymentPdf = async (req, res) => {
       });
     }
 
-    const built = await buildReceiptData(payment, size);
+    const built = await buildReceiptData(payment, size, userId);
 
     const html = generateReceivePaymentHTML({
       ...built,
@@ -211,7 +237,30 @@ const previewReceivePaymentHtml = async (req, res) => {
       parsed.date,
     );
 
+    const userId = req.user?.id || req.userId || parsed.userId;
+
+    const printSetting = await PrintSetting.findOne({
+      userId,
+    });
+
+    const company = printSetting?.sales?.header
+      ? {
+          companyName: printSetting.sales.header.companyName || "",
+          address: printSetting.sales.header.showCompanyAddress
+            ? printSetting.sales.header.address || ""
+            : "",
+          phone: printSetting.sales.header.showCompanyPhone
+            ? printSetting.sales.header.phone || ""
+            : "",
+          taxNumber: printSetting.sales.header.showTaxNumber
+            ? printSetting.sales.header.taxNumber || ""
+            : "",
+          showLogo: printSetting.sales.header.showLogo || false,
+        }
+      : {};
+
     const built = buildReceivePaymentPrint(payment, paymentEntries, {
+      company,
       pageWidth: size,
       previousBalance: previousBalance,
     });
@@ -272,7 +321,30 @@ const previewReceivePaymentPdf = async (req, res) => {
       parsed.date,
     );
 
+    const userId = req.user?.id || req.userId || parsed.userId;
+
+    const printSetting = await PrintSetting.findOne({
+      userId,
+    });
+
+    const company = printSetting?.sales?.header
+      ? {
+          companyName: printSetting.sales.header.companyName || "",
+          address: printSetting.sales.header.showCompanyAddress
+            ? printSetting.sales.header.address || ""
+            : "",
+          phone: printSetting.sales.header.showCompanyPhone
+            ? printSetting.sales.header.phone || ""
+            : "",
+          taxNumber: printSetting.sales.header.showTaxNumber
+            ? printSetting.sales.header.taxNumber || ""
+            : "",
+          showLogo: printSetting.sales.header.showLogo || false,
+        }
+      : {};
+
     const built = buildReceivePaymentPrint(payment, paymentEntries, {
+      company,
       pageWidth: size,
       previousBalance: previousBalance,
     });

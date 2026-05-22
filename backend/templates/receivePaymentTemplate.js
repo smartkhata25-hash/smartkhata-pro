@@ -26,7 +26,7 @@ const generateReceivePaymentHTML = (data = {}) => {
 
   if (page?.pageWidth === "narrow") {
     pageSize = "A5";
-    pageMaxWidth = "650px";
+    pageMaxWidth = "720px";
   }
 
   if (page?.pageWidth === "thermal") {
@@ -53,8 +53,28 @@ const generateReceivePaymentHTML = (data = {}) => {
 }
 
 @media print {
-  .no-print {
-    display: none !important;
+
+  @page{
+    size:A5 portrait;
+    margin:6mm;
+  }
+
+  body{
+    zoom:1.08;
+    -webkit-print-color-adjust:exact;
+  }
+
+  .no-print{
+    display:none !important;
+  }
+
+  table{
+    border-collapse:collapse;
+    border:2px solid #000;
+  }
+
+  th,td{
+    border:2px solid #000 !important;
   }
 }
 
@@ -78,20 +98,22 @@ body{
 }
 
 .header h2{
-  margin:3px 0;
-  font-size:22px;
+  margin:4px 0;
+  font-size:24px;
+  font-weight:800;
 }
 
 .header p{
-  margin:2px 0;
-  font-size:13px;
+  margin:3px 0;
+  font-size:15px;
+  font-weight:700;
 }
 
 /* ================= TITLE ================= */
 
 .title{
   text-align:center;
-  font-size:18px;
+  font-size:24px;
   font-weight:bold;
   margin:8px 0;
   text-transform:uppercase;
@@ -116,13 +138,16 @@ body{
 table{
   width:100%;
   border-collapse:collapse;
-  margin-top:8px;
+  margin-top:10px;
+  border:2px solid #000;
 }
 
 th,td{
-  border:1px solid #000;
-  padding:5px;
-  font-size:13px;
+  border:2px solid #000;
+  padding:6px;
+  font-size:14px;
+  font-weight:700;
+  vertical-align:middle;
 }
 
 th{
@@ -209,6 +234,10 @@ th,td{
 
 <div class="container">
 
+<div class="title">
+${documentTitle}
+</div>
+
 ${
   header
     ? `
@@ -226,10 +255,6 @@ ${header.taxNumber ? `<p>${t("business.taxOptional", lang)}: ${header.taxNumber}
 `
     : ""
 }
-
-<div class="title">
-${documentTitle}
-</div>
 
 <div class="info-section">
 

@@ -276,6 +276,8 @@ const ReceivePaymentForm = () => {
     const previewData = {
       ...formData,
 
+      userId: localStorage.getItem('userId'),
+
       billNo: `RCV-${lastNumber + 1}`,
 
       discountAmount: Number(formData.discountAmount || 0),
@@ -314,6 +316,8 @@ const ReceivePaymentForm = () => {
 
     const previewData = {
       ...formData,
+
+      userId: localStorage.getItem('userId'),
 
       billNo: `RCV-${lastNumber + 1}`,
 

@@ -255,7 +255,6 @@ const getSaleInvoiceHtml = async (req, res) => {
     if (!invoice) {
       return res.status(404).send("Sale invoice not found");
     }
-    console.log("DB LANG:", invoice.lang);
 
     let printSetting = await PrintSetting.findOne({ userId });
 

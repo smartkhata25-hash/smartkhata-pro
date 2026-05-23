@@ -45,7 +45,7 @@ const SidebarItem = ({ to, label, setIsSidebarOpen }) => (
     to={to}
     onClick={() => {
       if (window.innerWidth <= 768) {
-        setIsSidebarOpen(false); // 📱 mobile پر auto hide
+        setIsSidebarOpen(false);
       }
     }}
     className={({ isActive }) =>

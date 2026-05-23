@@ -212,7 +212,28 @@ font-medium h-[36px]"
           {t('quickActions')}
         </h2>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-3 gap-3">
+          <QuickAction
+            label={t('items')}
+            icon="📦"
+            gradient="from-slate-600 via-slate-500 to-slate-700"
+            onClick={() => navigate('/inventory')}
+          />
+
+          <QuickAction
+            label={t('customers')}
+            icon="👥"
+            gradient="from-cyan-600 via-sky-500 to-cyan-600"
+            onClick={() => navigate('/customers')}
+          />
+
+          <QuickAction
+            label={t('suppliers')}
+            icon="🏪"
+            gradient="from-pink-600 via-rose-500 to-pink-600"
+            onClick={() => navigate('/suppliers')}
+          />
+
           <QuickAction
             label={t('saleInvoice')}
             icon="📄"
@@ -288,22 +309,22 @@ const QuickAction = ({ label, onClick, icon, gradient }) => {
     <div
       onClick={onClick}
       className={`
-        rounded-2xl p-6 cursor-pointer
+        rounded-xl p-3 cursor-pointer
         transition-all duration-300
-        hover:-translate-y-1 hover:shadow-2xl
+        hover:-translate-y-1 hover:shadow-xl
         bg-gradient-to-br ${gradient}
-        shadow-lg
+        shadow-md min-h-[110px]
       `}
     >
-      <div className="flex flex-col items-center justify-center space-y-4">
+      <div className="flex flex-col items-center justify-center space-y-2 h-full">
         <div
-          className="w-14 h-14 rounded-full flex items-center justify-center
-          text-2xl text-white bg-white/20 backdrop-blur-md shadow-lg"
+          className="w-10 h-10 rounded-full flex items-center justify-center
+          text-lg text-white bg-white/20 backdrop-blur-md shadow-md"
         >
           {icon}
         </div>
 
-        <div className="text-sm font-semibold text-white text-center">{label}</div>
+        <div className="text-xs font-semibold text-white text-center leading-tight">{label}</div>
       </div>
     </div>
   );

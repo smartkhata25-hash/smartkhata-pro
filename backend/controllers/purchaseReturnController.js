@@ -56,8 +56,6 @@ exports.createPurchaseReturn = async (req, res) => {
       });
     }
 
-    const supplierByIdOnly = await Supplier.findById(supplierId);
-
     const supplier = await Supplier.findOne({
       _id: supplierId,
       userId: userId,
@@ -191,11 +189,18 @@ exports.createPurchaseReturn = async (req, res) => {
       amount: totalAmount,
     });
 
+    const isOpeningReturn =
+      billNo === "OPENING" || notes?.toLowerCase()?.includes("opening");
+
     const journal = new JournalEntry({
       date: dateTime,
       time: returnTime || "",
       description: `Purchase Return - ${supplier.name} (Bill# ${billNo})`,
-      sourceType: "purchase_return",
+
+      sourceType: isOpeningReturn
+        ? "opening_purchase_return"
+        : "purchase_return",
+
       referenceId: purchaseReturn._id,
       invoiceId: purchaseReturn._id,
       billNo,
@@ -274,15 +279,16 @@ exports.getPurchaseReturnById = async (req, res) => {
       });
     }
 
-    const journal = await JournalEntry.findOne({
+    let paymentLine = null;
+
+    const paymentJournal = await JournalEntry.findOne({
       referenceId: pr._id,
-      sourceType: "purchase_return",
+      sourceType: "purchase_return_payment",
       createdBy: userId,
+      isDeleted: false,
     }).populate("lines.account", "name");
 
-    const paymentLine = journal?.lines?.find(
-      (line) => line.paymentType && line.type === "debit",
-    );
+    paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
 
     return res.json({
       ...pr.toObject(),
@@ -326,20 +332,18 @@ exports.getAllPurchaseReturns = async (req, res) => {
 
     for (const pr of returns) {
       /* =============================
-         FIND RELATED JOURNAL
-      ============================== */
-      const journal = await JournalEntry.findOne({
-        referenceId: pr._id,
-        sourceType: "purchase_return",
-        createdBy: userId,
-      }).populate("lines.account", "name");
-
-      /* =============================
          FIND PAYMENT LINE
       ============================== */
-      const paymentLine = journal?.lines?.find(
-        (line) => line.paymentType && line.type === "debit",
-      );
+      let paymentLine = null;
+
+      const paymentJournal = await JournalEntry.findOne({
+        referenceId: pr._id,
+        sourceType: "purchase_return_payment",
+        createdBy: userId,
+        isDeleted: false,
+      }).populate("lines.account", "name");
+
+      paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
 
       formatted.push({
         ...pr,
@@ -532,7 +536,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     await JournalEntry.updateMany(
       {
         referenceId: pr._id,
-        sourceType: "purchase_return",
+        sourceType: "purchase_return_payment",
         createdBy: userId,
         isDeleted: false,
       },
@@ -546,7 +550,9 @@ exports.updatePurchaseReturn = async (req, res) => {
     await JournalEntry.updateMany(
       {
         referenceId: pr._id,
-        sourceType: "purchase_return_payment",
+        sourceType: {
+          $in: ["purchase_return", "opening_purchase_return"],
+        },
         createdBy: userId,
         isDeleted: false,
       },
@@ -608,11 +614,18 @@ exports.updatePurchaseReturn = async (req, res) => {
       amount: totalAmount,
     });
 
+    const isOpeningReturn =
+      billNo === "OPENING" || notes?.toLowerCase()?.includes("opening");
+
     const journal = new JournalEntry({
       date: dateTime,
       time: returnTime || "",
       description: `Purchase Return - ${supplier.name} (Bill# ${billNo})`,
-      sourceType: "purchase_return",
+
+      sourceType: isOpeningReturn
+        ? "opening_purchase_return"
+        : "purchase_return",
+
       referenceId: pr._id,
       invoiceId: pr._id,
       billNo,
@@ -715,7 +728,9 @@ exports.deletePurchaseReturn = async (req, res) => {
     await JournalEntry.updateMany(
       {
         referenceId: id,
-        sourceType: "purchase_return",
+        sourceType: {
+          $in: ["purchase_return", "opening_purchase_return"],
+        },
         createdBy: userId,
         isDeleted: false,
       },

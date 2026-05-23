@@ -74,7 +74,10 @@ const journalEntrySchema = new mongoose.Schema(
         "opening_refund_invoice",
 
         "purchase_invoice",
+        "opening_purchase_invoice",
+        "purchase_discount",
         "purchase_return",
+        "opening_purchase_return",
 
         "receive_payment",
         "pay_bill",

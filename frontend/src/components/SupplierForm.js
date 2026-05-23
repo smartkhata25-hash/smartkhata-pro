@@ -8,19 +8,26 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
     email: '',
     address: '',
     supplierType: 'vendor',
-    openingBalance: 0,
+    openingBalance: '',
+    openingType: 'payable',
     notes: '',
   });
 
   useEffect(() => {
     if (initialData) {
+      const opening = Number(initialData.openingBalance) || 0;
+
       setFormData({
         name: initialData.name || '',
         phone: initialData.phone || '',
         email: initialData.email || '',
         address: initialData.address || '',
         supplierType: initialData.supplierType || 'vendor',
-        openingBalance: Number(initialData.openingBalance) || 0,
+
+        openingBalance: opening,
+
+        openingType: opening < 0 ? 'advance' : 'payable',
+
         notes: initialData.notes || '',
       });
     }
@@ -44,9 +51,22 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
+    if (name === 'openingBalance') {
+      const numericValue = parseFloat(value) || 0;
+
+      setFormData((prev) => ({
+        ...prev,
+
+        openingBalance: value,
+
+        openingType: numericValue < 0 ? 'advance' : 'payable',
+      }));
+
+      return;
+    }
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'openingBalance' ? parseFloat(value) || 0 : value,
+      [name]: value,
     }));
   };
 
@@ -58,7 +78,15 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
       return;
     }
 
-    onSubmit(formData);
+    const finalOpening =
+      formData.openingType === 'advance'
+        ? -Math.abs(formData.openingBalance || 0)
+        : Math.abs(formData.openingBalance || 0);
+
+    onSubmit({
+      ...formData,
+      openingBalance: finalOpening,
+    });
   };
 
   return (
@@ -86,14 +114,35 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
             <option value="other">{t('supplier.other')}</option>
           </select>
 
-          <input
-            type="number"
-            name="openingBalance"
-            placeholder={t('supplier.openingBalance')}
-            value={formData.openingBalance}
-            onChange={handleChange}
-            style={input}
-          />
+          {!initialData?._id && (
+            <div className="flex gap-2">
+              <select
+                name="openingType"
+                value={formData.openingType}
+                onChange={handleChange}
+                style={{
+                  ...input,
+                  width: '40%',
+                }}
+              >
+                <option value="payable">Payable</option>
+                <option value="advance">Advance</option>
+              </select>
+
+              <input
+                type="text"
+                inputMode="decimal"
+                name="openingBalance"
+                placeholder={t('supplier.openingBalance')}
+                value={formData.openingBalance}
+                onChange={handleChange}
+                style={{
+                  ...input,
+                  width: '60%',
+                }}
+              />
+            </div>
+          )}
 
           <input
             type="email"
@@ -140,7 +189,8 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
                   email: '',
                   address: '',
                   supplierType: 'vendor',
-                  openingBalance: 0,
+                  openingBalance: '',
+                  openingType: 'payable',
                   notes: '',
                 })
               }

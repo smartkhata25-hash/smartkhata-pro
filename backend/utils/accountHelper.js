@@ -44,7 +44,7 @@ exports.recalculateAccountBalance = async (accountId) => {
       {
         $match: {
           "lines.account": objectId,
-          createdBy: account.userId, // ✅ MULTI-USER SAFETY FIX
+          createdBy: account.userId,
           isDeleted: false,
         },
       },

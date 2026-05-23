@@ -20,10 +20,27 @@ const payBillSchema = new mongoose.Schema(
       required: true,
       min: 0.01,
     },
+
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    finalAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     paymentType: {
       type: String,
       enum: ["cash", "online", "cheque"],
       required: true,
+    },
+
+    billNo: {
+      type: String,
+      default: "",
     },
 
     account: {

@@ -50,9 +50,23 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
+    if (name === 'openingBalance') {
+      const numericValue = parseFloat(value) || 0;
+
+      setFormData((prev) => ({
+        ...prev,
+
+        openingBalance: value,
+
+        openingType: numericValue < 0 ? 'payable' : 'receivable',
+      }));
+
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'openingBalance' ? Math.abs(parseFloat(value) || 0) : value,
+      [name]: value,
     }));
   };
 
@@ -121,8 +135,8 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
               </select>
 
               <input
-                type="number"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 name="openingBalance"
                 className="no-spinner"
                 placeholder={t('customer.openingBalance')}

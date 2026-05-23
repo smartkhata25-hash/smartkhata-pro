@@ -690,9 +690,12 @@ const ReceivePaymentForm = () => {
             <button
               type="button"
               onClick={(e) => handleSubmit(e, 'new')}
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow"
+              disabled={loading}
+              className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                loading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              {t('saveNew')}
+              {loading ? t('saving') : t('saveNew')}
             </button>
 
             <button

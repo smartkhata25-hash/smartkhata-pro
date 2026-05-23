@@ -1087,7 +1087,8 @@ const InvoiceForm = ({
               <label className="block text-sm font-semibold mb-2">Opening Balance Amount</label>
 
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={openingBalanceAmount}
                 onChange={(e) => setOpeningBalanceAmount(e.target.value)}
                 className="border px-3 py-2 w-64 rounded no-spinner"
@@ -1120,7 +1121,8 @@ const InvoiceForm = ({
                   <div className="flex gap-3 items-center flex-wrap">
                     {/* Discount % */}
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       placeholder={t('discountPercent')}
                       value={discountPercent === 0 ? '' : discountPercent}
                       onChange={(e) => {
@@ -1132,7 +1134,8 @@ const InvoiceForm = ({
 
                     {/* Discount Amount */}
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       placeholder={t('discountRS')}
                       value={discountAmount === 0 ? '' : discountAmount}
                       onChange={(e) => {
@@ -1143,7 +1146,8 @@ const InvoiceForm = ({
                     />
                     {/* Paid Amount */}
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       placeholder={t('amount')}
                       value={paidAmount === 0 ? '' : paidAmount}
                       onChange={(e) => setPaidAmount(+e.target.value || 0)}

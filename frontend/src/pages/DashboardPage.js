@@ -74,7 +74,9 @@ const DashboardPage = () => {
 
         let url = `${baseUrl}/api/dashboard-summary`;
 
-        if (startDate && endDate) {
+        if (filterType === 'today') {
+          url += `?filterType=today`;
+        } else if (startDate && endDate) {
           url += `?startDate=${startDate}&endDate=${endDate}`;
         }
 
@@ -118,6 +120,7 @@ font-medium h-[36px]"
             onChange={(e) => setFilterType(e.target.value)}
             className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
           >
+            <option value="today">Today</option>
             <option value="month">Month</option>
             <option value="year">Year</option>
             <option value="all">Total</option>

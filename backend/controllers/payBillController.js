@@ -4,6 +4,7 @@ const Supplier = require("../models/Supplier");
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { createPaymentEntry } = require("../utils/paymentService");
+const Account = require("../models/Account");
 
 const fs = require("fs");
 const path = require("path");
@@ -17,8 +18,15 @@ exports.createPayBill = async (req, res) => {
   }
 
   try {
-    const { supplier, date, time, description, paymentType, paymentEntries } =
-      req.body;
+    const {
+      supplier,
+      date,
+      time,
+      description,
+      paymentType,
+      paymentEntries,
+      discountAmount,
+    } = req.body;
     const normalizedPaymentType = paymentType?.toLowerCase();
 
     const payments = JSON.parse(paymentEntries || "[]");
@@ -36,10 +44,23 @@ exports.createPayBill = async (req, res) => {
       0,
     );
 
+    const rawDiscount = Array.isArray(discountAmount)
+      ? discountAmount[0]
+      : discountAmount;
+
+    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+
     if (totalAmount <= 0) {
       return res.status(400).json({ error: "Invalid payment amount" });
     }
 
+    if (parsedDiscount < 0) {
+      return res.status(400).json({
+        error: "Invalid discount amount",
+      });
+    }
+
+    const finalAmount = totalAmount + parsedDiscount;
     const userId = req.user?.id || req.userId;
     if (!userId) return res.status(400).json({ error: "User ID is required." });
 
@@ -56,11 +77,18 @@ exports.createPayBill = async (req, res) => {
 
     const supplierAccount = supplierData.account;
 
+    const count = await PayBill.countDocuments({ userId });
+
+    const billNo = `PB-${1001 + count}`;
+
     const newBill = await PayBill.create({
       supplier,
       date,
       time,
-      amount: totalAmount, // ✅
+      billNo,
+      amount: totalAmount,
+      discountAmount: parsedDiscount,
+      finalAmount,
       paymentType: normalizedPaymentType,
 
       description,
@@ -73,12 +101,54 @@ exports.createPayBill = async (req, res) => {
         userId,
         referenceId: newBill._id,
         sourceType: "pay_bill",
-        billNo: `PB-${newBill._id.toString().slice(-6)}`,
+        billNo,
         accountId: p.account,
         counterPartyAccountId: supplierAccount._id,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
+      });
+    }
+
+    // ✅ Discount Journal Entry
+    if (parsedDiscount > 0) {
+      let purchaseDiscountAccount = await Account.findOne({
+        userId,
+        code: "PURCHASE_DISCOUNT",
+      });
+
+      if (!purchaseDiscountAccount) {
+        purchaseDiscountAccount = await Account.create({
+          userId,
+          name: "purchase discount",
+          type: "Income",
+          normalBalance: "credit",
+          code: "PURCHASE_DISCOUNT",
+          category: "discount",
+          isSystem: true,
+        });
+      }
+
+      await JournalEntry.create({
+        createdBy: userId,
+        referenceId: newBill._id,
+        sourceType: "pay_bill",
+        date,
+        time,
+        billNo,
+        description: "Pay Bill Discount",
+        lines: [
+          {
+            account: supplierAccount._id,
+            type: "debit",
+            amount: parsedDiscount,
+          },
+          {
+            account: purchaseDiscountAccount._id,
+            type: "credit",
+            amount: parsedDiscount,
+          },
+        ],
       });
     }
 
@@ -180,11 +250,27 @@ exports.getPayBillById = async (req, res) => {
 // ✅ Update Pay Bill (CENTRALIZED PAYMENT SERVICE)
 exports.updatePayBill = async (req, res) => {
   try {
-    const { supplier, date, time, description, paymentType, paymentEntries } =
-      req.body;
+    const {
+      supplier,
+      date,
+      time,
+      description,
+      paymentType,
+      paymentEntries,
+      discountAmount,
+    } = req.body;
 
     const normalizedPaymentType = paymentType?.toLowerCase();
     const payments = JSON.parse(paymentEntries || "[]");
+
+    // ✅ Per-payment paymentType validation
+    for (const p of payments) {
+      if (!ALLOWED_PAYMENT_TYPES.includes(p.paymentType?.toLowerCase())) {
+        return res.status(400).json({
+          error: "Invalid payment type in payment entries",
+        });
+      }
+    }
 
     if (!ALLOWED_PAYMENT_TYPES.includes(normalizedPaymentType)) {
       return res.status(400).json({
@@ -197,9 +283,25 @@ exports.updatePayBill = async (req, res) => {
       0,
     );
 
+    const rawDiscount = Array.isArray(discountAmount)
+      ? discountAmount[0]
+      : discountAmount;
+
+    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+
     if (totalAmount <= 0) {
-      return res.status(400).json({ error: "Invalid payment amount" });
+      return res.status(400).json({
+        error: "Invalid payment amount",
+      });
     }
+
+    if (parsedDiscount < 0) {
+      return res.status(400).json({
+        error: "Invalid discount amount",
+      });
+    }
+
+    const finalAmount = totalAmount + parsedDiscount;
 
     const userId = req.user?.id || req.userId;
 
@@ -236,6 +338,8 @@ exports.updatePayBill = async (req, res) => {
 
     const supplierAccount = supplierData.account;
 
+    const billNo = bill.billNo || "PB-1001";
+
     // ✅ Remove old attachment if replaced
     if (req.file && bill.attachment) {
       try {
@@ -249,8 +353,13 @@ exports.updatePayBill = async (req, res) => {
     bill.supplier = supplier;
     bill.date = date;
     bill.time = time;
+
     bill.amount = totalAmount;
+    bill.discountAmount = parsedDiscount;
+    bill.finalAmount = finalAmount;
+
     bill.paymentType = normalizedPaymentType;
+    bill.billNo = billNo;
     bill.description = description;
 
     if (req.file) {
@@ -284,12 +393,54 @@ exports.updatePayBill = async (req, res) => {
         userId,
         referenceId: bill._id,
         sourceType: "pay_bill",
-        billNo: `PB-${bill._id.toString().slice(-6)}`,
+        billNo,
         accountId: p.account,
         counterPartyAccountId: supplierAccount._id,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
+      });
+    }
+
+    // ✅ Discount Journal Entry
+    if (parsedDiscount > 0) {
+      let purchaseDiscountAccount = await Account.findOne({
+        userId,
+        code: "PURCHASE_DISCOUNT",
+      });
+
+      if (!purchaseDiscountAccount) {
+        purchaseDiscountAccount = await Account.create({
+          userId,
+          name: "purchase discount",
+          type: "Income",
+          normalBalance: "credit",
+          code: "PURCHASE_DISCOUNT",
+          category: "discount",
+          isSystem: true,
+        });
+      }
+
+      await JournalEntry.create({
+        createdBy: userId,
+        referenceId: bill._id,
+        sourceType: "pay_bill",
+        date,
+        time,
+        billNo,
+        description: "Pay Bill Discount",
+        lines: [
+          {
+            account: supplierAccount._id,
+            type: "debit",
+            amount: parsedDiscount,
+          },
+          {
+            account: purchaseDiscountAccount._id,
+            type: "credit",
+            amount: parsedDiscount,
+          },
+        ],
       });
     }
 

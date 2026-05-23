@@ -41,7 +41,12 @@ exports.getSupplierLedger = async (req, res) => {
     if (type) query.sourceType = type;
 
     const entries = await JournalEntry.find(query)
-      .sort({ date: 1, time: 1 })
+      .sort({
+        date: 1,
+        billNo: 1,
+        createdAt: 1,
+        _id: 1,
+      })
       .lean();
 
     let balance = 0;
@@ -57,8 +62,8 @@ exports.getSupplierLedger = async (req, res) => {
       for (const entry of openingEntries) {
         for (const line of entry.lines) {
           if (line.account?.toString() === accountId) {
-            if (line.type === "debit") balance += Number(line.amount || 0);
-            if (line.type === "credit") balance -= Number(line.amount || 0);
+            if (line.type === "credit") balance += Number(line.amount || 0);
+            if (line.type === "debit") balance -= Number(line.amount || 0);
           }
         }
       }
@@ -73,14 +78,21 @@ exports.getSupplierLedger = async (req, res) => {
           const isDebit = line.type === "debit";
           const isCredit = line.type === "credit";
 
-          if (isDebit) balance += amount;
-          if (isCredit) balance -= amount;
+          if (isCredit) balance += amount;
+          if (isDebit) balance -= amount;
 
           formattedEntries.push({
             _id: entry._id,
             date: entry.date,
             time: entry.time || "",
-            description: entry.description || "",
+            description:
+              entry.sourceType === "opening_purchase_invoice"
+                ? "Opening Purchase Invoice"
+                : entry.sourceType === "opening_purchase_return"
+                  ? "Opening Purchase Return"
+                  : entry.sourceType === "purchase_discount"
+                    ? "Purchase Discount"
+                    : entry.description || "",
             sourceType: entry.sourceType || "",
             billNo: entry.billNo || "",
             paymentType: line.paymentType || entry.paymentType || "-",

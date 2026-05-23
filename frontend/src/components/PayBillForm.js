@@ -16,6 +16,7 @@ const PayBillForm = () => {
   const [supplierLedger, setSupplierLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+
   const printRef = useRef();
 
   const [formData, setFormData] = useState({
@@ -24,6 +25,8 @@ const PayBillForm = () => {
     time: dayjs().format('HH:mm'),
 
     paymentType: 'Cash',
+
+    discountAmount: '',
 
     description: '',
     attachment: null,
@@ -60,14 +63,12 @@ const PayBillForm = () => {
 
         setAccounts(paymentAccounts);
 
-        console.log('🔥 existing.paymentEntries', existing.paymentEntries);
-        console.log('🔥 accounts', paymentAccounts);
-
         setFormData({
           supplier: existing.supplier?._id || '',
           date: existing.date?.slice(0, 10) || '',
           time: existing.time || '',
           paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
+          discountAmount: existing.discountAmount || '',
           description: existing.description || '',
           attachment: null,
         });
@@ -111,6 +112,18 @@ const PayBillForm = () => {
         );
 
         setAccounts(paymentAccounts);
+
+        const handCash = paymentAccounts.find((acc) => acc.name?.toLowerCase() === 'hand cash');
+
+        if (handCash) {
+          setPaymentEntries([
+            {
+              account: handCash._id,
+              amount: '',
+              paymentType: 'Cash',
+            },
+          ]);
+        }
       }
     }
     fetchData();
@@ -148,6 +161,7 @@ const PayBillForm = () => {
       date: dayjs().format('YYYY-MM-DD'),
       time: dayjs().format('HH:mm'),
       amount: '',
+      discountAmount: '',
       paymentType: 'Cash',
       account: '',
       description: '',
@@ -177,6 +191,7 @@ const PayBillForm = () => {
         date: existing.date?.slice(0, 10) || '',
         time: existing.time || '',
         paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
+        discountAmount: existing.discountAmount || '',
         description: existing.description || '',
         attachment: null,
       });
@@ -256,6 +271,8 @@ const PayBillForm = () => {
 
     // ✅ IMPORTANT: multiple payments backend ko bhejna
     data.append('paymentEntries', JSON.stringify(paymentEntries));
+
+    data.append('discountAmount', formData.discountAmount || 0);
 
     try {
       setLoading(true);
@@ -445,15 +462,37 @@ const PayBillForm = () => {
 
             {/* AMOUNT */}
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               placeholder={t('common.amount')}
               className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm"
               value={entry.amount}
-              onChange={(e) =>
+              onChange={(e) => {
+                const value = e.target.value;
+
+                const handCash = accounts.find(
+                  (a) => a.category?.toLowerCase() === 'cash' || a.type?.toLowerCase() === 'cash'
+                );
+
                 setPaymentEntries((prev) =>
-                  prev.map((item, i) => (i === index ? { ...item, amount: e.target.value } : item))
-                )
-              }
+                  prev.map((item, i) => {
+                    if (i !== index) return item;
+
+                    return {
+                      ...item,
+                      amount: value,
+
+                      account:
+                        Number(value) > 0 &&
+                        !item.account &&
+                        item.paymentType === 'Cash' &&
+                        handCash
+                          ? handCash._id
+                          : item.account,
+                    };
+                  })
+                );
+              }}
               required
             />
 
@@ -480,6 +519,17 @@ const PayBillForm = () => {
         >
           + {t('payment.addAnother')}
         </button>
+        <div className="flex justify-end mt-2">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Discount"
+            className="w-32 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 text-xs md:text-sm text-right shadow-sm"
+            name="discountAmount"
+            value={formData.discountAmount || ''}
+            onChange={handleChange}
+          />
+        </div>
 
         {/* TOTAL */}
         <div className="flex justify-end mt-4">
@@ -487,7 +537,10 @@ const PayBillForm = () => {
             <div className="flex justify-between font-semibold text-sm">
               <span>{t('common.total')}</span>
               <span>
-                {paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0).toFixed(2)}
+                {(
+                  paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
+                  Number(formData.discountAmount || 0)
+                ).toFixed(2)}
               </span>
             </div>
           </div>
@@ -527,8 +580,10 @@ const PayBillForm = () => {
         <button
           type="submit"
           disabled={loading}
-          className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
-            loading ? 'opacity-50 cursor-not-allowed' : ''
+          className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
+            loading
+              ? 'bg-gray-400 cursor-not-allowed opacity-70'
+              : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105'
           }`}
         >
           {loading ? t('saving') : id ? t('common.updateClose') : t('common.saveClose')}
@@ -538,8 +593,10 @@ const PayBillForm = () => {
           type="button"
           onClick={(e) => handleSubmit(e, 'new')}
           disabled={loading}
-          className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
-            loading ? 'opacity-50 cursor-not-allowed' : ''
+          className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
+            loading
+              ? 'bg-gray-400 cursor-not-allowed opacity-70'
+              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:scale-105'
           }`}
         >
           {loading ? t('saving') : t('common.saveNew')}

@@ -67,6 +67,7 @@ const PurchaseInvoiceForm = () => {
 
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [accountError, setAccountError] = useState('');
+  const [loading] = useState(false);
   // 📊 Item History States
 
   const [itemHistory, setItemHistory] = useState([]);
@@ -100,6 +101,22 @@ const PurchaseInvoiceForm = () => {
     fetchProductsWithToken(token).then(setProducts);
     getValidPaymentAccounts().then(setAccounts);
   }, [token]);
+
+  useEffect(() => {
+    if (paidAmount > 0 && paymentType === 'cash' && accounts.length > 0) {
+      const handCash = accounts.find(
+        (a) => a.name?.toLowerCase() === 'handcash' || a.category === 'cash'
+      );
+
+      if (handCash) {
+        setSelectedAccountId(handCash._id);
+      }
+    }
+
+    if (paidAmount === 0) {
+      setSelectedAccountId('');
+    }
+  }, [paidAmount, paymentType, accounts]);
 
   useEffect(() => {
     if (!id || products.length === 0) return;
@@ -263,7 +280,6 @@ const PurchaseInvoiceForm = () => {
 
     updated[index][field] = Number(value);
 
-    // 🔥 Amount ہمیشہ Cost (rate field) سے بنے گا
     updated[index].amount = (updated[index].quantity || 0) * (updated[index].rate || 0);
 
     setItems(updated);
@@ -323,7 +339,7 @@ const PurchaseInvoiceForm = () => {
   }, [isEdit]);
 
   useFormPersist(!isEdit ? 'purchase_invoice_draft' : null, formState, () => {});
-  // 📊 Product select ہونے پر صرف ID محفوظ کریں
+
   const handleProductHistory = (productId) => {
     if (!productId) return;
 
@@ -486,7 +502,7 @@ const PurchaseInvoiceForm = () => {
     formData.append('supplierId', selectedSupplier?._id || '');
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
-    formData.append('discountAmount', finalDiscount);
+    formData.append('discountAmount', discountAmount);
     formData.append('grandTotal', grandTotal);
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
@@ -634,7 +650,7 @@ const PurchaseInvoiceForm = () => {
     formData.append('supplierId', selectedSupplier?._id || '');
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
-    formData.append('discountAmount', finalDiscount);
+    formData.append('discountAmount', discountAmount);
     formData.append('grandTotal', grandTotal);
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
@@ -871,7 +887,8 @@ const PurchaseInvoiceForm = () => {
                     {/* TOP ROW — Discount / Paid / File */}
                     <div className="flex gap-3 items-center flex-wrap">
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder={t('discountPercent')}
                         value={discountPercent === 0 ? '' : discountPercent}
                         onChange={(e) => {
@@ -882,7 +899,8 @@ const PurchaseInvoiceForm = () => {
                       />
 
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder={t('discountRS')}
                         value={discountAmount === 0 ? '' : discountAmount}
                         onChange={(e) => {
@@ -893,7 +911,8 @@ const PurchaseInvoiceForm = () => {
                       />
 
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         placeholder={t('paid')}
                         value={paidAmount === 0 ? '' : paidAmount}
                         onChange={(e) => setPaidAmount(+e.target.value || 0)}
@@ -957,7 +976,10 @@ const PurchaseInvoiceForm = () => {
                           <button
                             type="button"
                             onClick={handleSaveAndClose}
-                            className="bg-green-600 text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded"
+                            disabled={loading}
+                            className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
+                              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600'
+                            }`}
                           >
                             <span className="md:hidden">{t('saveClose')}</span>
                             <span className="hidden md:inline">💾 {t('saveClose')}</span>
@@ -966,7 +988,10 @@ const PurchaseInvoiceForm = () => {
                           <button
                             type="button"
                             onClick={handleSaveAndNew}
-                            className="bg-blue-600 text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded"
+                            disabled={loading}
+                            className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
+                              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600'
+                            }`}
                           >
                             <span className="md:hidden">{t('saveNew')}</span>
                             <span className="hidden md:inline">📄 {t('saveNew')}</span>

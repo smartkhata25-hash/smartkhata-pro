@@ -85,10 +85,10 @@ export default function SupplierLedgerPage() {
   let balanceStatus = t('ledger.settled');
   let balanceColor = '#6b7280';
 
-  if (closingBalance < 0) {
+  if (closingBalance > 0) {
     balanceStatus = t('ledger.payable');
     balanceColor = '#dc2626';
-  } else if (closingBalance > 0) {
+  } else if (closingBalance < 0) {
     balanceStatus = t('ledger.advance');
     balanceColor = '#2563eb';
   }
@@ -119,26 +119,11 @@ export default function SupplierLedgerPage() {
 
         let openingBalance = data.openingBalance || 0;
 
-        if (s && Array.isArray(data.ledger) && data.ledger.length > 0) {
-          const firstRow = data.ledger[0];
-          openingBalance = (firstRow.balance || 0) + (firstRow.debit || 0) - (firstRow.credit || 0);
-        }
+        setOpening(data.openingBalance || 0);
 
-        const openingRow = {
-          _id: 'opening-row',
-          isOpening: true,
-          date: s || new Date(),
-          billNo: '-',
-          sourceType: 'opening',
-          description: t('ledger.openingBalance'),
-          debit: openingBalance > 0 ? openingBalance : 0,
-          credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
-          balance: openingBalance,
-        };
+        const ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
 
-        const ledgerRows = Array.isArray(data.ledger) ? [...data.ledger].reverse() : [];
-
-        setLedger([openingRow, ...ledgerRows]);
+        setLedger(ledgerRows);
         setOpening(openingBalance);
       } catch (err) {
         console.error(err);
@@ -259,8 +244,13 @@ export default function SupplierLedgerPage() {
     }
 
     // ✅ Purchase Return
-    else if (type === 'purchase_return') {
+    else if (type === 'purchase_return' || type === 'opening_purchase_return') {
       navigate(`/purchase-returns/edit/${entry.referenceId || entry._id}`);
+    }
+
+    // ✅ Purchase Discount
+    else if (type === 'purchase_discount') {
+      navigate(`/purchase-invoice/${entry.referenceId || entry._id}`);
     }
 
     // ❌ Unknown

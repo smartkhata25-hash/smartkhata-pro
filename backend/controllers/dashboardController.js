@@ -13,12 +13,25 @@ const getDashboardSummary = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, filterType } = req.query;
 
     // ✅ Date filter
     let dateFilter = {};
 
-    if (startDate && endDate) {
+    if (filterType === "today") {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        date: {
+          $gte: todayStart,
+          $lte: todayEnd,
+        },
+      };
+    } else if (startDate && endDate) {
       dateFilter = {
         date: {
           $gte: new Date(startDate),

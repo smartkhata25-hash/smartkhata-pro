@@ -6,6 +6,8 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
+const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseReturn = require("../models/PurchaseReturn");
 
 /* ───────────── Create Supplier ───────────── */
 exports.createSupplier = async (req, res) => {
@@ -39,9 +41,9 @@ exports.createSupplier = async (req, res) => {
       userId,
       name,
       code,
-      type: "Liability", // must match enum
+      type: "Liability",
       normalBalance: "credit",
-      category: "supplier", // or 'supplier' if enum supports it
+      category: "supplier",
       openingBalance: Number(openingBalance) || 0,
     });
 
@@ -59,7 +61,9 @@ exports.createSupplier = async (req, res) => {
     });
 
     // ✅ Create opening journal entry (if applicable)
-    if (openingBalance > 0) {
+    const parsedOpeningBalance = Number(openingBalance) || 0;
+
+    if (parsedOpeningBalance !== 0) {
       let openingBalanceAccount = await Account.findOne({
         userId,
         code: "OPENING_BALANCE",
@@ -77,25 +81,103 @@ exports.createSupplier = async (req, res) => {
         });
       }
 
-      await JournalEntry.create({
-        date: new Date(),
-        description: "Opening Balance - Supplier",
-        createdBy: userId,
-        sourceType: "opening_balance",
-        supplierId: supplier._id,
-        lines: [
-          {
-            account: openingBalanceAccount._id,
-            type: "debit",
-            amount: Number(openingBalance),
-          },
-          {
-            account: account._id,
-            type: "credit",
-            amount: Number(openingBalance),
-          },
-        ],
-      });
+      // ✅ POSITIVE OPENING → Purchase Invoice
+      if (parsedOpeningBalance > 0) {
+        const openingInvoice = await PurchaseInvoice.create({
+          billNo: "OPENING",
+          invoiceDate: new Date(),
+          supplier: supplier._id,
+          supplierName: supplier.name,
+          supplierPhone: supplier.phone || "",
+
+          items: [],
+
+          totalAmount: parsedOpeningBalance,
+          grandTotal: parsedOpeningBalance,
+          paidAmount: 0,
+
+          status: "Unpaid",
+
+          paymentType: "credit",
+
+          notes: "Opening Purchase Invoice",
+
+          userId,
+        });
+
+        await JournalEntry.create({
+          date: new Date(),
+          description: "Opening Purchase Invoice",
+          createdBy: userId,
+          sourceType: "opening_purchase_invoice",
+          supplierId: supplier._id,
+          referenceId: openingInvoice._id,
+          invoiceId: openingInvoice._id,
+
+          lines: [
+            {
+              account: openingBalanceAccount._id,
+              type: "debit",
+              amount: parsedOpeningBalance,
+            },
+            {
+              account: account._id,
+              type: "credit",
+              amount: parsedOpeningBalance,
+            },
+          ],
+        });
+      }
+
+      // ✅ NEGATIVE OPENING → Purchase Return
+      if (parsedOpeningBalance < 0) {
+        const absAmount = Math.abs(parsedOpeningBalance);
+
+        const openingReturn = await PurchaseReturn.create({
+          billNo: "OPENING",
+
+          returnDate: new Date(),
+
+          supplierId: supplier._id,
+          supplierName: supplier.name,
+          supplierPhone: supplier.phone || "",
+
+          items: [],
+
+          totalAmount: absAmount,
+
+          paidAmount: 0,
+
+          paymentType: "",
+
+          notes: "Opening Purchase Return",
+
+          createdBy: userId,
+        });
+
+        await JournalEntry.create({
+          date: new Date(),
+          description: "Opening Purchase Return",
+          createdBy: userId,
+          sourceType: "opening_purchase_return",
+          supplierId: supplier._id,
+          referenceId: openingReturn._id,
+          invoiceId: openingReturn._id,
+
+          lines: [
+            {
+              account: account._id,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: openingBalanceAccount._id,
+              type: "credit",
+              amount: absAmount,
+            },
+          ],
+        });
+      }
 
       await recalculateAccountBalance(account._id);
     }
@@ -138,13 +220,11 @@ exports.getSuppliers = async (req, res) => {
 
     const suppliersWithBalance = await Promise.all(
       suppliers.map(async (sup) => {
-        console.log("🔥 CALL BALANCE FOR:", sup.name, sup._id);
         const balance = await getSupplierBalanceFromJournal(
           sup._id,
           req.user.id,
         );
-        console.log("🔥 RESULT BALANCE:", sup.name, balance);
-        console.log("🔥 SUP BAL:", sup.name, balance);
+
         return {
           ...sup.toObject(),
           balance,
@@ -229,11 +309,206 @@ exports.updateSupplier = async (req, res) => {
     currentSupplier.email = email || currentSupplier.email;
     currentSupplier.address = address || currentSupplier.address;
     currentSupplier.notes = notes || currentSupplier.notes;
-    currentSupplier.openingBalance =
-      openingBalance ?? currentSupplier.openingBalance;
     currentSupplier.supplierType = supplierType || currentSupplier.supplierType;
 
+    // =====================================================
+    // ✅ OPENING BALANCE UPDATE HANDLING
+    // =====================================================
+
+    const parsedOpeningBalance = Number(openingBalance) || 0;
+
+    // 🔥 OLD opening journals remove
+    await JournalEntry.updateMany(
+      {
+        supplierId: currentSupplier._id,
+        sourceType: {
+          $in: [
+            "opening_balance",
+            "opening_purchase_invoice",
+            "opening_purchase_return",
+          ],
+        },
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
+    // 🔥 OLD opening purchase invoices remove
+    await PurchaseInvoice.updateMany(
+      {
+        supplier: currentSupplier._id,
+        billNo: "OPENING",
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
+    // 🔥 OLD opening purchase returns remove
+    await PurchaseReturn.updateMany(
+      {
+        supplierId: currentSupplier._id,
+        billNo: "OPENING",
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
+    // 🔥 recreate opening journal
+    if (parsedOpeningBalance !== 0) {
+      let openingBalanceAccount = await Account.findOne({
+        userId,
+        code: "OPENING_BALANCE",
+      });
+
+      if (!openingBalanceAccount) {
+        openingBalanceAccount = await Account.create({
+          userId,
+          name: "opening balance equity",
+          type: "Equity",
+          category: "other",
+          code: "OPENING_BALANCE",
+          normalBalance: "credit",
+          isSystem: true,
+        });
+      }
+
+      // 🔥 remove old opening invoice references
+      await JournalEntry.updateMany(
+        {
+          supplierId: currentSupplier._id,
+          sourceType: {
+            $in: ["opening_purchase_invoice", "opening_purchase_return"],
+          },
+        },
+        {
+          $unset: {
+            invoiceId: "",
+            referenceId: "",
+          },
+        },
+      );
+
+      // ✅ opening purchase invoice
+      if (parsedOpeningBalance > 0) {
+        const openingInvoice = await PurchaseInvoice.create({
+          billNo: "OPENING",
+
+          invoiceDate: new Date(),
+
+          supplier: currentSupplier._id,
+          supplierName: currentSupplier.name,
+          supplierPhone: currentSupplier.phone || "",
+
+          items: [],
+
+          totalAmount: parsedOpeningBalance,
+          grandTotal: parsedOpeningBalance,
+
+          paidAmount: 0,
+
+          status: "Unpaid",
+
+          paymentType: "credit",
+
+          userId,
+        });
+
+        await JournalEntry.create({
+          date: new Date(),
+          description: "Opening Purchase Invoice",
+          createdBy: userId,
+          sourceType: "opening_purchase_invoice",
+
+          supplierId: currentSupplier._id,
+
+          referenceId: openingInvoice._id,
+          invoiceId: openingInvoice._id,
+
+          lines: [
+            {
+              account: openingBalanceAccount._id,
+              type: "debit",
+              amount: parsedOpeningBalance,
+            },
+            {
+              account: currentSupplier.account,
+              type: "credit",
+              amount: parsedOpeningBalance,
+            },
+          ],
+        });
+      }
+
+      // ✅ opening purchase return
+      if (parsedOpeningBalance < 0) {
+        const absAmount = Math.abs(parsedOpeningBalance);
+
+        const openingReturn = await PurchaseReturn.create({
+          billNo: "OPENING",
+
+          returnDate: new Date(),
+
+          supplierId: currentSupplier._id,
+          supplierName: currentSupplier.name,
+          supplierPhone: currentSupplier.phone || "",
+
+          items: [],
+
+          totalAmount: absAmount,
+
+          paidAmount: 0,
+
+          paymentType: "",
+
+          notes: "Opening Purchase Return",
+
+          createdBy: userId,
+        });
+
+        await JournalEntry.create({
+          date: new Date(),
+          description: "Opening Purchase Return",
+          createdBy: userId,
+          sourceType: "opening_purchase_return",
+
+          supplierId: currentSupplier._id,
+
+          referenceId: openingReturn._id,
+          invoiceId: openingReturn._id,
+
+          lines: [
+            {
+              account: currentSupplier.account,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: openingBalanceAccount._id,
+              type: "credit",
+              amount: absAmount,
+            },
+          ],
+        });
+      }
+    }
+
+    currentSupplier.openingBalance = parsedOpeningBalance;
+
     await currentSupplier.save();
+
+    await recalculateAccountBalance(currentSupplier.account);
 
     res.json(currentSupplier);
   } catch (error) {
@@ -307,7 +582,7 @@ exports.confirmMergeSupplier = async (req, res) => {
       journal.lines = journal.lines.map((line) => {
         if (line.account?.toString() === sourceSupplier.account.toString()) {
           return {
-            ...line.toObject(),
+            ...line,
             account: targetSupplier.account,
           };
         }
@@ -503,7 +778,7 @@ exports.getSupplierDetailedLedger = async (req, res) => {
 
       totalDebit += debit;
       totalCredit += credit;
-      balance += debit - credit;
+      balance += credit - debit;
 
       const row = {
         _id: entry._id,
@@ -615,7 +890,9 @@ exports.importSuppliers = async (req, res) => {
         account: account._id,
       });
 
-      if (sup.openingBalance > 0) {
+      const parsedOpeningBalance = Number(sup.openingBalance) || 0;
+
+      if (parsedOpeningBalance !== 0) {
         let openingBalanceAccount = await Account.findOne({
           userId: req.user.id,
           code: "OPENING_BALANCE",
@@ -633,26 +910,108 @@ exports.importSuppliers = async (req, res) => {
           });
         }
 
-        await JournalEntry.create({
-          date: new Date(),
-          description: "Opening Balance - Supplier",
-          createdBy: req.user.id,
-          sourceType: "opening_balance",
-          supplierId: sup._id,
-          lines: [
-            {
-              account: openingBalanceAccount._id,
-              type: "debit",
-              amount: sup.openingBalance,
-            },
-            {
-              account: account._id,
-              type: "credit",
-              amount: sup.openingBalance,
-            },
-          ],
-        });
+        // ✅ opening purchase invoice
+        if (parsedOpeningBalance > 0) {
+          const openingInvoice = await PurchaseInvoice.create({
+            billNo: "OPENING",
 
+            invoiceDate: new Date(),
+
+            supplier: sup._id,
+            supplierName: sup.name,
+            supplierPhone: sup.phone || "",
+
+            items: [],
+
+            totalAmount: parsedOpeningBalance,
+            grandTotal: parsedOpeningBalance,
+
+            paidAmount: 0,
+
+            status: "Unpaid",
+
+            paymentType: "credit",
+
+            userId: req.user.id,
+          });
+
+          await JournalEntry.create({
+            date: new Date(),
+            description: "Opening Purchase Invoice",
+            createdBy: req.user.id,
+            sourceType: "opening_purchase_invoice",
+
+            supplierId: sup._id,
+
+            referenceId: openingInvoice._id,
+            invoiceId: openingInvoice._id,
+
+            lines: [
+              {
+                account: openingBalanceAccount._id,
+                type: "debit",
+                amount: parsedOpeningBalance,
+              },
+              {
+                account: account._id,
+                type: "credit",
+                amount: parsedOpeningBalance,
+              },
+            ],
+          });
+        }
+
+        // ✅ opening purchase return
+        if (parsedOpeningBalance < 0) {
+          const absAmount = Math.abs(parsedOpeningBalance);
+
+          const openingReturn = await PurchaseReturn.create({
+            billNo: "OPENING",
+
+            returnDate: new Date(),
+
+            supplierId: sup._id,
+            supplierName: sup.name,
+            supplierPhone: sup.phone || "",
+
+            items: [],
+
+            totalAmount: absAmount,
+
+            paidAmount: 0,
+
+            paymentType: "",
+
+            notes: "Opening Purchase Return",
+
+            createdBy: req.user.id,
+          });
+
+          await JournalEntry.create({
+            date: new Date(),
+            description: "Opening Purchase Return",
+            createdBy: req.user.id,
+            sourceType: "opening_purchase_return",
+
+            supplierId: sup._id,
+
+            referenceId: openingReturn._id,
+            invoiceId: openingReturn._id,
+
+            lines: [
+              {
+                account: account._id,
+                type: "debit",
+                amount: absAmount,
+              },
+              {
+                account: openingBalanceAccount._id,
+                type: "credit",
+                amount: absAmount,
+              },
+            ],
+          });
+        }
         await recalculateAccountBalance(account._id);
       }
 

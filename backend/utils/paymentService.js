@@ -14,6 +14,9 @@ const createPaymentEntry = async ({
   paymentType,
   description = "",
   originModule = "",
+
+  entryDate = new Date(),
+  entryTime = new Date().toTimeString().slice(0, 8),
 }) => {
   amount = Number(amount);
 
@@ -102,8 +105,8 @@ const createPaymentEntry = async ({
   }
 
   const journal = new JournalEntry({
-    date: new Date(),
-    time: new Date().toTimeString().slice(0, 8),
+    date: entryDate || new Date(),
+    time: entryTime || new Date().toTimeString().slice(0, 8),
     sourceType,
     originModule,
     referenceId,
@@ -147,47 +150,74 @@ const createDiscountEntry = async ({
   discountAmount,
   description = "",
   originModule = "",
+
+  sourceType = "sale_discount",
+
+  // ✅ NEW
+  discountAccountCode = "SALES_DISCOUNT",
+
+  discountAccountName = "sales discount",
+
+  entryDate = new Date(),
+
+  entryTime = new Date().toTimeString().slice(0, 8),
 }) => {
   discountAmount = Number(discountAmount);
 
   if (!customerAccountId || !discountAmount) {
     throw new Error("Missing required discount fields");
   }
-
   let salesDiscountAccount = await Account.findOne({
-    code: "SALES_DISCOUNT",
+    code: discountAccountCode,
     userId,
   });
 
   if (!salesDiscountAccount) {
     salesDiscountAccount = await Account.create({
       userId,
-      name: "sales discount",
+      name: discountAccountName,
       type: "Expense",
       normalBalance: "debit",
-      code: "SALES_DISCOUNT",
+      code: discountAccountCode,
       category: "discount",
       isSystem: true,
     });
   }
 
-  const lines = [
-    {
-      account: new mongoose.Types.ObjectId(salesDiscountAccount._id),
-      type: "debit",
-      amount: discountAmount,
-    },
-    {
-      account: new mongoose.Types.ObjectId(customerAccountId),
-      type: "credit",
-      amount: discountAmount,
-    },
-  ];
+  let lines = [];
+
+  if (sourceType === "purchase_discount") {
+    lines = [
+      {
+        account: new mongoose.Types.ObjectId(customerAccountId),
+        type: "debit",
+        amount: discountAmount,
+      },
+      {
+        account: new mongoose.Types.ObjectId(salesDiscountAccount._id),
+        type: "credit",
+        amount: discountAmount,
+      },
+    ];
+  } else {
+    lines = [
+      {
+        account: new mongoose.Types.ObjectId(salesDiscountAccount._id),
+        type: "debit",
+        amount: discountAmount,
+      },
+      {
+        account: new mongoose.Types.ObjectId(customerAccountId),
+        type: "credit",
+        amount: discountAmount,
+      },
+    ];
+  }
 
   const journal = new JournalEntry({
-    date: new Date(),
-    time: new Date().toTimeString().slice(0, 8),
-    sourceType: "sale_discount",
+    date: entryDate || new Date(),
+    time: entryTime || new Date().toTimeString().slice(0, 8),
+    sourceType,
     originModule,
     referenceId,
     billNo,
@@ -273,12 +303,6 @@ const createReceivePaymentDiscountEntry = async ({
   });
 
   await journal.save();
-
-  console.log("🔥 DISCOUNT JOURNAL SAVED:", {
-    billNo,
-    discountAmount,
-    sourceType: "receive_payment_discount",
-  });
 
   const uniqueAccounts = [
     ...new Set(lines.map((line) => line.account.toString())),

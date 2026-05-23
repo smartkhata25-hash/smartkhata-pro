@@ -27,13 +27,13 @@ const purchaseInvoiceSchema = new mongoose.Schema(
 
     invoiceTime: {
       type: String,
-      default: "", // ✅ Optional allowed
+      default: "",
     },
 
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true, // ✅ Backend سے ensure کرنا ہے کہ یہ set ہو
+      required: true,
     },
     supplierName: {
       type: String,
@@ -91,7 +91,7 @@ const purchaseInvoiceSchema = new mongoose.Schema(
 
     attachmentType: {
       type: String,
-      default: "", // ✅ New field added for mimetype (e.g., image, pdf)
+      default: "",
     },
 
     userId: {
@@ -108,7 +108,7 @@ const purchaseInvoiceSchema = new mongoose.Schema(
 
     isDeleted: {
       type: Boolean,
-      default: false, // ✅ Soft delete supported
+      default: false,
     },
   },
 

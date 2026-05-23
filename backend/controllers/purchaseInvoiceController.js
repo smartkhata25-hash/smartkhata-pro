@@ -13,7 +13,10 @@ const asyncHandler = require("express-async-handler");
 const path = require("path");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
-const { createPaymentEntry } = require("../utils/paymentService");
+const {
+  createPaymentEntry,
+  createDiscountEntry,
+} = require("../utils/paymentService");
 
 // ✅ Create Purchase Invoice
 const addPurchaseInvoice = asyncHandler(async (req, res) => {
@@ -157,6 +160,35 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     attachmentType,
   });
 
+  /* =============================
+   CREATE DISCOUNT ENTRY
+============================== */
+  if (Number(discountAmount || 0) > 0) {
+    await createDiscountEntry({
+      userId,
+      referenceId: invoice._id,
+      billNo: invoice.billNo,
+
+      customerAccountId: supplier.account,
+
+      discountAmount: Number(discountAmount),
+
+      description: "Purchase Invoice Discount",
+
+      originModule: "purchase_invoice",
+
+      sourceType: "purchase_discount",
+
+      discountAccountCode: "PURCHASE_DISCOUNT",
+
+      discountAccountName: "purchase discount",
+
+      entryDate: parsedInvoiceDate,
+
+      entryTime: invoiceTime || "",
+    });
+  }
+
   if (paidAmount > 0 && accountId) {
     await createPaymentEntry({
       userId,
@@ -168,6 +200,11 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       amount: paidAmount,
       paymentType,
       description: `Payment against Purchase Invoice ${invoice.billNo}`,
+
+      // ✅ SAME DATE/TIME
+      entryDate: parsedInvoiceDate,
+
+      entryTime: invoiceTime || "",
     });
   }
 
@@ -295,20 +332,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   await JournalEntry.updateMany(
     {
       referenceId: invoice._id,
-      sourceType: "purchase_invoice",
-      isDeleted: false,
-    },
-    {
-      $set: {
-        isDeleted: true,
+      sourceType: {
+        $in: ["purchase_invoice", "purchase_payment", "purchase_discount"],
       },
-    },
-  );
-
-  await JournalEntry.updateMany(
-    {
-      referenceId: invoice._id,
-      sourceType: "purchase_payment",
       isDeleted: false,
     },
     {
@@ -414,6 +440,36 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   });
 
   /* =============================
+   CREATE DISCOUNT ENTRY
+============================== */
+  if (Number(discountAmount || 0) > 0) {
+    await createDiscountEntry({
+      userId,
+      referenceId: invoice._id,
+      billNo: invoice.billNo,
+
+      customerAccountId: supplier.account,
+
+      discountAmount: Number(discountAmount),
+
+      description: "Updated Purchase Invoice Discount",
+
+      originModule: "purchase_invoice",
+
+      // ✅ SAME DATE/TIME
+      sourceType: "purchase_discount",
+
+      discountAccountCode: "PURCHASE_DISCOUNT",
+
+      discountAccountName: "purchase discount",
+
+      entryDate: parsedInvoiceDate,
+
+      entryTime: invoiceTime || "",
+    });
+  }
+
+  /* =============================
      CREATE PAYMENT ENTRY
   ============================== */
   if (paidAmount > 0 && accountId) {
@@ -427,6 +483,11 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       amount: paidAmount,
       paymentType,
       description: `Payment against Purchase Invoice ${invoice.billNo}`,
+
+      // ✅ SAME DATE/TIME
+      entryDate: parsedInvoiceDate,
+
+      entryTime: invoiceTime || "",
     });
   }
 
@@ -517,19 +578,14 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
     userId,
   });
 
-  // ✅ 🔥 SOFT DELETE JOURNAL
-  await JournalEntry.updateMany(
-    {
-      referenceId: invoice._id,
-      sourceType: "purchase_invoice",
-    },
-    { isDeleted: true },
-  );
+  // ✅ 🔥 SOFT DELETE JOURNA
 
   await JournalEntry.updateMany(
     {
       referenceId: invoice._id,
-      sourceType: "purchase_payment",
+      sourceType: {
+        $in: ["purchase_invoice", "purchase_payment", "purchase_discount"],
+      },
     },
     { isDeleted: true },
   );

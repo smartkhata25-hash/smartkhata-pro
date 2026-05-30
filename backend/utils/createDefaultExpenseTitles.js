@@ -9,6 +9,11 @@ const createDefaultExpenseTitlesForUser = async (userId) => {
     });
 
     const findAccount = (keyword) => {
+      // ✅ Other Expense titles hamesha OTHER_EXP account mein jayen
+      if (keyword === "other") {
+        return accounts.find((acc) => acc.code === "OTHER_EXP");
+      }
+
       return accounts.find((acc) => acc.category === keyword);
     };
 

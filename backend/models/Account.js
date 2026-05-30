@@ -75,6 +75,7 @@ const accountSchema = new mongoose.Schema({
       "marketing",
       "maintenance",
       "other_expense",
+      "cogs",
 
       // Common
       "other",

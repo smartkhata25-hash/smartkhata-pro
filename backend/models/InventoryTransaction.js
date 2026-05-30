@@ -19,7 +19,6 @@ const inventoryTransactionSchema = new mongoose.Schema(
       required: true,
     },
 
-    // ⏱️ Manual date (agar kahin use ho)
     date: {
       type: Date,
       default: Date.now,
@@ -29,20 +28,17 @@ const inventoryTransactionSchema = new mongoose.Schema(
       type: String,
     },
 
-    // 💰 Avg cost / rate
     rate: {
       type: Number,
       default: 0,
     },
 
-    // 🧾 Adjust reference number (ADJ-001)
     adjustNo: {
       type: String,
       unique: true,
-      sparse: true, // sirf adjust transactions ke liye
+      sparse: true,
     },
 
-    // 🔗 Invoice linkage (existing feature – untouched)
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       refPath: "invoiceModel",
@@ -63,7 +59,7 @@ const inventoryTransactionSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true, // ⭐ createdAt & updatedAt (IMPORTANT)
+    timestamps: true,
   },
 );
 

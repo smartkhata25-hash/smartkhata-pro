@@ -87,6 +87,38 @@ exports.createInvoice = async (req, res) => {
     if (paidAmount >= totalAmount) status = "Paid";
     else if (paidAmount > 0) status = "Partial";
 
+    // ✅ Historical Snapshot Items
+    const snapshotItems = [];
+
+    for (let item of items) {
+      const product = await Product.findById(item.productId);
+
+      const quantity = Number(item.quantity || 0);
+
+      const salePrice = Number(item.price || 0);
+
+      const total = Number(item.total || 0);
+
+      // ✅ Historical cost at sale time
+      const costPrice = Number(product?.unitCost || 0);
+
+      // ✅ Profit
+      const profit = (salePrice - costPrice) * quantity;
+
+      // ✅ Margin %
+      const margin =
+        salePrice > 0
+          ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
+          : 0;
+
+      snapshotItems.push({
+        ...item,
+        costPrice,
+        profit,
+        margin,
+      });
+    }
+
     const invoice = new Invoice({
       billNo,
       customerName,
@@ -95,7 +127,9 @@ exports.createInvoice = async (req, res) => {
       invoiceDate: parsedInvoiceDate,
       invoiceTime,
       dueDate,
-      items,
+
+      // ✅ Save snapshot items
+      items: snapshotItems,
 
       totalAmount: Number(totalAmount),
       subTotal: Number(subTotal || totalAmount),
@@ -141,7 +175,7 @@ exports.createInvoice = async (req, res) => {
 
     // ✅ Stock Updates (skip for opening invoice)
     if (!isOpening || isOpening === "false") {
-      for (let item of items) {
+      for (let item of snapshotItems) {
         await createInventoryEntry({
           productId: item.productId,
           type: "OUT",
@@ -150,6 +184,9 @@ exports.createInvoice = async (req, res) => {
           invoiceId: saved._id,
           invoiceModel: "Invoice",
           userId: userId,
+
+          // ✅ Historical inventory rate
+          rate: Number(item.costPrice || 0),
         });
       }
     }
@@ -196,16 +233,12 @@ exports.createInvoice = async (req, res) => {
       }
     }
 
-    // 🧮 COGS calculate (skip for opening invoice)
+    // 🧮 COGS calculate using historical snapshot
     let totalCogs = 0;
 
     if (!isOpening || isOpening === "false") {
-      for (let item of items) {
-        const product = await Product.findById(item.productId);
-
-        if (product) {
-          totalCogs += product.unitCost * item.quantity;
-        }
+      for (let item of snapshotItems) {
+        totalCogs += Number(item.costPrice || 0) * Number(item.quantity || 0);
       }
     }
 
@@ -566,7 +599,40 @@ exports.updateInvoice = async (req, res) => {
 
     invoice.invoiceTime = invoiceTime;
     invoice.dueDate = dueDate;
-    invoice.items = items;
+
+    // ✅ Historical Snapshot Items
+    const snapshotItems = [];
+
+    for (let item of items) {
+      const product = await Product.findById(item.productId);
+
+      const quantity = Number(item.quantity || 0);
+
+      const salePrice = Number(item.price || 0);
+
+      // ✅ Historical cost at update time
+      const costPrice = Number(product?.unitCost || 0);
+
+      // ✅ Item Profit
+      const profit = (salePrice - costPrice) * quantity;
+
+      // ✅ Margin %
+      const margin =
+        salePrice > 0
+          ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
+          : 0;
+
+      snapshotItems.push({
+        ...item,
+        costPrice,
+        profit,
+        margin,
+      });
+    }
+
+    // ✅ Save snapshot items
+    invoice.items = snapshotItems;
+
     invoice.totalAmount = Number(totalAmount);
     invoice.subTotal = Number(subTotal || totalAmount);
     invoice.discountAmount = Number(discountAmount || 0);
@@ -589,7 +655,7 @@ exports.updateInvoice = async (req, res) => {
 
     // ✅ Skip stock for opening invoice
     if (!isOpening || isOpening === "false") {
-      for (let item of items) {
+      for (let item of snapshotItems) {
         await createInventoryEntry({
           productId: item.productId,
           type: "OUT",
@@ -598,6 +664,9 @@ exports.updateInvoice = async (req, res) => {
           invoiceId: invoice._id,
           invoiceModel: "Invoice",
           userId: userId,
+
+          // ✅ Historical inventory rate
+          rate: Number(item.costPrice || 0),
         });
       }
     }
@@ -630,16 +699,12 @@ exports.updateInvoice = async (req, res) => {
       },
     );
 
-    // 🧮 COGS calculate (skip for opening invoice)
+    // 🧮 COGS calculate using historical snapshot
     let totalCogs = 0;
 
     if (!isOpening || isOpening === "false") {
-      for (let item of items) {
-        const product = await Product.findById(item.productId);
-
-        if (product) {
-          totalCogs += product.unitCost * item.quantity;
-        }
+      for (let item of snapshotItems) {
+        totalCogs += Number(item.costPrice || 0) * Number(item.quantity || 0);
       }
     }
 

@@ -24,12 +24,15 @@ const validateFile = (req, res, next) => {
 
   const allowedTypes = [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
     "text/csv",
+
+    "application/pdf",
   ];
 
   if (!allowedTypes.includes(req.file.mimetype)) {
     return res.status(400).json({
-      message: "Only Excel (.xlsx) or CSV files are allowed",
+      message: "Only Excel (.xlsx), CSV, or PDF files are allowed",
     });
   }
 

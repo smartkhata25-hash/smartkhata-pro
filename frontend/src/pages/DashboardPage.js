@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import ProfitSummaryModal from '../components/profit/ProfitSummaryModal';
 import { t } from '../i18n/i18n';
 
 const DashboardPage = () => {
@@ -27,6 +28,9 @@ const DashboardPage = () => {
     totalCash: 0,
     totalBank: 0,
   });
+  const [showProfitModal, setShowProfitModal] = useState(false);
+
+  const [profitData, setProfitData] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState('month');
@@ -201,7 +205,10 @@ font-medium h-[36px]"
             title={t('netProfit')}
             value={summary.netProfit}
             accent={summary.netProfit >= 0 ? 'bg-green-500' : 'bg-red-500'}
-            onClick={() => {}}
+            onClick={() => {
+              setProfitData(summary);
+              setShowProfitModal(true);
+            }}
           />
         </div>
       )}
@@ -277,6 +284,14 @@ font-medium h-[36px]"
           />
         </div>
       </div>
+
+      {/* ✅ PROFIT SUMMARY MODAL */}
+
+      <ProfitSummaryModal
+        isOpen={showProfitModal}
+        onClose={() => setShowProfitModal(false)}
+        data={profitData}
+      />
     </div>
   );
 };

@@ -57,6 +57,7 @@ const ACCOUNT_RULES = {
       "maintenance",
       "supplier",
       "other_expense",
+      "cogs",
       "discount",
       "other",
     ],

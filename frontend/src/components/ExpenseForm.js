@@ -113,8 +113,14 @@ const ExpenseForm = () => {
       description: '',
       attachment: null,
     });
+
     setCreditEntries([{ account: '', amount: '', paymentType: 'Cash' }]);
+
     setShowPreview(false);
+
+    setSearch('');
+
+    setTitles([]);
   };
 
   useEffect(() => {

@@ -7,6 +7,7 @@ const { getProductStock } = require("../utils/stockHelper");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
+const { getProfitSummary } = require("../services/accounting/profitService");
 
 // ✅ Dashboard Summary – Professional Version
 const getDashboardSummary = async (req, res) => {
@@ -41,8 +42,29 @@ const getDashboardSummary = async (req, res) => {
     }
 
     /* ======================================================
-       1️⃣ SALES & EXPENSES (WITH FILTER)
-    ====================================================== */
+   ✅ PROFIT SUMMARY SERVICE
+===================================================== */
+
+    const profitData = await getProfitSummary({
+      userId,
+      startDate,
+      endDate,
+      filterType,
+    });
+
+    const { totalSales, operatingExpenses, netProfit, grossProfit, cogs } =
+      profitData;
+
+    /* ======================================================
+   ✅ OTHER DASHBOARD DATA
+===================================================== */
+
+    let totalCash = 0;
+    let totalBank = 0;
+    let totalReceivable = 0;
+    let totalPayable = 0;
+
+    let customerNet = 0;
 
     // ✅ ONLY ACTIVE SUPPLIERS
     const activeSuppliers = await Supplier.find({
@@ -76,7 +98,6 @@ const getDashboardSummary = async (req, res) => {
 
       { $unwind: "$accountInfo" },
 
-      // ✅ hidden customer accounts ignore
       {
         $lookup: {
           from: "customers",
@@ -107,6 +128,7 @@ const getDashboardSummary = async (req, res) => {
           ],
         },
       },
+
       {
         $group: {
           _id: {
@@ -120,34 +142,10 @@ const getDashboardSummary = async (req, res) => {
         },
       },
     ]);
-    /* ======================================================
-       🔢 CALCULATIONS
-    ====================================================== */
 
-    let totalSales = 0;
-    let totalExpenses = 0;
-
-    let totalCash = 0;
-    let totalBank = 0;
-    let totalReceivable = 0;
-    let totalPayable = 0;
-
-    let customerNet = 0;
-
-    // 🔹 Sales & Expense
     combinedData.forEach((item) => {
       const { type, category, lineType } = item._id;
       const amount = item.total;
-
-      // Sales
-      if (type === "Income" && lineType === "credit") {
-        totalSales += amount;
-      }
-
-      // Expense
-      if (type === "Expense" && lineType === "debit") {
-        totalExpenses += amount;
-      }
 
       // Cash
       if (category === "cash") {
@@ -161,12 +159,13 @@ const getDashboardSummary = async (req, res) => {
         else totalBank -= amount;
       }
 
-      // ✅ ONLY ACTIVE CUSTOMER RECEIVABLES
+      // Receivable
       if (type === "Asset" && category === "customer") {
         if (lineType === "debit") customerNet += amount;
         else customerNet -= amount;
       }
-      // ✅ ONLY ACTIVE SUPPLIER PAYABLES
+
+      // Payable
       if (
         type === "Liability" &&
         category === "supplier" &&
@@ -181,12 +180,12 @@ const getDashboardSummary = async (req, res) => {
 
     totalReceivable = customerNet;
 
-    const netProfit = totalSales - totalExpenses;
-
     res.json({
       totalSales: Number(totalSales.toFixed(2)),
-      totalExpenses: Number(totalExpenses.toFixed(2)),
+      totalExpenses: Number(operatingExpenses.toFixed(2)),
       netProfit: Number(netProfit.toFixed(2)),
+      grossProfit: Number(grossProfit.toFixed(2)),
+      cogs: Number(cogs.toFixed(2)),
       totalCash: Number(totalCash.toFixed(2)),
       totalBank: Number(totalBank.toFixed(2)),
       totalReceivable: Number(totalReceivable.toFixed(2)),

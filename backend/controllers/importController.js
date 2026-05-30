@@ -3,6 +3,8 @@ const {
   transformPartyData,
   transformProductData,
 } = require("../utils/importParser");
+const { parseDigikhataPdf } = require("../utils/pdfImportParser");
+const { parseProductPdf } = require("../utils/productPdfParser");
 
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
@@ -11,6 +13,13 @@ const Category = require("../models/Category");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const Invoice = require("../models/Invoice");
+const RefundInvoice = require("../models/RefundInvoice");
+
+const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseReturn = require("../models/PurchaseReturn");
+
+const Counter = require("../models/Counter");
 const importProgress = {};
 const importResults = {};
 /* =========================================================
@@ -118,34 +127,287 @@ const createPartyInternal = async (data, userId, type) => {
       });
     }
 
-    // 🔥 Opening Journal Entry
+    // 🔥 NEW OPENING BALANCE SYSTEM
     if (openingBalance !== 0) {
       const openingAcc = await getOpeningAccount(userId);
 
-      const isCustomer = type === "customer";
+      // =====================================================
+      // 👤 CUSTOMER
+      // =====================================================
 
-      await JournalEntry.create({
-        date: new Date(),
-        description: `Opening Balance - ${type}`,
-        createdBy: userId,
-        sourceType: "opening_balance",
-        customerId: isCustomer ? entity._id : null,
-        supplierId: !isCustomer ? entity._id : null,
-        lines: [
-          {
-            account: isCustomer ? account._id : openingAcc._id,
-            type: isCustomer ? "debit" : "debit",
-            amount: Math.abs(openingBalance),
-          },
-          {
-            account: isCustomer ? openingAcc._id : account._id,
-            type: "credit",
-            amount: Math.abs(openingBalance),
-          },
-        ],
-      });
+      if (type === "customer") {
+        // ✅ POSITIVE = Opening Sale Invoice
+        if (openingBalance > 0) {
+          let counter = await Counter.findOne({
+            type: "sale_invoice",
+            userId,
+          });
+
+          if (!counter) {
+            counter = await Counter.create({
+              type: "sale_invoice",
+              userId,
+              seq: 1000,
+            });
+          }
+
+          counter.seq += 1;
+          await counter.save();
+
+          const openingInvoice = await Invoice.create({
+            billNo: counter.seq.toString(),
+
+            customerName: entity.name,
+            customerPhone: entity.phone || "",
+
+            invoiceDate: new Date(),
+
+            items: [],
+
+            totalAmount: openingBalance,
+
+            paidAmount: 0,
+
+            status: "Unpaid",
+
+            notes: "Opening Balance",
+
+            isOpening: true,
+
+            createdBy: userId,
+
+            accountId: account._id,
+            customerId: entity._id,
+          });
+
+          const journal = await JournalEntry.create({
+            date: new Date(),
+            description: "Opening Balance Customer Invoice",
+            createdBy: userId,
+
+            customerId: entity._id,
+
+            sourceType: "opening_sale_invoice",
+
+            invoiceId: openingInvoice._id,
+
+            billNo: openingInvoice.billNo,
+
+            lines: [
+              {
+                account: account._id,
+                type: "debit",
+                amount: openingBalance,
+              },
+
+              {
+                account: openingAcc._id,
+                type: "credit",
+                amount: openingBalance,
+              },
+            ],
+          });
+
+          openingInvoice.journalEntryId = journal._id;
+
+          await openingInvoice.save();
+        }
+
+        // ✅ NEGATIVE = Opening Refund Invoice
+        if (openingBalance < 0) {
+          let counter = await Counter.findOne({
+            type: "refund_invoice",
+            userId,
+          });
+
+          if (!counter) {
+            counter = await Counter.create({
+              type: "refund_invoice",
+              userId,
+              seq: 1000,
+            });
+          }
+
+          counter.seq += 1;
+          await counter.save();
+
+          const openingRefund = await RefundInvoice.create({
+            billNo: counter.seq.toString(),
+
+            customerName: entity.name,
+            customerPhone: entity.phone || "",
+
+            invoiceDate: new Date(),
+
+            items: [],
+
+            totalAmount: Math.abs(openingBalance),
+
+            paidAmount: 0,
+
+            status: "Unpaid",
+
+            paymentType: "credit",
+
+            notes: "Opening Balance",
+
+            isOpening: true,
+
+            createdBy: userId,
+
+            accountId: account._id,
+            customerId: entity._id,
+          });
+
+          await JournalEntry.create({
+            date: new Date(),
+            description: "Opening Balance Customer Refund",
+            createdBy: userId,
+
+            customerId: entity._id,
+
+            sourceType: "opening_refund_invoice",
+
+            invoiceId: openingRefund._id,
+
+            lines: [
+              {
+                account: openingAcc._id,
+                type: "debit",
+                amount: Math.abs(openingBalance),
+              },
+
+              {
+                account: account._id,
+                type: "credit",
+                amount: Math.abs(openingBalance),
+              },
+            ],
+          });
+        }
+      }
+
+      // =====================================================
+      // 🏢 SUPPLIER
+      // =====================================================
+
+      if (type === "supplier") {
+        // ✅ POSITIVE = Opening Purchase Invoice
+        if (openingBalance > 0) {
+          const openingInvoice = await PurchaseInvoice.create({
+            billNo: "OPENING",
+
+            invoiceDate: new Date(),
+
+            supplier: entity._id,
+
+            supplierName: entity.name,
+            supplierPhone: entity.phone || "",
+
+            items: [],
+
+            totalAmount: openingBalance,
+            grandTotal: openingBalance,
+
+            paidAmount: 0,
+
+            status: "Unpaid",
+
+            paymentType: "credit",
+
+            notes: "Opening Purchase Invoice",
+
+            userId,
+          });
+
+          await JournalEntry.create({
+            date: new Date(),
+
+            description: "Opening Purchase Invoice",
+
+            createdBy: userId,
+
+            sourceType: "opening_purchase_invoice",
+
+            supplierId: entity._id,
+
+            referenceId: openingInvoice._id,
+            invoiceId: openingInvoice._id,
+
+            lines: [
+              {
+                account: openingAcc._id,
+                type: "debit",
+                amount: openingBalance,
+              },
+
+              {
+                account: account._id,
+                type: "credit",
+                amount: openingBalance,
+              },
+            ],
+          });
+        }
+
+        // ✅ NEGATIVE = Opening Purchase Return
+        if (openingBalance < 0) {
+          const absAmount = Math.abs(openingBalance);
+
+          const openingReturn = await PurchaseReturn.create({
+            billNo: "OPENING",
+
+            returnDate: new Date(),
+
+            supplierId: entity._id,
+
+            supplierName: entity.name,
+            supplierPhone: entity.phone || "",
+
+            items: [],
+
+            totalAmount: absAmount,
+
+            paidAmount: 0,
+
+            paymentType: "",
+
+            notes: "Opening Purchase Return",
+
+            createdBy: userId,
+          });
+
+          await JournalEntry.create({
+            date: new Date(),
+
+            description: "Opening Purchase Return",
+
+            createdBy: userId,
+
+            sourceType: "opening_purchase_return",
+
+            supplierId: entity._id,
+
+            referenceId: openingReturn._id,
+            invoiceId: openingReturn._id,
+
+            lines: [
+              {
+                account: account._id,
+                type: "debit",
+                amount: absAmount,
+              },
+
+              {
+                account: openingAcc._id,
+                type: "credit",
+                amount: absAmount,
+              },
+            ],
+          });
+        }
+      }
     }
-
     return { success: true };
   } catch (error) {
     return { success: false, message: error.message };
@@ -347,7 +609,14 @@ exports.importCustomers = async (req, res) => {
         });
       }
 
-      rows = parseExcelFile(req.file.buffer);
+      // 🔥 PDF SUPPORT
+      if (req.file.mimetype === "application/pdf") {
+        const parsed = await parseDigikhataPdf(req.file.buffer, "customer");
+
+        rows = parsed.valid || [];
+      } else {
+        rows = parseExcelFile(req.file.buffer);
+      }
     }
 
     const jobId = Date.now().toString();
@@ -399,7 +668,14 @@ exports.importSuppliers = async (req, res) => {
         });
       }
 
-      rows = parseExcelFile(req.file.buffer);
+      // 🔥 PDF SUPPORT
+      if (req.file.mimetype === "application/pdf") {
+        const parsed = await parseDigikhataPdf(req.file.buffer, "supplier");
+
+        rows = parsed.valid || [];
+      } else {
+        rows = parseExcelFile(req.file.buffer);
+      }
     }
 
     const jobId = Date.now().toString();
@@ -451,7 +727,15 @@ exports.importProducts = async (req, res) => {
         });
       }
 
-      rows = parseExcelFile(req.file.buffer);
+      // 🔥 PDF SUPPORT
+      if (req.file.mimetype === "application/pdf") {
+        const parsed = await parseProductPdf(req.file.buffer);
+
+        rows = parsed.valid || [];
+      } else {
+        // ✅ Excel / CSV SAME AS BEFORE
+        rows = parseExcelFile(req.file.buffer);
+      }
     }
 
     const jobId = Date.now().toString();

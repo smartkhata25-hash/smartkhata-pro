@@ -1,5 +1,5 @@
 const RefundInvoice = require("../models/RefundInvoice");
-const Product = require("../models/Product");
+
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
 const Account = require("../models/Account");
@@ -190,17 +190,21 @@ exports.createRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ Calculate refund cost (IMPORTANT FIX)
+    // ✅ Calculate refund cost using historical invoice snapshot
     let totalRefundCost = 0;
 
     if (!isOpening || isOpening === "false") {
-      for (const item of items) {
-        const product = await Product.findById(item.productId);
+      const originalInvoice = await Invoice.findById(originalInvoiceId);
 
-        if (product) {
-          const cost = Number(product.unitCost || 0);
+      if (originalInvoice) {
+        for (const item of items) {
+          const originalItem = originalInvoice.items.find(
+            (i) => i.productId?.toString() === item.productId?.toString(),
+          );
 
-          totalRefundCost += cost * Number(item.quantity || 0);
+          const historicalCost = Number(originalItem?.costPrice || 0);
+
+          totalRefundCost += historicalCost * Number(item.quantity || 0);
         }
       }
     }
@@ -293,7 +297,13 @@ exports.createRefundInvoice = async (req, res) => {
 
     // ✅ Inventory transactions
     if (!isOpening || isOpening === "false") {
+      const originalInvoice = await Invoice.findById(originalInvoiceId);
+
       for (const item of items) {
+        const originalItem = originalInvoice?.items.find(
+          (i) => i.productId?.toString() === item.productId?.toString(),
+        );
+
         await createInventoryEntry({
           productId: item.productId,
           type: "IN",
@@ -302,6 +312,9 @@ exports.createRefundInvoice = async (req, res) => {
           invoiceId: refundInvoice._id,
           invoiceModel: "RefundInvoice",
           userId,
+
+          // ✅ Historical refund rate
+          rate: Number(originalItem?.costPrice || 0),
         });
       }
     }
@@ -539,17 +552,21 @@ exports.updateRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ Calculate refund cost (IMPORTANT FIX)
+    // ✅ Calculate refund cost using historical invoice snapshot
     let totalRefundCost = 0;
 
     if (!isOpening || isOpening === "false") {
-      for (const item of items) {
-        const product = await Product.findById(item.productId);
+      const originalInvoice = await Invoice.findById(originalInvoiceId);
 
-        if (product) {
-          const cost = Number(product.unitCost || 0);
+      if (originalInvoice) {
+        for (const item of items) {
+          const originalItem = originalInvoice.items.find(
+            (i) => i.productId?.toString() === item.productId?.toString(),
+          );
 
-          totalRefundCost += cost * Number(item.quantity || 0);
+          const historicalCost = Number(originalItem?.costPrice || 0);
+
+          totalRefundCost += historicalCost * Number(item.quantity || 0);
         }
       }
     }
@@ -641,7 +658,13 @@ exports.updateRefundInvoice = async (req, res) => {
 
     // ✅ New inventory transactions
     if (!isOpening || isOpening === "false") {
+      const originalInvoice = await Invoice.findById(originalInvoiceId);
+
       for (const item of items) {
+        const originalItem = originalInvoice?.items.find(
+          (i) => i.productId?.toString() === item.productId?.toString(),
+        );
+
         await createInventoryEntry({
           productId: item.productId,
           type: "IN",
@@ -650,6 +673,9 @@ exports.updateRefundInvoice = async (req, res) => {
           invoiceId: refund._id,
           invoiceModel: "RefundInvoice",
           userId,
+
+          // ✅ Historical refund rate
+          rate: Number(originalItem?.costPrice || 0),
         });
       }
     }

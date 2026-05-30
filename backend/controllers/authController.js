@@ -9,6 +9,7 @@ const { recalculateAllUserAccounts } = require("../utils/accountHelper");
 const mongoose = require("mongoose");
 const createBaseAccountsForUser = require("../utils/createBaseAccounts");
 const createDefaultExpenseTitlesForUser = require("../utils/createDefaultExpenseTitles");
+const fixLegacyExpenseTitles = require("../utils/fixLegacyExpenseTitles");
 const InviteCode = require("../models/InviteCode");
 
 const PasswordReset = require("../models/PasswordReset");
@@ -72,9 +73,10 @@ const loginUser = async (req, res) => {
         return res.status(401).json({ msg: "Invalid password" });
       }
 
-      // 🔥 background mein chalega (login fast ho jayega)
-      setTimeout(() => {
-        recalculateAllUserAccounts(user._id);
+      // 🔥 background tasks
+      setTimeout(async () => {
+        await recalculateAllUserAccounts(user._id);
+        await fixLegacyExpenseTitles(user._id);
       }, 0);
       // 🔒 Installation Check (Device Lock with User)
 

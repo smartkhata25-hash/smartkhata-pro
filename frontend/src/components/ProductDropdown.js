@@ -68,7 +68,10 @@ const ProductDropdown = ({
         position: 'absolute',
         top: `${top}px`,
         left: `${rect.left + window.scrollX}px`,
-        width: window.innerWidth < 768 ? `${window.innerWidth * 0.8}px` : `${rect.width}px`,
+        width:
+          window.innerWidth < 768
+            ? `${window.innerWidth * 0.85}px`
+            : `${Math.max(rect.width + 80, 280)}px`,
         zIndex: 9999,
         background: 'white',
         border: '1px solid #ccc',

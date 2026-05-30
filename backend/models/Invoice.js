@@ -25,6 +25,21 @@ const invoiceItemSchema = new mongoose.Schema({
     required: false,
     default: 0,
   },
+
+  costPrice: {
+    type: Number,
+    default: 0,
+  },
+
+  profit: {
+    type: Number,
+    default: 0,
+  },
+
+  margin: {
+    type: Number,
+    default: 0,
+  },
 });
 
 // Main Invoice Schema

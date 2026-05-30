@@ -47,7 +47,10 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
         position: 'absolute',
         top: `${rect.bottom + window.scrollY}px`,
         left: `${rect.left + window.scrollX}px`,
-        width: `${rect.width}px`,
+        width:
+          window.innerWidth < 768
+            ? `${window.innerWidth * 0.85}px`
+            : `${Math.max(rect.width + 80, 280)}px`,
         zIndex: 9999,
         background: '#fff',
         border: '1px solid #ccc',

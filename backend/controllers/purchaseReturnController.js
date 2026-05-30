@@ -1,6 +1,6 @@
 const PurchaseReturn = require("../models/PurchaseReturn");
 const PurchaseInvoice = require("../models/purchaseInvoice");
-const Product = require("../models/Product");
+
 const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");
 const Account = require("../models/Account");
@@ -235,7 +235,13 @@ exports.createPurchaseReturn = async (req, res) => {
     /* =============================
        STOCK REDUCE + INVENTORY LOG
     ============================== */
+    const originalInvoice = await PurchaseInvoice.findById(originalInvoiceId);
+
     for (const item of items) {
+      const originalItem = originalInvoice?.items.find(
+        (i) => i.productId?.toString() === item.productId?.toString(),
+      );
+
       await createInventoryEntry({
         productId: item.productId,
         type: "OUT",
@@ -244,6 +250,9 @@ exports.createPurchaseReturn = async (req, res) => {
         invoiceId: purchaseReturn._id,
         invoiceModel: "PurchaseReturn",
         userId,
+
+        // ✅ Historical purchase rate
+        rate: Number(originalItem?.price || 0),
       });
     }
 
@@ -658,7 +667,15 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        APPLY STOCK OUT
     ============================== */
+    const originalInvoice = await PurchaseInvoice.findById(
+      pr.originalInvoiceId,
+    );
+
     for (const item of items) {
+      const originalItem = originalInvoice?.items.find(
+        (i) => i.productId?.toString() === item.productId?.toString(),
+      );
+
       await createInventoryEntry({
         productId: item.productId,
         type: "OUT",
@@ -667,6 +684,9 @@ exports.updatePurchaseReturn = async (req, res) => {
         invoiceId: pr._id,
         invoiceModel: "PurchaseReturn",
         userId,
+
+        // ✅ Historical purchase rate
+        rate: Number(originalItem?.price || 0),
       });
     }
 

@@ -15,13 +15,9 @@ const SalesInvoiceList = () => {
 
   const fetchInvoices = async () => {
     try {
-      console.log('🔥 FETCH INVOICES FUNCTION HIT');
-
       const token = localStorage.getItem('token');
 
       const data = await getInvoices(token);
-
-      console.log('📦 INVOICES API DATA:', data);
 
       setInvoices(data);
     } catch (err) {

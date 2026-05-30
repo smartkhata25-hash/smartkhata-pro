@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const profitRoutes = require("./routes/profitRoutes");
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use(
 app.use("/api/purchase-invoices", require("./routes/purchaseInvoiceRoutes"));
 app.use("/api/supplier-ledger", require("./routes/supplierLedgerRoutes"));
 app.use("/api", require("./routes/dashboardRoutes"));
+app.use("/api/profit", profitRoutes);
 app.use("/api", require("./routes/stockValueRoutes"));
 
 app.use("/api/pay-bill", require("./routes/payBillRoutes"));

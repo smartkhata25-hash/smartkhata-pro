@@ -250,7 +250,7 @@ const ImportDataPage = () => {
           <input
             type="file"
             className="input w-full"
-            accept=".xlsx,.csv"
+            accept=".xlsx,.csv,.pdf"
             onChange={(e) => setFile(e.target.files[0])}
           />
 

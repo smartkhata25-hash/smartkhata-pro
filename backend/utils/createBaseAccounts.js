@@ -79,7 +79,7 @@ const createBaseAccountsForUser = async (userId) => {
     {
       name: "cogs",
       type: "Expense",
-      category: "other",
+      category: "cogs",
       code: "COGS",
       normalBalance: "debit",
       isSystem: true,
@@ -137,7 +137,7 @@ const createBaseAccountsForUser = async (userId) => {
     {
       name: "Other Expense",
       type: "Expense",
-      category: "other",
+      category: "other_expense",
       code: "OTHER_EXP",
       normalBalance: "debit",
       isSystem: false,

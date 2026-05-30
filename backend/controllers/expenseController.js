@@ -12,7 +12,7 @@ exports.createExpense = async (req, res) => {
     const {
       title,
       titleId,
-      category, // fallback for old system
+      category,
       date,
       time,
       amount,
@@ -36,7 +36,6 @@ exports.createExpense = async (req, res) => {
     let finalCategory = category;
     let finalTitle = title || "";
 
-    // 🔥 NEW: اگر titleId آیا ہے تو category auto لے آئیں
     if (titleId) {
       const titleDoc = await ExpenseTitle.findOne({
         _id: titleId,

@@ -4,6 +4,7 @@ const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
 const Account = require("../models/Account");
 const Invoice = require("../models/Invoice");
+const Product = require("../models/Product");
 const {
   createInventoryEntry,
   deleteTransactionsByReference,
@@ -190,29 +191,47 @@ exports.createRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ Calculate refund cost using historical invoice snapshot
+    // ✅ Calculate refund cost
     let totalRefundCost = 0;
+    const refundCostMap = {};
 
     if (!isOpening || isOpening === "false") {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
+      let originalInvoice = null;
 
-      if (originalInvoice) {
-        for (const item of items) {
-          const originalItem = originalInvoice.items.find(
-            (i) => i.productId?.toString() === item.productId?.toString(),
-          );
+      if (originalInvoiceId) {
+        originalInvoice = await Invoice.findById(originalInvoiceId);
+      }
 
-          const historicalCost = Number(originalItem?.costPrice || 0);
+      const productIds = items.map((i) => i.productId).filter(Boolean);
 
-          totalRefundCost += historicalCost * Number(item.quantity || 0);
-        }
+      const products = await Product.find({
+        _id: { $in: productIds },
+        userId,
+      });
+
+      for (const item of items) {
+        const productId = item.productId?.toString();
+
+        const originalItem = originalInvoice?.items?.find(
+          (i) => i.productId?.toString() === productId,
+        );
+
+        const product = products.find((p) => p._id.toString() === productId);
+
+        const costRate =
+          Number(originalItem?.costPrice || 0) > 0
+            ? Number(originalItem.costPrice)
+            : Number(product?.unitCost || 0);
+
+        refundCostMap[productId] = costRate;
+
+        totalRefundCost += costRate * Number(item.quantity || 0);
       }
     }
 
     // ✅ JOURNAL LINES
     const lines = isOpening
       ? [
-          // ✅ Opening Refund Entry
           {
             account: (
               await Account.findOne({
@@ -223,7 +242,6 @@ exports.createRefundInvoice = async (req, res) => {
             type: "debit",
             amount: totalAmount,
           },
-
           {
             account: customerAccountId,
             type: "credit",
@@ -231,33 +249,30 @@ exports.createRefundInvoice = async (req, res) => {
           },
         ]
       : [
-          // 🔴 Customer refund
           {
             account: customerAccountId,
             type: "credit",
             amount: totalAmount,
           },
-
-          // 🟢 Sales return
           {
             account: salesReturnAccount._id,
             type: "debit",
             amount: totalAmount,
           },
-
-          // 🟢 Inventory back (COST BASED)
-          {
-            account: inventoryAccount._id,
-            type: "debit",
-            amount: totalRefundCost,
-          },
-
-          // 🔴 COGS reverse (COST BASED)
-          {
-            account: cogsAccount._id,
-            type: "credit",
-            amount: totalRefundCost,
-          },
+          ...(totalRefundCost > 0
+            ? [
+                {
+                  account: inventoryAccount._id,
+                  type: "debit",
+                  amount: totalRefundCost,
+                },
+                {
+                  account: cogsAccount._id,
+                  type: "credit",
+                  amount: totalRefundCost,
+                },
+              ]
+            : []),
         ];
 
     // ✅ Journal Entry
@@ -314,7 +329,7 @@ exports.createRefundInvoice = async (req, res) => {
           userId,
 
           // ✅ Historical refund rate
-          rate: Number(originalItem?.costPrice || 0),
+          rate: Number(refundCostMap[item.productId?.toString()] || 0),
         });
       }
     }
@@ -495,10 +510,9 @@ exports.updateRefundInvoice = async (req, res) => {
         originalQtyMap[item.productId.toString()] = item.quantity;
       });
 
-      // پہلے کتنے ریفنڈ ہو چکے (اپنے آپ کو چھوڑ کر)
       const previousRefunds = await RefundInvoice.find({
         originalInvoiceId,
-        _id: { $ne: refund._id }, // 🔥 IMPORTANT
+        _id: { $ne: refund._id },
       });
 
       const refundedQtyMap = {};
@@ -552,29 +566,47 @@ exports.updateRefundInvoice = async (req, res) => {
       refundDateTime = new Date(invoiceDate);
     }
 
-    // ✅ Calculate refund cost using historical invoice snapshot
+    // ✅ Calculate refund cost
     let totalRefundCost = 0;
+    const refundCostMap = {};
 
     if (!isOpening || isOpening === "false") {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
+      let originalInvoice = null;
 
-      if (originalInvoice) {
-        for (const item of items) {
-          const originalItem = originalInvoice.items.find(
-            (i) => i.productId?.toString() === item.productId?.toString(),
-          );
+      if (originalInvoiceId) {
+        originalInvoice = await Invoice.findById(originalInvoiceId);
+      }
 
-          const historicalCost = Number(originalItem?.costPrice || 0);
+      const productIds = items.map((i) => i.productId).filter(Boolean);
 
-          totalRefundCost += historicalCost * Number(item.quantity || 0);
-        }
+      const products = await Product.find({
+        _id: { $in: productIds },
+        userId,
+      });
+
+      for (const item of items) {
+        const productId = item.productId?.toString();
+
+        const originalItem = originalInvoice?.items?.find(
+          (i) => i.productId?.toString() === productId,
+        );
+
+        const product = products.find((p) => p._id.toString() === productId);
+
+        const costRate =
+          Number(originalItem?.costPrice || 0) > 0
+            ? Number(originalItem.costPrice)
+            : Number(product?.unitCost || 0);
+
+        refundCostMap[productId] = costRate;
+
+        totalRefundCost += costRate * Number(item.quantity || 0);
       }
     }
 
     // ✅ JOURNAL LINES
     const lines = isOpening
       ? [
-          // ✅ Opening Refund Entry
           {
             account: (
               await Account.findOne({
@@ -585,7 +617,6 @@ exports.updateRefundInvoice = async (req, res) => {
             type: "debit",
             amount: totalAmount,
           },
-
           {
             account: customerAccountId,
             type: "credit",
@@ -593,33 +624,30 @@ exports.updateRefundInvoice = async (req, res) => {
           },
         ]
       : [
-          // 🔴 Customer refund
           {
             account: customerAccountId,
             type: "credit",
             amount: totalAmount,
           },
-
-          // 🟢 Sales return
           {
             account: salesReturnAccount._id,
             type: "debit",
             amount: totalAmount,
           },
-
-          // 🟢 Inventory back (COST BASED)
-          {
-            account: inventoryAccount._id,
-            type: "debit",
-            amount: totalRefundCost,
-          },
-
-          // 🔴 COGS reverse (COST BASED)
-          {
-            account: cogsAccount._id,
-            type: "credit",
-            amount: totalRefundCost,
-          },
+          ...(totalRefundCost > 0
+            ? [
+                {
+                  account: inventoryAccount._id,
+                  type: "debit",
+                  amount: totalRefundCost,
+                },
+                {
+                  account: cogsAccount._id,
+                  type: "credit",
+                  amount: totalRefundCost,
+                },
+              ]
+            : []),
         ];
 
     // ✅ New journal entry
@@ -675,7 +703,7 @@ exports.updateRefundInvoice = async (req, res) => {
           userId,
 
           // ✅ Historical refund rate
-          rate: Number(originalItem?.costPrice || 0),
+          rate: Number(refundCostMap[item.productId?.toString()] || 0),
         });
       }
     }

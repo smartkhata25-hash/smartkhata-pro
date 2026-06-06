@@ -107,7 +107,6 @@ const journalEntrySchema = new mongoose.Schema(
     },
     attachmentType: {
       type: String,
-      enum: ["image", "pdf", "voice", "other", ""],
       default: "",
     },
     invoiceId: {

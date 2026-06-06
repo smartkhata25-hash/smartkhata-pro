@@ -336,7 +336,10 @@ const RefundInvoiceForm = ({
 
       const formData = new FormData();
       formData.append('billNo', billNo || '');
-      formData.append('originalInvoiceId', originalInvoiceId);
+
+      if (originalInvoiceId) {
+        formData.append('originalInvoiceId', originalInvoiceId);
+      }
 
       formData.append('customerId', customer._id);
       formData.append('customerName', customer.name);

@@ -12,7 +12,10 @@ dotenv.config();
 // MongoDB connect
 mongoose
   .connect(process.env.MONGO_URI)
+
   .then(async () => {
+    console.log("MONGO_URI =", process.env.MONGO_URI);
+    console.log("DB NAME =", mongoose.connection.name);
     console.log("MongoDB connected");
 
     if (process.env.ENABLE_STARTUP_BACKUP === "true") {

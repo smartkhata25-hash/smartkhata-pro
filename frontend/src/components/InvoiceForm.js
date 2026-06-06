@@ -50,6 +50,8 @@ const InvoiceForm = ({
 
   const [attachment, setAttachment] = useState(null);
 
+  const [existingAttachment, setExistingAttachment] = useState(null);
+
   const [footerText, setFooterText] = useState('');
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -327,6 +329,12 @@ const InvoiceForm = ({
     if (editingInvoiceFromAPI.isOpening) {
       setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
     }
+
+    setExistingAttachment({
+      url: editingInvoiceFromAPI.attachmentUrl || '',
+      name: editingInvoiceFromAPI.attachmentOriginalName || '',
+      type: editingInvoiceFromAPI.attachmentType || '',
+    });
   }, [editingInvoiceFromAPI]);
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
@@ -614,6 +622,10 @@ const InvoiceForm = ({
 
   const handleFileChange = (e) => {
     setAttachment(e.target.files[0]);
+
+    if (e.target.files[0]) {
+      setExistingAttachment(null);
+    }
   };
   const formState = {
     billNo,
@@ -1201,6 +1213,24 @@ const InvoiceForm = ({
                         onChange={handleFileChange}
                         className="border px-2 py-0 text-sm h-8 w-28 relative z-10"
                       />
+
+                      {existingAttachment?.name && (
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-blue-600">📎 {existingAttachment.name}</div>
+
+                          {existingAttachment?.url && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.open(existingAttachment.url, '_blank');
+                              }}
+                              className="text-green-600 text-xs underline"
+                            >
+                              👁 View
+                            </button>
+                          )}
+                        </div>
+                      )}
 
                       {attachment && (
                         <>

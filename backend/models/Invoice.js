@@ -165,6 +165,16 @@ const invoiceSchema = new mongoose.Schema(
       default: "",
     },
 
+    attachmentSize: {
+      type: Number,
+      default: 0,
+    },
+
+    attachmentOriginalName: {
+      type: String,
+      default: "",
+    },
+
     isDeleted: {
       type: Boolean,
       default: false,

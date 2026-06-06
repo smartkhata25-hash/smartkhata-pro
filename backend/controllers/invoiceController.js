@@ -5,8 +5,7 @@ const Account = require("../models/Account");
 
 const Product = require("../models/Product");
 const JournalEntry = require("../models/JournalEntry");
-const fs = require("fs");
-const path = require("path");
+const { uploadFile, deleteFile } = require("../services/r2FileService");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getCustomerBalanceFromJournal } = require("../utils/journalHelper");
 const {
@@ -119,6 +118,18 @@ exports.createInvoice = async (req, res) => {
       });
     }
 
+    let attachmentData = null;
+
+    if (req.file) {
+      attachmentData = await uploadFile({
+        buffer: req.file.buffer,
+        userId,
+        moduleName: "invoices",
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+    }
+
     const invoice = new Invoice({
       billNo,
       customerName,
@@ -142,6 +153,10 @@ exports.createInvoice = async (req, res) => {
       accountId,
       isOpening: isOpening || false,
       createdBy: userId,
+      attachmentUrl: attachmentData?.key || "",
+      attachmentType: attachmentData?.mimeType || "",
+      attachmentSize: attachmentData?.size || 0,
+      attachmentOriginalName: attachmentData?.originalName || "",
     });
 
     const customer = await Customer.findOne({
@@ -295,8 +310,8 @@ exports.createInvoice = async (req, res) => {
 
       createdBy: userId,
       customerId: customer._id,
-      attachmentUrl: req.file?.filename || "",
-      attachmentType: req.file?.mimetype?.split("/")[0] || "",
+      attachmentUrl: saved.attachmentUrl || "",
+      attachmentType: saved.attachmentType || "",
       lines: isOpening
         ? [
             // ✅ Opening Balance Entry
@@ -453,7 +468,13 @@ exports.getInvoices = async (req, res) => {
 
       formatted.push({
         ...inv,
+
+        attachmentFullUrl: inv.attachmentUrl
+          ? require("../services/r2FileService").getFileUrl(inv.attachmentUrl)
+          : "",
+
         paymentMode: paymentLine?.paymentType || inv.paymentType || "-",
+
         accountName: paymentLine?.account?.name || "-",
       });
     }
@@ -472,8 +493,17 @@ exports.getInvoiceById = async (req, res) => {
     const invoice = await Invoice.findOne({
       _id: req.params.id,
       createdBy: userId,
-    });
-    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+    }).lean();
+
+    if (!invoice)
+      return res.status(404).json({
+        message: "Invoice not found",
+      });
+
+    invoice.attachmentFullUrl = invoice.attachmentUrl
+      ? require("../services/r2FileService").getFileUrl(invoice.attachmentUrl)
+      : "";
+
     res.json(invoice);
   } catch (error) {
     res.status(500).json({ message: "Error fetching invoice", error });
@@ -493,9 +523,12 @@ exports.deleteInvoice = async (req, res) => {
     return res.status(404).json({ message: "Invoice not found" });
   }
 
-  // 🟡 Delete Invoice
   invoice.isDeleted = true;
   await invoice.save();
+
+  if (invoice.attachmentUrl) {
+    await deleteFile(invoice.attachmentUrl);
+  }
 
   // ❗ Delete related inventory transactions
   if (!invoice.isOpening) {
@@ -570,12 +603,7 @@ exports.updateInvoice = async (req, res) => {
     }
 
     if (req.file && invoice.attachmentUrl) {
-      const oldPath = path.join(
-        __dirname,
-        "../uploads/",
-        invoice.attachmentUrl,
-      );
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      await deleteFile(invoice.attachmentUrl);
     }
 
     if (!invoice.isOpening) {
@@ -649,8 +677,18 @@ exports.updateInvoice = async (req, res) => {
       finalPaid >= totalAmount ? "Paid" : finalPaid > 0 ? "Partial" : "Unpaid";
 
     if (req.file) {
-      invoice.attachmentUrl = req.file.filename;
-      invoice.attachmentType = req.file.mimetype?.split("/")[0] || "";
+      const uploadedFile = await uploadFile({
+        buffer: req.file.buffer,
+        userId,
+        moduleName: "invoices",
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+
+      invoice.attachmentUrl = uploadedFile.key;
+      invoice.attachmentType = uploadedFile.mimeType;
+      invoice.attachmentSize = uploadedFile.size;
+      invoice.attachmentOriginalName = uploadedFile.originalName;
     }
 
     // ✅ Skip stock for opening invoice

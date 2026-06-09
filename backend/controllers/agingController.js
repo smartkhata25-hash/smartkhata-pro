@@ -38,13 +38,18 @@ const calculateAgingBuckets = (entries, asOfDate) => {
 const getAgingReport = asyncHandler(async (req, res) => {
   const { asOfDate } = req.query;
 
+  const userId = req.user?.id || req.userId;
+
   const reportDate = asOfDate ? new Date(asOfDate) : new Date();
 
   /* ==============================
      STEP 1 — GET CUSTOMERS
   ============================== */
 
-  const customers = await Customer.find({ isActive: true }).lean();
+  const customers = await Customer.find({
+    createdBy: userId,
+    isActive: true,
+  }).lean();
 
   if (!customers.length) {
     return res.json([]);
@@ -65,6 +70,7 @@ const getAgingReport = asyncHandler(async (req, res) => {
   ============================== */
 
   const journalEntries = await JournalEntry.find({
+    createdBy: userId,
     isDeleted: { $ne: true },
     date: { $lte: reportDate },
     "lines.account": { $in: customerAccounts },

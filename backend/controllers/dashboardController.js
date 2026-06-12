@@ -66,6 +66,16 @@ const getDashboardSummary = async (req, res) => {
 
     let customerNet = 0;
 
+    // ✅ ONLY ACTIVE CUSTOMERS
+    const activeCustomers = await Customer.find({
+      createdBy: userId,
+      isActive: true,
+    }).select("account");
+
+    const activeCustomerAccountIds = activeCustomers
+      .map((c) => c.account)
+      .filter(Boolean);
+
     // ✅ ONLY ACTIVE SUPPLIERS
     const activeSuppliers = await Supplier.find({
       userId,
@@ -99,31 +109,14 @@ const getDashboardSummary = async (req, res) => {
       { $unwind: "$accountInfo" },
 
       {
-        $lookup: {
-          from: "customers",
-          localField: "customerId",
-          foreignField: "_id",
-          as: "customerInfo",
-        },
-      },
-
-      {
-        $unwind: {
-          path: "$customerInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      {
         $match: {
           $or: [
             {
               "accountInfo.category": { $ne: "customer" },
             },
-
             {
               "accountInfo.category": "customer",
-              "customerInfo.isActive": true,
+              "lines.account": { $in: activeCustomerAccountIds },
             },
           ],
         },

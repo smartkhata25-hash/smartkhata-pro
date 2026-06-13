@@ -173,11 +173,26 @@ const ProductDropdown = ({
                   i === highlightIndex ? 'bg-blue-100 font-medium' : ''
                 }`}
               >
-                <div className="flex justify-between">
-                  <span>{p.name}</span>
-                  <span className="text-gray-500 text-xs">
-                    {p.categoryId?.name || p.category || t('product.inventory')}
-                  </span>
+                <div className="flex justify-between items-center gap-3">
+                  <div className="flex flex-col">
+                    <span className="font-medium">{p.name}</span>
+
+                    <span className="text-gray-500 text-xs">
+                      {p.categoryId?.name || p.category || t('product.inventory')}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`text-xs px-2 py-1 rounded font-semibold ${
+                      Number(p.stock || 0) <= 0
+                        ? 'bg-red-100 text-red-600'
+                        : Number(p.stock || 0) <= Number(p.lowStockThreshold || 0)
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700'
+                    }`}
+                  >
+                    Stock: {Number(p.stock || 0)}
+                  </div>
                 </div>
               </li>
             ))}

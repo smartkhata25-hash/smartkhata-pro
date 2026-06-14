@@ -39,7 +39,11 @@ const getPaymentEntries = async (paymentId) => {
 
 const Customer = require("../models/Customer");
 
-const calculatePreviousBalance = async (customerId, paymentDate) => {
+const calculatePreviousBalance = async (
+  customerId,
+  paymentDate,
+  userId = null,
+) => {
   if (!customerId) return 0;
 
   const customerData = await Customer.findById(customerId).populate("account");
@@ -48,10 +52,18 @@ const calculatePreviousBalance = async (customerId, paymentDate) => {
 
   const customerAccountId = customerData.account._id;
 
-  const journals = await JournalEntry.find({
+  const filter = {
     date: { $lt: paymentDate || new Date() },
     "lines.account": customerAccountId,
-  });
+    isDeleted: false,
+    sourceType: { $ne: "reversal" },
+  };
+
+  if (userId) {
+    filter.createdBy = new mongoose.Types.ObjectId(userId);
+  }
+
+  const journals = await JournalEntry.find(filter);
 
   let debit = 0;
   let credit = 0;
@@ -109,6 +121,7 @@ const buildReceiptData = async (payment, size = "standard", userId = null) => {
   const previousBalance = await calculatePreviousBalance(
     payment.customer?._id,
     payment.date,
+    userId,
   );
 
   return buildReceivePaymentPrint(payment, paymentEntries, {
@@ -232,12 +245,12 @@ const previewReceivePaymentHtml = async (req, res) => {
 
     const paymentEntries = parsed.paymentEntries || [];
 
-    const previousBalance = await calculatePreviousBalance(
-      parsed.customer,
-      parsed.date,
-    );
-
     const userId = req.user?.id || req.userId || parsed.userId;
+
+    const previousBalance =
+      parsed.previousBalance !== undefined
+        ? Number(parsed.previousBalance || 0)
+        : await calculatePreviousBalance(parsed.customer, parsed.date, userId);
 
     const printSetting = await PrintSetting.findOne({
       userId,
@@ -316,12 +329,12 @@ const previewReceivePaymentPdf = async (req, res) => {
 
     const paymentEntries = parsed.paymentEntries || [];
 
-    const previousBalance = await calculatePreviousBalance(
-      parsed.customer,
-      parsed.date,
-    );
-
     const userId = req.user?.id || req.userId || parsed.userId;
+
+    const previousBalance =
+      parsed.previousBalance !== undefined
+        ? Number(parsed.previousBalance || 0)
+        : await calculatePreviousBalance(parsed.customer, parsed.date, userId);
 
     const printSetting = await PrintSetting.findOne({
       userId,

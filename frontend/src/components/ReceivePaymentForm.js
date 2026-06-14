@@ -282,6 +282,8 @@ const ReceivePaymentForm = () => {
 
       discountAmount: Number(formData.discountAmount || 0),
 
+      previousBalance: Number(closingBalance || 0),
+
       lang: getCurrentLanguage(),
 
       customer: formData.customer,
@@ -295,6 +297,7 @@ const ReceivePaymentForm = () => {
         accountName: accounts.find((a) => a._id === p.account)?.name || '',
       })),
     };
+
     const encoded = encodeURIComponent(JSON.stringify(previewData));
 
     window.open(
@@ -323,7 +326,11 @@ const ReceivePaymentForm = () => {
 
       discountAmount: Number(formData.discountAmount || 0),
 
+      previousBalance: Number(closingBalance || 0),
+
       lang: getCurrentLanguage(),
+
+      customer: formData.customer,
 
       customerName: customers.find((c) => c._id === formData.customer)?.name || '',
 

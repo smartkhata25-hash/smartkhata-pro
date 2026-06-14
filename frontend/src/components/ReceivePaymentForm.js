@@ -620,7 +620,7 @@ const ReceivePaymentForm = () => {
                   type="text"
                   inputMode="decimal"
                   placeholder={t('amount')}
-                  className="col-span-2 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm no-spinner"
+                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm no-spinner"
                   value={entry.amount}
                   onChange={(e) =>
                     setPaymentEntries((prev) =>

@@ -129,6 +129,7 @@ const getDashboardSummary = async (req, res) => {
             type: "$accountInfo.type",
             category: "$accountInfo.category",
             lineType: "$lines.type",
+            accountCode: "$accountInfo.code",
           },
 
           total: { $sum: "$lines.amount" },
@@ -173,9 +174,24 @@ const getDashboardSummary = async (req, res) => {
 
     totalReceivable = customerNet;
 
+    const dashboardExpenses = combinedData
+      .filter((item) => {
+        const { type, lineType, accountCode } = item._id;
+
+        const code = String(accountCode || "").toUpperCase();
+
+        return (
+          type === "Expense" &&
+          lineType === "debit" &&
+          code !== "COGS" &&
+          !code.includes("DISCOUNT")
+        );
+      })
+      .reduce((sum, item) => sum + Number(item.total || 0), 0);
+
     res.json({
       totalSales: Number(totalSales.toFixed(2)),
-      totalExpenses: Number(operatingExpenses.toFixed(2)),
+      totalExpenses: Number(dashboardExpenses.toFixed(2)),
       netProfit: Number(netProfit.toFixed(2)),
       grossProfit: Number(grossProfit.toFixed(2)),
       cogs: Number(cogs.toFixed(2)),

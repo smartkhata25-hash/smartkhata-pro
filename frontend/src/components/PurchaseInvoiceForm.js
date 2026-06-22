@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchSuppliers } from '../services/supplierService';
+import { fetchPurchaseParties } from '../services/partyService';
 import { fetchProductsWithToken } from '../services/inventoryService';
 import { getValidPaymentAccounts } from '../services/accountService';
 
@@ -27,6 +28,9 @@ const PurchaseInvoiceForm = () => {
   const [invoiceId, setInvoiceId] = useState(null);
 
   const [suppliers, setSuppliers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedSupplierType, setSelectedSupplierType] = useState('supplier');
+  const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [products, setProducts] = useState([]);
   const [accounts, setAccounts] = useState([]);
 
@@ -98,6 +102,11 @@ const PurchaseInvoiceForm = () => {
     if (!token) return;
 
     fetchSuppliers().then(setSuppliers);
+
+    fetchPurchaseParties(token)
+      .then(setParties)
+      .catch((err) => console.error('Purchase parties load failed:', err));
+
     fetchProductsWithToken(token).then(setProducts);
     getValidPaymentAccounts().then(setAccounts);
   }, [token]);
@@ -177,7 +186,24 @@ const PurchaseInvoiceForm = () => {
 
   const filterSuppliers = (value) => {
     const query = value.toLowerCase();
-    return suppliers.filter((s) => s.name.toLowerCase().includes(query));
+
+    const supplierList = suppliers
+      .filter((s) => s.name?.toLowerCase().includes(query) || s.phone?.includes(query))
+      .map((s) => ({
+        ...s,
+        selectType: 'supplier',
+        badge: 'Supplier',
+      }));
+
+    const partyList = parties
+      .filter((p) => p.name?.toLowerCase().includes(query) || p.phone?.includes(query))
+      .map((p) => ({
+        ...p,
+        selectType: 'party',
+        badge: 'Party',
+      }));
+
+    return [...supplierList, ...partyList];
   };
 
   const handleSupplierInput = (e) => {
@@ -214,7 +240,7 @@ const PurchaseInvoiceForm = () => {
       e.preventDefault();
       const selected = supplierSuggestions[selectedSupplierIndex];
       if (selected) {
-        handleSupplierSelect(selected.name, selected.phone);
+        handleSupplierSelect(selected.name, selected.phone, selected._id, selected.selectType);
         setTimeout(() => {
           document.getElementById('supplier-phone')?.focus();
         }, 0);
@@ -222,17 +248,15 @@ const PurchaseInvoiceForm = () => {
     }
   };
 
-  const handleSupplierSelect = (name, phone) => {
+  const handleSupplierSelect = (name, phone, id, type = 'supplier') => {
     setSupplierName(name);
     setSupplierPhone(phone || '');
-    const selected = suppliers.find((s) => s.name === name);
-    if (selected && selected.account) {
-    }
+    setSelectedSupplierId(id);
+    setSelectedSupplierType(type);
 
     setSupplierSuggestions([]);
     setSelectedSupplierIndex(-1);
   };
-
   const quickAddSupplier = async (name) => {
     try {
       const res = await fetch(`${API}/api/suppliers`, {
@@ -359,7 +383,11 @@ const PurchaseInvoiceForm = () => {
 
     setAccountError('');
 
-    const selectedSupplier = suppliers.find((s) => s.name === supplierName);
+    const selectedSupplier =
+      selectedSupplierType === 'supplier'
+        ? suppliers.find((s) => s._id === selectedSupplierId || s.name === supplierName)
+        : null;
+
     const supplierAccountId = selectedSupplier?.account || '';
 
     const validItems = items
@@ -397,7 +425,11 @@ const PurchaseInvoiceForm = () => {
     formData.append('invoiceTime', invoiceTime);
     formData.append('supplierName', supplierName);
     formData.append('supplierPhone', supplierPhone);
-    formData.append('supplierId', selectedSupplier?._id || '');
+    if (selectedSupplierType === 'party') {
+      formData.append('partyId', selectedSupplierId);
+    } else {
+      formData.append('supplierId', selectedSupplier?._id || selectedSupplierId || '');
+    }
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);
@@ -441,6 +473,9 @@ const PurchaseInvoiceForm = () => {
       setBillNo('');
       setSupplierName('');
       setSupplierPhone('');
+
+      setSelectedSupplierId('');
+      setSelectedSupplierType('supplier');
 
       setItems(Array.from({ length: 15 }, (_, i) => generateEmptyRow(i)));
 
@@ -578,6 +613,8 @@ const PurchaseInvoiceForm = () => {
     setBillNo('');
     setSupplierName('');
     setSupplierPhone('');
+    setSelectedSupplierId('');
+    setSelectedSupplierType('supplier');
     setItems(Array.from({ length: 15 }, (_, i) => generateEmptyRow(i)));
     setDiscountPercent(0);
     setDiscountAmount(0);
@@ -647,7 +684,11 @@ const PurchaseInvoiceForm = () => {
     formData.append('invoiceTime', invoiceTime);
     formData.append('supplierName', supplierName);
     formData.append('supplierPhone', supplierPhone);
-    formData.append('supplierId', selectedSupplier?._id || '');
+    if (selectedSupplierType === 'party') {
+      formData.append('partyId', selectedSupplierId);
+    } else {
+      formData.append('supplierId', selectedSupplier?._id || selectedSupplierId || '');
+    }
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);
@@ -769,12 +810,14 @@ const PurchaseInvoiceForm = () => {
                       {supplierSuggestions.map((s, i) => (
                         <li
                           key={i}
-                          onMouseDown={() => handleSupplierSelect(s.name, s.phone)}
+                          onMouseDown={() =>
+                            handleSupplierSelect(s.name, s.phone, s._id, s.selectType)
+                          }
                           className={`px-2 py-2 cursor-pointer ${
                             selectedSupplierIndex === i ? 'bg-blue-100 font-bold' : ''
                           }`}
                         >
-                          {s.name}
+                          {s.name} {s.badge === 'Party' ? '🟣 Party' : ''}
                         </li>
                       ))}
                     </ul>

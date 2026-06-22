@@ -9,6 +9,8 @@ import {
 import { getAccounts } from '../services/accountService';
 import { fetchCustomers } from '../services/customerService';
 import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+import { fetchSaleParties } from '../services/partyService';
+import { getPartyLedger } from '../services/partyLedgerService';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
@@ -17,6 +19,8 @@ import './ReceivePaymentForm.css';
 
 const ReceivePaymentForm = () => {
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedCustomerType, setSelectedCustomerType] = useState('customer');
   const [accounts, setAccounts] = useState([]);
   const [customerName, setCustomerName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -59,7 +63,7 @@ const ReceivePaymentForm = () => {
     async function fetchData() {
       try {
         const cData = await fetchCustomers();
-
+        const pData = await fetchSaleParties();
         const aData = await getAccounts();
 
         // ✅ Sirf Receive Payment ke liye valid accounts
@@ -70,6 +74,7 @@ const ReceivePaymentForm = () => {
         );
 
         setCustomers(cData);
+        setParties(pData);
         setAccounts(paymentAccounts);
 
         const loadedCustomers = cData;
@@ -151,18 +156,28 @@ const ReceivePaymentForm = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const loadLedger = async (customerId) => {
-    if (customerId) {
-      const customer = customers.find((c) => String(c._id) === String(customerId));
-
-      const accountId = customer?.account?._id || customer?.account;
-
-      const res = await getLedgerByCustomerAccount(accountId);
-
-      setCustomerLedger(res.ledger || []);
-    } else {
+  const loadLedger = async (id, type = selectedCustomerType) => {
+    if (!id) {
       setCustomerLedger([]);
+      return;
     }
+
+    if (type === 'party') {
+      const res = await getPartyLedger(id);
+      setCustomerLedger(res.ledger || []);
+      return;
+    }
+
+    const customer = customers.find((c) => String(c._id) === String(id));
+    const accountId = customer?.account?._id || customer?.account;
+
+    if (!accountId) {
+      setCustomerLedger([]);
+      return;
+    }
+
+    const res = await getLedgerByCustomerAccount(accountId);
+    setCustomerLedger(res.ledger || []);
   };
 
   const handleChange = (e) => {
@@ -193,6 +208,7 @@ const ReceivePaymentForm = () => {
     });
 
     setCustomerName('');
+    setSelectedCustomerType('customer');
 
     const handCash = accounts.find((acc) => acc.name?.toLowerCase() === 'handcash');
 
@@ -288,9 +304,15 @@ const ReceivePaymentForm = () => {
 
       customer: formData.customer,
 
-      customerName: customers.find((c) => c._id === formData.customer)?.name || '',
+      customerName:
+        selectedCustomerType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.name || ''
+          : customers.find((c) => c._id === formData.customer)?.name || '',
 
-      customerPhone: customers.find((c) => c._id === formData.customer)?.phone || '',
+      customerPhone:
+        selectedCustomerType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.phone || ''
+          : customers.find((c) => c._id === formData.customer)?.phone || '',
 
       paymentEntries: paymentEntries.map((p) => ({
         ...p,
@@ -358,7 +380,7 @@ const ReceivePaymentForm = () => {
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
 
-    if (!formData.customer || paymentEntries.length === 0) {
+    if ((!formData.customer && !formData.partyId) || paymentEntries.length === 0) {
       alert(t('alerts.addAtLeastOnePayment'));
       return;
     }
@@ -464,17 +486,35 @@ const ReceivePaymentForm = () => {
                   zIndex: 50,
                 }}
               >
-                {customers
-                  .filter((c) => (c.name || '').toLowerCase().includes(customerName.toLowerCase()))
+                {[
+                  ...customers
+                    .filter((c) =>
+                      (c.name || '').toLowerCase().includes(customerName.toLowerCase())
+                    )
+                    .map((c) => ({ ...c, selectType: 'customer', badge: 'Customer' })),
+
+                  ...parties
+                    .filter((p) =>
+                      (p.name || '').toLowerCase().includes(customerName.toLowerCase())
+                    )
+                    .map((p) => ({ ...p, selectType: 'party', badge: 'Party' })),
+                ]
                   .slice(0, 10)
                   .map((c) => (
                     <div
                       key={c._id}
                       onClick={() => {
                         setCustomerName(c.name);
-                        setFormData((prev) => ({ ...prev, customer: c._id }));
+                        setSelectedCustomerType(c.selectType);
+
+                        setFormData((prev) => ({
+                          ...prev,
+                          customer: c.selectType === 'customer' ? c._id : '',
+                          partyId: c.selectType === 'party' ? c._id : '',
+                        }));
+
                         setShowSuggestions(false);
-                        loadLedger(c._id);
+                        loadLedger(c._id, c.selectType);
                       }}
                       style={{
                         padding: '8px 10px',
@@ -482,7 +522,7 @@ const ReceivePaymentForm = () => {
                         borderBottom: '1px solid #f1f5f9',
                       }}
                     >
-                      {c.name}
+                      {c.name} {c.badge === 'Party' ? '🟣 Party' : ''}
                     </div>
                   ))}
               </div>

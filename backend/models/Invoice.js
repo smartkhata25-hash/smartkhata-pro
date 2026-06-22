@@ -146,7 +146,13 @@ const invoiceSchema = new mongoose.Schema(
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
 
     journalEntryId: {
@@ -190,5 +196,15 @@ const invoiceSchema = new mongoose.Schema(
 
 // ✅ Correct UNIQUE rule (per user, per bill)
 invoiceSchema.index({ createdBy: 1, billNo: 1 }, { unique: true });
+
+invoiceSchema.index({
+  createdBy: 1,
+  partyId: 1,
+});
+
+invoiceSchema.index({
+  createdBy: 1,
+  customerId: 1,
+});
 
 module.exports = mongoose.model("Invoice", invoiceSchema);

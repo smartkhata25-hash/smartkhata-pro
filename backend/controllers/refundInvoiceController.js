@@ -2,6 +2,7 @@ const RefundInvoice = require("../models/RefundInvoice");
 
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
+const Party = require("../models/Party");
 const Account = require("../models/Account");
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
@@ -25,6 +26,7 @@ exports.createRefundInvoice = async (req, res) => {
       invoiceDate,
       invoiceTime,
       customerId,
+      partyId,
       customerPhone,
       totalAmount,
       paidAmount,
@@ -48,20 +50,36 @@ exports.createRefundInvoice = async (req, res) => {
     }
 
     // ✅ Basic validation
-    if (!customerId) {
+    if (!customerId && !partyId) {
       return res.status(400).json({
-        error: "Customer ID required",
+        error: "Customer or Party required",
       });
     }
 
     // ✅ Customer
-    const customer = await Customer.findOne({
-      _id: customerId,
-      createdBy: userId,
-    });
+    let customer = null;
+    let party = null;
 
-    if (!customer) {
-      return res.status(404).json({ error: "Customer not found" });
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party) {
+        return res.status(404).json({ error: "Party not found" });
+      }
+    } else {
+      customer = await Customer.findOne({
+        _id: customerId,
+        createdBy: userId,
+      });
+
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
     }
 
     // ✅ Accounts
@@ -88,14 +106,15 @@ exports.createRefundInvoice = async (req, res) => {
     }
 
     // ✅ Customer account (MOST IMPORTANT FOR LEDGER)
-    const customerAccountId =
-      typeof customer.account === "object"
+    const counterPartyAccountId = party
+      ? party.account
+      : typeof customer.account === "object"
         ? customer.account?._id
         : customer.account;
 
-    if (!customerAccountId) {
+    if (!counterPartyAccountId) {
       return res.status(400).json({
-        error: "Customer account not linked",
+        error: "Account not linked",
       });
     }
 
@@ -123,13 +142,14 @@ exports.createRefundInvoice = async (req, res) => {
       billNo: refundBillNo,
       invoiceDate,
       invoiceTime,
-      customerId: customer._id,
-      customerName: customer.name,
+      customerId: customer?._id || null,
+      partyId: party?._id || null,
+      customerName: customer?.name || party?.name || "",
       customerPhone,
       totalAmount,
       paidAmount,
       paymentType: isOpening ? "credit" : paymentType,
-      accountId: paymentType === "cash" ? accountId : null,
+      accountId: Number(paidAmount || 0) > 0 ? accountId : null,
       notes,
       isOpening: isOpening || false,
       items,
@@ -243,14 +263,14 @@ exports.createRefundInvoice = async (req, res) => {
             amount: totalAmount,
           },
           {
-            account: customerAccountId,
+            account: counterPartyAccountId,
             type: "credit",
             amount: totalAmount,
           },
         ]
       : [
           {
-            account: customerAccountId,
+            account: counterPartyAccountId,
             type: "credit",
             amount: totalAmount,
           },
@@ -287,26 +307,34 @@ exports.createRefundInvoice = async (req, res) => {
       billNo: refundBillNo,
       paymentType,
       createdBy: userId,
-      customerId: customer._id,
+      customerId: customer?._id || null,
+      partyId: party?._id || null,
       attachmentUrl: req.file?.filename || "",
       attachmentType: req.file?.mimetype?.split("/")[0] || "",
       lines,
     });
 
     await journal.save();
-    if ((!isOpening || isOpening === "false") && paymentType && accountId) {
+    if (
+      (!isOpening || isOpening === "false") &&
+      Number(paidAmount || 0) > 0 &&
+      paymentType &&
+      accountId
+    ) {
       await createPaymentEntry({
         userId,
         referenceId: refundInvoice._id,
         sourceType: "refund_payment",
         billNo: refundInvoice.billNo,
         accountId,
-        counterPartyAccountId: customerAccountId,
-        amount: totalAmount,
+        counterPartyAccountId,
+        amount: Number(paidAmount || 0),
         paymentType,
         description: `Refund Payment - ${refundInvoice.billNo}`,
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
       });
-      await recalculateAccountBalance(customerAccountId);
+      await recalculateAccountBalance(counterPartyAccountId);
       if (accountId) await recalculateAccountBalance(accountId);
     }
 
@@ -406,6 +434,7 @@ exports.updateRefundInvoice = async (req, res) => {
       invoiceDate,
       invoiceTime,
       customerId,
+      partyId,
       customerPhone,
       totalAmount,
       paidAmount,
@@ -429,13 +458,29 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ Customer
-    const customer = await Customer.findOne({
-      _id: customerId,
-      createdBy: userId,
-    });
+    let customer = null;
+    let party = null;
 
-    if (!customer) {
-      return res.status(404).json({ error: "Customer not found" });
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party) {
+        return res.status(404).json({ error: "Party not found" });
+      }
+    } else {
+      customer = await Customer.findOne({
+        _id: customerId,
+        createdBy: userId,
+      });
+
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
     }
 
     // ✅ Accounts
@@ -462,14 +507,15 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ Customer account (ledger key)
-    const customerAccountId =
-      typeof customer.account === "object"
+    const counterPartyAccountId = party
+      ? party.account
+      : typeof customer.account === "object"
         ? customer.account?._id
         : customer.account;
 
-    if (!customerAccountId) {
+    if (!counterPartyAccountId) {
       return res.status(400).json({
-        error: "Customer account not linked",
+        error: "Account not linked",
       });
     }
 
@@ -478,8 +524,9 @@ exports.updateRefundInvoice = async (req, res) => {
     refund.billNo = billNo;
     refund.invoiceDate = invoiceDate;
     refund.invoiceTime = invoiceTime;
-    refund.customerId = customer._id;
-    refund.customerName = customer.name;
+    refund.customerId = customer?._id || null;
+    refund.partyId = party?._id || null;
+    refund.customerName = customer?.name || party?.name || "";
     refund.customerPhone = customerPhone;
     refund.totalAmount = totalAmount;
     refund.paidAmount = paidAmount;
@@ -543,13 +590,19 @@ exports.updateRefundInvoice = async (req, res) => {
     await refund.save();
 
     // ✅ Delete old journal
-    await JournalEntry.deleteMany({
-      referenceId: refund._id,
-      sourceType: {
-        $in: ["refund_invoice", "opening_refund_invoice"],
+    await JournalEntry.updateMany(
+      {
+        referenceId: refund._id,
+        sourceType: {
+          $in: ["refund_invoice", "opening_refund_invoice", "refund_payment"],
+        },
+        createdBy: userId,
+        isDeleted: false,
       },
-      createdBy: userId,
-    });
+      {
+        $set: { isDeleted: true },
+      },
+    );
 
     // ✅ Delete old inventory transactions
     if (!refund.isOpening) {
@@ -618,14 +671,14 @@ exports.updateRefundInvoice = async (req, res) => {
             amount: totalAmount,
           },
           {
-            account: customerAccountId,
+            account: counterPartyAccountId,
             type: "credit",
             amount: totalAmount,
           },
         ]
       : [
           {
-            account: customerAccountId,
+            account: counterPartyAccountId,
             type: "credit",
             amount: totalAmount,
           },
@@ -661,26 +714,34 @@ exports.updateRefundInvoice = async (req, res) => {
       billNo: refund.billNo,
       paymentType: isOpening ? "credit" : paymentType,
       createdBy: userId,
-      customerId: customer._id,
+      customerId: customer?._id || null,
+      partyId: party?._id || null,
       attachmentUrl: refund.attachmentUrl || "",
       attachmentType: refund.attachmentType || "",
       lines,
     });
 
     await journal.save();
-    if ((!isOpening || isOpening === "false") && paymentType && accountId) {
+    if (
+      (!isOpening || isOpening === "false") &&
+      Number(paidAmount || 0) > 0 &&
+      paymentType &&
+      accountId
+    ) {
       await createPaymentEntry({
         userId,
         referenceId: refund._id,
         sourceType: "refund_payment",
         billNo: refund.billNo,
         accountId,
-        counterPartyAccountId: customerAccountId,
-        amount: totalAmount,
+        counterPartyAccountId,
+        amount: Number(paidAmount || 0),
         paymentType,
         description: `Refund Payment - ${refund.billNo}`,
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
       });
-      await recalculateAccountBalance(customerAccountId);
+      await recalculateAccountBalance(counterPartyAccountId);
       if (accountId) await recalculateAccountBalance(accountId);
     }
 
@@ -733,9 +794,21 @@ exports.getAllRefunds = async (req, res) => {
     }).select("_id");
 
     const activeCustomerIds = activeCustomers.map((c) => c._id);
+
+    const activeParties = await Party.find({
+      userId,
+      isDeleted: false,
+      isActive: true,
+    }).select("_id");
+
+    const activePartyIds = activeParties.map((p) => p._id);
     const refunds = await RefundInvoice.find({
       createdBy: userId,
-      customerId: { $in: activeCustomerIds },
+      isDeleted: { $ne: true },
+      $or: [
+        { customerId: { $in: activeCustomerIds } },
+        { partyId: { $in: activePartyIds } },
+      ],
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -796,27 +869,25 @@ exports.deleteRefundInvoice = async (req, res) => {
     }
 
     // 🧾 Step 3: Delete journal entry
-    await JournalEntry.deleteMany({
-      referenceId: id,
-      sourceType: {
-        $in: ["refund_invoice", "opening_refund_invoice"],
+    await JournalEntry.updateMany(
+      {
+        referenceId: id,
+        sourceType: {
+          $in: ["refund_invoice", "opening_refund_invoice", "refund_payment"],
+        },
+        createdBy: userId,
+        isDeleted: false,
       },
-      createdBy: userId,
-    });
-
-    await JournalEntry.deleteMany({
-      referenceId: id,
-      sourceType: "refund_payment",
-      createdBy: userId,
-    });
+      {
+        $set: { isDeleted: true },
+      },
+    );
 
     // 🧾 Step 4: Delete refund invoice itself
-    const result = await RefundInvoice.deleteOne({
-      _id: id,
-      createdBy: userId,
-    });
+    refundInvoice.isDeleted = true;
+    await refundInvoice.save();
 
-    if (result.deletedCount === 0) {
+    if (!refundInvoice) {
       return res
         .status(404)
         .json({ error: "Refund not found or already deleted" });

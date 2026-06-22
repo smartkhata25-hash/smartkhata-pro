@@ -24,6 +24,8 @@ app.use("/api/journal", require("./routes/journalEntryRoutes"));
 app.use("/api/customers", require("./routes/customerRoutes"));
 app.use("/api/customer-ledger", require("./routes/ledgerRoutes"));
 app.use("/api/suppliers", require("./routes/supplierRoutes"));
+app.use("/api/parties", require("./routes/partyRoutes"));
+app.use("/api/party-ledger", require("./routes/partyLedgerRoutes"));
 app.use("/api/aging", require("./routes/agingRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
 app.use("/api/categories", require("./routes/categoryRoutes"));

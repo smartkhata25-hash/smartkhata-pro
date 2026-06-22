@@ -14,7 +14,9 @@ const createPaymentEntry = async ({
   paymentType,
   description = "",
   originModule = "",
-
+  customerId = null,
+  supplierId = null,
+  partyId = null,
   entryDate = new Date(),
   entryTime = new Date().toTimeString().slice(0, 8),
 }) => {
@@ -114,17 +116,9 @@ const createPaymentEntry = async ({
     createdBy: userId,
     description,
 
-    customerId:
-      sourceType === "receive_payment" || sourceType === "refund_payment"
-        ? counterPartyAccountId
-        : null,
-
-    supplierId:
-      sourceType === "pay_bill" ||
-      sourceType === "purchase_payment" ||
-      sourceType === "purchase_return_payment"
-        ? counterPartyAccountId
-        : null,
+    customerId: customerId || null,
+    supplierId: supplierId || null,
+    partyId: partyId || null,
 
     lines,
   });
@@ -161,6 +155,10 @@ const createDiscountEntry = async ({
   entryDate = new Date(),
 
   entryTime = new Date().toTimeString().slice(0, 8),
+
+  customerId = null,
+  supplierId = null,
+  partyId = null,
 }) => {
   discountAmount = Number(discountAmount);
 
@@ -223,8 +221,9 @@ const createDiscountEntry = async ({
     billNo,
     createdBy: userId,
     description,
-
-    customerId: customerAccountId,
+    customerId: customerId || null,
+    supplierId: supplierId || null,
+    partyId: partyId || null,
 
     lines,
   });
@@ -250,6 +249,8 @@ const createReceivePaymentDiscountEntry = async ({
   discountAmount,
   description = "",
   originModule = "",
+  customerId = null,
+  partyId = null,
 }) => {
   discountAmount = Number(discountAmount);
 
@@ -297,7 +298,8 @@ const createReceivePaymentDiscountEntry = async ({
     createdBy: userId,
     description: "Receive Payment Discount",
 
-    customerId: customerAccountId,
+    customerId: customerId || null,
+    partyId: partyId || null,
 
     lines,
   });

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchSuppliers } from '../services/supplierService';
+import { fetchPurchaseParties } from '../services/partyService';
 import { getAllPurchaseReturns, deletePurchaseReturn } from '../services/purchaseReturnService';
 import { t } from '../i18n/i18n';
 
@@ -8,6 +9,7 @@ const PurchaseReturnList = () => {
   const [returns, setReturns] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [parties, setParties] = useState([]);
 
   const [filters, setFilters] = useState({
     supplier: '',
@@ -23,64 +25,108 @@ const PurchaseReturnList = () => {
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
-  // 📥 Fetch Data
+  const getSupplierOrPartyName = useCallback(
+    (row) => {
+      const partyId = typeof row.partyId === 'object' ? row.partyId?._id : row.partyId;
+      const supplierId = typeof row.supplierId === 'object' ? row.supplierId?._id : row.supplierId;
+
+      if (partyId) {
+        const partyName =
+          row.partyId?.name ||
+          parties.find((party) => String(party._id) === String(partyId))?.name ||
+          row.supplierName;
+
+        return partyName ? `${partyName} 🟣 Party` : '-';
+      }
+
+      if (supplierId) {
+        const supplierName =
+          row.supplierId?.name ||
+          suppliers.find((supplier) => String(supplier._id) === String(supplierId))?.name ||
+          row.supplierName;
+
+        return supplierName || '-';
+      }
+
+      return row.supplierName || '-';
+    },
+    [parties, suppliers]
+  );
+
   const fetchData = useCallback(async () => {
     try {
       const returnData = await getAllPurchaseReturns(token);
       const supplierData = await fetchSuppliers();
+      const partyData = await fetchPurchaseParties(token);
 
-      setReturns(returnData);
-      setSuppliers(supplierData);
+      setReturns(Array.isArray(returnData) ? returnData : []);
+      setSuppliers(Array.isArray(supplierData) ? supplierData : []);
+      setParties(Array.isArray(partyData) ? partyData : []);
     } catch (err) {
       alert(t('alerts.expenseLoadError') + ': ' + err.message);
     }
   }, [token]);
 
-  // 🔄 Initial Load + Auto Refresh
   useEffect(() => {
     fetchData();
+
     const interval = setInterval(fetchData, 30000);
+
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // 🔍 Filtering Logic
   useEffect(() => {
     let result = [...returns];
 
     if (filters.supplier) {
-      result = result.filter((r) => r.supplierId === filters.supplier);
+      result = result.filter((row) => {
+        const partyId = typeof row.partyId === 'object' ? row.partyId?._id : row.partyId;
+        const supplierId =
+          typeof row.supplierId === 'object' ? row.supplierId?._id : row.supplierId;
+
+        return (
+          String(supplierId || '') === String(filters.supplier) ||
+          String(partyId || '') === String(filters.supplier)
+        );
+      });
     }
 
     if (filters.paymentType === 'adjust') {
-      result = result.filter((r) => !r.paymentType);
+      result = result.filter((row) => !row.paymentType);
     } else if (filters.paymentType) {
-      result = result.filter((r) => r.paymentType === filters.paymentType);
+      result = result.filter(
+        (row) =>
+          String(row.paymentType || '').toLowerCase() ===
+          String(filters.paymentType || '').toLowerCase()
+      );
     }
 
     if (filters.search) {
       const q = filters.search.toLowerCase();
+
       result = result.filter(
-        (r) =>
-          r.billNo?.toLowerCase().includes(q) ||
-          r.supplierName?.toLowerCase().includes(q) ||
-          r.supplierPhone?.includes(q) ||
-          r.notes?.toLowerCase().includes(q)
+        (row) =>
+          row.billNo?.toLowerCase().includes(q) ||
+          getSupplierOrPartyName(row).toLowerCase().includes(q) ||
+          row.supplierName?.toLowerCase().includes(q) ||
+          row.supplierPhone?.includes(q) ||
+          row.notes?.toLowerCase().includes(q) ||
+          String(row.totalAmount || '').includes(q)
       );
     }
 
     if (filters.fromDate) {
-      result = result.filter((r) => new Date(r.returnDate) >= new Date(filters.fromDate));
+      result = result.filter((row) => new Date(row.returnDate) >= new Date(filters.fromDate));
     }
 
     if (filters.toDate) {
-      result = result.filter((r) => new Date(r.returnDate) <= new Date(filters.toDate));
+      result = result.filter((row) => new Date(row.returnDate) <= new Date(filters.toDate));
     }
 
     setFiltered(result);
     setCurrentPage(1);
-  }, [filters, returns]);
+  }, [filters, returns, getSupplierOrPartyName]);
 
-  // 🗑 Delete
   const handleDelete = async (id) => {
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
@@ -92,17 +138,16 @@ const PurchaseReturnList = () => {
     }
   };
 
-  // 📄 Pagination
   const startIdx = (currentPage - 1) * itemsPerPage;
   const endIdx = startIdx + itemsPerPage;
   const currentItems = filtered.slice(startIdx, endIdx);
-  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
 
   return (
     <div className="p-4 bg-white shadow rounded">
-      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('purchase.returnList')}</h2>
+
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/purchase-returns/new')}
@@ -111,17 +156,23 @@ const PurchaseReturnList = () => {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
         <select
           value={filters.supplier}
           onChange={(e) => setFilters((prev) => ({ ...prev, supplier: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">{t('supplier.allSuppliers')}</option>
-          {suppliers.map((s) => (
-            <option key={s._id} value={s._id}>
-              {s.name}
+          <option value="">Suppliers / Parties</option>
+
+          {suppliers.map((supplier) => (
+            <option key={`supplier-${supplier._id}`} value={supplier._id}>
+              {supplier.name}
+            </option>
+          ))}
+
+          {parties.map((party) => (
+            <option key={`party-${party._id}`} value={party._id}>
+              {party.name} 🟣 Party
             </option>
           ))}
         </select>
@@ -133,6 +184,8 @@ const PurchaseReturnList = () => {
         >
           <option value="">{t('payment.allTypes')}</option>
           <option value="cash">{t('purchase.cashReceived')}</option>
+          <option value="online">{t('payment.online')}</option>
+          <option value="cheque">{t('payment.cheque')}</option>
           <option value="adjust">{t('purchase.adjustPayable')}</option>
         </select>
 
@@ -159,6 +212,7 @@ const PurchaseReturnList = () => {
         />
 
         <button
+          type="button"
           onClick={() =>
             setFilters({
               supplier: '',
@@ -174,7 +228,6 @@ const PurchaseReturnList = () => {
         </button>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full border text-sm">
           <thead>
@@ -190,25 +243,34 @@ const PurchaseReturnList = () => {
           </thead>
 
           <tbody>
-            {currentItems.map((r) => (
-              <tr key={r._id} className="text-center">
-                <td className="border p-2">{new Date(r.returnDate).toLocaleDateString()}</td>
-                <td className="border p-2">{r.billNo}</td>
-                <td className="border p-2">{r.supplierName}</td>
-                <td className="border p-2">{parseFloat(r.totalAmount).toFixed(2)}</td>
-                <td className="border p-2 capitalize">{r.paymentType || 'adjust'}</td>
-                <td className="border p-2">{r.notes || '-'}</td>
+            {currentItems.map((row) => (
+              <tr key={row._id} className="text-center">
+                <td className="border p-2">
+                  {row.returnDate ? new Date(row.returnDate).toLocaleDateString() : '-'}
+                </td>
+
+                <td className="border p-2">{row.billNo || '-'}</td>
+
+                <td className="border p-2">{getSupplierOrPartyName(row)}</td>
+
+                <td className="border p-2">{Number(row.totalAmount || 0).toFixed(2)}</td>
+
+                <td className="border p-2 capitalize">{row.paymentType || 'adjust'}</td>
+
+                <td className="border p-2">{row.notes || '-'}</td>
+
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
                     <button
                       className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/purchase-returns/edit/${r._id}`)}
+                      onClick={() => navigate(`/purchase-returns/edit/${row._id}`)}
                     >
                       {t('edit')}
                     </button>
+
                     <button
                       className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(r._id)}
+                      onClick={() => handleDelete(row._id)}
                     >
                       {t('delete')}
                     </button>
@@ -228,24 +290,25 @@ const PurchaseReturnList = () => {
         </table>
       </div>
 
-      {/* Pagination */}
       <div className="flex justify-center gap-2 mt-4">
         <button
+          type="button"
           disabled={currentPage === 1}
-          className="px-3 py-1 border rounded"
-          onClick={() => setCurrentPage((prev) => prev - 1)}
+          className="px-3 py-1 border rounded disabled:opacity-50"
+          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
         >
           ◀️ {t('previous')}
         </button>
 
         <span className="px-3 py-1">
-          {t('page')} {currentPage} {t('of')} {totalPages || 1}
+          {t('page')} {currentPage} {t('of')} {totalPages}
         </span>
 
         <button
-          disabled={currentPage === totalPages || totalPages === 0}
-          className="px-3 py-1 border rounded"
-          onClick={() => setCurrentPage((prev) => prev + 1)}
+          type="button"
+          disabled={currentPage === totalPages}
+          className="px-3 py-1 border rounded disabled:opacity-50"
+          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
         >
           {t('next')} ▶️
         </button>

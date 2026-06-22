@@ -5,6 +5,7 @@ import {
   getPurchaseReturnById,
 } from '../services/purchaseReturnService';
 import { fetchSuppliers } from '../services/supplierService';
+import { fetchPurchaseParties } from '../services/partyService';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
 import { getAccounts } from '../services/accountService';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -25,6 +26,8 @@ const PurchaseReturnForm = ({ token }) => {
 
   const [productList, setProductList] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedSupplierType, setSelectedSupplierType] = useState('supplier');
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [selectedSupplierIndex, setSelectedSupplierIndex] = useState(-1);
 
@@ -62,7 +65,13 @@ const PurchaseReturnForm = ({ token }) => {
       setBillNo(data.billNo || '');
       setSupplierName(data.supplierName || '');
       setSupplierPhone(data.supplierPhone || '');
-      setSupplierId(data.supplier?._id || data.supplier || '');
+      setSupplierId(data.partyId?._id || data.partyId || data.supplier?._id || data.supplier || '');
+
+      if (data.partyId) {
+        setSelectedSupplierType('party');
+      } else {
+        setSelectedSupplierType('supplier');
+      }
       setReturnDate(data.returnDate?.slice(0, 10) || '');
       setReturnTime(data.returnTime || '');
       setNotes(data.notes || '');
@@ -101,6 +110,7 @@ const PurchaseReturnForm = ({ token }) => {
   useEffect(() => {
     getProducts(token).then(setProductList);
     fetchSuppliers().then(setSuppliers);
+    fetchPurchaseParties().then(setParties);
 
     getAccounts(token).then((all) => {
       const filtered = all.filter((acc) =>
@@ -159,6 +169,7 @@ const PurchaseReturnForm = ({ token }) => {
     supplierName,
     supplierPhone,
     supplierId,
+    partyId: selectedSupplierType === 'party' ? supplierId : '',
     notes,
     returnMethod,
     accountId,
@@ -190,6 +201,13 @@ const PurchaseReturnForm = ({ token }) => {
 
       setSupplierId(data.supplierId || '');
 
+      if (data.partyId) {
+        setSupplierId(data.partyId);
+        setSelectedSupplierType('party');
+      } else {
+        setSelectedSupplierType('supplier');
+      }
+
       setNotes(data.notes || '');
 
       setReturnMethod(data.returnMethod || 'adjust');
@@ -215,11 +233,11 @@ const PurchaseReturnForm = ({ token }) => {
 
   const handleRevert = async () => {
     if (!id) {
-      // 🆕 New return → clear form
       setBillNo('');
       setSupplierName('');
       setSupplierPhone('');
       setSupplierId('');
+      setSelectedSupplierType('supplier');
       setNotes('');
       setReturnMethod('adjust');
       setAccountId('');
@@ -256,12 +274,21 @@ const PurchaseReturnForm = ({ token }) => {
       }
     }
 
-    const supplier = suppliers.find((s) => s._id === finalSupplierId);
-    if (!supplier) return alert(t('alerts.supplierAddFailed'));
+    const selectedSupplier =
+      selectedSupplierType === 'party'
+        ? parties.find((p) => p._id === finalSupplierId)
+        : suppliers.find((s) => s._id === finalSupplierId);
+
+    if (!selectedSupplier) return alert(t('alerts.supplierAddFailed'));
 
     const formData = new FormData();
     formData.append('billNo', billNo || `PR-${Math.floor(Math.random() * 10000)}`);
-    formData.append('supplierId', supplier._id);
+    if (selectedSupplierType === 'party') {
+      formData.append('partyId', selectedSupplier._id);
+    } else {
+      formData.append('supplierId', selectedSupplier._id);
+    }
+    formData.append('supplierName', selectedSupplier.name);
     formData.append('supplierPhone', supplierPhone);
     formData.append('returnDate', returnDate);
     formData.append('returnTime', returnTime);
@@ -305,6 +332,7 @@ const PurchaseReturnForm = ({ token }) => {
       setSupplierName('');
       setSupplierPhone('');
       setSupplierId('');
+      setSelectedSupplierType('supplier');
       setOriginalInvoiceId('');
       setNotes('');
       setReturnDate(new Date().toISOString().slice(0, 10));
@@ -312,29 +340,42 @@ const PurchaseReturnForm = ({ token }) => {
       setReturnMethod('adjust');
       setAccountId('');
     }
-  }; // 🔥 یہ bracket missing تھا
+  };
 
   const handleSupplierInput = (e) => {
     const value = e.target.value;
     setSupplierName(value);
 
     setSupplierId('');
+    setSelectedSupplierType('supplier');
 
     if (!value.trim()) {
       setSupplierSuggestions([]);
       setSupplierPhone('');
     } else {
-      const filtered = suppliers.filter(
-        (s) => s.name.toLowerCase().includes(value.toLowerCase()) || s.phone?.includes(value)
+      const supplierResults = suppliers.map((s) => ({
+        ...s,
+        selectType: 'supplier',
+      }));
+
+      const partyResults = parties.map((p) => ({
+        ...p,
+        phone: p.phone || '',
+        selectType: 'party',
+      }));
+
+      const filtered = [...supplierResults, ...partyResults].filter(
+        (s) => s.name.toLowerCase().includes(value.toLowerCase()) || (s.phone || '').includes(value)
       );
       setSupplierSuggestions(filtered);
     }
   };
 
-  const handleSupplierSelect = (name, phone, id) => {
+  const handleSupplierSelect = (name, phone, id, type = 'supplier') => {
     setSupplierName(name || '');
     setSupplierPhone(phone || '');
     setSupplierId(id || '');
+    setSelectedSupplierType(type);
 
     setSupplierSuggestions([]);
   };
@@ -352,7 +393,7 @@ const PurchaseReturnForm = ({ token }) => {
       e.preventDefault();
       const selected = supplierSuggestions[selectedSupplierIndex];
       if (selected) {
-        handleSupplierSelect(selected.name, selected.phone, selected._id);
+        handleSupplierSelect(selected.name, selected.phone, selected._id, selected.selectType);
       }
     }
   };
@@ -368,6 +409,7 @@ const PurchaseReturnForm = ({ token }) => {
     setSupplierName(invoice.supplierName);
     setSupplierPhone(invoice.supplierPhone);
     setSupplierId(invoice.supplier?._id || invoice.supplier);
+    setSelectedSupplierType('supplier');
 
     const loadedItems = invoice.items.map((i) => {
       const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
@@ -381,7 +423,6 @@ const PurchaseReturnForm = ({ token }) => {
       };
     });
 
-    // 🔥 10 empty rows add کریں
     const emptyRows = Array.from({ length: 10 }, () => blankRow());
 
     setItems([...loadedItems, ...emptyRows]);
@@ -410,7 +451,7 @@ const PurchaseReturnForm = ({ token }) => {
               {supplierSuggestions.map((s, i) => (
                 <li
                   key={s._id || i}
-                  onClick={() => handleSupplierSelect(s.name, s.phone, s._id)}
+                  onClick={() => handleSupplierSelect(s.name, s.phone, s._id, s.selectType)}
                   style={{
                     backgroundColor: selectedSupplierIndex === i ? '#e0f2fe' : 'white',
                     fontWeight: selectedSupplierIndex === i ? 'bold' : 'normal',
@@ -418,7 +459,10 @@ const PurchaseReturnForm = ({ token }) => {
                     cursor: 'pointer',
                   }}
                 >
-                  {s.name} – {s.phone}
+                  {s.name}
+                  {s.selectType === 'party' && ' 🟣 Party'}
+                  {' - '}
+                  {s.phone}
                 </li>
               ))}
             </ul>

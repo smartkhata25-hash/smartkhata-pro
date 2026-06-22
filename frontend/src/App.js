@@ -23,6 +23,9 @@ import CustomerDetailLedgerPage from './pages/CustomerDetailLedgerPage';
 import SuppliersPage from './pages/SuppliersPage';
 import SupplierLedgerPage from './pages/SupplierLedgerPage';
 import SupplierDetailLedgerPage from './pages/SupplierDetailLedgerPage';
+import PartiesPage from './pages/PartiesPage';
+import PartyLedgerPage from './pages/PartyLedgerPage';
+import PartyDetailLedgerPage from './pages/PartyDetailLedgerPage';
 import AgingReport from './pages/AgingReport';
 import InventoryPage from './pages/InventoryPage';
 import StockHistoryPage from './pages/StockHistoryPage';
@@ -256,6 +259,17 @@ function App() {
           <Route path="/supplier-detail-ledger" element={<SupplierDetailLedgerPage />} />
           <Route path="/supplier-ledger/:supplierId" element={<SupplierLedgerPage />} />
           <Route path="/supplier-ledger" element={<SupplierLedgerPage />} />
+
+          {/* 🆕 Parties */}
+          <Route path="/parties" element={<PartiesPage />} />
+
+          <Route path="/party-ledger/:partyId/detail" element={<PartyDetailLedgerPage />} />
+
+          <Route path="/party-detail-ledger" element={<PartyDetailLedgerPage />} />
+
+          {/* 🆕 PARTY LEDGER ROUTES */}
+          <Route path="/party-ledger/:partyId" element={<PartyLedgerPage />} />
+          <Route path="/party-ledger" element={<PartyLedgerPage />} />
 
           {/* Reports */}
           <Route path="/aging-report" element={<AgingReport />} />

@@ -5,7 +5,13 @@ const payBillSchema = new mongoose.Schema(
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
     date: {
       type: String,
@@ -76,7 +82,14 @@ const payBillSchema = new mongoose.Schema(
   },
 );
 
-// ✅ (Optional) Add index for text search
-// payBillSchema.index({ description: "text" });
+payBillSchema.index({
+  userId: 1,
+  supplier: 1,
+});
+
+payBillSchema.index({
+  userId: 1,
+  partyId: 1,
+});
 
 module.exports = mongoose.model("PayBill", payBillSchema);

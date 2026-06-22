@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
+const Party = require("../models/Party");
 const Invoice = require("../models/Invoice");
 const Account = require("../models/Account");
 
@@ -38,6 +39,7 @@ exports.createInvoice = async (req, res) => {
       paymentType,
       accountId,
       isOpening,
+      partyId,
     } = req.body;
 
     const parsedInvoiceDate = new Date(invoiceDate);
@@ -159,20 +161,40 @@ exports.createInvoice = async (req, res) => {
       attachmentOriginalName: attachmentData?.originalName || "",
     });
 
-    const customer = await Customer.findOne({
-      name: customerName,
-      createdBy: userId,
-    });
-    const customerAccount = await Account.findById(customer?.account);
+    let customer = null;
+    let party = null;
+    let counterPartyAccountId = null;
 
-    if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party) {
+        return res.status(404).json({ message: "Party not found" });
+      }
+
+      counterPartyAccountId = party.account;
+    } else {
+      customer = await Customer.findOne({
+        name: customerName,
+        createdBy: userId,
+      });
+
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      counterPartyAccountId = customer.account;
     }
 
     // ⚠️ CREDIT LIMIT WARNING ONLY (invoice save ہوگی)
     let creditLimitExceeded = false;
 
-    if (customer.creditLimit && customer.creditLimit > 0) {
+    if (!partyId && customer?.creditLimit && customer.creditLimit > 0) {
       const currentBalance = await getCustomerBalanceFromJournal(
         customer._id,
         userId,
@@ -182,7 +204,8 @@ exports.createInvoice = async (req, res) => {
         creditLimitExceeded = true;
       }
     }
-    invoice.customerId = customer._id;
+    invoice.customerId = customer?._id || null;
+    invoice.partyId = party?._id || null;
 
     const saved = await invoice.save();
 
@@ -309,14 +332,15 @@ exports.createInvoice = async (req, res) => {
       billNo,
 
       createdBy: userId,
-      customerId: customer._id,
+      customerId: customer?._id || null,
+      partyId: party?._id || null,
       attachmentUrl: saved.attachmentUrl || "",
       attachmentType: saved.attachmentType || "",
       lines: isOpening
         ? [
             // ✅ Opening Balance Entry
             {
-              account: new mongoose.Types.ObjectId(customer.account),
+              account: new mongoose.Types.ObjectId(counterPartyAccountId),
               type: "debit",
               amount: totalAmount,
             },
@@ -337,7 +361,7 @@ exports.createInvoice = async (req, res) => {
         : [
             // 👤 Customer debit
             {
-              account: new mongoose.Types.ObjectId(customer.account),
+              account: new mongoose.Types.ObjectId(counterPartyAccountId),
               type: "debit",
               amount: Number(subTotal || totalAmount),
             },
@@ -376,10 +400,12 @@ exports.createInvoice = async (req, res) => {
           userId,
           referenceId: saved._id,
           billNo: saved.billNo,
-          customerAccountId: customer.account,
+          customerAccountId: counterPartyAccountId,
           discountAmount: Number(discountAmount),
           description: "Sale Invoice Discount",
           originModule: "sale_invoice",
+          customerId: customer?._id || null,
+          partyId: party?._id || null,
         });
       }
 
@@ -391,11 +417,12 @@ exports.createInvoice = async (req, res) => {
           originModule: "sale_invoice",
           billNo: saved.billNo,
           accountId,
-          counterPartyAccountId: customer.account,
+          counterPartyAccountId,
           amount: paidAmount,
           paymentType,
           description: "Sale Invoice Payment",
-          customerId: customer._id,
+          customerId: customer?._id || null,
+          partyId: party?._id || null,
         });
       }
     } catch (err) {
@@ -442,12 +469,22 @@ exports.getInvoices = async (req, res) => {
 
     const activeCustomerIds = activeCustomers.map((c) => c._id);
 
+    const activeParties = await Party.find({
+      userId,
+      isDeleted: false,
+      isActive: true,
+    }).select("_id");
+
+    const activePartyIds = activeParties.map((p) => p._id);
+
     const invoices = await Invoice.find({
       createdBy: userId,
       isDeleted: { $ne: true },
 
-      // ✅ hidden customer invoices hide
-      customerId: { $in: activeCustomerIds },
+      $or: [
+        { customerId: { $in: activeCustomerIds } },
+        { partyId: { $in: activePartyIds } },
+      ],
     })
       .populate("items.productId", "name unit")
       .sort({ createdAt: -1 })
@@ -585,6 +622,7 @@ exports.updateInvoice = async (req, res) => {
       paymentType,
       accountId,
       isOpening,
+      partyId,
     } = req.body;
 
     const items =
@@ -782,17 +820,39 @@ exports.updateInvoice = async (req, res) => {
       });
     }
 
-    const customer = await Customer.findOne({
-      name: customerName,
-      createdBy: userId,
-    });
+    let customer = null;
+    let party = null;
+    let counterPartyAccountId = null;
 
-    if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party) {
+        return res.status(404).json({ message: "Party not found" });
+      }
+
+      counterPartyAccountId = party.account;
+    } else {
+      customer = await Customer.findOne({
+        name: customerName,
+        createdBy: userId,
+      });
+
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      counterPartyAccountId = customer.account;
     }
 
-    // ✅ update customerId
-    invoice.customerId = customer._id;
+    // ✅ update customer/party link
+    invoice.customerId = customer?._id || null;
+    invoice.partyId = party?._id || null;
     await invoice.save();
     const incomeAccount = await Account.findOne({
       name: "sales",
@@ -806,7 +866,7 @@ exports.updateInvoice = async (req, res) => {
         .json({ message: "Income account 'sales' not found" });
     }
 
-    if (customer) {
+    if (customer || party) {
       // ✅ Safe DateTime for journal entry
       let parsedInvoiceDate = new Date(invoiceDate);
 
@@ -833,13 +893,14 @@ exports.updateInvoice = async (req, res) => {
         billNo: invoice.billNo,
         createdBy: userId,
 
-        customerId: customer._id,
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
 
         lines: isOpening
           ? [
               // ✅ Opening Balance Entry
               {
-                account: new mongoose.Types.ObjectId(customer.account),
+                account: new mongoose.Types.ObjectId(counterPartyAccountId),
                 type: "debit",
                 amount: totalAmount,
               },
@@ -861,7 +922,7 @@ exports.updateInvoice = async (req, res) => {
               // 👤 Customer debit
 
               {
-                account: new mongoose.Types.ObjectId(customer.account),
+                account: new mongoose.Types.ObjectId(counterPartyAccountId),
                 type: "debit",
                 amount: Number(subTotal || totalAmount),
               },
@@ -901,10 +962,12 @@ exports.updateInvoice = async (req, res) => {
           userId,
           referenceId: invoice._id,
           billNo: invoice.billNo,
-          customerAccountId: customer.account,
+          customerAccountId: counterPartyAccountId,
           discountAmount: Number(discountAmount),
           description: "Updated Sale Invoice Discount",
           originModule: "sale_invoice",
+          customerId: customer?._id || null,
+          partyId: party?._id || null,
         });
       }
 
@@ -929,11 +992,12 @@ exports.updateInvoice = async (req, res) => {
           originModule: "sale_invoice",
           billNo: invoice.billNo,
           accountId,
-          counterPartyAccountId: customer.account,
+          counterPartyAccountId,
           amount: paidAmount,
           paymentType,
           description: "Sale Invoice Payment",
-          customerId: customer._id,
+          customerId: customer?._id || null,
+          partyId: party?._id || null,
         });
       }
 
@@ -962,13 +1026,58 @@ exports.recordPayment = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { amount, accountId, paymentType } = req.body;
 
+    const payAmount = Number(amount || 0);
+
+    if (payAmount <= 0) {
+      return res.status(400).json({ message: "Invalid payment amount" });
+    }
+
+    if (!accountId) {
+      return res.status(400).json({ message: "Payment account required" });
+    }
+
     const invoice = await Invoice.findOne({
       _id: req.params.id,
       createdBy: userId,
+      isDeleted: { $ne: true },
     });
-    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
 
-    invoice.paidAmount += amount;
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found" });
+    }
+
+    let customer = null;
+    let party = null;
+    let counterPartyAccountId = null;
+
+    if (invoice.partyId) {
+      party = await Party.findOne({
+        _id: invoice.partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party || !party.account) {
+        return res.status(404).json({ message: "Party account not found" });
+      }
+
+      counterPartyAccountId = party.account;
+    } else {
+      customer = await Customer.findOne({
+        _id: invoice.customerId,
+        createdBy: userId,
+      });
+
+      if (!customer || !customer.account) {
+        return res.status(404).json({ message: "Customer account not found" });
+      }
+
+      counterPartyAccountId = customer.account;
+    }
+
+    invoice.paidAmount = Number(invoice.paidAmount || 0) + payAmount;
+
     invoice.status =
       invoice.paidAmount >= invoice.totalAmount
         ? "Paid"
@@ -978,28 +1087,23 @@ exports.recordPayment = async (req, res) => {
 
     await invoice.save();
 
-    // ✅ Record journal for additional payment
-    const customer = await Customer.findById(invoice.customerId);
+    await createPaymentEntry({
+      userId,
+      referenceId: invoice._id,
+      sourceType: "receive_payment",
+      originModule: "sale_invoice",
+      billNo: invoice.billNo,
+      accountId,
+      counterPartyAccountId,
+      amount: payAmount,
+      paymentType,
+      description: `Additional payment for Invoice ${invoice.billNo}`,
+      customerId: customer?._id || null,
+      partyId: party?._id || null,
+    });
 
-    if (customer) {
-      await createPaymentEntry({
-        userId,
-        referenceId: invoice._id,
-        sourceType: "receive_payment",
-        originModule: "sale_invoice",
-        billNo: invoice.billNo,
-        accountId,
-        counterPartyAccountId: customer.account,
-        amount,
-        paymentType,
-        description: `Additional payment for Invoice ${invoice.billNo}`,
-        customerId: customer._id,
-      });
-
-      if (accountId) {
-        await recalculateAccountBalance(accountId);
-      }
-    }
+    await recalculateAccountBalance(counterPartyAccountId);
+    await recalculateAccountBalance(accountId);
 
     res.json(invoice);
   } catch (error) {

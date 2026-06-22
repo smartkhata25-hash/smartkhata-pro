@@ -39,7 +39,6 @@ const menuConfig = [
     ],
   },
 
-  // 🔥 NEW ITEMS SECTION
   {
     label: 'items',
     path: '/inventory',
@@ -79,14 +78,33 @@ const menuConfig = [
       {
         title: 'reports',
         items: [
-          { label: 'ledger.supplierLedger', path: '/supplier-ledger' }, // ✅ fixed
+          { label: 'ledger.supplierLedger', path: '/supplier-ledger' },
           { label: 'ledger.supplierDetailed', path: '/supplier-detail-ledger' },
         ],
       },
     ],
   },
 
-  // 🔥 UPDATED INVENTORY (cleaned)
+  {
+    label: 'parties',
+    sections: [
+      {
+        title: 'menu.manage',
+        items: [
+          { label: 'party.addParty', path: '/parties?new=true' },
+          { label: 'party.allParties', path: '/parties' },
+        ],
+      },
+      {
+        title: 'reports',
+        items: [
+          { label: 'party.ledger', path: '/party-ledger' },
+          { label: 'party.detailedLedger', path: '/party-detail-ledger' },
+        ],
+      },
+    ],
+  },
+
   {
     label: 'inventory',
     sections: [
@@ -107,7 +125,6 @@ const menuConfig = [
     ],
   },
 
-  // 🔥 NEW EXPENSES
   {
     label: 'menu.expenses',
     sections: [
@@ -122,7 +139,6 @@ const menuConfig = [
     ],
   },
 
-  // 🔥 NEW ACCOUNTS
   {
     label: 'accounts',
     sections: [
@@ -133,15 +149,6 @@ const menuConfig = [
       {
         title: 'menu.entries',
         items: [{ label: 'accounts.journal', path: '/journal-entries' }],
-      },
-    ],
-  },
-  {
-    label: 'menu.import',
-    sections: [
-      {
-        title: 'dataImport',
-        items: [{ label: 'import.data', path: '/import' }],
       },
     ],
   },
@@ -161,13 +168,8 @@ const menuConfig = [
         title: 'menu.analytics',
         items: [
           { label: 'dashboard.monthlyCashFlow', path: '/cashflow' },
-
           { label: 'dashboard.monthlySales', path: '/monthly-sales' },
-
-          {
-            label: 'stockValueReport',
-            path: '/stock-value-report',
-          },
+          { label: 'stockValueReport', path: '/stock-value-report' },
         ],
       },
     ],

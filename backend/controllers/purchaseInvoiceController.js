@@ -2,6 +2,7 @@ const PurchaseInvoice = require("../models/purchaseInvoice");
 
 const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");
+const Party = require("../models/Party");
 const {
   createInventoryEntry,
   deleteTransactionsByReference,
@@ -10,6 +11,7 @@ const {
 const Product = require("../models/Product");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
+
 const path = require("path");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
@@ -34,6 +36,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     paymentType,
     accountId,
     items,
+    partyId,
   } = req.body;
 
   // ✅ STATUS CALCULATION (ADD HERE)
@@ -55,35 +58,54 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     attachmentType = req.file.mimetype?.split("/")[0] || "";
   }
 
-  // 🔍 Find or Create Supplier with Account
-  let supplier = await Supplier.findOne({
-    name: {
-      $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
-    },
-    userId,
-    isDeleted: false,
-  });
-  if (!supplier) {
-    const account = await Account.create({
-      name: supplierName,
-      type: "Liability",
+  let supplier = null;
+  let party = null;
+  let counterPartyAccountId = null;
 
-      normalBalance: "credit",
-      category: "supplier",
+  if (partyId) {
+    party = await Party.findOne({
+      _id: partyId,
       userId,
+      isDeleted: false,
+      isActive: true,
     });
 
-    supplier = await Supplier.create({
-      name: supplierName,
-      phone: supplierPhone,
-      account: account._id,
-      userId,
-    });
+    if (!party || !party.account) {
+      return res.status(400).json({ message: "Party account not linked" });
+    }
+
+    counterPartyAccountId = party.account;
   } else {
-  }
+    supplier = await Supplier.findOne({
+      name: {
+        $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
+      },
+      userId,
+      isDeleted: false,
+    });
 
-  if (!supplier.account) {
-    return res.status(400).json({ message: "Supplier account not linked" });
+    if (!supplier) {
+      const account = await Account.create({
+        name: supplierName,
+        type: "Liability",
+        normalBalance: "credit",
+        category: "supplier",
+        userId,
+      });
+
+      supplier = await Supplier.create({
+        name: supplierName,
+        phone: supplierPhone,
+        account: account._id,
+        userId,
+      });
+    }
+
+    if (!supplier.account) {
+      return res.status(400).json({ message: "Supplier account not linked" });
+    }
+
+    counterPartyAccountId = supplier.account;
   }
 
   // 💾 Save invoice
@@ -94,7 +116,8 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     invoiceDate: parsedInvoiceDate,
 
     invoiceTime,
-    supplier: supplier._id, // ✅ New
+    supplier: supplier?._id || null,
+    partyId: party?._id || null,
     supplierName,
     supplierPhone,
     totalAmount,
@@ -134,7 +157,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
     // ✅ Supplier liability
     {
-      account: supplier.account,
+      account: counterPartyAccountId,
       type: "credit",
       amount: grandTotal,
     },
@@ -150,9 +173,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     createdBy: userId,
     sourceType: "purchase_invoice",
 
-    supplierId: supplier._id, // ✅ already added
-    invoiceId: invoice._id, // ✅ ADD THIS
-    invoiceModel: "PurchaseInvoice", // ✅ ADD THIS
+    supplierId: supplier?._id || null,
+    partyId: party?._id || null,
+    invoiceId: invoice._id,
+    invoiceModel: "PurchaseInvoice",
     referenceId: invoice._id,
 
     lines,
@@ -169,7 +193,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       referenceId: invoice._id,
       billNo: invoice.billNo,
 
-      customerAccountId: supplier.account,
+      customerAccountId: counterPartyAccountId,
 
       discountAmount: Number(discountAmount),
 
@@ -186,6 +210,9 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       entryDate: parsedInvoiceDate,
 
       entryTime: invoiceTime || "",
+
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
     });
   }
 
@@ -196,15 +223,17 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       sourceType: "purchase_payment",
       billNo: invoice.billNo,
       accountId,
-      counterPartyAccountId: supplier.account,
+      counterPartyAccountId,
       amount: paidAmount,
       paymentType,
       description: `Payment against Purchase Invoice ${invoice.billNo}`,
 
-      // ✅ SAME DATE/TIME
       entryDate: parsedInvoiceDate,
 
       entryTime: invoiceTime || "",
+
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
     });
   }
 
@@ -229,7 +258,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  await recalculateAccountBalance(supplier.account);
+  await recalculateAccountBalance(counterPartyAccountId);
   if (accountId) await recalculateAccountBalance(accountId);
 
   res.status(201).json({
@@ -278,6 +307,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     paymentType,
     accountId,
     items,
+    partyId,
   } = req.body;
 
   const parsedInvoiceDate = new Date(invoiceDate);
@@ -293,9 +323,17 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   /* =============================
      SAVE OLD ACCOUNTS
   ============================== */
-  const oldSupplier = await Supplier.findById(invoice.supplier);
+  const oldSupplier = invoice.supplier
+    ? await Supplier.findById(invoice.supplier)
+    : null;
 
   const oldSupplierAccount = oldSupplier?.account || null;
+
+  const oldParty = invoice.partyId
+    ? await Party.findById(invoice.partyId)
+    : null;
+
+  const oldPartyAccount = oldParty?.account || null;
 
   const oldPaymentAccount = invoice.accountId || null;
 
@@ -344,19 +382,37 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     },
   );
 
-  /* =============================
-     FIND SUPPLIER
-  ============================== */
-  const supplier = await Supplier.findOne({
-    name: {
-      $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
-    },
-    userId,
-    isDeleted: false,
-  });
+  let supplier = null;
+  let party = null;
+  let counterPartyAccountId = null;
 
-  if (!supplier || !supplier.account) {
-    throw new Error("Supplier or supplier account not found");
+  if (partyId) {
+    party = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (!party || !party.account) {
+      throw new Error("Party account not found");
+    }
+
+    counterPartyAccountId = party.account;
+  } else {
+    supplier = await Supplier.findOne({
+      name: {
+        $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
+      },
+      userId,
+      isDeleted: false,
+    });
+
+    if (!supplier || !supplier.account) {
+      throw new Error("Supplier or supplier account not found");
+    }
+
+    counterPartyAccountId = supplier.account;
   }
 
   /* =============================
@@ -377,7 +433,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     billNo,
     invoiceDate: parsedInvoiceDate,
     invoiceTime,
-    supplier: supplier._id,
+    supplier: supplier?._id || null,
+    partyId: party?._id || null,
     supplierName,
     supplierPhone,
     totalAmount,
@@ -417,7 +474,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       amount: grandTotal,
     },
     {
-      account: supplier.account,
+      account: counterPartyAccountId,
       type: "credit",
       amount: grandTotal,
     },
@@ -430,7 +487,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     description: req.body.description || "",
     createdBy: userId,
     sourceType: "purchase_invoice",
-    supplierId: supplier._id,
+    supplierId: supplier?._id || null,
+    partyId: party?._id || null,
     invoiceId: invoice._id,
     invoiceModel: "PurchaseInvoice",
     referenceId: invoice._id,
@@ -448,7 +506,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       referenceId: invoice._id,
       billNo: invoice.billNo,
 
-      customerAccountId: supplier.account,
+      customerAccountId: counterPartyAccountId,
 
       discountAmount: Number(discountAmount),
 
@@ -456,7 +514,6 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
       originModule: "purchase_invoice",
 
-      // ✅ SAME DATE/TIME
       sourceType: "purchase_discount",
 
       discountAccountCode: "PURCHASE_DISCOUNT",
@@ -466,6 +523,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       entryDate: parsedInvoiceDate,
 
       entryTime: invoiceTime || "",
+
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
     });
   }
 
@@ -479,15 +539,16 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       sourceType: "purchase_payment",
       billNo: invoice.billNo,
       accountId,
-      counterPartyAccountId: supplier.account,
+      counterPartyAccountId,
       amount: paidAmount,
       paymentType,
       description: `Payment against Purchase Invoice ${invoice.billNo}`,
-
-      // ✅ SAME DATE/TIME
       entryDate: parsedInvoiceDate,
 
       entryTime: invoiceTime || "",
+
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
     });
   }
 
@@ -517,7 +578,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   /* =============================
      RECALCULATE NEW ACCOUNTS
   ============================== */
-  await recalculateAccountBalance(supplier.account);
+  await recalculateAccountBalance(counterPartyAccountId);
 
   if (accountId) {
     await recalculateAccountBalance(accountId);
@@ -527,10 +588,10 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
      RECALCULATE OLD SUPPLIER ACCOUNT
   ============================== */
   if (
-    oldSupplierAccount &&
-    oldSupplierAccount.toString() !== supplier.account.toString()
+    oldPartyAccount &&
+    oldPartyAccount.toString() !== counterPartyAccountId.toString()
   ) {
-    await recalculateAccountBalance(oldSupplierAccount);
+    await recalculateAccountBalance(oldPartyAccount);
   }
 
   /* =============================
@@ -565,9 +626,13 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
 
   // ✅ Save old accounts
-  const supplier = await Supplier.findById(invoice.supplier);
+  const supplier = invoice.supplier
+    ? await Supplier.findById(invoice.supplier)
+    : null;
 
-  const supplierAccount = supplier?.account || null;
+  const party = invoice.partyId ? await Party.findById(invoice.partyId) : null;
+
+  const supplierAccount = supplier?.account || party?.account || null;
 
   const paymentAccount = invoice.accountId || null;
 
@@ -621,12 +686,22 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
 
   const activeSupplierIds = activeSuppliers.map((s) => s._id);
 
+  const activeParties = await Party.find({
+    userId,
+    isDeleted: false,
+    isActive: true,
+  }).select("_id");
+
+  const activePartyIds = activeParties.map((p) => p._id);
+
   const invoices = await PurchaseInvoice.find({
     userId,
     isDeleted: false,
 
-    // ✅ hidden supplier invoices hide
-    supplier: { $in: activeSupplierIds },
+    $or: [
+      { supplier: { $in: activeSupplierIds } },
+      { partyId: { $in: activePartyIds } },
+    ],
   })
     .populate("supplier", "name")
     .sort({ createdAt: -1 })
@@ -654,6 +729,14 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
     isDeleted: false,
   }).select("_id");
   const activeSupplierIds = activeSuppliers.map((s) => s._id);
+
+  const activeParties = await Party.find({
+    userId,
+    isDeleted: false,
+    isActive: true,
+  }).select("_id");
+
+  const activePartyIds = activeParties.map((p) => p._id);
 
   if (!query || !query.trim()) {
     return res.status(400).json({
@@ -702,8 +785,10 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
     userId,
     isDeleted: false,
 
-    // ✅ hidden supplier invoices hide
-    supplier: { $in: activeSupplierIds },
+    $or: [
+      { supplier: { $in: activeSupplierIds } },
+      { partyId: { $in: activePartyIds } },
+    ],
 
     $and: conditions,
   })

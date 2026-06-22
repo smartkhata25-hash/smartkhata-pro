@@ -1,14 +1,5 @@
 const { t } = require("../i18n/i18n");
-
 // 📁 templates/customerLedgerTemplate.js
-
-/**
- * Customer Ledger HTML Template
- * --------------------------------
- * Professional accounting layout
- * Supports A4 + A5 (Compact A5 Version)
- */
-
 const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
   const lang = data?.lang || "ur";
   const { documentTitle, customer, period, summary, rows } = data;

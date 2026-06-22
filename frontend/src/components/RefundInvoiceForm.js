@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRefund, updateRefund, getRefundById } from '../services/refundService';
 import { fetchCustomers } from '../services/customerService';
+import { fetchSaleParties } from '../services/partyService';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
 import { getAccounts } from '../services/accountService';
@@ -34,7 +35,15 @@ const RefundInvoiceForm = ({
       setBillNo(data.billNo || '');
       setCustomerName(data.customerName || '');
       setCustomerPhone(data.customerPhone || '');
-      setCustomerId(data.customerId?._id || data.customerId || '');
+      setCustomerId(
+        data.partyId?._id || data.partyId || data.customerId?._id || data.customerId || ''
+      );
+
+      if (data.partyId) {
+        setSelectedCustomerType('party');
+      } else {
+        setSelectedCustomerType('customer');
+      }
       setInvoiceDate(data.invoiceDate?.slice(0, 10) || '');
       setInvoiceTime(data.invoiceTime || getCurrentTime());
       setNotes(data.notes || '');
@@ -78,6 +87,8 @@ const RefundInvoiceForm = ({
   const [accountId, setAccountId] = useState('');
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedCustomerType, setSelectedCustomerType] = useState('customer');
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
   const [accounts, setAccounts] = useState([]);
@@ -175,7 +186,7 @@ const RefundInvoiceForm = ({
     fetchProducts();
 
     fetchCustomers(token).then(setCustomers);
-
+    fetchSaleParties().then(setParties);
     getAccounts(token).then((all) => {
       const filtered = all.filter(
         (acc) =>
@@ -264,6 +275,7 @@ const RefundInvoiceForm = ({
     refundMethod,
     accountId,
     customerId,
+    partyId: selectedCustomerType === 'party' ? customerId : '',
     paymentType,
     originalInvoiceId,
   };
@@ -330,9 +342,12 @@ const RefundInvoiceForm = ({
     if (refundMethod === 'cash' && !accountId) return alert(t('alerts.selectAccount'));
 
     try {
-      const customer = customers.find((c) => c._id === customerId);
+      const selectedCustomer =
+        selectedCustomerType === 'party'
+          ? parties.find((p) => p._id === customerId)
+          : customers.find((c) => c._id === customerId);
 
-      if (!customer) return alert(t('alerts.customerRequired'));
+      if (!selectedCustomer) return alert(t('alerts.customerRequired'));
 
       const formData = new FormData();
       formData.append('billNo', billNo || '');
@@ -341,8 +356,13 @@ const RefundInvoiceForm = ({
         formData.append('originalInvoiceId', originalInvoiceId);
       }
 
-      formData.append('customerId', customer._id);
-      formData.append('customerName', customer.name);
+      if (selectedCustomerType === 'party') {
+        formData.append('partyId', customerId);
+      } else {
+        formData.append('customerId', selectedCustomer._id);
+      }
+
+      formData.append('customerName', selectedCustomer.name);
       formData.append('customerPhone', customerPhone);
       formData.append('invoiceDate', invoiceDate);
       formData.append('invoiceTime', safeTime);
@@ -420,7 +440,6 @@ const RefundInvoiceForm = ({
       };
     });
 
-    // 👉 باقی empty rows add کریں (20 تک)
     const emptyRows = Array.from({ length: 20 - loadedItems.length }, () => blankRow());
 
     setItems([...loadedItems, ...emptyRows]);
@@ -433,10 +452,21 @@ const RefundInvoiceForm = ({
     if (value.trim() === '') {
       setCustomerSuggestions([]);
       setSelectedCustomerIndex(-1);
-      setCustomerPhone(''); // ✅ فون نمبر بھی خالی کریں
+      setCustomerPhone('');
     } else {
-      const filtered = customers.filter(
-        (c) => c.name.toLowerCase().includes(value.toLowerCase()) || c.phone.includes(value)
+      const customerResults = customers.map((c) => ({
+        ...c,
+        selectType: 'customer',
+      }));
+
+      const partyResults = parties.map((p) => ({
+        ...p,
+        phone: p.phone || '',
+        selectType: 'party',
+      }));
+
+      const filtered = [...customerResults, ...partyResults].filter(
+        (c) => c.name.toLowerCase().includes(value.toLowerCase()) || (c.phone || '').includes(value)
       );
       setCustomerSuggestions(filtered);
       setSelectedCustomerIndex(-1);
@@ -456,16 +486,20 @@ const RefundInvoiceForm = ({
       e.preventDefault();
       const selected = customerSuggestions[selectedCustomerIndex];
       if (selected) {
-        handleCustomerSelect(selected.name, selected.phone, selected._id);
+        handleCustomerSelect(selected.name, selected.phone, selected._id, selected.selectType);
       }
     }
   };
 
-  const handleCustomerSelect = (name, phone, id) => {
+  const handleCustomerSelect = (name, phone, id, type = 'customer') => {
     setCustomerName(name);
     setCustomerPhone(phone);
     setCustomerId(id);
+
+    setSelectedCustomerType(type);
+
     onCustomerChange && onCustomerChange(id);
+
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
   };
@@ -505,7 +539,7 @@ const RefundInvoiceForm = ({
               {customerSuggestions.map((c, i) => (
                 <li
                   key={i}
-                  onClick={() => handleCustomerSelect(c.name, c.phone, c._id)}
+                  onClick={() => handleCustomerSelect(c.name, c.phone, c._id, c.selectType)}
                   style={{
                     backgroundColor: selectedCustomerIndex === i ? '#e0f2fe' : 'white',
                     fontWeight: selectedCustomerIndex === i ? 'bold' : 'normal',
@@ -513,7 +547,10 @@ const RefundInvoiceForm = ({
                     cursor: 'pointer',
                   }}
                 >
-                  {c.name} – {c.phone}
+                  {c.name}
+                  {c.selectType === 'party' && ' 🟣 Party'}
+                  {' - '}
+                  {c.phone}
                 </li>
               ))}
             </ul>

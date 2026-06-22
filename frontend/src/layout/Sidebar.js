@@ -23,6 +23,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
         <SidebarItem to="/dashboard" label={t('dashboard')} setIsSidebarOpen={setIsSidebarOpen} />
         <SidebarItem to="/customers" label={t('customers')} setIsSidebarOpen={setIsSidebarOpen} />
         <SidebarItem to="/suppliers" label={t('suppliers')} setIsSidebarOpen={setIsSidebarOpen} />
+        <SidebarItem to="/parties" label={t('parties')} setIsSidebarOpen={setIsSidebarOpen} />
         <SidebarItem to="/accounts" label={t('accounts')} setIsSidebarOpen={setIsSidebarOpen} />
         <SidebarItem to="/inventory" label={t('inventory')} setIsSidebarOpen={setIsSidebarOpen} />
         <SidebarItem to="/import" label={t('import.data')} setIsSidebarOpen={setIsSidebarOpen} />

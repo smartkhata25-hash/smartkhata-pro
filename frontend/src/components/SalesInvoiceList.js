@@ -16,13 +16,23 @@ const SalesInvoiceList = () => {
   const fetchInvoices = async () => {
     try {
       const token = localStorage.getItem('token');
-
       const data = await getInvoices(token);
 
-      setInvoices(data);
+      setInvoices(Array.isArray(data) ? data : []);
     } catch (err) {
       alert(t('alerts.fetchInvoices') + ': ' + err.message);
     }
+  };
+
+  const getPartyOrCustomerName = (inv) => {
+    if (inv.partyId) {
+      const partyName =
+        typeof inv.partyId === 'object' ? inv.partyId?.name : inv.partyName || inv.customerName;
+
+      return partyName ? `${partyName} 🟣 Party` : inv.customerName || '-';
+    }
+
+    return inv.customerName || inv.customerId?.name || '-';
   };
 
   const handleDelete = async (id) => {
@@ -30,7 +40,6 @@ const SalesInvoiceList = () => {
 
     try {
       const token = localStorage.getItem('token');
-
       const res = await deleteInvoice(id, token);
 
       if (!res || res.error) {
@@ -47,7 +56,11 @@ const SalesInvoiceList = () => {
 
   const filtered = invoices.filter((inv) => {
     const q = search.toLowerCase();
+
+    const displayName = getPartyOrCustomerName(inv).toLowerCase();
+
     const matchesSearch =
+      displayName.includes(q) ||
       inv.customerName?.toLowerCase().includes(q) ||
       inv.billNo?.toString().includes(q) ||
       inv.sourceType?.toLowerCase().includes(q);
@@ -61,6 +74,7 @@ const SalesInvoiceList = () => {
     <div className="p-4 bg-white shadow rounded">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">📦 {t('sales.invoiceList')}</h2>
+
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/sales')}
@@ -69,7 +83,6 @@ const SalesInvoiceList = () => {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <input
           type="text"
@@ -91,7 +104,6 @@ const SalesInvoiceList = () => {
         </select>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <table className="w-full border text-xs md:text-sm">
           <thead>
@@ -106,58 +118,71 @@ const SalesInvoiceList = () => {
               <th className="border px-2 py-1 md:p-2">{t('common.actions')}</th>
             </tr>
           </thead>
-          <tbody>
-            {filtered.map((inv) => (
-              <tr key={inv._id} className="text-center text-xs md:text-sm">
-                <td className="border px-2 py-1 md:p-2">
-                  <div className="flex flex-col items-center">
-                    <span>{inv.billNo}</span>
 
-                    {(inv.sourceType === 'opening_sale_invoice' || inv.isOpening) && (
-                      <span className="text-[10px] md:text-xs bg-yellow-100 text-yellow-700 px-1 rounded mt-1">
-                        Opening
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="border px-2 py-1 md:p-2">
-                  {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
-                </td>
-                <td className="border px-2 py-1 md:p-2">{inv.customerName || '-'}</td>
-                <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
-                  Rs. {inv.totalAmount?.toFixed(2) || '0.00'}
-                </td>
-                <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
-                  Rs. {inv.paidAmount?.toFixed(2) || '0.00'}
-                </td>
-                <td className="border px-2 py-1 md:p-2 text-center">
-                  Rs. {((Number(inv.totalAmount) || 0) - (Number(inv.paidAmount) || 0)).toFixed(2)}
-                </td>
-                <td className="hidden md:table-cell border px-2 py-1 md:p-2">
-                  {inv.isOpening || inv.sourceType === 'opening_sale_invoice'
-                    ? 'Opening'
-                    : inv.status || t('sales.unpaid')}
-                </td>
-                <td className="border px-2 py-1 md:p-2">
-                  <div className="flex gap-1 md:gap-2 justify-center">
-                    <button
-                      className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
-                      onClick={() => navigate(`/sales?invoiceId=${inv._id}`)}
-                    >
-                      {t('edit')}
-                    </button>
-                    {!inv.isOpening && inv.sourceType !== 'opening_sale_invoice' && (
+          <tbody>
+            {filtered.map((inv) => {
+              const totalAmount = Number(inv.totalAmount || 0);
+              const paidAmount = Number(inv.paidAmount || 0);
+              const balance = totalAmount - paidAmount;
+
+              return (
+                <tr key={inv._id} className="text-center text-xs md:text-sm">
+                  <td className="border px-2 py-1 md:p-2">
+                    <div className="flex flex-col items-center">
+                      <span>{inv.billNo}</span>
+
+                      {(inv.sourceType === 'opening_sale_invoice' || inv.isOpening) && (
+                        <span className="text-[10px] md:text-xs bg-yellow-100 text-yellow-700 px-1 rounded mt-1">
+                          Opening
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  <td className="border px-2 py-1 md:p-2">
+                    {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
+                  </td>
+
+                  <td className="border px-2 py-1 md:p-2">{getPartyOrCustomerName(inv)}</td>
+
+                  <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
+                    Rs. {totalAmount.toFixed(2)}
+                  </td>
+
+                  <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
+                    Rs. {paidAmount.toFixed(2)}
+                  </td>
+
+                  <td className="border px-2 py-1 md:p-2 text-center">Rs. {balance.toFixed(2)}</td>
+
+                  <td className="hidden md:table-cell border px-2 py-1 md:p-2">
+                    {inv.isOpening || inv.sourceType === 'opening_sale_invoice'
+                      ? 'Opening'
+                      : inv.status || t('sales.unpaid')}
+                  </td>
+
+                  <td className="border px-2 py-1 md:p-2">
+                    <div className="flex gap-1 md:gap-2 justify-center">
                       <button
-                        className="bg-red-600 text-white px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
-                        onClick={() => handleDelete(inv._id)}
+                        className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
+                        onClick={() => navigate(`/sales?invoiceId=${inv._id}`)}
                       >
-                        {t('delete')}
+                        {t('edit')}
                       </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+
+                      {!inv.isOpening && inv.sourceType !== 'opening_sale_invoice' && (
+                        <button
+                          className="bg-red-600 text-white px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
+                          onClick={() => handleDelete(inv._id)}
+                        >
+                          {t('delete')}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
 
             {filtered.length === 0 && (
               <tr>

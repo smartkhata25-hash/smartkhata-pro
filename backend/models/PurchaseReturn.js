@@ -48,7 +48,13 @@ const PurchaseReturnSchema = new mongoose.Schema(
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
 
     supplierName: {
@@ -124,11 +130,12 @@ const PurchaseReturnSchema = new mongoose.Schema(
   },
 );
 
-/* =========================================================
-   INDEXES (PERFORMANCE BOOST)
-========================================================= */
 PurchaseReturnSchema.index({ createdBy: 1, returnDate: 1 });
 PurchaseReturnSchema.index({ createdBy: 1, supplierId: 1 });
+PurchaseReturnSchema.index({
+  createdBy: 1,
+  partyId: 1,
+});
 PurchaseReturnSchema.index({ billNo: 1 });
 PurchaseReturnSchema.index({ createdBy: 1, isDeleted: 1 });
 

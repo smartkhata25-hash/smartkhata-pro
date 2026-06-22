@@ -1,8 +1,9 @@
 // src/components/ReceivePaymentList.js
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getAllReceivePayments, deleteReceivePayment } from '../services/receivePaymentService';
 import { fetchCustomers } from '../services/customerService';
+import { fetchSaleParties } from '../services/partyService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
@@ -10,6 +11,7 @@ const ReceivePaymentList = () => {
   const [payments, setPayments] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
 
   const [filters, setFilters] = useState({
     customer: '',
@@ -21,41 +23,101 @@ const ReceivePaymentList = () => {
 
   const navigate = useNavigate();
 
-  const fetchData = async () => {
+  const getPaymentTotal = useCallback((p) => {
+    if (Array.isArray(p.paymentEntries) && p.paymentEntries.length > 0) {
+      return p.paymentEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    }
+
+    return Number(p.amount || 0);
+  }, []);
+
+  const getPaymentTypes = useCallback((p) => {
+    if (Array.isArray(p.paymentEntries) && p.paymentEntries.length > 0) {
+      return p.paymentEntries
+        .map((e) => e.paymentType)
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return p.paymentType || p.paymentMode || '-';
+  }, []);
+
+  const getAccountNames = useCallback((p) => {
+    if (Array.isArray(p.paymentEntries) && p.paymentEntries.length > 0) {
+      return p.paymentEntries
+        .map((e) => e.account?.name || e.accountName)
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return p.account?.name || p.accountName || '-';
+  }, []);
+
+  const getPartyOrCustomerName = useCallback(
+    (p) => {
+      const partyId = typeof p.partyId === 'object' ? p.partyId?._id : p.partyId;
+
+      if (partyId) {
+        const partyName =
+          p.partyId?.name || parties.find((party) => String(party._id) === String(partyId))?.name;
+
+        return partyName ? `${partyName} 🟣 Party` : '-';
+      }
+
+      return p.customer?.name || '-';
+    },
+    [parties]
+  );
+
+  const fetchData = useCallback(async () => {
     try {
       const paymentData = await getAllReceivePayments();
       const customerData = await fetchCustomers();
-      setPayments(paymentData);
-      setCustomers(customerData);
-      setFiltered(paymentData);
+      const partyData = await fetchSaleParties();
+
+      setPayments(Array.isArray(paymentData) ? paymentData : []);
+      setCustomers(Array.isArray(customerData) ? customerData : []);
+      setParties(Array.isArray(partyData) ? partyData : []);
+      setFiltered(Array.isArray(paymentData) ? paymentData : []);
     } catch (err) {
       alert(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   useEffect(() => {
     let result = [...payments];
 
     if (filters.customer) {
-      result = result.filter((p) => p.customer?._id === filters.customer);
+      result = result.filter((p) => {
+        const partyId = typeof p.partyId === 'object' ? p.partyId?._id : p.partyId;
+        const customerId = typeof p.customer === 'object' ? p.customer?._id : p.customer;
+
+        return (
+          String(customerId || '') === String(filters.customer) ||
+          String(partyId || '') === String(filters.customer)
+        );
+      });
     }
 
     if (filters.paymentType) {
-      result = result.filter((p) => p.paymentType === filters.paymentType);
+      result = result.filter((p) =>
+        getPaymentTypes(p).toLowerCase().includes(filters.paymentType.toLowerCase())
+      );
     }
 
     if (filters.search) {
       const q = filters.search.toLowerCase();
+
       result = result.filter(
         (p) =>
           p.description?.toLowerCase().includes(q) ||
-          p.amount?.toString().includes(q) ||
-          p.account?.name?.toLowerCase().includes(q) ||
-          p.customer?.name?.toLowerCase().includes(q)
+          getPaymentTotal(p).toString().includes(q) ||
+          getAccountNames(p).toLowerCase().includes(q) ||
+          getPartyOrCustomerName(p).toLowerCase().includes(q)
       );
     }
 
@@ -68,10 +130,18 @@ const ReceivePaymentList = () => {
     }
 
     setFiltered(result);
-  }, [filters, payments]);
+  }, [
+    filters,
+    payments,
+    getPaymentTotal,
+    getPaymentTypes,
+    getAccountNames,
+    getPartyOrCustomerName,
+  ]);
 
   const handleDelete = async (id) => {
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
+
     try {
       await deleteReceivePayment(id);
       fetchData();
@@ -84,6 +154,7 @@ const ReceivePaymentList = () => {
     <div className="p-4 bg-white shadow rounded">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('payment.payments')}</h2>
+
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/receive-payments/new')}
@@ -92,17 +163,23 @@ const ReceivePaymentList = () => {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
         <select
           value={filters.customer}
           onChange={(e) => setFilters((prev) => ({ ...prev, customer: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">{t('customers')}</option>
+          <option value="">Customers / Parties</option>
+
           {customers.map((c) => (
-            <option key={c._id} value={c._id}>
+            <option key={`customer-${c._id}`} value={c._id}>
               {c.name}
+            </option>
+          ))}
+
+          {parties.map((p) => (
+            <option key={`party-${p._id}`} value={p._id}>
+              {p.name} 🟣 Party
             </option>
           ))}
         </select>
@@ -114,8 +191,8 @@ const ReceivePaymentList = () => {
         >
           <option value="">{t('payment.allTypes')}</option>
           <option value="Cash">{t('payment.cash')}</option>
+          <option value="Online">{t('payment.online')}</option>
           <option value="Cheque">{t('payment.cheque')}</option>
-          <option value="Bank">{t('bank')}</option>
         </select>
 
         <input
@@ -141,7 +218,6 @@ const ReceivePaymentList = () => {
         />
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full border text-sm">
           <thead>
@@ -155,6 +231,7 @@ const ReceivePaymentList = () => {
               <th className="border p-2">{t('common.actions')}</th>
             </tr>
           </thead>
+
           <tbody>
             {filtered.map((p) => (
               <tr key={p._id} className="text-center">
@@ -162,15 +239,13 @@ const ReceivePaymentList = () => {
                   {p.date ? new Date(p.date).toLocaleDateString() : '-'}
                 </td>
 
-                <td className="border p-2">{p.customer?.name || '-'}</td>
+                <td className="border p-2">{getPartyOrCustomerName(p)}</td>
 
-                {/* ✅ Payment Mode */}
-                <td className="border p-2 capitalize">{p.paymentMode || '-'}</td>
+                <td className="border p-2 capitalize">{getPaymentTypes(p)}</td>
 
-                {/* ✅ Account */}
-                <td className="border p-2">{p.accountName || '-'}</td>
+                <td className="border p-2">{getAccountNames(p)}</td>
 
-                <td className="border p-2 text-center">{Number(p.amount || 0).toFixed(2)}</td>
+                <td className="border p-2 text-center">{getPaymentTotal(p).toFixed(2)}</td>
 
                 <td className="border p-2">{p.description || '-'}</td>
 

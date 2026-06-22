@@ -5,7 +5,13 @@ const receivePaymentSchema = new mongoose.Schema(
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
     date: {
       type: String,
@@ -78,5 +84,15 @@ const receivePaymentSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+receivePaymentSchema.index({
+  userId: 1,
+  customer: 1,
+});
+
+receivePaymentSchema.index({
+  userId: 1,
+  partyId: 1,
+});
 
 module.exports = mongoose.model("ReceivePayment", receivePaymentSchema);

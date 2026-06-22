@@ -33,7 +33,13 @@ const purchaseInvoiceSchema = new mongoose.Schema(
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
     supplierName: {
       type: String,
@@ -120,6 +126,16 @@ purchaseInvoiceSchema.index({
   userId: 1,
   "items.productId": 1,
   invoiceDate: -1,
+});
+
+purchaseInvoiceSchema.index({
+  userId: 1,
+  supplier: 1,
+});
+
+purchaseInvoiceSchema.index({
+  userId: 1,
+  partyId: 1,
 });
 
 module.exports =

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchCustomers } from '../services/customerService';
+import { fetchSaleParties } from '../services/partyService';
 import { getAllRefunds, deleteRefund } from '../services/refundService';
 import { t } from '../i18n/i18n';
 
@@ -8,6 +9,8 @@ const RefundInvoiceList = () => {
   const [refunds, setRefunds] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
+
   const [filters, setFilters] = useState({
     customer: '',
     paymentType: '',
@@ -22,12 +25,44 @@ const RefundInvoiceList = () => {
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
+  const getCustomerOrPartyName = useCallback(
+    (refund) => {
+      const partyId = typeof refund.partyId === 'object' ? refund.partyId?._id : refund.partyId;
+      const customerId =
+        typeof refund.customerId === 'object' ? refund.customerId?._id : refund.customerId;
+
+      if (partyId) {
+        const partyName =
+          refund.partyId?.name ||
+          parties.find((party) => String(party._id) === String(partyId))?.name ||
+          refund.customerName;
+
+        return partyName ? `${partyName} 🟣 Party` : '-';
+      }
+
+      if (customerId) {
+        const customerName =
+          refund.customerId?.name ||
+          customers.find((customer) => String(customer._id) === String(customerId))?.name ||
+          refund.customerName;
+
+        return customerName || '-';
+      }
+
+      return refund.customerName || '-';
+    },
+    [customers, parties]
+  );
+
   const fetchData = useCallback(async () => {
     try {
       const refundData = await getAllRefunds(token);
       const customerData = await fetchCustomers(token);
-      setRefunds(refundData);
-      setCustomers(customerData);
+      const partyData = await fetchSaleParties(token);
+
+      setRefunds(Array.isArray(refundData) ? refundData : []);
+      setCustomers(Array.isArray(customerData) ? customerData : []);
+      setParties(Array.isArray(partyData) ? partyData : []);
     } catch (err) {
       alert(err.message);
     }
@@ -35,46 +70,67 @@ const RefundInvoiceList = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // ⏱️ Auto-refresh every 30 seconds
-    return () => clearInterval(interval); // Cleanup
+
+    const interval = setInterval(fetchData, 30000);
+
+    return () => clearInterval(interval);
   }, [fetchData]);
 
   useEffect(() => {
     let result = [...refunds];
 
     if (filters.customer) {
-      result = result.filter((r) => r.customerId === filters.customer);
+      result = result.filter((refund) => {
+        const partyId = typeof refund.partyId === 'object' ? refund.partyId?._id : refund.partyId;
+        const customerId =
+          typeof refund.customerId === 'object' ? refund.customerId?._id : refund.customerId;
+
+        return (
+          String(customerId || '') === String(filters.customer) ||
+          String(partyId || '') === String(filters.customer)
+        );
+      });
     }
 
     if (filters.paymentType) {
-      result = result.filter((r) => r.paymentType === filters.paymentType);
+      result = result.filter(
+        (refund) =>
+          String(refund.paymentType || '').toLowerCase() ===
+          String(filters.paymentType || '').toLowerCase()
+      );
     }
 
     if (filters.search) {
       const q = filters.search.toLowerCase();
+
       result = result.filter(
-        (r) =>
-          r.billNo?.toLowerCase().includes(q) ||
-          r.customerName?.toLowerCase().includes(q) ||
-          r.customerPhone?.includes(q) ||
-          r.notes?.toLowerCase().includes(q)
+        (refund) =>
+          refund.billNo?.toLowerCase().includes(q) ||
+          getCustomerOrPartyName(refund).toLowerCase().includes(q) ||
+          refund.customerName?.toLowerCase().includes(q) ||
+          refund.customerPhone?.includes(q) ||
+          refund.notes?.toLowerCase().includes(q) ||
+          String(refund.totalAmount || '').includes(q)
       );
     }
 
     if (filters.fromDate) {
-      result = result.filter((r) => new Date(r.invoiceDate) >= new Date(filters.fromDate));
+      result = result.filter(
+        (refund) => new Date(refund.invoiceDate) >= new Date(filters.fromDate)
+      );
     }
 
     if (filters.toDate) {
-      result = result.filter((r) => new Date(r.invoiceDate) <= new Date(filters.toDate));
+      result = result.filter((refund) => new Date(refund.invoiceDate) <= new Date(filters.toDate));
     }
 
     setFiltered(result);
-    setCurrentPage(1); // جب بھی filter change ہو، پہلی page پر چلے جائیں
-  }, [filters, refunds]);
+    setCurrentPage(1);
+  }, [filters, refunds, getCustomerOrPartyName]);
 
   const handleDelete = async (id) => {
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
+
     try {
       await deleteRefund(id, token);
       fetchData();
@@ -83,16 +139,16 @@ const RefundInvoiceList = () => {
     }
   };
 
-  // 🔢 Pagination logic
   const startIdx = (currentPage - 1) * itemsPerPage;
   const endIdx = startIdx + itemsPerPage;
   const currentItems = filtered.slice(startIdx, endIdx);
-  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
 
   return (
     <div className="p-4 bg-white shadow rounded">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('purchase.refundList')}</h2>
+
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded"
           onClick={() => navigate('/refunds/new')}
@@ -101,17 +157,23 @@ const RefundInvoiceList = () => {
         </button>
       </div>
 
-      {/* Filters + Clear Button */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
         <select
           value={filters.customer}
           onChange={(e) => setFilters((prev) => ({ ...prev, customer: e.target.value }))}
           className="border rounded p-2"
         >
-          <option value="">{t('customers')}</option>
-          {customers.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.name}
+          <option value="">Customers / Parties</option>
+
+          {customers.map((customer) => (
+            <option key={`customer-${customer._id}`} value={customer._id}>
+              {customer.name}
+            </option>
+          ))}
+
+          {parties.map((party) => (
+            <option key={`party-${party._id}`} value={party._id}>
+              {party.name} 🟣 Party
             </option>
           ))}
         </select>
@@ -124,6 +186,9 @@ const RefundInvoiceList = () => {
           <option value="">{t('payment.allTypes')}</option>
           <option value="cash">{t('purchase.cashRefund')}</option>
           <option value="credit">{t('purchase.adjustCredit')}</option>
+          <option value="bank">{t('bank')}</option>
+          <option value="online">{t('payment.online')}</option>
+          <option value="cheque">{t('payment.cheque')}</option>
         </select>
 
         <input
@@ -149,6 +214,7 @@ const RefundInvoiceList = () => {
         />
 
         <button
+          type="button"
           onClick={() =>
             setFilters({
               customer: '',
@@ -164,7 +230,6 @@ const RefundInvoiceList = () => {
         </button>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full border text-sm">
           <thead>
@@ -178,26 +243,38 @@ const RefundInvoiceList = () => {
               <th className="border p-2">{t('common.actions')}</th>
             </tr>
           </thead>
+
           <tbody>
-            {currentItems.map((r) => (
-              <tr key={r._id} className="text-center">
-                <td className="border p-2">{new Date(r.invoiceDate).toLocaleDateString()}</td>
-                <td className="border p-2">{r.billNo}</td>
-                <td className="border p-2">{r.customerName}</td>
-                <td className="border p-2 text-center">{parseFloat(r.totalAmount).toFixed(2)}</td>
-                <td className="border p-2 capitalize">{r.paymentType}</td>
-                <td className="border p-2">{r.notes || '-'}</td>
+            {currentItems.map((refund) => (
+              <tr key={refund._id} className="text-center">
+                <td className="border p-2">
+                  {refund.invoiceDate ? new Date(refund.invoiceDate).toLocaleDateString() : '-'}
+                </td>
+
+                <td className="border p-2">{refund.billNo || '-'}</td>
+
+                <td className="border p-2">{getCustomerOrPartyName(refund)}</td>
+
+                <td className="border p-2 text-center">
+                  {Number(refund.totalAmount || 0).toFixed(2)}
+                </td>
+
+                <td className="border p-2 capitalize">{refund.paymentType || '-'}</td>
+
+                <td className="border p-2">{refund.notes || '-'}</td>
+
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
                     <button
                       className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/refunds/edit/${r._id}`)}
+                      onClick={() => navigate(`/refunds/edit/${refund._id}`)}
                     >
                       {t('edit')}
                     </button>
+
                     <button
                       className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(r._id)}
+                      onClick={() => handleDelete(refund._id)}
                     >
                       {t('delete')}
                     </button>
@@ -205,6 +282,7 @@ const RefundInvoiceList = () => {
                 </td>
               </tr>
             ))}
+
             {currentItems.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-center p-4">
@@ -216,22 +294,25 @@ const RefundInvoiceList = () => {
         </table>
       </div>
 
-      {/* Pagination Controls */}
       <div className="flex justify-center gap-2 mt-4">
         <button
+          type="button"
           disabled={currentPage === 1}
-          className="px-3 py-1 border rounded"
-          onClick={() => setCurrentPage((prev) => prev - 1)}
+          className="px-3 py-1 border rounded disabled:opacity-50"
+          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
         >
           ◀️ {t('previous')}
         </button>
+
         <span className="px-3 py-1">
           {t('page')} {currentPage} {t('of')} {totalPages}
         </span>
+
         <button
+          type="button"
           disabled={currentPage === totalPages}
-          className="px-3 py-1 border rounded"
-          onClick={() => setCurrentPage((prev) => prev + 1)}
+          className="px-3 py-1 border rounded disabled:opacity-50"
+          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
         >
           {t('next')} ▶️
         </button>

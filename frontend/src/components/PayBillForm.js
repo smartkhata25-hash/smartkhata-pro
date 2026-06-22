@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchSuppliers as getSuppliers, fetchSupplierLedger } from '../services/supplierService';
+import { fetchPurchaseParties } from '../services/partyService';
+import { getPartyLedger } from '../services/partyLedgerService';
 import { getAccounts } from '../services/accountService';
 import { createPayBill, updatePayBill, getPayBillById } from '../services/payBillService';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
@@ -10,9 +12,9 @@ import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 const PayBillForm = () => {
   const [suppliers, setSuppliers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedSupplierType, setSelectedSupplierType] = useState('supplier');
   const [accounts, setAccounts] = useState([]);
-  // ✅ Sirf payment walay accounts (Cash / Bank / Asset)
-
   const [supplierLedger, setSupplierLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -42,10 +44,30 @@ const PayBillForm = () => {
   const queryId = searchParams.get('id');
   const id = paramId || queryId;
 
+  const loadLedger = useCallback(async (id, type = 'supplier') => {
+    if (!id) {
+      setSupplierLedger([]);
+      return;
+    }
+
+    if (type === 'party') {
+      const res = await getPartyLedger(id);
+      setSupplierLedger(res.ledger || []);
+      return;
+    }
+
+    const res = await fetchSupplierLedger(id);
+    setSupplierLedger(res.entries || []);
+  }, []);
+
   useEffect(() => {
     async function fetchData() {
       if (id) {
-        const [sData, aData] = await Promise.all([getSuppliers(), getAccounts()]);
+        const [sData, pData, aData] = await Promise.all([
+          getSuppliers(),
+          fetchPurchaseParties(),
+          getAccounts(),
+        ]);
 
         let existing = JSON.parse(localStorage.getItem(`paybill_${id}`) || 'null');
 
@@ -55,6 +77,7 @@ const PayBillForm = () => {
         }
 
         setSuppliers(sData);
+        setParties(pData);
         const paymentAccounts = aData.filter(
           (acc) =>
             ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
@@ -101,9 +124,14 @@ const PayBillForm = () => {
 
         loadLedger(existing.supplier?._id);
       } else {
-        const [sData, aData] = await Promise.all([getSuppliers(), getAccounts()]);
+        const [sData, pData, aData] = await Promise.all([
+          getSuppliers(),
+          fetchPurchaseParties(),
+          getAccounts(),
+        ]);
 
         setSuppliers(sData);
+        setParties(pData);
 
         const paymentAccounts = aData.filter(
           (acc) =>
@@ -127,26 +155,26 @@ const PayBillForm = () => {
       }
     }
     fetchData();
-  }, [id]);
-
-  const loadLedger = async (supplierId) => {
-    if (supplierId) {
-      const res = await fetchSupplierLedger(supplierId);
-      setSupplierLedger(res.entries || []);
-    } else {
-      setSupplierLedger([]);
-    }
-  };
+  }, [id, loadLedger]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSupplierChange = async (e) => {
-    const supplierId = e.target.value;
-    setFormData((prev) => ({ ...prev, supplier: supplierId }));
-    loadLedger(supplierId);
+  const handleSupplierChange = async (selected) => {
+    const id = selected?.value || '';
+    const type = selected?.selectType || 'supplier';
+
+    setSelectedSupplierType(type);
+
+    setFormData((prev) => ({
+      ...prev,
+      supplier: type === 'supplier' ? id : '',
+      partyId: type === 'party' ? id : '',
+    }));
+
+    loadLedger(id, type);
   };
 
   const handleFileChange = (e) => {
@@ -171,6 +199,7 @@ const PayBillForm = () => {
     setPaymentEntries([{ account: '', amount: '', paymentType: 'Cash' }]);
 
     setSupplierLedger([]);
+    setSelectedSupplierType('supplier');
     setShowPreview(false);
 
     localStorage.removeItem('app_state_pay_bill_draft');
@@ -247,7 +276,7 @@ const PayBillForm = () => {
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
 
-    if (!formData.supplier) {
+    if (!formData.supplier && !formData.partyId) {
       alert(t('alerts.selectSupplier'));
       return;
     }
@@ -307,7 +336,9 @@ const PayBillForm = () => {
     <div>
       <h2 style="text-align:center;">${t('payment.invoiceTitle')}</h2>
       <p><strong>${t('supplier.supplier')}:</strong> ${
-        suppliers.find((s) => s._id === formData.supplier)?.name || '-'
+        selectedSupplierType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.name || '-'
+          : suppliers.find((s) => s._id === formData.supplier)?.name || '-'
       }</p>
       <p><strong>${t('common.date')}:</strong> ${formData.date} ${formData.time}</p>
       <p><strong>${t('common.amount')}:</strong> ${totalAmount}</p>
@@ -336,7 +367,11 @@ const PayBillForm = () => {
 
     doc.setFontSize(12);
     doc.text(
-      `${t('supplier.supplier')}: ${suppliers.find((s) => s._id === formData.supplier)?.name || '-'}`,
+      `${t('supplier.supplier')}: ${
+        selectedSupplierType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.name || '-'
+          : suppliers.find((s) => s._id === formData.supplier)?.name || '-'
+      }`,
       14,
       30
     );
@@ -361,18 +396,36 @@ const PayBillForm = () => {
         <label>{t('supplier.supplier')}:</label>
         <Select
           name="supplier"
-          options={suppliers.map((s) => ({ value: s._id, label: s.name }))}
+          options={[
+            ...suppliers.map((s) => ({
+              value: s._id,
+              label: s.name,
+              selectType: 'supplier',
+            })),
+            ...parties.map((p) => ({
+              value: p._id,
+              label: `${p.name} 🟣 Party`,
+              selectType: 'party',
+            })),
+          ]}
           value={
-            suppliers.find((s) => s._id === formData.supplier)
-              ? {
-                  value: formData.supplier,
-                  label: suppliers.find((s) => s._id === formData.supplier)?.name,
-                }
-              : null
+            selectedSupplierType === 'party'
+              ? parties.find((p) => p._id === formData.partyId)
+                ? {
+                    value: formData.partyId,
+                    label: `${parties.find((p) => p._id === formData.partyId)?.name} 🟣 Party`,
+                    selectType: 'party',
+                  }
+                : null
+              : suppliers.find((s) => s._id === formData.supplier)
+                ? {
+                    value: formData.supplier,
+                    label: suppliers.find((s) => s._id === formData.supplier)?.name,
+                    selectType: 'supplier',
+                  }
+                : null
           }
-          onChange={(selected) =>
-            handleSupplierChange({ target: { name: 'supplier', value: selected?.value } })
-          }
+          onChange={handleSupplierChange}
           placeholder={t('supplier.select')}
           isClearable
         />
@@ -610,7 +663,7 @@ const PayBillForm = () => {
           {id ? t('common.revert') : t('common.clear')}
         </button>
 
-        {formData.supplier && paymentEntries.length > 0 && (
+        {(formData.supplier || formData.partyId) && paymentEntries.length > 0 && (
           <>
             <button
               onClick={handlePrint}

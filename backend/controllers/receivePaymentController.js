@@ -2,6 +2,7 @@ const ReceivePayment = require("../models/ReceivePayment");
 const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
+const Party = require("../models/Party");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const {
   createPaymentEntry,
@@ -16,6 +17,7 @@ exports.createReceivePayment = async (req, res) => {
   try {
     const {
       customer,
+      partyId,
       date,
       time,
       description,
@@ -55,15 +57,34 @@ exports.createReceivePayment = async (req, res) => {
 
     const cleanPaymentType = paymentType?.toLowerCase() || "";
 
-    const customerData = await Customer.findById(customer).populate("account");
+    let customerData = null;
+    let partyData = null;
+    let counterPartyAccountId = null;
 
-    if (!customerData || !customerData.account) {
-      return res.status(404).json({
-        error: "Customer or linked account not found",
-      });
+    if (partyId) {
+      partyData = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      }).populate("account");
+
+      if (!partyData || !partyData.account) {
+        return res.status(404).json({ error: "Party account not found" });
+      }
+
+      counterPartyAccountId = partyData.account._id;
+    } else {
+      customerData = await Customer.findById(customer).populate("account");
+
+      if (!customerData || !customerData.account) {
+        return res.status(404).json({
+          error: "Customer or linked account not found",
+        });
+      }
+
+      counterPartyAccountId = customerData.account._id;
     }
-
-    const customerAccountId = customerData.account._id;
 
     const count = await ReceivePayment.countDocuments({ userId });
 
@@ -71,7 +92,8 @@ exports.createReceivePayment = async (req, res) => {
 
     // ✅ Save ReceivePayment
     const newPayment = await ReceivePayment.create({
-      customer,
+      customer: customerData?._id || null,
+      partyId: partyData?._id || null,
       date,
       time,
       amount: totalAmount,
@@ -92,10 +114,12 @@ exports.createReceivePayment = async (req, res) => {
         originModule: "receive_payment_form",
         billNo,
         accountId: p.account,
-        counterPartyAccountId: customerAccountId,
+        counterPartyAccountId,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || cleanPaymentType || "cash",
         description: description || "Receive Payment",
+        customerId: customerData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
@@ -104,10 +128,12 @@ exports.createReceivePayment = async (req, res) => {
         userId,
         referenceId: newPayment._id,
         billNo,
-        customerAccountId: customerAccountId,
+        customerAccountId: counterPartyAccountId,
         discountAmount: parsedDiscount,
         description: "Receive Payment Discount",
         originModule: "receive_payment_form",
+        customerId: customerData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
@@ -134,10 +160,21 @@ exports.getAllReceivePayments = async (req, res) => {
 
     const activeCustomerIds = activeCustomers.map((c) => c._id);
 
+    const activeParties = await Party.find({
+      userId,
+      isDeleted: false,
+      isActive: true,
+    }).select("_id");
+
+    const activePartyIds = activeParties.map((p) => p._id);
+
     // 🔹 Receive payments لائیں
     const payments = await ReceivePayment.find({
       userId,
-      customer: { $in: activeCustomerIds },
+      $or: [
+        { customer: { $in: activeCustomerIds } },
+        { partyId: { $in: activePartyIds } },
+      ],
     })
       .populate("customer", "name")
       .sort({ createdAt: -1 });
@@ -211,6 +248,7 @@ exports.updateReceivePayment = async (req, res) => {
   try {
     const {
       customer,
+      partyId,
       date,
       time,
       description,
@@ -270,15 +308,34 @@ exports.updateReceivePayment = async (req, res) => {
     });
 
     // 🔍 Get customer account
-    const customerData = await Customer.findById(customer).populate("account");
+    let customerData = null;
+    let partyData = null;
+    let counterPartyAccountId = null;
 
-    if (!customerData || !customerData.account) {
-      return res.status(404).json({
-        error: "Customer or linked account not found",
-      });
+    if (partyId) {
+      partyData = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      }).populate("account");
+
+      if (!partyData || !partyData.account) {
+        return res.status(404).json({ error: "Party account not found" });
+      }
+
+      counterPartyAccountId = partyData.account._id;
+    } else {
+      customerData = await Customer.findById(customer).populate("account");
+
+      if (!customerData || !customerData.account) {
+        return res.status(404).json({
+          error: "Customer or linked account not found",
+        });
+      }
+
+      counterPartyAccountId = customerData.account._id;
     }
-
-    const customerAccountId = customerData.account._id;
 
     const existingJournal = await JournalEntry.findOne({
       referenceId: payment._id,
@@ -301,7 +358,8 @@ exports.updateReceivePayment = async (req, res) => {
       : payment.attachment;
 
     // 🔄 Update payment
-    payment.customer = customer;
+    payment.customer = customerData?._id || null;
+    payment.partyId = partyData?._id || null;
     payment.date = date;
     payment.time = time;
     payment.amount = totalAmount;
@@ -337,11 +395,13 @@ exports.updateReceivePayment = async (req, res) => {
         originModule: "receive_payment_form",
         billNo,
         accountId: p.account,
-        counterPartyAccountId: customerAccountId,
+        counterPartyAccountId,
         amount: Number(p.amount),
         paymentType:
           p.paymentType?.toLowerCase() || payment.paymentType || "cash",
         description: description || "Receive Payment",
+        customerId: customerData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
@@ -350,15 +410,17 @@ exports.updateReceivePayment = async (req, res) => {
         userId,
         referenceId: payment._id,
         billNo,
-        customerAccountId: customerAccountId,
+        customerAccountId: counterPartyAccountId,
         discountAmount: parsedDiscount,
         description: "Updated Receive Payment Discount",
         originModule: "receive_payment_form",
+        customerId: customerData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
     // 🔄 Recalculate customer account
-    await safeRecalculate(customerAccountId);
+    await safeRecalculate(counterPartyAccountId);
 
     res.json({
       message: "Payment updated successfully",

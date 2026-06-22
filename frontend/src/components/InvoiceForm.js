@@ -13,6 +13,8 @@ import { fetchProductsWithToken } from '../services/inventoryService';
 
 import { getAccounts } from '../services/accountService';
 import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+import { fetchSaleParties } from '../services/partyService';
+import { getPartyLedger } from '../services/partyLedgerService';
 
 import InvoiceTable from './InvoiceTable';
 import { useLocation } from 'react-router-dom';
@@ -54,6 +56,9 @@ const InvoiceForm = ({
 
   const [footerText, setFooterText] = useState('');
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [selectedCustomerType, setSelectedCustomerType] = useState('customer');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [products, setProducts] = useState([]);
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -371,6 +376,10 @@ const InvoiceForm = ({
     })
       .then((res) => res.json())
       .then(setCustomers);
+
+    fetchSaleParties(token)
+      .then(setParties)
+      .catch((err) => console.error('Sale parties load failed:', err));
     const cachedProducts = localStorage.getItem('products');
 
     if (cachedProducts) {
@@ -401,7 +410,24 @@ const InvoiceForm = ({
 
   const filterCustomers = (value) => {
     const query = value.toLowerCase();
-    return customers.filter((c) => c.name.toLowerCase().includes(query) || c.phone.includes(query));
+
+    const customerList = customers
+      .filter((c) => c.name?.toLowerCase().includes(query) || c.phone?.includes(query))
+      .map((c) => ({
+        ...c,
+        selectType: 'customer',
+        badge: 'Customer',
+      }));
+
+    const partyList = parties
+      .filter((p) => p.name?.toLowerCase().includes(query) || p.phone?.includes(query))
+      .map((p) => ({
+        ...p,
+        selectType: 'party',
+        badge: 'Party',
+      }));
+
+    return [...customerList, ...partyList];
   };
 
   const debounceTimer = useRef(null);
@@ -471,7 +497,7 @@ const InvoiceForm = ({
       e.preventDefault();
       const selected = customerSuggestions[selectedCustomerIndex];
       if (selected) {
-        handleCustomerSelect(selected.name, selected.phone, selected._id);
+        handleCustomerSelect(selected.name, selected.phone, selected._id, selected.selectType);
 
         setTimeout(() => {
           document.getElementById('customer-phone')?.focus();
@@ -480,27 +506,38 @@ const InvoiceForm = ({
     }
   };
 
-  const handleCustomerSelect = async (name, phone, id) => {
+  const handleCustomerSelect = async (name, phone, id, type = 'customer') => {
     setCustomerName(name);
     setCustomerPhone(phone);
 
-    onCustomerChange && onCustomerChange(id);
+    setSelectedCustomerId(id);
+    setSelectedCustomerType(type);
+
+    if (type === 'customer') {
+      onCustomerChange && onCustomerChange(id);
+    }
 
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
     setShowCustomerAddOptions(false);
 
     try {
-      const selectedCustomer = customers.find((c) => c._id === id);
+      let res;
 
-      const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+      if (type === 'party') {
+        res = await getPartyLedger(id);
+      } else {
+        const selectedCustomer = customers.find((c) => c._id === id);
 
-      if (!accountId) {
-        setCustomerBalance(0);
-        return;
+        const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+
+        if (!accountId) {
+          setCustomerBalance(0);
+          return;
+        }
+
+        res = await getLedgerByCustomerAccount(accountId);
       }
-
-      const res = await getLedgerByCustomerAccount(accountId);
 
       setCustomerLedger(res.ledger || []);
 
@@ -721,6 +758,8 @@ const InvoiceForm = ({
 
     setCustomerName('');
     setCustomerPhone('');
+    setSelectedCustomerId('');
+    setSelectedCustomerType('customer');
     setItems(Array.from({ length: 20 }, () => blankRow()));
     setDiscountPercent(0);
     setDiscountAmount(0);
@@ -812,6 +851,11 @@ const InvoiceForm = ({
     formData.append('customerName', customerName);
     formData.append('customerPhone', customerPhone);
     formData.append('by', by);
+    if (selectedCustomerType === 'party') {
+      formData.append('partyId', selectedCustomerId);
+    } else {
+      formData.append('customerId', selectedCustomerId);
+    }
     const finalOpeningAmount = isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal;
     formData.append('totalAmount', finalOpeningAmount);
 
@@ -1003,13 +1047,15 @@ const InvoiceForm = ({
                   {customerSuggestions.map((c, i) => (
                     <li
                       key={i}
-                      onMouseDown={() => handleCustomerSelect(c.name, c.phone, c._id)}
-                      onTouchStart={() => handleCustomerSelect(c.name, c.phone, c._id)}
+                      onMouseDown={() => handleCustomerSelect(c.name, c.phone, c._id, c.selectType)}
+                      onTouchStart={() =>
+                        handleCustomerSelect(c.name, c.phone, c._id, c.selectType)
+                      }
                       className={`px-2 py-2 cursor-pointer ${
                         selectedCustomerIndex === i ? 'bg-blue-100 font-bold' : ''
                       }`}
                     >
-                      {c.name} – {c.phone}
+                      {c.name} – {c.phone} {c.badge === 'Party' ? '🟣 Party' : ''}
                     </li>
                   ))}
                 </ul>

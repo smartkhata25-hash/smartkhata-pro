@@ -30,6 +30,7 @@ exports.createEntry = async (req, res) => {
       lines,
       customerId,
       supplierId,
+      partyId,
       billNo,
       paymentType,
       sourceType,
@@ -100,6 +101,7 @@ exports.createEntry = async (req, res) => {
       lines,
       customerId: customerId || null,
       supplierId: supplierId || null,
+      partyId: partyId || null,
       billNo: billNo || "",
       paymentType: paymentType || "",
       sourceType: sourceType || "manual",
@@ -116,6 +118,7 @@ exports.createEntry = async (req, res) => {
     console.log("🔥 STEP1 JOURNAL SAVED:", {
       supplierId,
       customerId,
+      partyId,
       lines,
     });
     await recalculateInvolvedAccounts(lines);
@@ -153,6 +156,7 @@ exports.updateEntry = async (req, res) => {
       invoiceModel,
       customerId,
       supplierId,
+      partyId,
       referenceId,
     } = req.body;
 
@@ -232,6 +236,7 @@ exports.updateEntry = async (req, res) => {
     entry.lines = lines;
     entry.customerId = customerId || null;
     entry.supplierId = supplierId || null;
+    entry.partyId = partyId || null;
     entry.billNo = billNo || "";
     entry.paymentType = paymentType || "";
     entry.sourceType = sourceType || "manual";

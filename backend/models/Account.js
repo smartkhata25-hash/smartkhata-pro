@@ -77,6 +77,9 @@ const accountSchema = new mongoose.Schema({
       "other_expense",
       "cogs",
 
+      // Party
+      "party",
+
       // Common
       "other",
     ],

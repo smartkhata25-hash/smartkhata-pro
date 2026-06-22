@@ -3,6 +3,7 @@ const PurchaseInvoice = require("../models/purchaseInvoice");
 
 const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");
+const Party = require("../models/Party");
 const Account = require("../models/Account");
 const {
   createInventoryEntry,
@@ -24,6 +25,7 @@ exports.createPurchaseReturn = async (req, res) => {
       returnDate,
       returnTime,
       supplierId,
+      partyId,
       supplierPhone,
       totalAmount,
       paidAmount = 0,
@@ -38,7 +40,7 @@ exports.createPurchaseReturn = async (req, res) => {
     /* =============================
        BASIC VALIDATION
     ============================== */
-    if (!supplierId || items.length === 0) {
+    if ((!supplierId && !partyId) || items.length === 0) {
       return res.status(400).json({
         error: "Supplier and items required",
       });
@@ -56,21 +58,43 @@ exports.createPurchaseReturn = async (req, res) => {
       });
     }
 
-    const supplier = await Supplier.findOne({
-      _id: supplierId,
-      userId: userId,
-    });
+    let supplier = null;
+    let party = null;
 
-    if (!supplier) {
-      return res.status(404).json({ error: "Supplier not found" });
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party) {
+        return res.status(404).json({
+          error: "Party not found",
+        });
+      }
+    } else {
+      supplier = await Supplier.findOne({
+        _id: supplierId,
+        userId,
+        isDeleted: false,
+      });
+
+      if (!supplier) {
+        return res.status(404).json({
+          error: "Supplier not found",
+        });
+      }
     }
 
-    const supplierAccountId =
-      typeof supplier.account === "object"
+    const counterPartyAccountId = party
+      ? party.account
+      : typeof supplier.account === "object"
         ? supplier.account?._id
         : supplier.account;
 
-    if (!supplierAccountId) {
+    if (!counterPartyAccountId) {
       return res.status(400).json({
         error: "Supplier account not linked",
       });
@@ -99,8 +123,9 @@ exports.createPurchaseReturn = async (req, res) => {
       billNo,
       returnDate,
       returnTime,
-      supplierId: supplier._id,
-      supplierName: supplier.name,
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
+      supplierName: supplier?.name || party?.name || "",
       supplierPhone,
       originalInvoiceId: originalInvoiceId || null,
       totalAmount,
@@ -177,7 +202,7 @@ exports.createPurchaseReturn = async (req, res) => {
 
     // ✅ Supplier payable decrease
     lines.push({
-      account: supplierAccountId,
+      account: counterPartyAccountId,
       type: "debit",
       amount: totalAmount,
     });
@@ -195,7 +220,7 @@ exports.createPurchaseReturn = async (req, res) => {
     const journal = new JournalEntry({
       date: dateTime,
       time: returnTime || "",
-      description: `Purchase Return - ${supplier.name} (Bill# ${billNo})`,
+      description: `Purchase Return - ${supplier?.name || party?.name} (Bill# ${billNo})`,
 
       sourceType: isOpeningReturn
         ? "opening_purchase_return"
@@ -205,7 +230,8 @@ exports.createPurchaseReturn = async (req, res) => {
       invoiceId: purchaseReturn._id,
       billNo,
       createdBy: userId,
-      supplierId: supplier._id,
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
       attachmentUrl: req.file?.filename || "",
       attachmentType: req.file?.mimetype?.split("/")[0] || "",
       lines,
@@ -213,7 +239,7 @@ exports.createPurchaseReturn = async (req, res) => {
 
     await journal.save();
 
-    await recalculateAccountBalance(supplierAccountId);
+    await recalculateAccountBalance(counterPartyAccountId);
 
     if (paidAmount > 0 && paymentType && accountId) {
       await createPaymentEntry({
@@ -222,13 +248,15 @@ exports.createPurchaseReturn = async (req, res) => {
         sourceType: "purchase_return_payment",
         billNo: purchaseReturn.billNo,
         accountId,
-        counterPartyAccountId: supplierAccountId,
+        counterPartyAccountId: counterPartyAccountId,
         amount: paidAmount,
         paymentType,
         description: `Purchase Return Payment - ${purchaseReturn.billNo}`,
+        supplierId: supplier?._id || null,
+        partyId: party?._id || null,
       });
 
-      await recalculateAccountBalance(supplierAccountId);
+      await recalculateAccountBalance(counterPartyAccountId);
       if (accountId) await recalculateAccountBalance(accountId);
     }
 
@@ -385,6 +413,7 @@ exports.updatePurchaseReturn = async (req, res) => {
       returnDate,
       returnTime,
       supplierId,
+      partyId,
       supplierPhone,
       totalAmount,
       paidAmount = 0,
@@ -413,7 +442,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        BASIC VALIDATION
     ============================== */
-    if (!supplierId || items.length === 0) {
+    if ((!supplierId && !partyId) || items.length === 0) {
       return res.status(400).json({
         error: "Supplier and items required",
       });
@@ -434,26 +463,45 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        SUPPLIER VALIDATION
     ============================== */
-    const supplier = await Supplier.findOne({
-      _id: supplierId,
-      userId,
-      isDeleted: false,
-    });
+    let supplier = null;
+    let party = null;
 
-    if (!supplier) {
-      return res.status(404).json({
-        error: "Supplier not found",
+    if (partyId) {
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
       });
+
+      if (!party) {
+        return res.status(404).json({
+          error: "Party not found",
+        });
+      }
+    } else {
+      supplier = await Supplier.findOne({
+        _id: supplierId,
+        userId,
+        isDeleted: false,
+      });
+
+      if (!supplier) {
+        return res.status(404).json({
+          error: "Supplier not found",
+        });
+      }
     }
 
-    const supplierAccountId =
-      typeof supplier.account === "object"
+    const counterPartyAccountId = party
+      ? party.account
+      : typeof supplier.account === "object"
         ? supplier.account?._id
         : supplier.account;
 
-    if (!supplierAccountId) {
+    if (!counterPartyAccountId) {
       return res.status(400).json({
-        error: "Supplier account not linked",
+        error: "Account not linked",
       });
     }
 
@@ -578,8 +626,9 @@ exports.updatePurchaseReturn = async (req, res) => {
     pr.billNo = billNo;
     pr.returnDate = returnDate;
     pr.returnTime = returnTime;
-    pr.supplierId = supplier._id;
-    pr.supplierName = supplier.name;
+    pr.supplierId = supplier?._id || null;
+    pr.partyId = party?._id || null;
+    pr.supplierName = supplier?.name || party?.name || "";
     pr.supplierPhone = supplierPhone;
     pr.totalAmount = totalAmount;
     pr.paidAmount = paidAmount;
@@ -611,7 +660,7 @@ exports.updatePurchaseReturn = async (req, res) => {
 
     // ✅ Supplier payable decrease
     lines.push({
-      account: supplierAccountId,
+      account: counterPartyAccountId,
       type: "debit",
       amount: totalAmount,
     });
@@ -629,7 +678,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     const journal = new JournalEntry({
       date: dateTime,
       time: returnTime || "",
-      description: `Purchase Return - ${supplier.name} (Bill# ${billNo})`,
+      description: `Purchase Return - ${supplier?.name || party?.name} (Bill# ${billNo})`,
 
       sourceType: isOpeningReturn
         ? "opening_purchase_return"
@@ -639,7 +688,8 @@ exports.updatePurchaseReturn = async (req, res) => {
       invoiceId: pr._id,
       billNo,
       createdBy: userId,
-      supplierId: supplier._id,
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
       attachmentUrl: pr.attachmentUrl || "",
       attachmentType: pr.attachmentType || "",
       lines,
@@ -657,10 +707,12 @@ exports.updatePurchaseReturn = async (req, res) => {
         sourceType: "purchase_return_payment",
         billNo: pr.billNo,
         accountId,
-        counterPartyAccountId: supplierAccountId,
+        counterPartyAccountId: counterPartyAccountId,
         amount: paidAmount,
         paymentType,
         description: `Purchase Return Payment - ${pr.billNo}`,
+        supplierId: supplier?._id || null,
+        partyId: party?._id || null,
       });
     }
 
@@ -693,7 +745,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        RECALCULATE BALANCES
     ============================== */
-    await recalculateAccountBalance(supplierAccountId);
+    await recalculateAccountBalance(counterPartyAccountId);
 
     if (accountId) {
       await recalculateAccountBalance(accountId);
@@ -788,10 +840,18 @@ exports.deletePurchaseReturn = async (req, res) => {
     /* =============================
        RECALCULATE SUPPLIER ACCOUNT
     ============================== */
-    const supplier = await Supplier.findById(pr.supplierId);
+    const supplier = pr.supplierId
+      ? await Supplier.findById(pr.supplierId)
+      : null;
+
+    const party = pr.partyId ? await Party.findById(pr.partyId) : null;
 
     if (supplier?.account) {
       await recalculateAccountBalance(supplier.account);
+    }
+
+    if (party?.account) {
+      await recalculateAccountBalance(party.account);
     }
 
     /* =============================

@@ -40,7 +40,13 @@ const RefundInvoiceSchema = new mongoose.Schema(
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      default: null,
+    },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
     },
     originalInvoiceId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -87,6 +93,10 @@ const RefundInvoiceSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -94,5 +104,15 @@ const RefundInvoiceSchema = new mongoose.Schema(
 );
 
 RefundInvoiceSchema.index({ createdBy: 1, billNo: 1 }, { unique: true });
+
+RefundInvoiceSchema.index({
+  createdBy: 1,
+  customerId: 1,
+});
+
+RefundInvoiceSchema.index({
+  createdBy: 1,
+  partyId: 1,
+});
 
 module.exports = mongoose.model("RefundInvoice", RefundInvoiceSchema);

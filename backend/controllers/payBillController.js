@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const PayBill = require("../models/PayBill");
 const Supplier = require("../models/Supplier");
+const Party = require("../models/Party");
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { createPaymentEntry } = require("../utils/paymentService");
@@ -20,6 +21,7 @@ exports.createPayBill = async (req, res) => {
   try {
     const {
       supplier,
+      partyId,
       date,
       time,
       description,
@@ -66,23 +68,45 @@ exports.createPayBill = async (req, res) => {
 
     const attachmentPath = req.file ? `uploads/${req.file.filename}` : null;
 
-    const supplierData = await Supplier.findOne({
-      _id: supplier,
-      userId,
-    }).populate("account");
-    if (!supplierData || !supplierData.account)
-      return res
-        .status(404)
-        .json({ error: "Supplier or linked account not found" });
+    let supplierData = null;
+    let partyData = null;
+    let counterPartyAccountId = null;
 
-    const supplierAccount = supplierData.account;
+    if (partyId) {
+      partyData = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      }).populate("account");
+
+      if (!partyData || !partyData.account) {
+        return res.status(404).json({ error: "Party account not found" });
+      }
+
+      counterPartyAccountId = partyData.account._id;
+    } else {
+      supplierData = await Supplier.findOne({
+        _id: supplier,
+        userId,
+      }).populate("account");
+
+      if (!supplierData || !supplierData.account) {
+        return res
+          .status(404)
+          .json({ error: "Supplier or linked account not found" });
+      }
+
+      counterPartyAccountId = supplierData.account._id;
+    }
 
     const count = await PayBill.countDocuments({ userId });
 
     const billNo = `PB-${1001 + count}`;
 
     const newBill = await PayBill.create({
-      supplier,
+      supplier: supplierData?._id || null,
+      partyId: partyData?._id || null,
       date,
       time,
       billNo,
@@ -103,10 +127,12 @@ exports.createPayBill = async (req, res) => {
         sourceType: "pay_bill",
         billNo,
         accountId: p.account,
-        counterPartyAccountId: supplierAccount._id,
+        counterPartyAccountId,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
+        supplierId: supplierData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
@@ -137,9 +163,11 @@ exports.createPayBill = async (req, res) => {
         time,
         billNo,
         description: "Pay Bill Discount",
+        supplierId: supplierData?._id || null,
+        partyId: partyData?._id || null,
         lines: [
           {
-            account: supplierAccount._id,
+            account: counterPartyAccountId,
             type: "debit",
             amount: parsedDiscount,
           },
@@ -166,7 +194,28 @@ exports.getAllPayBills = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const bills = await PayBill.find({ userId })
+    const activeSuppliers = await Supplier.find({
+      userId,
+      isDeleted: false,
+    }).select("_id");
+
+    const activeSupplierIds = activeSuppliers.map((s) => s._id);
+
+    const activeParties = await Party.find({
+      userId,
+      isDeleted: false,
+      isActive: true,
+    }).select("_id");
+
+    const activePartyIds = activeParties.map((p) => p._id);
+
+    const bills = await PayBill.find({
+      userId,
+      $or: [
+        { supplier: { $in: activeSupplierIds } },
+        { partyId: { $in: activePartyIds } },
+      ],
+    })
       .populate("supplier", "name")
       .sort({ createdAt: -1 });
 
@@ -205,10 +254,9 @@ exports.getAllPayBills = async (req, res) => {
 // ✅ Get One Pay Bill
 exports.getPayBillById = async (req, res) => {
   try {
-    const bill = await PayBill.findById(req.params.id).populate(
-      "supplier",
-      "name phone email",
-    );
+    const bill = await PayBill.findById(req.params.id)
+      .populate("supplier", "name phone email")
+      .populate("partyId", "name phone email");
 
     if (!bill) {
       return res.status(404).json({ error: "Record not found" });
@@ -252,6 +300,7 @@ exports.updatePayBill = async (req, res) => {
   try {
     const {
       supplier,
+      partyId,
       date,
       time,
       description,
@@ -320,23 +369,49 @@ exports.updatePayBill = async (req, res) => {
     };
 
     // 🔍 Get old supplier account
-    const oldSupplierData = await Supplier.findById(bill.supplier).populate(
-      "account",
-    );
-    const oldSupplierAccountId = oldSupplierData?.account?._id;
+    const oldSupplierData = bill.supplier
+      ? await Supplier.findById(bill.supplier).populate("account")
+      : null;
+
+    const oldPartyData = bill.partyId
+      ? await Party.findById(bill.partyId).populate("account")
+      : null;
+
+    const oldSupplierAccountId =
+      oldSupplierData?.account?._id || oldPartyData?.account?._id || null;
 
     // 🔍 Get new supplier account
-    const supplierData = await Supplier.findOne({
-      _id: supplier,
-      userId,
-    }).populate("account");
+    let supplierData = null;
+    let partyData = null;
+    let counterPartyAccountId = null;
 
-    if (!supplierData || !supplierData.account)
-      return res.status(404).json({
-        error: "Supplier or linked account not found",
-      });
+    if (partyId) {
+      partyData = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      }).populate("account");
 
-    const supplierAccount = supplierData.account;
+      if (!partyData || !partyData.account) {
+        return res.status(404).json({ error: "Party account not found" });
+      }
+
+      counterPartyAccountId = partyData.account._id;
+    } else {
+      supplierData = await Supplier.findOne({
+        _id: supplier,
+        userId,
+      }).populate("account");
+
+      if (!supplierData || !supplierData.account) {
+        return res.status(404).json({
+          error: "Supplier or linked account not found",
+        });
+      }
+
+      counterPartyAccountId = supplierData.account._id;
+    }
 
     const billNo = bill.billNo || "PB-1001";
 
@@ -350,7 +425,8 @@ exports.updatePayBill = async (req, res) => {
     }
 
     // ✅ Update bill fields
-    bill.supplier = supplier;
+    bill.supplier = supplierData?._id || null;
+    bill.partyId = partyData?._id || null;
     bill.date = date;
     bill.time = time;
 
@@ -395,10 +471,12 @@ exports.updatePayBill = async (req, res) => {
         sourceType: "pay_bill",
         billNo,
         accountId: p.account,
-        counterPartyAccountId: supplierAccount._id,
+        counterPartyAccountId,
         amount: Number(p.amount),
         paymentType: p.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
+        supplierId: supplierData?._id || null,
+        partyId: partyData?._id || null,
       });
     }
 
@@ -429,9 +507,11 @@ exports.updatePayBill = async (req, res) => {
         time,
         billNo,
         description: "Pay Bill Discount",
+        supplierId: supplierData?._id || null,
+        partyId: partyData?._id || null,
         lines: [
           {
-            account: supplierAccount._id,
+            account: counterPartyAccountId,
             type: "debit",
             amount: parsedDiscount,
           },
@@ -449,7 +529,7 @@ exports.updatePayBill = async (req, res) => {
       await safeRecalculate(oldSupplierAccountId);
     }
 
-    await safeRecalculate(supplierAccount._id);
+    await safeRecalculate(counterPartyAccountId);
 
     res.json({
       message: "Bill updated successfully",
@@ -472,16 +552,33 @@ exports.deletePayBill = async (req, res) => {
     }
 
     // 🔍 Supplier account
-    const supplierData = await Supplier.findOne({
-      _id: bill.supplier,
-      userId,
-    }).populate("account");
+    let supplierData = null;
+    let partyData = null;
+    let counterPartyAccountId = null;
 
-    if (!supplierData || !supplierData.account) {
-      return res.status(404).json({ error: "Supplier or account missing" });
+    if (bill.partyId) {
+      partyData = await Party.findOne({
+        _id: bill.partyId,
+        userId,
+      }).populate("account");
+
+      if (!partyData || !partyData.account) {
+        return res.status(404).json({ error: "Party account missing" });
+      }
+
+      counterPartyAccountId = partyData.account._id;
+    } else {
+      supplierData = await Supplier.findOne({
+        _id: bill.supplier,
+        userId,
+      }).populate("account");
+
+      if (!supplierData || !supplierData.account) {
+        return res.status(404).json({ error: "Supplier or account missing" });
+      }
+
+      counterPartyAccountId = supplierData.account._id;
     }
-
-    const supplierAccount = supplierData.account;
 
     // 🔍 Get ALL related journals (IMPORTANT for multiple payments)
     const journals = await JournalEntry.find({
@@ -525,7 +622,7 @@ exports.deletePayBill = async (req, res) => {
     }
 
     // 🔄 Recalculate supplier account
-    await safeRecalculate(supplierAccount._id);
+    await safeRecalculate(counterPartyAccountId);
 
     res.json({
       message: "Bill deleted successfully",

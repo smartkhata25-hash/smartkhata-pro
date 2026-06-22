@@ -56,6 +56,12 @@ const journalEntrySchema = new mongoose.Schema(
       ref: "Supplier",
       default: null,
     },
+
+    partyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
     billNo: {
       type: String,
       default: "",
@@ -240,6 +246,13 @@ journalEntrySchema.index({
   date: 1,
 });
 
+// Party Ledger queries
+journalEntrySchema.index({
+  createdBy: 1,
+  partyId: 1,
+  isDeleted: 1,
+  date: 1,
+});
 // Sorting optimization
 journalEntrySchema.index({
   createdBy: 1,

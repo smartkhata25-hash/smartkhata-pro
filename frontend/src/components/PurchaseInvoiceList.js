@@ -23,6 +23,17 @@ const PurchaseInvoiceList = () => {
     }
   };
 
+  const getSupplierOrPartyName = (inv) => {
+    if (inv.partyId) {
+      const partyName =
+        typeof inv.partyId === 'object' ? inv.partyId?.name : inv.partyName || inv.supplierName;
+
+      return partyName ? `${partyName} 🟣 Party` : inv.supplierName || '-';
+    }
+
+    return inv.supplierName || inv.supplier?.name || '-';
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
@@ -37,9 +48,12 @@ const PurchaseInvoiceList = () => {
 
   const filtered = invoices.filter((inv) => {
     const q = search.toLowerCase();
+    const displayName = getSupplierOrPartyName(inv).toLowerCase();
 
     const matchesSearch =
-      inv.supplierName?.toLowerCase().includes(q) || inv.billNo?.toString().includes(q);
+      displayName.includes(q) ||
+      inv.supplierName?.toLowerCase().includes(q) ||
+      inv.billNo?.toString().includes(q);
 
     const matchesStatus = !statusFilter || inv.status?.toLowerCase() === statusFilter.toLowerCase();
 
@@ -59,7 +73,6 @@ const PurchaseInvoiceList = () => {
         </button>
       </div>
 
-      {/* 🔍 Filters */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <input
           type="text"
@@ -81,7 +94,6 @@ const PurchaseInvoiceList = () => {
         </select>
       </div>
 
-      {/* 📋 Table */}
       <div className="overflow-x-auto">
         <table className="w-full border text-xs md:text-sm">
           <thead>
@@ -111,7 +123,7 @@ const PurchaseInvoiceList = () => {
                     {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
                   </td>
 
-                  <td className="border p-2">{inv.supplierName || '-'}</td>
+                  <td className="border p-2">{getSupplierOrPartyName(inv)}</td>
 
                   <td className="border p-2 text-center">Rs. {total.toFixed(2)}</td>
 
@@ -129,9 +141,7 @@ const PurchaseInvoiceList = () => {
                     <div className="flex gap-1 md:gap-2 justify-center">
                       <button
                         className="bg-yellow-400 px-2 py-1 rounded"
-                        onClick={() => {
-                          navigate(`/purchase-invoice/${inv._id}`);
-                        }}
+                        onClick={() => navigate(`/purchase-invoice/${inv._id}`)}
                       >
                         {t('edit')}
                       </button>

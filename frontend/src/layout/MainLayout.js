@@ -43,7 +43,8 @@ const MainLayout = () => {
 
   const isLedgerPage =
     location.pathname.startsWith('/customer-ledger') ||
-    location.pathname.startsWith('/supplier-ledger');
+    location.pathname.startsWith('/supplier-ledger') ||
+    location.pathname.startsWith('/party-ledger');
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">

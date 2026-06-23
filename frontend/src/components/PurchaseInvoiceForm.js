@@ -498,8 +498,20 @@ const PurchaseInvoiceForm = () => {
   };
 
   const handleUpdate = async () => {
-    const selectedSupplier = suppliers.find((s) => s.name === supplierName);
-    const supplierAccountId = selectedSupplier?.account || '';
+    const selectedSupplier =
+      selectedSupplierType === 'supplier'
+        ? suppliers.find((s) => s._id === selectedSupplierId || s.name === supplierName)
+        : null;
+
+    const selectedParty =
+      selectedSupplierType === 'party'
+        ? parties.find((p) => p._id === selectedSupplierId || p.name === supplierName)
+        : null;
+
+    const supplierAccountId =
+      selectedSupplierType === 'supplier'
+        ? selectedSupplier?.account || ''
+        : selectedParty?.account || '';
 
     const validItems = items
       .filter((i) => i.productId && i.quantity > 0 && (i.cost > 0 || i.rate > 0))
@@ -534,7 +546,11 @@ const PurchaseInvoiceForm = () => {
     formData.append('invoiceTime', invoiceTime);
     formData.append('supplierName', supplierName);
     formData.append('supplierPhone', supplierPhone);
-    formData.append('supplierId', selectedSupplier?._id || '');
+    if (selectedSupplierType === 'party') {
+      formData.append('partyId', selectedSupplierId);
+    } else {
+      formData.append('supplierId', selectedSupplier?._id || selectedSupplierId || '');
+    }
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);

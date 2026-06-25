@@ -33,6 +33,7 @@ exports.createPurchaseReturn = async (req, res) => {
       accountId,
       notes,
       originalInvoiceId,
+      isOpening,
     } = req.body;
 
     const items = JSON.parse(req.body.items || "[]");
@@ -40,7 +41,9 @@ exports.createPurchaseReturn = async (req, res) => {
     /* =============================
        BASIC VALIDATION
     ============================== */
-    if ((!supplierId && !partyId) || items.length === 0) {
+    const openingMode = isOpening === true || isOpening === "true";
+
+    if ((!supplierId && !partyId) || (!openingMode && items.length === 0)) {
       return res.status(400).json({
         error: "Supplier and items required",
       });
@@ -113,7 +116,16 @@ exports.createPurchaseReturn = async (req, res) => {
       userId,
     });
 
-    if (!purchaseReturnAccount || !inventoryAccount) {
+    const openingBalanceAccount = await Account.findOne({
+      code: "OPENING_BALANCE",
+      userId,
+    });
+
+    if (
+      !purchaseReturnAccount ||
+      !inventoryAccount ||
+      (openingMode && !openingBalanceAccount)
+    ) {
       return res.status(400).json({
         error: "Required accounts not found",
       });
@@ -198,24 +210,36 @@ exports.createPurchaseReturn = async (req, res) => {
       dateTime = new Date(returnDate);
     }
 
-    const lines = [];
-
-    // ✅ Supplier payable decrease
-    lines.push({
-      account: counterPartyAccountId,
-      type: "debit",
-      amount: totalAmount,
-    });
-
-    // ✅ Inventory decrease (stock going out)
-    lines.push({
-      account: inventoryAccount._id,
-      type: "credit",
-      amount: totalAmount,
-    });
-
     const isOpeningReturn =
-      billNo === "OPENING" || notes?.toLowerCase()?.includes("opening");
+      openingMode ||
+      billNo === "OPENING" ||
+      notes?.toLowerCase()?.includes("opening");
+
+    const lines = isOpeningReturn
+      ? [
+          {
+            account: counterPartyAccountId,
+            type: "debit",
+            amount: totalAmount,
+          },
+          {
+            account: openingBalanceAccount._id,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ]
+      : [
+          {
+            account: counterPartyAccountId,
+            type: "debit",
+            amount: totalAmount,
+          },
+          {
+            account: inventoryAccount._id,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ];
 
     const journal = new JournalEntry({
       date: dateTime,
@@ -265,25 +289,26 @@ exports.createPurchaseReturn = async (req, res) => {
     ============================== */
     const originalInvoice = await PurchaseInvoice.findById(originalInvoiceId);
 
-    for (const item of items) {
-      const originalItem = originalInvoice?.items.find(
-        (i) => i.productId?.toString() === item.productId?.toString(),
-      );
+    if (!isOpeningReturn) {
+      for (const item of items) {
+        const originalItem = originalInvoice?.items.find(
+          (i) => i.productId?.toString() === item.productId?.toString(),
+        );
 
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "OUT",
-        quantity: item.quantity,
-        note: `Purchase Return #${billNo}`,
-        invoiceId: purchaseReturn._id,
-        invoiceModel: "PurchaseReturn",
-        userId,
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "OUT",
+          quantity: item.quantity,
+          note: `Purchase Return #${billNo}`,
+          invoiceId: purchaseReturn._id,
+          invoiceModel: "PurchaseReturn",
+          userId,
 
-        // ✅ Historical purchase rate
-        rate: Number(originalItem?.price || 0),
-      });
+          // ✅ Historical purchase rate
+          rate: Number(originalItem?.price || 0),
+        });
+      }
     }
-
     return res.status(201).json({
       message: "✅ Purchase Return created successfully",
       purchaseReturn,
@@ -420,9 +445,12 @@ exports.updatePurchaseReturn = async (req, res) => {
       paymentType,
       accountId,
       notes,
+      isOpening,
     } = req.body;
 
     const items = JSON.parse(req.body.items || "[]");
+
+    const openingMode = isOpening === true || isOpening === "true";
 
     /* =============================
        FIND EXISTING RECORD
@@ -442,7 +470,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        BASIC VALIDATION
     ============================== */
-    if ((!supplierId && !partyId) || items.length === 0) {
+    if ((!supplierId && !partyId) || (!openingMode && items.length === 0)) {
       return res.status(400).json({
         error: "Supplier and items required",
       });
@@ -519,6 +547,11 @@ exports.updatePurchaseReturn = async (req, res) => {
       });
     }
 
+    const openingBalanceAccount = await Account.findOne({
+      code: "OPENING_BALANCE",
+      userId,
+    });
+
     /* =============================
        ORIGINAL INVOICE VALIDATION
     ============================== */
@@ -560,24 +593,25 @@ exports.updatePurchaseReturn = async (req, res) => {
         });
       });
 
-      for (const item of items) {
-        const key =
-          typeof item.productId === "object"
-            ? item.productId._id?.toString()
-            : item.productId.toString();
+      if (!openingMode) {
+        for (const item of items) {
+          const key =
+            typeof item.productId === "object"
+              ? item.productId._id?.toString()
+              : item.productId.toString();
 
-        const originalQty = originalQtyMap[key] || 0;
+          const originalQty = originalQtyMap[key] || 0;
 
-        const alreadyReturned = returnedQtyMap[key] || 0;
+          const alreadyReturned = returnedQtyMap[key] || 0;
 
-        if (item.quantity + alreadyReturned > originalQty) {
-          return res.status(400).json({
-            error: "Return quantity exceeds original invoice quantity",
-          });
+          if (item.quantity + alreadyReturned > originalQty) {
+            return res.status(400).json({
+              error: "Return quantity exceeds original invoice quantity",
+            });
+          }
         }
       }
     }
-
     /* =============================
        REMOVE OLD STOCK ENTRIES
     ============================== */
@@ -592,7 +626,7 @@ exports.updatePurchaseReturn = async (req, res) => {
     ============================== */
     await JournalEntry.updateMany(
       {
-        referenceId: pr._id,
+        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
         sourceType: "purchase_return_payment",
         createdBy: userId,
         isDeleted: false,
@@ -606,7 +640,7 @@ exports.updatePurchaseReturn = async (req, res) => {
 
     await JournalEntry.updateMany(
       {
-        referenceId: pr._id,
+        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
         sourceType: {
           $in: ["purchase_return", "opening_purchase_return"],
         },
@@ -619,7 +653,6 @@ exports.updatePurchaseReturn = async (req, res) => {
         },
       },
     );
-
     /* =============================
        UPDATE MAIN DOCUMENT
     ============================== */
@@ -656,24 +689,36 @@ exports.updatePurchaseReturn = async (req, res) => {
     /* =============================
        CREATE JOURNAL ENTRY
     ============================== */
-    const lines = [];
-
-    // ✅ Supplier payable decrease
-    lines.push({
-      account: counterPartyAccountId,
-      type: "debit",
-      amount: totalAmount,
-    });
-
-    // ✅ Inventory decrease
-    lines.push({
-      account: inventoryAccount._id,
-      type: "credit",
-      amount: totalAmount,
-    });
-
     const isOpeningReturn =
-      billNo === "OPENING" || notes?.toLowerCase()?.includes("opening");
+      openingMode ||
+      billNo === "OPENING" ||
+      notes?.toLowerCase()?.includes("opening");
+
+    const lines = isOpeningReturn
+      ? [
+          {
+            account: counterPartyAccountId,
+            type: "debit",
+            amount: totalAmount,
+          },
+          {
+            account: openingBalanceAccount._id,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ]
+      : [
+          {
+            account: counterPartyAccountId,
+            type: "debit",
+            amount: totalAmount,
+          },
+          {
+            account: inventoryAccount._id,
+            type: "credit",
+            amount: totalAmount,
+          },
+        ];
 
     const journal = new JournalEntry({
       date: dateTime,
@@ -723,25 +768,26 @@ exports.updatePurchaseReturn = async (req, res) => {
       pr.originalInvoiceId,
     );
 
-    for (const item of items) {
-      const originalItem = originalInvoice?.items.find(
-        (i) => i.productId?.toString() === item.productId?.toString(),
-      );
+    if (!isOpeningReturn) {
+      for (const item of items) {
+        const originalItem = originalInvoice?.items.find(
+          (i) => i.productId?.toString() === item.productId?.toString(),
+        );
 
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "OUT",
-        quantity: item.quantity,
-        note: `Updated Purchase Return #${billNo}`,
-        invoiceId: pr._id,
-        invoiceModel: "PurchaseReturn",
-        userId,
+        await createInventoryEntry({
+          productId: item.productId,
+          type: "OUT",
+          quantity: item.quantity,
+          note: `Updated Purchase Return #${billNo}`,
+          invoiceId: pr._id,
+          invoiceModel: "PurchaseReturn",
+          userId,
 
-        // ✅ Historical purchase rate
-        rate: Number(originalItem?.price || 0),
-      });
+          // ✅ Historical purchase rate
+          rate: Number(originalItem?.price || 0),
+        });
+      }
     }
-
     /* =============================
        RECALCULATE BALANCES
     ============================== */
@@ -799,7 +845,7 @@ exports.deletePurchaseReturn = async (req, res) => {
     ============================== */
     await JournalEntry.updateMany(
       {
-        referenceId: id,
+        $or: [{ referenceId: id }, { invoiceId: id }],
         sourceType: {
           $in: ["purchase_return", "opening_purchase_return"],
         },
@@ -818,7 +864,7 @@ exports.deletePurchaseReturn = async (req, res) => {
     ============================== */
     await JournalEntry.updateMany(
       {
-        referenceId: pr._id,
+        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
         sourceType: "purchase_return_payment",
         createdBy: userId,
         isDeleted: false,

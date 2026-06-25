@@ -977,5 +977,6 @@
   "party.deleteWarning": "Deleting this party will hide the party linked with transactions. Ledger data will remain safe.",
   "active": "Active",
   "hidden": "Hidden",
-  "both": "Both"
+  "both": "Both",
+  "reports.totalSales": "Total Sales"
 }

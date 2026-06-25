@@ -54,3 +54,10 @@ export const confirmMergeCustomers = async (payload, token) => {
   const response = await axios.post(`${API_URL}/merge/confirm`, payload, getAuthHeaders(token));
   return response.data;
 };
+
+// ✅ Convert Customer → Party
+export const convertCustomerToParty = async (id, token = null) => {
+  const response = await axios.post(`${API_URL}/${id}/convert-to-party`, {}, getAuthHeaders(token));
+
+  return response.data;
+};

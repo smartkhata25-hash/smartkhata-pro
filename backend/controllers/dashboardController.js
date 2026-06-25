@@ -7,6 +7,7 @@ const { getProductStock } = require("../utils/stockHelper");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
+const Party = require("../models/Party");
 const { getProfitSummary } = require("../services/accounting/profitService");
 
 // ✅ Dashboard Summary – Professional Version
@@ -65,6 +66,7 @@ const getDashboardSummary = async (req, res) => {
     let totalPayable = 0;
 
     let customerNet = 0;
+    let partyBalances = {};
 
     // ✅ ONLY ACTIVE CUSTOMERS
     const activeCustomers = await Customer.find({
@@ -84,6 +86,17 @@ const getDashboardSummary = async (req, res) => {
 
     const activeSupplierAccountIds = activeSuppliers
       .map((s) => s.account)
+      .filter(Boolean);
+
+    // ✅ ONLY ACTIVE PARTIES
+    const activeParties = await Party.find({
+      userId,
+      isActive: true,
+      isDeleted: false,
+    }).select("account");
+
+    const activePartyAccountIds = activeParties
+      .map((p) => p.account)
       .filter(Boolean);
 
     const combinedData = await JournalEntry.aggregate([
@@ -112,11 +125,17 @@ const getDashboardSummary = async (req, res) => {
         $match: {
           $or: [
             {
-              "accountInfo.category": { $ne: "customer" },
+              "accountInfo.category": {
+                $nin: ["customer", "party"],
+              },
             },
             {
               "accountInfo.category": "customer",
               "lines.account": { $in: activeCustomerAccountIds },
+            },
+            {
+              "accountInfo.category": "party",
+              "lines.account": { $in: activePartyAccountIds },
             },
           ],
         },
@@ -159,6 +178,18 @@ const getDashboardSummary = async (req, res) => {
         else customerNet -= amount;
       }
 
+      // Party Balance Account Wise
+      if (category === "party") {
+        const accId = item._id.account.toString();
+
+        if (!partyBalances[accId]) {
+          partyBalances[accId] = 0;
+        }
+
+        if (lineType === "debit") partyBalances[accId] += amount;
+        else partyBalances[accId] -= amount;
+      }
+
       // Payable
       if (
         type === "Liability" &&
@@ -172,7 +203,19 @@ const getDashboardSummary = async (req, res) => {
       }
     });
 
-    totalReceivable = customerNet;
+    let partyReceivable = 0;
+    let partyPayable = 0;
+
+    Object.values(partyBalances).forEach((balance) => {
+      if (balance > 0) {
+        partyReceivable += balance;
+      } else if (balance < 0) {
+        partyPayable += Math.abs(balance);
+      }
+    });
+
+    totalReceivable = customerNet + partyReceivable;
+    totalPayable += partyPayable;
 
     const dashboardExpenses = combinedData
       .filter((item) => {

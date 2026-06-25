@@ -748,7 +748,7 @@ exports.updateInvoice = async (req, res) => {
     }
 
     const oldEntries = await JournalEntry.find({
-      referenceId: invoice._id,
+      $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       isDeleted: false,
     });
 
@@ -765,7 +765,7 @@ exports.updateInvoice = async (req, res) => {
     // ✅ Remove old journal entries
     await JournalEntry.updateMany(
       {
-        referenceId: invoice._id,
+        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
         isDeleted: false,
       },
       {
@@ -972,7 +972,7 @@ exports.updateInvoice = async (req, res) => {
       }
 
       const allEntries = await JournalEntry.find({
-        referenceId: invoice._id,
+        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       });
 
       console.log(

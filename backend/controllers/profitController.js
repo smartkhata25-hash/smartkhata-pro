@@ -203,7 +203,7 @@ const getSalesBreakdown = async (req, res) => {
     const dateFilter = {};
 
     if (rawDateFilter.date) {
-      dateFilter.date = rawDateFilter.date;
+      dateFilter.invoiceDate = rawDateFilter.date;
     }
 
     const sales = await Invoice.aggregate([
@@ -327,16 +327,6 @@ const getProductProfitability = async (req, res) => {
       dateFilter.invoiceDate = rawDateFilter.date;
     }
 
-    // ✅ Product filters
-    const productFilters = {};
-
-    // 🎯 Single product filter
-    if (productId && mongoose.Types.ObjectId.isValid(productId)) {
-      productFilters["items.productId"] = new mongoose.Types.ObjectId(
-        productId,
-      );
-    }
-
     const products = await Invoice.aggregate([
       {
         $match: {
@@ -346,12 +336,20 @@ const getProductProfitability = async (req, res) => {
           isOpening: false,
 
           ...dateFilter,
-
-          ...productFilters,
         },
       },
 
       { $unwind: "$items" },
+      // 🎯 Single product filter after unwind
+      ...(productId && mongoose.Types.ObjectId.isValid(productId)
+        ? [
+            {
+              $match: {
+                "items.productId": new mongoose.Types.ObjectId(productId),
+              },
+            },
+          ]
+        : []),
 
       {
         $lookup: {

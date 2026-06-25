@@ -592,7 +592,7 @@ exports.updateRefundInvoice = async (req, res) => {
     // ✅ Delete old journal
     await JournalEntry.updateMany(
       {
-        referenceId: refund._id,
+        $or: [{ referenceId: refund._id }, { invoiceId: refund._id }],
         sourceType: {
           $in: ["refund_invoice", "opening_refund_invoice", "refund_payment"],
         },
@@ -871,7 +871,7 @@ exports.deleteRefundInvoice = async (req, res) => {
     // 🧾 Step 3: Delete journal entry
     await JournalEntry.updateMany(
       {
-        referenceId: id,
+        $or: [{ referenceId: id }, { invoiceId: id }],
         sourceType: {
           $in: ["refund_invoice", "opening_refund_invoice", "refund_payment"],
         },

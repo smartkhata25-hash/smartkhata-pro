@@ -94,7 +94,7 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
         $lte: end,
       },
     };
-  } else if (startDate && endDate) {
+  } else if (filterType === "custom" && startDate && endDate) {
     /* =========================
      CUSTOM RANGE
   ========================= */

@@ -5,6 +5,7 @@ import {
   updateSupplier,
   deleteSupplier,
   confirmMergeSupplier,
+  convertSupplierToParty,
 } from '../services/supplierService';
 
 import SupplierForm from '../components/SupplierForm';
@@ -184,6 +185,30 @@ const SuppliersPage = () => {
     } catch (err) {
       console.error(t('alerts.deleteSupplierError'), err);
       alert(t('alerts.deleteSupplierFailed'));
+    }
+  };
+
+  const handleConvertToParty = async (e, supplier) => {
+    e.stopPropagation();
+
+    if (!window.confirm(`${supplier.name} کو Party میں convert کرنا ہے؟`)) {
+      return;
+    }
+
+    try {
+      await convertSupplierToParty(supplier._id);
+
+      await loadSuppliers();
+
+      if (selectedSupplierId === supplier._id) {
+        setSelectedSupplierId(null);
+        setSupplierName('');
+        setLedgerData(null);
+      }
+
+      alert('Supplier party میں convert ہو گیا');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Convert failed');
     }
   };
 
@@ -663,6 +688,26 @@ const SuppliersPage = () => {
                         }}
                       >
                         <FaTrash size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => handleConvertToParty(e, supplier)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: '1px solid #7c3aed',
+                          background: '#f5f3ff',
+                          color: '#6d28d9',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                          fontSize: 12,
+                        }}
+                        title="Convert to Party"
+                      >
+                        P
                       </button>
                     </div>
                   )}

@@ -61,6 +61,20 @@ export const deleteParty = async (id, token = null) => {
   return res.data;
 };
 
+// ✅ Convert Party → Customer
+export const convertPartyToCustomer = async (id, token = null) => {
+  const res = await axios.post(`${API_URL}/${id}/convert-to-customer`, {}, getAuthHeaders(token));
+
+  return res.data;
+};
+
+// ✅ Convert Party → Supplier
+export const convertPartyToSupplier = async (id, token = null) => {
+  const res = await axios.post(`${API_URL}/${id}/convert-to-supplier`, {}, getAuthHeaders(token));
+
+  return res.data;
+};
+
 // ✅ Search helper for dropdowns
 export const searchPartiesLocal = (parties = [], search = '', allowedRoles = []) => {
   const q = String(search || '')
@@ -88,6 +102,10 @@ const partyService = {
   addParty,
   updateParty,
   deleteParty,
+
+  convertPartyToCustomer,
+  convertPartyToSupplier,
+
   searchPartiesLocal,
 };
 

@@ -6,6 +6,7 @@ import {
   addCustomer,
   updateCustomer,
   deleteCustomer,
+  convertCustomerToParty,
 } from '../services/customerService';
 import CustomerForm from '../components/CustomerForm';
 import PageLayout from '../components/PageLayout';
@@ -191,6 +192,27 @@ const CustomersPage = () => {
     } catch (err) {
       console.error('Error deleting customer:', err);
       alert(t('alerts.customerDeleteFailed'));
+    }
+  };
+
+  const handleConvertToParty = async (e, customer) => {
+    e.stopPropagation();
+
+    if (!window.confirm(`${customer.name} کو Party میں convert کرنا ہے؟`)) return;
+
+    try {
+      await convertCustomerToParty(customer._id);
+      await loadCustomers();
+
+      if (selectedCustomerId === customer._id) {
+        setSelectedCustomerId('');
+        setCustomerName('');
+        setLedgerData(null);
+      }
+
+      alert('Customer party میں convert ہو گیا');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Convert failed');
     }
   };
 
@@ -725,6 +747,26 @@ const CustomersPage = () => {
                         }}
                       >
                         <FaTrash size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => handleConvertToParty(e, customer)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: '1px solid #7c3aed',
+                          background: '#f5f3ff',
+                          color: '#6d28d9',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                          fontSize: 12,
+                        }}
+                        title="Convert to Party"
+                      >
+                        P
                       </button>
 
                       {/* WHATSAPP ONLY IF PHONE */}

@@ -1,5 +1,9 @@
 // backend/controllers/supplierController.js
 const Supplier = require("../models/Supplier");
+const Party = require("../models/Party");
+const Invoice = require("../models/Invoice");
+const RefundInvoice = require("../models/RefundInvoice");
+const Counter = require("../models/Counter");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const XLSX = require("xlsx");
@@ -8,6 +12,27 @@ const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
+const escapeRegex = (text = "") => {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const generateAccountCode = async (userId) => {
+  const lastAccount = await Account.findOne({
+    userId,
+    code: { $regex: /^ACC-\d+$/ },
+  }).sort({ createdAt: -1 });
+
+  let code = "ACC-0001";
+
+  if (lastAccount?.code) {
+    const lastNum = Number(lastAccount.code.replace("ACC-", ""));
+    if (!isNaN(lastNum)) {
+      code = `ACC-${String(lastNum + 1).padStart(4, "0")}`;
+    }
+  }
+
+  return code;
+};
 
 /* ───────────── Create Supplier ───────────── */
 exports.createSupplier = async (req, res) => {
@@ -686,6 +711,249 @@ exports.deleteSupplier = async (req, res) => {
   } catch (error) {
     console.error("❌ Smart Delete Supplier Error:", error);
     res.status(500).json({ message: "Server Error" });
+  }
+};
+
+const createPartyOpeningFromSupplier = async ({
+  userId,
+  party,
+  partyAccountId,
+  openingBalance,
+}) => {
+  const amount = Number(openingBalance) || 0;
+  if (amount === 0) return null;
+
+  let openingBalanceAccount = await Account.findOne({
+    userId,
+    code: "OPENING_BALANCE",
+  });
+
+  if (!openingBalanceAccount) {
+    openingBalanceAccount = await Account.create({
+      userId,
+      name: "opening balance equity",
+      type: "Equity",
+      normalBalance: "credit",
+      code: "OPENING_BALANCE",
+      category: "other",
+      isSystem: true,
+    });
+  }
+
+  // ✅ Positive Party Opening = Sale Invoice
+  if (amount > 0) {
+    let counter = await Counter.findOne({
+      type: "sale_invoice",
+      userId,
+    });
+
+    if (!counter) {
+      counter = await Counter.create({
+        type: "sale_invoice",
+        userId,
+        seq: 1000,
+      });
+    }
+
+    counter.seq += 1;
+    await counter.save();
+
+    const openingInvoice = await Invoice.create({
+      billNo: counter.seq.toString(),
+      customerName: party.name,
+      customerPhone: party.phone || "",
+      invoiceDate: new Date(),
+      items: [],
+      totalAmount: amount,
+      paidAmount: 0,
+      status: "Unpaid",
+      notes: "Opening Balance From Supplier",
+      isOpening: true,
+      createdBy: userId,
+      accountId: partyAccountId,
+      partyId: party._id,
+    });
+
+    const journal = await JournalEntry.create({
+      date: new Date(),
+      description: "Opening Balance Party From Supplier",
+      createdBy: userId,
+      partyId: party._id,
+      sourceType: "opening_sale_invoice",
+      invoiceId: openingInvoice._id,
+      referenceId: openingInvoice._id,
+      billNo: openingInvoice.billNo,
+      lines: [
+        {
+          account: partyAccountId,
+          type: "debit",
+          amount,
+        },
+        {
+          account: openingBalanceAccount._id,
+          type: "credit",
+          amount,
+        },
+      ],
+    });
+
+    openingInvoice.journalEntryId = journal._id;
+    await openingInvoice.save();
+
+    return journal;
+  }
+
+  // ✅ Negative Party Opening = Refund Invoice
+  if (amount < 0) {
+    const absAmount = Math.abs(amount);
+
+    let counter = await Counter.findOne({
+      type: "refund_invoice",
+      userId,
+    });
+
+    if (!counter) {
+      counter = await Counter.create({
+        type: "refund_invoice",
+        userId,
+        seq: 1000,
+      });
+    }
+
+    counter.seq += 1;
+    await counter.save();
+
+    const openingRefund = await RefundInvoice.create({
+      billNo: counter.seq.toString(),
+      customerName: party.name,
+      customerPhone: party.phone || "",
+      invoiceDate: new Date(),
+      items: [],
+      totalAmount: absAmount,
+      paidAmount: 0,
+      paymentType: "credit",
+      notes: "Opening Balance From Supplier",
+      isOpening: true,
+      createdBy: userId,
+      accountId: partyAccountId,
+      partyId: party._id,
+    });
+
+    return await JournalEntry.create({
+      date: new Date(),
+      description: "Opening Balance Party Refund From Supplier",
+      createdBy: userId,
+      partyId: party._id,
+      sourceType: "opening_refund_invoice",
+      invoiceId: openingRefund._id,
+      referenceId: openingRefund._id,
+      billNo: openingRefund.billNo,
+      lines: [
+        {
+          account: openingBalanceAccount._id,
+          type: "debit",
+          amount: absAmount,
+        },
+        {
+          account: partyAccountId,
+          type: "credit",
+          amount: absAmount,
+        },
+      ],
+    });
+  }
+};
+
+exports.convertSupplierToParty = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const supplierId = req.params.id;
+
+    const supplier = await Supplier.findOne({
+      _id: supplierId,
+      userId,
+      isDeleted: false,
+    });
+
+    if (!supplier) {
+      return res.status(404).json({ message: "Supplier not found" });
+    }
+
+    const existingParty = await Party.findOne({
+      name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (existingParty) {
+      return res.status(400).json({
+        message: "Party with same name already exists",
+      });
+    }
+
+    const supplierClosingBalance = await getSupplierBalanceFromJournal(
+      supplier._id,
+      userId,
+    );
+
+    // ✅ Supplier balance reverse ہوگا
+    const partyOpeningBalance = supplierClosingBalance * -1;
+
+    const code = await generateAccountCode(userId);
+
+    const partyAccount = await Account.create({
+      userId,
+      name: supplier.name,
+      code,
+      type: "Asset",
+      normalBalance: "debit",
+      category: "party",
+      openingBalance: 0,
+    });
+
+    const party = await Party.create({
+      name: supplier.name,
+      phone: supplier.phone || "",
+      email: supplier.email || "",
+      address: supplier.address || "",
+      notes: supplier.notes || "",
+      role: "supplier",
+      openingBalance: partyOpeningBalance,
+      account: partyAccount._id,
+      userId,
+    });
+
+    await createPartyOpeningFromSupplier({
+      userId,
+      party,
+      partyAccountId: partyAccount._id,
+      openingBalance: partyOpeningBalance,
+    });
+
+    supplier.isDeleted = true;
+    supplier.supplierType = "blocked";
+    await supplier.save();
+
+    await Account.updateOne(
+      { _id: supplier.account },
+      { $set: { isActive: false } },
+    );
+
+    await recalculateAccountBalance(partyAccount._id);
+
+    return res.status(201).json({
+      message: "Supplier converted to party successfully",
+      party,
+      supplierClosingBalance,
+      partyOpeningBalance,
+    });
+  } catch (error) {
+    console.error("❌ Convert Supplier To Party Error:", error);
+    return res.status(500).json({
+      message: "Convert supplier to party failed",
+      error: error.message,
+    });
   }
 };
 

@@ -43,6 +43,9 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
 
   const [selectedCategory, setSelectedCategory] = useState('');
 
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   useEffect(() => {
     if (!isOpen) {
       setDrawerOpen(false);
@@ -55,6 +58,8 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
       try {
         const response = await getProfitSummary({
           filterType: quickFilter,
+          startDate,
+          endDate,
           productId: selectedProduct,
           categoryId: selectedCategory,
         });
@@ -68,7 +73,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
     if (isOpen) {
       loadSummary();
     }
-  }, [quickFilter, isOpen, selectedProduct, selectedCategory]);
+  }, [quickFilter, isOpen, selectedProduct, selectedCategory, startDate, endDate]);
 
   useEffect(() => {
     const loadFilters = async () => {
@@ -190,7 +195,25 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
               <option value="last_month">{t('date.lastMonth')}</option>
               <option value="this_year">{t('date.thisYear')}</option>
               <option value="last_year">{t('date.lastYear')}</option>
+              <option value="custom">{t('date.custom')}</option>
             </select>
+            {quickFilter === 'custom' && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm outline-none"
+                />
+
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm outline-none"
+                />
+              </div>
+            )}
           </div>
 
           <div className="px-6 pt-4">
@@ -225,6 +248,9 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
                 onClick={() => {
                   setSelectedProduct('');
                   setSelectedCategory('');
+                  setQuickFilter('this_month');
+                  setStartDate('');
+                  setEndDate('');
                 }}
                 className="h-full rounded-xl text-white text-sm font-semibold shadow-md transition hover:scale-[1.02] active:scale-[0.98]"
                 style={{

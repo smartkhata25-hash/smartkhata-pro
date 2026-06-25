@@ -77,22 +77,22 @@ const accountSchema = new mongoose.Schema({
       "other_expense",
       "cogs",
 
-      // Party
       "party",
-
-      // Common
       "other",
     ],
     default: "other",
   },
-  // 🔒 NEW FIELD
+
   isSystem: {
     type: Boolean,
     default: false,
   },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
 });
 
-// ✅ compound index to make `code` unique per user
 accountSchema.index({ userId: 1, code: 1 }, { unique: true });
 
 accountSchema.index({ userId: 1, type: 1 });

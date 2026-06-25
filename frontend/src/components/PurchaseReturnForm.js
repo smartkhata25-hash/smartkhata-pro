@@ -46,6 +46,8 @@ const PurchaseReturnForm = ({ token }) => {
   const [paymentType, setPaymentType] = useState('cash');
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
+  const [isOpeningReturn, setIsOpeningReturn] = useState(false);
+  const [openingReturnAmount, setOpeningReturnAmount] = useState(0);
 
   const blankRow = () => ({
     productId: '',
@@ -78,6 +80,11 @@ const PurchaseReturnForm = ({ token }) => {
       setReturnMethod(data.paymentType ? 'cash' : 'adjust');
       setPaymentType(data.paymentType || 'cash');
       setAccountId(data.accountId || '');
+      const openingMode =
+        data.isOpening === true || data.billNo === 'OPENING' || (data.items || []).length === 0;
+
+      setIsOpeningReturn(openingMode);
+      setOpeningReturnAmount(openingMode ? Number(data.totalAmount || 0) : 0);
 
       const mappedItems = (data.items || []).map((i) => {
         const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
@@ -117,7 +124,7 @@ const PurchaseReturnForm = ({ token }) => {
         ['cash', 'bank', 'asset'].includes(acc.type?.toLowerCase())
       );
 
-      setAccounts(filtered); // 👈 یہ add کریں
+      setAccounts(filtered);
 
       // 🟢 Default Cash Account Auto Select
       if (returnMethod === 'cash') {
@@ -159,7 +166,9 @@ const PurchaseReturnForm = ({ token }) => {
     }
   };
 
-  const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
+  const totalAmount = isOpeningReturn
+    ? Number(openingReturnAmount || 0)
+    : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
   const formState = {
     items,
@@ -253,11 +262,11 @@ const PurchaseReturnForm = ({ token }) => {
   };
 
   const handleSubmit = async (action) => {
-    const filteredItems = items.filter((i) => i.productId && i.quantity > 0);
+    const filteredItems = isOpeningReturn ? [] : items.filter((i) => i.productId && i.quantity > 0);
 
     if (!returnDate) return alert(t('alerts.fillRequiredFields'));
     if (!supplierName.trim()) return alert(t('alerts.selectSupplier'));
-    if (filteredItems.length === 0) return alert(t('alerts.addProduct'));
+    if (!isOpeningReturn && filteredItems.length === 0) return alert(t('alerts.addProduct'));
     if (returnMethod === 'cash' && !accountId) return alert(t('alerts.selectAccount'));
 
     // 🔥 Auto match supplier by name in edit mode
@@ -299,6 +308,9 @@ const PurchaseReturnForm = ({ token }) => {
     formData.append('accountId', returnMethod === 'cash' ? accountId : '');
     if (originalInvoiceId) {
       formData.append('originalInvoiceId', originalInvoiceId);
+    }
+    if (isOpeningReturn) {
+      formData.append('isOpening', true);
     }
     formData.append(
       'items',
@@ -546,67 +558,88 @@ const PurchaseReturnForm = ({ token }) => {
           className="border p-1 text-sm col-span-2"
         />
       </div>
+      {isOpeningReturn && (
+        <div className="mb-2 px-3 py-2 rounded bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm font-semibold">
+          ⚠️ Opening Purchase Return Entry
+        </div>
+      )}
 
-      <div
-        ref={scrollRef}
-        className="border overflow-y-auto mb-4"
-        style={{ maxHeight: '50vh', minHeight: '300px' }}
-      >
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-gray-100">
-            <tr>
-              <th className="p-2 border">{t('item')}</th>
-              <th className="p-2 border">{t('qty')}</th>
-              <th className="p-2 border">{t('rate')}</th>
-              <th className="p-2 border">{t('total')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, idx) => (
-              <tr key={idx} className="even:bg-gray-50">
-                <td className="border p-1">
-                  <ProductDropdown
-                    productList={productList}
-                    value={item.name}
-                    onSelect={(product) => {
-                      const updated = [...items];
-                      const qty = parseFloat(updated[idx].quantity) || 1;
-                      updated[idx] = {
-                        ...updated[idx],
-                        name: product.name,
-                        productId: product._id,
-                        price: product.purchasePrice || product.costPrice || product.price || 0,
-                        quantity: qty,
-                        total: (
-                          (product.purchasePrice || product.costPrice || product.price || 0) * qty
-                        ).toFixed(2),
-                      };
-                      setItems(updated);
-                    }}
-                  />
-                </td>
-                <td className="border p-1">
-                  <input
-                    type="number"
-                    value={item.quantity || ''}
-                    onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                    className="w-full text-center"
-                  />
-                </td>
-                <td className="border p-1">
-                  <input
-                    type="number"
-                    value={item.price || ''}
-                    onChange={(e) => handleItemChange(idx, 'price', e.target.value)}
-                    className="w-full text-center"
-                  />
-                </td>
-                <td className="border p-1 text-center">{item.total || '0.00'}</td>
+      {isOpeningReturn && (
+        <div className="mb-3 p-3 border rounded bg-blue-50">
+          <label className="block text-sm font-semibold mb-2">Opening Purchase Return Amount</label>
+
+          <input
+            type="text"
+            inputMode="decimal"
+            value={openingReturnAmount}
+            onChange={(e) => setOpeningReturnAmount(e.target.value)}
+            className="border px-3 py-2 w-64 rounded no-spinner"
+          />
+        </div>
+      )}
+
+      {!isOpeningReturn && (
+        <div
+          ref={scrollRef}
+          className="border overflow-y-auto mb-4"
+          style={{ maxHeight: '50vh', minHeight: '300px' }}
+        >
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-gray-100">
+              <tr>
+                <th className="p-2 border">{t('item')}</th>
+                <th className="p-2 border">{t('qty')}</th>
+                <th className="p-2 border">{t('rate')}</th>
+                <th className="p-2 border">{t('total')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr key={idx} className="even:bg-gray-50">
+                  <td className="border p-1">
+                    <ProductDropdown
+                      productList={productList}
+                      value={item.name}
+                      onSelect={(product) => {
+                        const updated = [...items];
+                        const qty = parseFloat(updated[idx].quantity) || 1;
+                        updated[idx] = {
+                          ...updated[idx],
+                          name: product.name,
+                          productId: product._id,
+                          price: product.purchasePrice || product.costPrice || product.price || 0,
+                          quantity: qty,
+                          total: (
+                            (product.purchasePrice || product.costPrice || product.price || 0) * qty
+                          ).toFixed(2),
+                        };
+                        setItems(updated);
+                      }}
+                    />
+                  </td>
+                  <td className="border p-1">
+                    <input
+                      type="number"
+                      value={item.quantity || ''}
+                      onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                      className="w-full text-center"
+                    />
+                  </td>
+                  <td className="border p-1">
+                    <input
+                      type="number"
+                      value={item.price || ''}
+                      onChange={(e) => handleItemChange(idx, 'price', e.target.value)}
+                      className="w-full text-center"
+                    />
+                  </td>
+                  <td className="border p-1 text-center">{item.total || '0.00'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="sticky bottom-0 bg-white border-t py-3 flex justify-between items-center">
         <div className="font-semibold text-lg">

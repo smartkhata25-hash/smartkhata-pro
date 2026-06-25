@@ -16,6 +16,8 @@ router.route("/:id").put(ctrl.updateSupplier).delete(ctrl.deleteSupplier);
 
 router.post("/merge/confirm", ctrl.confirmMergeSupplier);
 
+router.post("/:id/convert-to-party", ctrl.convertSupplierToParty);
+
 // 📘 Supplier Detailed Ledger
 router.get("/:id/detailed-ledger", ctrl.getSupplierDetailedLedger);
 

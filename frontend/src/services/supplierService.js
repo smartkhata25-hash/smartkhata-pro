@@ -57,6 +57,16 @@ export const confirmMergeSupplier = (data) =>
       throw err;
     });
 
+// ✅ Convert Supplier → Party
+export const convertSupplierToParty = (id) =>
+  axios
+    .post(`${API}/${id}/convert-to-party`, {}, getConfig())
+    .then((r) => r.data)
+    .catch((err) => {
+      console.error('❌ Error converting supplier to party:', err.response?.data || err.message);
+      throw err;
+    });
+
 // ✅ Import Suppliers (with optional progress)
 export const importSuppliers = (file) => {
   const fd = new FormData();

@@ -37,6 +37,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     accountId,
     items,
     partyId,
+    isOpening,
   } = req.body;
 
   // ✅ STATUS CALCULATION (ADD HERE)
@@ -45,9 +46,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   else if (paidAmount > 0) status = "Partial";
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
-  parsedItems = parsedItems.filter(
-    (i) => i.productId && i.quantity > 0 && i.price > 0,
-  ); // ✅ Clean only valid items
+  parsedItems =
+    isOpening === true || isOpening === "true"
+      ? []
+      : parsedItems.filter((i) => i.productId && i.quantity > 0 && i.price > 0);
 
   const userId = req.user?.id || req.userId;
 
@@ -129,12 +131,11 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     status,
     accountId: paidAmount > 0 ? accountId : null,
     attachment: attachmentPath,
-    attachmentType, // ✅ New
+    attachmentType,
     items: parsedItems,
+    isOpening: isOpening === true || isOpening === "true",
     userId,
   });
-
-  // 📘 Create Journal Entry
 
   // 🔹 Inventory account nikalein
   const inventoryAccount = await Account.findOne({
@@ -147,21 +148,37 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  const lines = [
-    // ✅ Inventory increase
-    {
-      account: inventoryAccount._id,
-      type: "debit",
-      amount: grandTotal,
-    },
+  const openingBalanceAccount = await Account.findOne({
+    code: "OPENING_BALANCE",
+    userId,
+  });
 
-    // ✅ Supplier liability
-    {
-      account: counterPartyAccountId,
-      type: "credit",
-      amount: grandTotal,
-    },
-  ];
+  const lines =
+    isOpening === true || isOpening === "true"
+      ? [
+          {
+            account: openingBalanceAccount._id,
+            type: "debit",
+            amount: grandTotal,
+          },
+          {
+            account: counterPartyAccountId,
+            type: "credit",
+            amount: grandTotal,
+          },
+        ]
+      : [
+          {
+            account: inventoryAccount._id,
+            type: "debit",
+            amount: grandTotal,
+          },
+          {
+            account: counterPartyAccountId,
+            type: "credit",
+            amount: grandTotal,
+          },
+        ];
 
   await JournalEntry.create({
     date: parsedInvoiceDate,
@@ -171,7 +188,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     description: req.body.description || "",
 
     createdBy: userId,
-    sourceType: "purchase_invoice",
+    sourceType:
+      isOpening === true || isOpening === "true"
+        ? "opening_purchase_invoice"
+        : "purchase_invoice",
 
     supplierId: supplier?._id || null,
     partyId: party?._id || null,
@@ -238,24 +258,25 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   // 📦 Stock via stockHelper
-  for (const item of parsedItems) {
-    // ✅ Update Product Prices
-    await Product.findByIdAndUpdate(item.productId, {
-      unitCost: item.price || 0,
-      salePrice: item.salePrice || 0,
-    });
+  if (!(isOpening === true || isOpening === "true")) {
+    for (const item of parsedItems) {
+      await Product.findByIdAndUpdate(item.productId, {
+        unitCost: item.price || 0,
+        salePrice: item.salePrice || 0,
+      });
 
-    // ✅ Inventory Entry
-    await createInventoryEntry({
-      productId: item.productId,
-      type: "IN",
-      quantity: item.quantity,
-      note: `Purchase Invoice #${billNo}`,
-      invoiceId: invoice._id,
-      invoiceModel: "PurchaseInvoice",
-      userId,
-      rate: item.price || 0,
-    });
+      // ✅ Inventory Entry
+      await createInventoryEntry({
+        productId: item.productId,
+        type: "IN",
+        quantity: item.quantity,
+        note: `Purchase Invoice #${billNo}`,
+        invoiceId: invoice._id,
+        invoiceModel: "PurchaseInvoice",
+        userId,
+        rate: item.price || 0,
+      });
+    }
   }
 
   await recalculateAccountBalance(counterPartyAccountId);
@@ -308,15 +329,17 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     accountId,
     items,
     partyId,
+    isOpening,
   } = req.body;
 
   const parsedInvoiceDate = new Date(invoiceDate);
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
 
-  parsedItems = parsedItems.filter(
-    (i) => i.productId && i.quantity > 0 && i.price > 0,
-  );
+  parsedItems =
+    isOpening === true || isOpening === "true"
+      ? []
+      : parsedItems.filter((i) => i.productId && i.quantity > 0 && i.price > 0);
 
   const userId = req.user?.id || req.userId;
 
@@ -369,9 +392,14 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   ============================== */
   await JournalEntry.updateMany(
     {
-      referenceId: invoice._id,
+      $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       sourceType: {
-        $in: ["purchase_invoice", "purchase_payment", "purchase_discount"],
+        $in: [
+          "purchase_invoice",
+          "opening_purchase_invoice",
+          "purchase_payment",
+          "purchase_discount",
+        ],
       },
       isDeleted: false,
     },
@@ -448,6 +476,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     attachment: attachmentPath,
     attachmentType,
     items: parsedItems,
+    isOpening: isOpening === true || isOpening === "true",
   });
 
   await invoice.save();
@@ -467,18 +496,37 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   /* =============================
      CREATE JOURNAL ENTRY
   ============================== */
-  const lines = [
-    {
-      account: inventoryAccount._id,
-      type: "debit",
-      amount: grandTotal,
-    },
-    {
-      account: counterPartyAccountId,
-      type: "credit",
-      amount: grandTotal,
-    },
-  ];
+  const openingBalanceAccount = await Account.findOne({
+    code: "OPENING_BALANCE",
+    userId,
+  });
+
+  const lines =
+    isOpening === true || isOpening === "true"
+      ? [
+          {
+            account: openingBalanceAccount._id,
+            type: "debit",
+            amount: grandTotal,
+          },
+          {
+            account: counterPartyAccountId,
+            type: "credit",
+            amount: grandTotal,
+          },
+        ]
+      : [
+          {
+            account: inventoryAccount._id,
+            type: "debit",
+            amount: grandTotal,
+          },
+          {
+            account: counterPartyAccountId,
+            type: "credit",
+            amount: grandTotal,
+          },
+        ];
 
   await JournalEntry.create({
     date: parsedInvoiceDate,
@@ -486,7 +534,10 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     billNo,
     description: req.body.description || "",
     createdBy: userId,
-    sourceType: "purchase_invoice",
+    sourceType:
+      isOpening === true || isOpening === "true"
+        ? "opening_purchase_invoice"
+        : "purchase_invoice",
     supplierId: supplier?._id || null,
     partyId: party?._id || null,
     invoiceId: invoice._id,
@@ -555,26 +606,27 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   /* =============================
      RE-APPLY STOCK
   ============================== */
-  for (const item of parsedItems) {
-    // ✅ Update Product Prices
-    await Product.findByIdAndUpdate(item.productId, {
-      unitCost: item.price || 0,
-      salePrice: item.salePrice || 0,
-    });
+  if (!(isOpening === true || isOpening === "true")) {
+    for (const item of parsedItems) {
+      // ✅ Update Product Prices
+      await Product.findByIdAndUpdate(item.productId, {
+        unitCost: item.price || 0,
+        salePrice: item.salePrice || 0,
+      });
 
-    // ✅ Re-Apply Stock
-    await createInventoryEntry({
-      productId: item.productId,
-      type: "IN",
-      quantity: item.quantity,
-      note: `Updated Purchase Invoice #${billNo}`,
-      invoiceId: invoice._id,
-      invoiceModel: "PurchaseInvoice",
-      userId,
-      rate: item.price || 0,
-    });
+      // ✅ Re-Apply Stock
+      await createInventoryEntry({
+        productId: item.productId,
+        type: "IN",
+        quantity: item.quantity,
+        note: `Updated Purchase Invoice #${billNo}`,
+        invoiceId: invoice._id,
+        invoiceModel: "PurchaseInvoice",
+        userId,
+        rate: item.price || 0,
+      });
+    }
   }
-
   /* =============================
      RECALCULATE NEW ACCOUNTS
   ============================== */
@@ -647,9 +699,14 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
 
   await JournalEntry.updateMany(
     {
-      referenceId: invoice._id,
+      $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       sourceType: {
-        $in: ["purchase_invoice", "purchase_payment", "purchase_discount"],
+        $in: [
+          "purchase_invoice",
+          "opening_purchase_invoice",
+          "purchase_payment",
+          "purchase_discount",
+        ],
       },
     },
     { isDeleted: true },

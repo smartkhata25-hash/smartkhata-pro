@@ -78,6 +78,8 @@ const PurchaseInvoiceForm = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [isOpeningPurchase, setIsOpeningPurchase] = useState(false);
+  const [openingPurchaseAmount, setOpeningPurchaseAmount] = useState(0);
 
   useEffect(() => {
     if (!selectedProductId || !showHistory) return;
@@ -146,6 +148,23 @@ const PurchaseInvoiceForm = () => {
       setPaidAmount(invoice.paidAmount || 0);
       setPaymentType(invoice.paymentType || 'credit');
       setSelectedAccountId(invoice.accountId || '');
+      const openingMode =
+        invoice.isOpening === true ||
+        invoice.billNo === 'OPENING' ||
+        (invoice.items || []).length === 0;
+
+      setIsOpeningPurchase(openingMode);
+      setOpeningPurchaseAmount(
+        openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
+      );
+
+      if (invoice.partyId) {
+        setSelectedSupplierType('party');
+        setSelectedSupplierId(invoice.partyId?._id || invoice.partyId);
+      } else {
+        setSelectedSupplierType('supplier');
+        setSelectedSupplierId(invoice.supplier?._id || invoice.supplier || '');
+      }
 
       const loadedItems = (invoice.items || []).map((item, index) => {
         const product =
@@ -309,10 +328,19 @@ const PurchaseInvoiceForm = () => {
     setItems(updated);
   };
 
-  const totalAmount = items.reduce((sum, i) => sum + i.amount, 0);
-  const finalDiscount =
-    discountPercent > 0 ? (totalAmount * discountPercent) / 100 : discountAmount;
-  const grandTotal = totalAmount - finalDiscount;
+  const totalAmount = isOpeningPurchase
+    ? Number(openingPurchaseAmount || 0)
+    : items.reduce((sum, i) => sum + i.amount, 0);
+
+  const finalDiscount = isOpeningPurchase
+    ? 0
+    : discountPercent > 0
+      ? (totalAmount * discountPercent) / 100
+      : discountAmount;
+
+  const grandTotal = isOpeningPurchase
+    ? Number(openingPurchaseAmount || 0)
+    : totalAmount - finalDiscount;
   const formState = {
     supplierName,
     supplierPhone,
@@ -390,15 +418,17 @@ const PurchaseInvoiceForm = () => {
 
     const supplierAccountId = selectedSupplier?.account || '';
 
-    const validItems = items
-      .filter((i) => i.productId && i.quantity > 0 && (i.cost > 0 || i.rate > 0))
-      .map((i) => ({
-        productId: i.productId,
-        quantity: i.quantity,
-        price: i.rate,
-        salePrice: i.cost,
-        total: i.amount || i.quantity * i.rate,
-      }));
+    const validItems = isOpeningPurchase
+      ? []
+      : items
+          .filter((i) => i.productId && i.quantity > 0 && (i.cost > 0 || i.rate > 0))
+          .map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            price: i.rate,
+            salePrice: i.cost,
+            total: i.amount || i.quantity * i.rate,
+          }));
 
     const journalEntries = [];
 
@@ -443,6 +473,9 @@ const PurchaseInvoiceForm = () => {
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
+    if (isOpeningPurchase) {
+      formData.append('isOpening', true);
+    }
 
     if (isEdit) {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
@@ -513,16 +546,17 @@ const PurchaseInvoiceForm = () => {
         ? selectedSupplier?.account || ''
         : selectedParty?.account || '';
 
-    const validItems = items
-      .filter((i) => i.productId && i.quantity > 0 && (i.cost > 0 || i.rate > 0))
-
-      .map((i) => ({
-        productId: i.productId,
-        quantity: i.quantity,
-        price: i.rate,
-        salePrice: i.cost,
-        total: i.amount || i.quantity * i.rate,
-      }));
+    const validItems = isOpeningPurchase
+      ? []
+      : items
+          .filter((i) => i.productId && i.quantity > 0 && (i.cost > 0 || i.rate > 0))
+          .map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            price: i.rate,
+            salePrice: i.cost,
+            total: i.amount || i.quantity * i.rate,
+          }));
 
     const journalEntries = [];
     if (paidAmount > 0 && selectedAccountId) {
@@ -562,6 +596,9 @@ const PurchaseInvoiceForm = () => {
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
+    if (isOpeningPurchase) {
+      formData.append('isOpening', true);
+    }
 
     try {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
@@ -589,6 +626,15 @@ const PurchaseInvoiceForm = () => {
       setPaidAmount(invoice.paidAmount || 0);
       setPaymentType(invoice.paymentType || 'credit');
       setSelectedAccountId(invoice.accountId || '');
+      const openingMode =
+        invoice.isOpening === true ||
+        invoice.billNo === 'OPENING' ||
+        (invoice.items || []).length === 0;
+
+      setIsOpeningPurchase(openingMode);
+      setOpeningPurchaseAmount(
+        openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
+      );
 
       const loadedItems = (invoice.items || []).map((item, index) => {
         const product =
@@ -928,15 +974,38 @@ const PurchaseInvoiceForm = () => {
               {isEdit && <input type="hidden" value={invoiceId} />}
 
               {/* PurchaseInvoice Table */}
-              <InvoiceTable
-                items={items}
-                setItems={setItems}
-                products={products}
-                handleQtyRateChange={handleQtyRateChange}
-                clearOnFocus={clearOnFocus}
-                mode="purchase" // ✅ VERY IMPORTANT
-                onProductChange={handleProductHistory}
-              />
+              {isOpeningPurchase && (
+                <div className="mb-2 px-3 py-2 rounded bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm font-semibold">
+                  ⚠️ Opening Purchase Entry
+                </div>
+              )}
+
+              {isOpeningPurchase && (
+                <div className="mb-3 p-3 border rounded bg-blue-50">
+                  <label className="block text-sm font-semibold mb-2">
+                    Opening Purchase Amount
+                  </label>
+
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={openingPurchaseAmount}
+                    onChange={(e) => setOpeningPurchaseAmount(e.target.value)}
+                    className="border px-3 py-2 w-64 rounded no-spinner"
+                  />
+                </div>
+              )}
+              {!isOpeningPurchase && (
+                <InvoiceTable
+                  items={items}
+                  setItems={setItems}
+                  products={products}
+                  handleQtyRateChange={handleQtyRateChange}
+                  clearOnFocus={clearOnFocus}
+                  mode="purchase"
+                  onProductChange={handleProductHistory}
+                />
+              )}
 
               {/* 🔹 Totals + Buttons – Sales Style */}
               <div className="bg-gray-100 p-4 rounded mt-6">
@@ -1173,6 +1242,15 @@ const PurchaseInvoiceForm = () => {
             setPaidAmount(invoice.paidAmount || 0);
             setPaymentType(invoice.paymentType || 'cash');
             setSelectedAccountId(invoice.accountId || '');
+            const openingMode =
+              invoice.isOpening === true ||
+              invoice.billNo === 'OPENING' ||
+              (invoice.items || []).length === 0;
+
+            setIsOpeningPurchase(openingMode);
+            setOpeningPurchaseAmount(
+              openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
+            );
 
             // 🔥 Items load کریں
             const loadedItems = (invoice.items || []).map((item, index) => {

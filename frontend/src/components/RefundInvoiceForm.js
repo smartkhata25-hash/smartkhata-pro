@@ -51,6 +51,9 @@ const RefundInvoiceForm = ({
       setPaymentType(data.paymentType || 'cash');
 
       setAccountId(data.accountId || data.account?._id || '');
+      setOriginalInvoiceId(data.originalInvoiceId || '');
+      setIsOpeningRefund(data.isOpening === true);
+      setOpeningRefundAmount(data.isOpening === true ? Number(data.totalAmount || 0) : 0);
 
       const loadedItems = (data.items || []).map((i) => {
         const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
@@ -96,6 +99,8 @@ const RefundInvoiceForm = ({
   const [customerId, setCustomerId] = useState('');
   const [paymentType, setPaymentType] = useState('cash');
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
+  const [isOpeningRefund, setIsOpeningRefund] = useState(false);
+  const [openingRefundAmount, setOpeningRefundAmount] = useState(0);
 
   const scrollRef = useRef();
   // 🔵 Print Settings States
@@ -245,12 +250,10 @@ const RefundInvoiceForm = ({
 
   const handleRevert = async () => {
     if (!id) {
-      // 🆕 New Refund → clear form
       handleClear();
       return;
     }
 
-    // 🔁 Edit mode → original refund دوبارہ load
     try {
       const data = await getRefundById(id, token);
       populateForm(data);
@@ -259,10 +262,9 @@ const RefundInvoiceForm = ({
     }
   };
 
-  const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
-
-  const isOpeningRefund =
-    id && originalInvoiceId === '' && items.every((i) => !i.productId && !i.quantity);
+  const totalAmount = isOpeningRefund
+    ? Number(openingRefundAmount || 0)
+    : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
   const formState = {
     items,
@@ -334,7 +336,9 @@ const RefundInvoiceForm = ({
     if (!invoiceDate) return alert(t('alerts.fillRequiredFields'));
     if (!customerName.trim()) return alert(t('alerts.customerRequired'));
 
-    const totalAmount = items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
+    const totalAmount = isOpeningRefund
+      ? Number(openingRefundAmount || 0)
+      : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
     if (filteredItems.length === 0 && !isOpeningRefund) {
       return alert(t('alerts.addProduct'));
@@ -401,7 +405,7 @@ const RefundInvoiceForm = ({
       }
 
       if (action === 'new') {
-        handleClear(); // form reset
+        handleClear();
       } else if (action === 'close') {
         navigate('/dashboard');
       }
@@ -637,85 +641,101 @@ const RefundInvoiceForm = ({
         </div>
       )}
 
-      <div
-        ref={scrollRef}
-        className="border overflow-y-auto mb-4"
-        style={{ maxHeight: '50vh', minHeight: '300px' }}
-      >
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-gray-100">
-            <tr>
-              <th className="p-2 border">{t('item')}</th>
-              <th className="p-2 border">{t('qty')}</th>
-              <th className="p-2 border">{t('rate')}</th>
-              <th className="p-2 border">{t('total')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, idx) => (
-              <tr key={idx} className="even:bg-gray-50">
-                <td className="border p-1">
-                  <ProductDropdown
-                    productList={productList}
-                    value={item.name}
-                    onSelect={(selectedProduct) => {
-                      const updated = [...items];
-                      const qty = parseFloat(updated[idx].quantity) || 1;
-                      updated[idx] = {
-                        ...updated[idx],
-                        name: selectedProduct.name,
-                        productId: selectedProduct._id,
-                        price:
-                          selectedProduct.salePrice ||
-                          selectedProduct.unitPrice ||
-                          selectedProduct.price ||
-                          0,
-                        quantity: qty,
-                        total: (
-                          (selectedProduct.salePrice ||
+      {isOpeningRefund && (
+        <div className="mb-3 p-3 border rounded bg-blue-50">
+          <label className="block text-sm font-semibold mb-2">Opening Refund Amount</label>
+
+          <input
+            type="text"
+            inputMode="decimal"
+            value={openingRefundAmount}
+            onChange={(e) => setOpeningRefundAmount(e.target.value)}
+            className="border px-3 py-2 w-64 rounded no-spinner"
+          />
+        </div>
+      )}
+
+      {!isOpeningRefund && (
+        <div
+          ref={scrollRef}
+          className="border overflow-y-auto mb-4"
+          style={{ maxHeight: '50vh', minHeight: '300px' }}
+        >
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-gray-100">
+              <tr>
+                <th className="p-2 border">{t('item')}</th>
+                <th className="p-2 border">{t('qty')}</th>
+                <th className="p-2 border">{t('rate')}</th>
+                <th className="p-2 border">{t('total')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr key={idx} className="even:bg-gray-50">
+                  <td className="border p-1">
+                    <ProductDropdown
+                      productList={productList}
+                      value={item.name}
+                      onSelect={(selectedProduct) => {
+                        const updated = [...items];
+                        const qty = parseFloat(updated[idx].quantity) || 1;
+                        updated[idx] = {
+                          ...updated[idx],
+                          name: selectedProduct.name,
+                          productId: selectedProduct._id,
+                          price:
+                            selectedProduct.salePrice ||
                             selectedProduct.unitPrice ||
                             selectedProduct.price ||
-                            0) * qty
-                        ).toFixed(2),
-                      };
-                      setItems(updated);
-                      onProductChange && onProductChange(selectedProduct._id);
-                    }}
-                  />
-                </td>
-                <td className="border p-1">
-                  <input
-                    type="number"
-                    value={item.quantity || ''}
-                    onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                    onWheel={(e) => e.target.blur()}
-                    className="w-full text-center no-spinner"
-                  />
-                </td>
-                <td className="border p-1">
-                  <input
-                    type="number"
-                    value={item.price || ''}
-                    onChange={(e) => {
-                      handleItemChange(idx, 'price', e.target.value);
-                    }}
-                    onWheel={(e) => e.target.blur()}
-                    onBlur={() => {
-                      const updated = [...items];
-                      const q = parseFloat(updated[idx].quantity) || 0;
-                      const p = parseFloat(updated[idx].price) || 0;
-                      updated[idx].total = (q * p).toFixed(2);
-                      setItems(updated);
-                    }}
-                    className="w-full text-center no-spinner"
-                  />
-                </td>
-                <td className="border p-1 text-center">{item.total || '0.00'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                            0,
+                          quantity: qty,
+                          total: (
+                            (selectedProduct.salePrice ||
+                              selectedProduct.unitPrice ||
+                              selectedProduct.price ||
+                              0) * qty
+                          ).toFixed(2),
+                        };
+                        setItems(updated);
+                        onProductChange && onProductChange(selectedProduct._id);
+                      }}
+                    />
+                  </td>
+                  <td className="border p-1">
+                    <input
+                      type="number"
+                      value={item.quantity || ''}
+                      onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                      onWheel={(e) => e.target.blur()}
+                      className="w-full text-center no-spinner"
+                    />
+                  </td>
+                  <td className="border p-1">
+                    <input
+                      type="number"
+                      value={item.price || ''}
+                      onChange={(e) => {
+                        handleItemChange(idx, 'price', e.target.value);
+                      }}
+                      onWheel={(e) => e.target.blur()}
+                      onBlur={() => {
+                        const updated = [...items];
+                        const q = parseFloat(updated[idx].quantity) || 0;
+                        const p = parseFloat(updated[idx].price) || 0;
+                        updated[idx].total = (q * p).toFixed(2);
+                        setItems(updated);
+                      }}
+                      className="w-full text-center no-spinner"
+                    />
+                  </td>
+                  <td className="border p-1 text-center">{item.total || '0.00'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="sticky bottom-0 bg-white border-t py-3 flex flex-col md:flex-row md:justify-between md:items-center gap-2 px-4">
         {/* LEFT SIDE — Find + Print + PDF */}

@@ -331,6 +331,15 @@ const InvoiceForm = ({
     setPaymentType(editingInvoiceFromAPI.paymentType || 'credit');
 
     setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
+
+    if (editingInvoiceFromAPI.partyId) {
+      setSelectedCustomerType('party');
+      setSelectedCustomerId(editingInvoiceFromAPI.partyId);
+    } else {
+      setSelectedCustomerType('customer');
+      setSelectedCustomerId(editingInvoiceFromAPI.customerId || '');
+    }
+
     if (editingInvoiceFromAPI.isOpening) {
       setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
     }

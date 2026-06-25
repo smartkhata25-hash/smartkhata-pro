@@ -3,7 +3,14 @@ import PageLayout from '../components/PageLayout';
 import LedgerTable from '../components/LedgerTable';
 import PartyForm from '../components/PartyForm';
 import PartyLedgerHeader from '../components/PartyLedgerHeader';
-import { fetchParties, addParty, updateParty, deleteParty } from '../services/partyService';
+import {
+  fetchParties,
+  addParty,
+  updateParty,
+  deleteParty,
+  convertPartyToCustomer,
+  convertPartyToSupplier,
+} from '../services/partyService';
 import { getPartyLedger } from '../services/partyLedgerService';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { t } from '../i18n/i18n';
@@ -106,6 +113,48 @@ const PartiesPage = () => {
     } catch (err) {
       console.error('Party delete failed:', err);
       alert(t('alerts.partyDeleteFailed'));
+    }
+  };
+
+  const handleConvertToCustomer = async (e, party) => {
+    e.stopPropagation();
+
+    if (!window.confirm(`${party.name} کو Customer میں convert کرنا ہے؟`)) return;
+
+    try {
+      await convertPartyToCustomer(party._id);
+      await loadParties();
+
+      if (selectedPartyId === party._id) {
+        setSelectedPartyId('');
+        setSelectedPartyName('');
+        setLedgerData(null);
+      }
+
+      alert('Party customer میں convert ہو گئی');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Convert failed');
+    }
+  };
+
+  const handleConvertToSupplier = async (e, party) => {
+    e.stopPropagation();
+
+    if (!window.confirm(`${party.name} کو Supplier میں convert کرنا ہے؟`)) return;
+
+    try {
+      await convertPartyToSupplier(party._id);
+      await loadParties();
+
+      if (selectedPartyId === party._id) {
+        setSelectedPartyId('');
+        setSelectedPartyName('');
+        setLedgerData(null);
+      }
+
+      alert('Party supplier میں convert ہو گئی');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Convert failed');
     }
   };
 
@@ -419,6 +468,21 @@ const PartiesPage = () => {
                         style={iconButton('#ef4444', '#fef2f2', '#b91c1c')}
                       >
                         <FaTrash size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => handleConvertToCustomer(e, party)}
+                        style={iconButton('#16a34a', '#f0fdf4', '#15803d')}
+                        title="Convert to Customer"
+                      >
+                        C
+                      </button>
+
+                      <button
+                        onClick={(e) => handleConvertToSupplier(e, party)}
+                        style={iconButton('#7c3aed', '#f5f3ff', '#6d28d9')}
+                        title="Convert to Supplier"
+                      >
+                        S
                       </button>
                     </div>
                   )}

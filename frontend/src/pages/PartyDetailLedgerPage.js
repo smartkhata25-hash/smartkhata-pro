@@ -81,44 +81,27 @@ const PartyDetailLedgerPage = () => {
       .slice(0, 10);
   }, [parties, partyName]);
 
-  const buildBlocks = useCallback(
-    (ledger = [], openingBalance = 0) => {
-      const openingBlock = {
-        key: 'opening-balance',
-        sourceType: 'opening_balance',
-        sourceLabel: t('ledger.openingBalance') || 'Opening Balance',
-        billNo: '-',
-        date: startDate || '',
-        time: '',
-        items: [],
-        debit: null,
-        credit: null,
-        balance: Number(openingBalance || 0),
-        description: '',
-      };
+  const buildBlocks = useCallback((ledger = []) => {
+    const rows = Array.isArray(ledger)
+      ? ledger.map((row, index) => ({
+          key: row.key || `${row._id || row.referenceId || index}-${index}`,
+          sourceType: row.sourceType || '',
+          sourceLabel: row.sourceLabel || row.sourceType || '-',
+          billNo: row.billNo || '-',
+          date: row.date,
+          time: row.time || '',
+          items: Array.isArray(row.items) ? row.items : [],
+          debit: Number(row.debit || 0),
+          credit: Number(row.credit || 0),
+          balance: Number(row.balance || 0),
+          description: row.description || '',
+          paymentType: row.paymentType || '',
+          documentTotal: Number(row.documentTotal || 0),
+        }))
+      : [];
 
-      const rows = Array.isArray(ledger)
-        ? ledger.map((row, index) => ({
-            key: row.key || `${row._id || row.referenceId || index}-${index}`,
-            sourceType: row.sourceType || '',
-            sourceLabel: row.sourceLabel || row.sourceType || '-',
-            billNo: row.billNo || '-',
-            date: row.date,
-            time: row.time || '',
-            items: Array.isArray(row.items) ? row.items : [],
-            debit: Number(row.debit || 0),
-            credit: Number(row.credit || 0),
-            balance: Number(row.balance || 0),
-            description: row.description || '',
-            paymentType: row.paymentType || '',
-            documentTotal: Number(row.documentTotal || 0),
-          }))
-        : [];
-
-      return [openingBlock, ...rows];
-    },
-    [startDate]
-  );
+    return rows;
+  }, []);
 
   const loadData = useCallback(
     async (id = selectedPartyId, start = startDate, end = endDate) => {
@@ -134,9 +117,9 @@ const PartyDetailLedgerPage = () => {
         setPartyPhone(data.partyPhone || '');
 
         setSummary({
-          opening: Number(data.openingBalance || 0),
-          debit: Number(data.totalDebit || 0),
-          credit: Number(data.totalCredit || 0),
+          opening: Number(data.partyOpeningBalance || data.openingBalance || 0),
+          debit: Number(data.businessDebit ?? data.totalDebit ?? 0),
+          credit: Number(data.businessCredit ?? data.totalCredit ?? 0),
           closing: Number(data.closingBalance || 0),
         });
 

@@ -1,12 +1,4 @@
-/**
- * Supplier Ledger Print Controller
- * --------------------------------
- * Purpose:
- *  - Fetch supplier ledger data
- *  - Prepare ledger for print
- *  - Generate HTML preview
- *  - Generate PDF using Puppeteer
- */
+// Supplier Ledger Print Controller
 
 const mongoose = require("mongoose");
 
@@ -156,6 +148,8 @@ const getSupplierLedgerHtml = async (req, res) => {
       ledger: rawData.ledger,
     });
 
+    built.lang = req.query.lang || "ur";
+
     const html = generateSupplierLedgerHTML(built, size || "A5");
 
     res.set({
@@ -195,6 +189,8 @@ const generateSupplierLedgerPdf = async (req, res) => {
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
     });
+
+    built.lang = req.query.lang || "ur";
 
     const html = generateSupplierLedgerHTML(built, size || "A5");
 

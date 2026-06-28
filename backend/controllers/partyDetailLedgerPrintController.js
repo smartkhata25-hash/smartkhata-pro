@@ -44,16 +44,16 @@ const getSourceLabel = (type = "") => {
     opening_balance: "Opening Balance",
 
     sale_invoice: "Sale Invoice",
-    opening_sale_invoice: "Opening Sale Invoice",
+    opening_sale_invoice: "Opening Balance",
 
     refund_invoice: "Sale Return",
-    opening_refund_invoice: "Opening Sale Return",
+    opening_refund_invoice: "Opening Balance",
 
     purchase_invoice: "Purchase Invoice",
-    opening_purchase_invoice: "Opening Purchase Invoice",
+    opening_purchase_invoice: "Opening Balance",
 
     purchase_return: "Purchase Return",
-    opening_purchase_return: "Opening Purchase Return",
+    opening_purchase_return: "Opening Balance",
 
     receive_payment: "Receive Payment",
     receive_payment_discount: "Receive Payment Discount",
@@ -187,6 +187,9 @@ const fetchPartyDetailedLedgerData = async ({
     .lean();
 
   let runningBalance = openingBalance;
+  let partyOpeningBalance = 0;
+  let businessDebit = 0;
+  let businessCredit = 0;
 
   const ledger = [];
 
@@ -213,6 +216,14 @@ const fetchPartyDetailedLedgerData = async ({
     runningBalance += debit - credit;
 
     const sourceType = entry.sourceType || "";
+    if (
+      ["opening_sale_invoice", "opening_refund_invoice"].includes(sourceType)
+    ) {
+      partyOpeningBalance += debit - credit;
+    } else {
+      businessDebit += debit;
+      businessCredit += credit;
+    }
     const invoiceId = entry.invoiceId || entry.referenceId || null;
 
     if (
@@ -402,8 +413,11 @@ const fetchPartyDetailedLedgerData = async ({
     endDate,
 
     openingBalance: Number(openingBalance.toFixed(2)),
+    partyOpeningBalance: Number(partyOpeningBalance.toFixed(2)),
     totalDebit: Number(totalDebit.toFixed(2)),
     totalCredit: Number(totalCredit.toFixed(2)),
+    businessDebit: Number(businessDebit.toFixed(2)),
+    businessCredit: Number(businessCredit.toFixed(2)),
     closingBalance: Number(closingBalance.toFixed(2)),
 
     ledger,

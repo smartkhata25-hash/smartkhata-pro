@@ -1,17 +1,6 @@
-/**
- * Supplier Ledger Print Builder
- * --------------------------------
- * Purpose:
- *  - Format raw supplier ledger data into print-ready structure
- *  - Calculate totals safely
- *  - Maintain running balance
- *  - Normalize values (no null / undefined leaks)
- *  - Keep structure consistent with Customer Ledger print
- */
+//Supplier Ledger Print Builder
 
-/* ================================
-   Helpers
-================================ */
+// Helpers
 
 const formatDate = (date) => {
   if (!date) return "-";
@@ -38,28 +27,27 @@ const buildSupplierLedgerPrint = ({
   openingBalance = 0,
   ledger = [],
 }) => {
-  // 🔹 Normalize opening balance
-  const opening = safeNumber(openingBalance);
+  const openingInvoiceBalance = Array.isArray(ledger)
+    ? ledger
+        .filter((entry) =>
+          ["opening_purchase_invoice", "opening_purchase_return"].includes(
+            entry.sourceType,
+          ),
+        )
+        .reduce(
+          (sum, entry) =>
+            sum + safeNumber(entry.debit) - safeNumber(entry.credit),
+          0,
+        )
+    : 0;
 
-  let runningBalance = opening;
+  const opening = openingInvoiceBalance || safeNumber(openingBalance);
+
+  let runningBalance = 0;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const formattedRows = [];
-
-  /* ================================
-     Opening Row
-  ================================ */
-
-  formattedRows.push({
-    type: "opening",
-    date: startDate ? formatDate(startDate) : "-",
-    billNo: "-",
-    source: "Opening Balance",
-    debit: null,
-    credit: null,
-    balance: runningBalance,
-  });
 
   /* ================================
      Ledger Entries
@@ -97,18 +85,14 @@ const buildSupplierLedgerPrint = ({
     }
   }
 
-  /* ================================
-     Closing Balance
-  ================================ */
+  // Closing Balance
 
   const closingBalance =
     formattedRows.length > 1
       ? formattedRows[formattedRows.length - 1].balance
       : opening;
 
-  /* ================================
-     Final Print Object
-  ================================ */
+  //Final Print Object
 
   return {
     documentTitle: "Supplier Ledger",

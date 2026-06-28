@@ -1,16 +1,4 @@
-/**
- * Supplier Detail Ledger Print Builder
- * ------------------------------------
- * Purpose:
- *  - Convert raw supplier ledger data into print-ready structure
- *  - Normalize items and blocks
- *  - Calculate totals safely
- *  - Keep template logic clean
- */
-
-/* ================================
-   Helpers
-================================ */
+//Supplier Detail Ledger Print Builder
 
 const formatDate = (date) => {
   if (!date) return "-";
@@ -73,30 +61,27 @@ const buildSupplierDetailLedgerPrint = ({
   openingBalance = 0,
   ledger = [],
 }) => {
-  const opening = safeNumber(openingBalance);
+  const openingInvoiceBalance = Array.isArray(ledger)
+    ? ledger
+        .filter((entry) =>
+          ["opening_purchase_invoice", "opening_purchase_return"].includes(
+            entry.sourceType,
+          ),
+        )
+        .reduce(
+          (sum, entry) =>
+            sum + safeNumber(entry.credit) - safeNumber(entry.debit),
+          0,
+        )
+    : 0;
 
-  let runningBalance = opening;
+  const opening = openingInvoiceBalance || safeNumber(openingBalance);
+
+  let runningBalance = 0;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const blocks = [];
-
-  /* ================================
-     Opening Block
-  ================================ */
-
-  blocks.push({
-    type: "opening",
-    key: "opening-balance",
-    billNo: "-",
-    date: startDate ? formatDate(startDate) : "-",
-    sourceType: "opening_balance",
-    sourceLabel: "Opening Balance",
-    items: [],
-    debit: null,
-    credit: null,
-    balance: runningBalance,
-  });
 
   /* ================================
      Ledger Blocks

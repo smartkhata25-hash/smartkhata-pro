@@ -74,12 +74,11 @@ const renderItemsTable = (items, lang, isA5) => {
   <thead>
     <tr>
       <th style="width:7%">${label("common.sr", lang, "Sr")}</th>
-      <th style="width:43%">${label("inventory.product", lang, "Product")}</th>
-      <th style="width:10%">${label("unit", lang, "Unit")}</th>
-      <th style="width:10%">CTN</th>
-      <th style="width:10%">${label("qty", lang, "Qty")}</th>
-      <th style="width:10%">${label("rate", lang, "Rate")}</th>
-      <th style="width:10%">${label("total", lang, "Total")}</th>
+      <th style="width:48%">${label("inventory.product", lang, "Product")}</th>
+      <th style="width:12%">${label("unit", lang, "Unit")}</th>
+      <th style="width:11%">${label("qty", lang, "Qty")}</th>
+      <th style="width:11%">${label("rate", lang, "Rate")}</th>
+      <th style="width:11%">${label("total", lang, "Total")}</th>
     </tr>
   </thead>
 
@@ -91,7 +90,6 @@ const renderItemsTable = (items, lang, isA5) => {
         <td>${it.sr || index + 1}</td>
         <td class="left">${safeText(it.productName, "Product")}</td>
         <td>${safeText(it.unit, "-")}</td>
-        <td>${Number(it.ctn || 0) || "-"}</td>
         <td>${Number(it.quantity || 0)}</td>
         <td class="right">${money(it.rate)}</td>
         <td class="right">${money(it.amount)}</td>
@@ -268,27 +266,16 @@ body {
   break-inside: avoid;
 }
 
-.block.opening {
-  background: #f3f4f6;
-}
-
-.block.sale {
-  background: #fffdf5;
-}
-
-.block.purchase {
-  background: #f8fbff;
-}
-
+.block.opening,
+.block.sale,
+.block.purchase,
 .block.sale_return,
-.block.purchase_return {
-  background: #fff7f7;
-}
-
+.block.purchase_return,
 .block.cash_in,
 .block.cash_out,
-.block.discount {
-  background: #f7fff9;
+.block.discount,
+.block.other {
+  background: #fff;
 }
 
 /* ===== BLOCK HEADER ===== */
@@ -387,7 +374,7 @@ td {
 
 .balance-title,
 .balance-amount {
-  background: #f3f4f6;
+  background: #fff;
   font-size: ${isA5 ? "10.5px" : "13px"};
 }
 

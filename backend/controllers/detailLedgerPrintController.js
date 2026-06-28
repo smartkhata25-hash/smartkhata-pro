@@ -97,6 +97,7 @@ const fetchCustomerDetailedLedgerData = async ({
     .lean();
 
   let balance = openingBalance;
+  let customerOpeningBalance = 0;
 
   const ledger = [];
 
@@ -123,6 +124,13 @@ const fetchCustomerDetailedLedgerData = async ({
     }
 
     balance += debit - credit;
+    if (
+      ["opening_sale_invoice", "opening_refund_invoice"].includes(
+        entry.sourceType,
+      )
+    ) {
+      customerOpeningBalance += debit - credit;
+    }
 
     const row = {
       _id: entry._id,
@@ -210,6 +218,7 @@ const fetchCustomerDetailedLedgerData = async ({
   return {
     customerName: customer.name,
     openingBalance,
+    customerOpeningBalance,
     ledger,
   };
 };
@@ -222,7 +231,7 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { customerId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
       customerId,
@@ -236,11 +245,11 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
+      customerOpeningBalance: rawData.customerOpeningBalance,
       ledger: rawData.ledger,
     });
-
+    built.lang = lang || "ur";
     const html = generateCustomerDetailLedgerHTML(built, size || "A4");
-
     res.set({ "Content-Type": "text/html" });
 
     return res.send(html);
@@ -259,7 +268,7 @@ const generateCustomerDetailLedgerPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { customerId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
       customerId,
@@ -273,9 +282,11 @@ const generateCustomerDetailLedgerPdf = async (req, res) => {
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
+      customerOpeningBalance: rawData.customerOpeningBalance,
       ledger: rawData.ledger,
     });
 
+    built.lang = lang || "ur";
     const html = generateCustomerDetailLedgerHTML(built, size || "A4");
 
     const pdfBuffer = await generatePdfFromHtml(html);
@@ -289,8 +300,6 @@ const generateCustomerDetailLedgerPdf = async (req, res) => {
 
     return res.send(pdfBuffer);
   } catch (error) {
-    
-
     return res
       .status(500)
       .json({ message: "Detailed ledger PDF generation failed" });

@@ -135,7 +135,7 @@ const getCustomerLedger = async (req, res) => {
                     ? "Payment"
                     : "Sale Invoice"
                 : entry.sourceType === "opening_sale_invoice"
-                  ? "Opening Invoice"
+                  ? "Opening Balance"
                   : entry.sourceType === "receive_payment"
                     ? "Receive Payment"
                     : entry.sourceType === "receive_payment_discount"
@@ -143,7 +143,7 @@ const getCustomerLedger = async (req, res) => {
                       : entry.sourceType === "refund_invoice"
                         ? "Refund Invoice"
                         : entry.sourceType === "opening_refund_invoice"
-                          ? "Opening Refund"
+                          ? "Opening Balance"
                           : "-",
             debit,
             credit,

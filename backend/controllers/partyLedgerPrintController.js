@@ -19,16 +19,16 @@ const getPartySourceLabel = (entry) => {
   if (type === "opening_balance") return "Opening Balance";
 
   if (type === "sale_invoice") return "Sale Invoice";
-  if (type === "opening_sale_invoice") return "Opening Sale Invoice";
+  if (type === "opening_sale_invoice") return "Opening Balance";
 
   if (type === "refund_invoice") return "Sale Return";
-  if (type === "opening_refund_invoice") return "Opening Sale Return";
+  if (type === "opening_refund_invoice") return "Opening Balance";
 
   if (type === "purchase_invoice") return "Purchase Invoice";
-  if (type === "opening_purchase_invoice") return "Opening Purchase Invoice";
+  if (type === "opening_purchase_invoice") return "Opening Balance";
 
   if (type === "purchase_return") return "Purchase Return";
-  if (type === "opening_purchase_return") return "Opening Purchase Return";
+  if (type === "opening_purchase_return") return "Opening Balance";
 
   if (type === "receive_payment") return "Receive Payment";
   if (type === "receive_payment_discount") return "Receive Payment Discount";

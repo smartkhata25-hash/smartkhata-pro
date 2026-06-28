@@ -23,30 +23,30 @@ const buildCustomerLedgerPrint = ({
   openingBalance = 0,
   ledger = [],
 }) => {
-  const opening = safeNumber(openingBalance);
+  const openingInvoiceBalance = Array.isArray(ledger)
+    ? ledger
+        .filter((entry) =>
+          ["opening_sale_invoice", "opening_refund_invoice"].includes(
+            entry.sourceType,
+          ),
+        )
+        .reduce(
+          (sum, entry) =>
+            sum + safeNumber(entry.debit) - safeNumber(entry.credit),
+          0,
+        )
+    : 0;
 
-  let runningBalance = opening;
+  const opening = openingInvoiceBalance || safeNumber(openingBalance);
+
+  let runningBalance = 0;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const formattedRows = [];
 
-  /* ================================
-     Opening Row
-  ================================ */
-  formattedRows.push({
-    type: "opening",
-    date: startDate ? formatDate(startDate) : "-",
-    billNo: "-",
-    source: "Opening Balance",
-    debit: null,
-    credit: null,
-    balance: runningBalance,
-  });
+  // Ledger Rows
 
-  /* ================================
-     Ledger Rows
-  ================================ */
   if (Array.isArray(ledger)) {
     for (const entry of ledger) {
       const debit = safeNumber(entry.debit);
@@ -63,13 +63,15 @@ const buildCustomerLedgerPrint = ({
         billNo: entry.billNo || "-",
         source:
           entry.sourceLabel ||
-          (entry.sourceType === "sale_invoice"
-            ? "Sale Invoice"
-            : entry.sourceType === "receive_payment"
-              ? "Receive Payment"
-              : entry.sourceType === "refund_invoice"
-                ? "Refund Invoice"
-                : "-"),
+          (entry.sourceType === "opening_sale_invoice"
+            ? "Opening Balance"
+            : entry.sourceType === "sale_invoice"
+              ? "Sale Invoice"
+              : entry.sourceType === "receive_payment"
+                ? "Receive Payment"
+                : entry.sourceType === "refund_invoice"
+                  ? "Refund Balance"
+                  : "-"),
         debit: debit > 0 ? debit : null,
         credit: credit > 0 ? credit : null,
         balance: runningBalance,
@@ -77,17 +79,15 @@ const buildCustomerLedgerPrint = ({
     }
   }
 
-  /* ================================
-     Closing Balance
-  ================================ */
+  // Closing Balance
+
   const closingBalance =
     formattedRows.length > 1
       ? formattedRows[formattedRows.length - 1].balance
       : opening;
 
-  /* ================================
-     Final Print Object
-  ================================ */
+  // Final Print Object
+
   return {
     documentTitle: "Customer Ledger",
 

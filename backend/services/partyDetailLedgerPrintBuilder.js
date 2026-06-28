@@ -1,13 +1,6 @@
 // 📁 services/partyDetailLedgerPrintBuilder.js
 
-/* =========================================================
-   PARTY DETAIL LEDGER PRINT BUILDER
-   ---------------------------------------------------------
-   Purpose:
-   - Controller کے raw data کو print/PDF friendly format میں بدلنا
-   - Opening, entries, items, totals, running balance سب safely بنانا
-   - Sale + Purchase + Returns + Payments سب support کرنا
-========================================================= */
+// PARTY DETAIL LEDGER PRINT BUILDER
 
 const formatDate = (date) => {
   if (!date) return "-";
@@ -126,13 +119,14 @@ const buildPartyDetailLedgerPrint = ({
   endDate,
 
   openingBalance = 0,
+  partyOpeningBalance = 0,
   totalDebit = 0,
   totalCredit = 0,
   closingBalance = 0,
 
   ledger = [],
 }) => {
-  const opening = round2(openingBalance);
+  const opening = round2(partyOpeningBalance || openingBalance);
 
   let runningBalance = opening;
 
@@ -141,38 +135,7 @@ const buildPartyDetailLedgerPrint = ({
 
   const blocks = [];
 
-  /* =========================================================
-     OPENING BLOCK
-  ========================================================= */
-
-  blocks.push({
-    type: "opening",
-    nature: "opening",
-    key: "opening-balance",
-
-    date: startDate ? formatDate(startDate) : "-",
-    rawDate: startDate || null,
-    time: "",
-
-    billNo: "-",
-    title: "Opening Balance",
-    sourceType: "opening_balance",
-    sourceLabel: "Opening Balance",
-
-    description: "",
-    paymentType: "",
-
-    debit: null,
-    credit: null,
-    balance: opening,
-
-    documentTotal: null,
-    items: [],
-  });
-
-  /* =========================================================
-     LEDGER BLOCKS
-  ========================================================= */
+  // LEDGER BLOCKS
 
   if (Array.isArray(ledger)) {
     for (const row of ledger) {
@@ -241,9 +204,7 @@ const buildPartyDetailLedgerPrint = ({
     }
   }
 
-  /* =========================================================
-     FINAL SUMMARY
-  ========================================================= */
+  // FINAL SUMMARY
 
   const finalDebit =
     totalDebit !== undefined && totalDebit !== null

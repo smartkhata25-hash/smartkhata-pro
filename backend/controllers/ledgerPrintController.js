@@ -83,13 +83,15 @@ const fetchCustomerLedgerData = async ({
           billNo: entry.billNo || "",
           sourceType: entry.sourceType || "",
           sourceLabel:
-            entry.sourceType === "sale_invoice"
-              ? "Sale Invoice"
-              : entry.sourceType === "receive_payment"
-                ? "Receive Payment"
-                : entry.sourceType === "refund_invoice"
-                  ? "Refund Invoice"
-                  : "-",
+            entry.sourceType === "opening_sale_invoice"
+              ? "Opening Balance"
+              : entry.sourceType === "sale_invoice"
+                ? "Sale Invoice"
+                : entry.sourceType === "receive_payment"
+                  ? "Receive Payment"
+                  : entry.sourceType === "refund_invoice"
+                    ? "Refund Invoice"
+                    : "-",
           debit: line.type === "debit" ? line.amount : 0,
           credit: line.type === "credit" ? line.amount : 0,
         });

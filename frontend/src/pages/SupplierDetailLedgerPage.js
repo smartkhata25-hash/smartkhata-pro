@@ -7,7 +7,7 @@ import PageLayout from '../components/PageLayout';
 
 import { getSupplierDetailedLedger } from '../services/supplierDetailLedgerService';
 import { fetchSupplierLedger } from '../services/supplierService';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -389,6 +389,7 @@ export default function SupplierDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
+                lang: getCurrentLanguage(),
               }).toString();
 
               try {
@@ -439,6 +440,7 @@ export default function SupplierDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
+                lang: getCurrentLanguage(),
               }).toString();
 
               try {

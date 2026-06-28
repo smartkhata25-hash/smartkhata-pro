@@ -35,38 +35,31 @@ const buildPartyLedgerPrint = ({
   openingBalance = 0,
   ledger = [],
 }) => {
-  const opening = safeNumber(openingBalance);
+  const openingInvoiceBalance = Array.isArray(ledger)
+    ? ledger
+        .filter((entry) =>
+          [
+            "opening_sale_invoice",
+            "opening_refund_invoice",
+            "opening_purchase_invoice",
+            "opening_purchase_return",
+          ].includes(entry.sourceType),
+        )
+        .reduce(
+          (sum, entry) =>
+            sum + safeNumber(entry.debit) - safeNumber(entry.credit),
+          0,
+        )
+    : 0;
 
-  let runningBalance = opening;
+  const opening = openingInvoiceBalance || safeNumber(openingBalance);
+
+  let runningBalance = 0;
 
   let totalDebit = 0;
   let totalCredit = 0;
 
   const formattedRows = [];
-
-  /* ==============================
-     Opening Row
-  ============================== */
-
-  formattedRows.push({
-    type: "opening",
-
-    date: startDate ? formatDate(startDate) : "-",
-
-    billNo: "-",
-
-    source: "Opening Balance",
-
-    description: "",
-
-    paymentType: "",
-
-    debit: null,
-
-    credit: null,
-
-    balance: runningBalance,
-  });
 
   /* ==============================
      Ledger Rows

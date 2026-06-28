@@ -65,36 +65,32 @@ export default function CustomerDetailLedgerPage() {
 
         const closing = rows.length > 0 ? rows[rows.length - 1].balance : opening;
 
-        const debit = rows.reduce((sum, r) => sum + (r.debit || 0), 0);
-        const credit = rows.reduce((sum, r) => sum + (r.credit || 0), 0);
+        const detail = await getCustomerDetailedLedger(cid, s, e);
+
+        const customerOpening = (detail?.ledger || [])
+          .filter((r) => ['opening_sale_invoice', 'opening_refund_invoice'].includes(r.sourceType))
+          .reduce((sum, r) => sum + Number(r.debit || 0) - Number(r.credit || 0), 0);
+
+        const businessDebit = rows
+          .filter((r) => !['opening_sale_invoice', 'opening_refund_invoice'].includes(r.sourceType))
+          .reduce((sum, r) => sum + Number(r.debit || 0), 0);
+
+        const businessCredit = rows
+          .filter((r) => !['opening_sale_invoice', 'opening_refund_invoice'].includes(r.sourceType))
+          .reduce((sum, r) => sum + Number(r.credit || 0), 0);
 
         setSummary({
-          opening,
-          debit,
-          credit,
+          opening: customerOpening || opening,
+          debit: businessDebit,
+          credit: businessCredit,
           closing,
         });
-        const detail = await getCustomerDetailedLedger(cid, s, e);
 
         setCustomerName(detail?.customerName || '');
 
         const grouped = buildBlocks(detail?.ledger || []);
 
-        // 🟦 OPENING BLOCK (SIMPLE)
-        const openingBlock = {
-          key: 'opening-balance',
-          billNo: '-',
-          date: startDate ? new Date(startDate) : new Date(),
-
-          sourceType: 'opening_balance',
-          sourceLabel: t('ledger.openingBalance'),
-          items: [],
-          debit: null,
-          credit: null,
-          balance: opening,
-        };
-
-        setBlocks([openingBlock, ...grouped]);
+        setBlocks(grouped);
       } catch (err) {
         console.error(`❌ ${t('alerts.detailLedgerLoadFailed')}`, err);
       }
@@ -143,13 +139,15 @@ export default function CustomerDetailLedgerPage() {
           date: row.date,
           sourceType: row.sourceType,
           sourceLabel:
-            row.sourceType === 'sale_invoice'
-              ? t('saleInvoice')
-              : row.sourceType === 'refund_invoice'
-                ? t('refund.new')
-                : row.sourceType === 'receive_payment'
-                  ? t('receivePayment')
-                  : '-',
+            row.sourceType === 'opening_sale_invoice'
+              ? 'Opening Sale Invoice'
+              : row.sourceType === 'sale_invoice'
+                ? t('saleInvoice')
+                : row.sourceType === 'refund_invoice'
+                  ? t('refund.new')
+                  : row.sourceType === 'receive_payment'
+                    ? t('receivePayment')
+                    : '-',
           items: [],
           debit: 0,
           credit: 0,
@@ -405,6 +403,7 @@ export default function CustomerDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
+                lang: localStorage.getItem('lang') || 'ur',
               }).toString();
 
               try {
@@ -470,6 +469,7 @@ export default function CustomerDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
+                lang: localStorage.getItem('lang') || 'ur',
               }).toString();
 
               try {
@@ -744,6 +744,7 @@ export default function CustomerDetailLedgerPage() {
             startDate: startDate || '',
             endDate: endDate || '',
             size: printSize,
+            lang: localStorage.getItem('lang') || 'ur',
           }).toString();
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-detail-ledger/${selectedCustomerId}/pdf?${query}`;
@@ -754,7 +755,7 @@ export default function CustomerDetailLedgerPage() {
             balance: summary.closing,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: localStorage.getItem('lang') || 'ur',
             pdfUrl,
             token,
             preferredApp: type,

@@ -45,6 +45,7 @@ const PartyLedgerHeader = ({
       startDate: start || '',
       endDate: end || '',
       size: printSize || 'A5',
+      lang: localStorage.getItem('lang') || 'ur',
     }).toString();
 
   const handleSelectParty = (party) => {

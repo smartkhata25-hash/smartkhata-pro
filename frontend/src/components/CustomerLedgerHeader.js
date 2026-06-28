@@ -136,6 +136,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
+                  lang: localStorage.getItem('lang') || 'ur',
                 }).toString();
 
                 try {
@@ -180,6 +181,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
+                  lang: localStorage.getItem('lang') || 'ur',
                 }).toString();
 
                 try {
@@ -377,6 +379,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
+                  lang: localStorage.getItem('lang') || 'ur',
                 }).toString();
 
                 try {
@@ -420,6 +423,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
+                  lang: localStorage.getItem('lang') || 'ur',
                 }).toString();
 
                 try {

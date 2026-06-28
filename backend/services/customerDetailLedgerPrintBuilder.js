@@ -1,16 +1,4 @@
-/**
- * Customer Detail Ledger Print Builder
- * ------------------------------------
- * Purpose:
- *  - Convert raw API ledger data into print-ready structure
- *  - Normalize items and blocks
- *  - Calculate totals safely
- *  - Keep template logic clean
- */
-
-/* ================================
-   Helpers
-================================ */
+// Customer Detail Ledger Print Builder
 
 const formatDate = (date) => {
   if (!date) return "-";
@@ -24,12 +12,12 @@ const safeNumber = (value) => {
   return isNaN(num) ? 0 : num;
 };
 
-/* ================================
-   Source Label Resolver
-================================ */
-
+// Source Label Resolver
 const resolveSourceLabel = (type) => {
   switch (type) {
+    case "opening_sale_invoice":
+      return "Opening Sale Invoice";
+
     case "sale_invoice":
       return "Sale Invoice";
 
@@ -47,9 +35,7 @@ const resolveSourceLabel = (type) => {
   }
 };
 
-/* ================================
-   Normalize Items
-================================ */
+// Normalize Items
 
 const normalizeItems = (items = []) => {
   if (!Array.isArray(items)) return [];
@@ -71,32 +57,16 @@ const buildCustomerDetailLedgerPrint = ({
   startDate,
   endDate,
   openingBalance = 0,
+  customerOpeningBalance = 0,
   ledger = [],
 }) => {
-  const opening = safeNumber(openingBalance);
+  const opening = safeNumber(customerOpeningBalance || openingBalance);
 
-  let runningBalance = opening;
+  let runningBalance = 0;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const blocks = [];
-
-  /* ================================
-     Opening Block
-  ================================ */
-
-  blocks.push({
-    type: "opening",
-    key: "opening-balance",
-    billNo: "-",
-    date: startDate ? formatDate(startDate) : "-",
-    sourceType: "opening_balance",
-    sourceLabel: "Opening Balance",
-    items: [],
-    debit: null,
-    credit: null,
-    balance: runningBalance,
-  });
 
   /* ================================
      Ledger Blocks
@@ -123,7 +93,7 @@ const buildCustomerDetailLedgerPrint = ({
 
         sourceType: entry.sourceType || "",
 
-        sourceLabel: entry.sourceLabel || resolveSourceLabel(entry.sourceType),
+        sourceLabel: entry.sourceLabel || "",
 
         items: normalizeItems(entry.items),
 

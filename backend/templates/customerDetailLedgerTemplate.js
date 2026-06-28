@@ -1,19 +1,62 @@
-/**
- * Customer Detailed Ledger HTML Template
- * ---------------------------------------
- * Professional block-style accounting layout
- * Supports A4 + A5
- */
+// Customer Detailed Ledger HTML Template
+
+const { t } = require("../i18n/i18n");
+
+const safeText = (value, fallback = "-") => {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+};
+
+const money = (value) => {
+  const num = Number(value || 0);
+
+  if (num < 0) {
+    return `(${Math.abs(num).toFixed(2)})`;
+  }
+
+  return num.toFixed(2);
+};
+
+const getSourceLabel = (sourceType, fallback, lang) => {
+  switch (sourceType) {
+    case "opening_sale_invoice":
+      return t("ledger.openingSaleInvoice", lang);
+
+    case "sale_invoice":
+      return t("saleInvoice", lang);
+
+    case "refund_invoice":
+      return t("refund.new", lang);
+
+    case "receive_payment":
+      return t("receivePayment", lang);
+
+    case "opening_balance":
+      return t("ledger.openingBalance", lang);
+
+    default:
+      return fallback || "-";
+  }
+};
 
 const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
   const { documentTitle, customer, period, summary, blocks } = data;
 
+  const lang = data?.lang || "ur";
+  const isUrdu = lang === "ur";
+  const dir = isUrdu ? "rtl" : "ltr";
+
+  const title =
+    documentTitle && documentTitle !== "Customer Detailed Ledger"
+      ? documentTitle
+      : t("ledger.customerDetailed", lang);
+
   return `
 <!DOCTYPE html>
-<html>
+<html lang="${lang}" dir="${dir}">
 <head>
 <meta charset="UTF-8" />
-<title>${documentTitle}</title>
+<title>${title}</title>
 
 <style>
 
@@ -29,6 +72,7 @@ body {
   font-size: ${pageSize === "A5" ? "11px" : "13px"};
   margin: 0;
   color: #000;
+  direction: ${dir};
 }
 
 .container {
@@ -108,11 +152,11 @@ td {
 }
 
 td.left {
-  text-align: left;
+  text-align: ${isUrdu ? "right" : "left"};
 }
 
 td.right {
-  text-align: right;
+  text-align: ${isUrdu ? "left" : "right"};
 }
 
 /* ===== TOTAL ROW ===== */
@@ -142,39 +186,38 @@ td.right {
 <!-- ===== HEADER ===== -->
 
 <div class="header">
-  <h2>${documentTitle}</h2>
+  <h2>${title}</h2>
   <div class="sub-info">
-    Customer: ${customer.name}
+    ${t("customer", lang)}: ${safeText(customer?.name)}
     &nbsp;&nbsp; | &nbsp;&nbsp;
-    Period: ${period.from} to ${period.to}
+    ${t("ledger.period", lang)}: ${safeText(period?.from, t("common.all", lang))} ${t(
+      "date.to",
+      lang,
+    )} ${safeText(period?.to, t("common.all", lang))}
   </div>
 </div>
 
 <!-- ===== SUMMARY ===== -->
 
 <div class="summary">
-  Opening: ${summary.opening.toFixed(2)} |
-  Debit: ${summary.totalDebit.toFixed(2)} |
-  Credit: ${summary.totalCredit.toFixed(2)} |
-  Closing: ${
-    summary.closingBalance < 0
-      ? `(${Math.abs(summary.closingBalance).toFixed(2)})`
-      : summary.closingBalance.toFixed(2)
-  }
+  ${t("ledger.opening", lang)}: ${money(summary?.opening)} |
+  ${t("credit", lang)}: ${money(summary?.totalDebit)} |
+${t("debit", lang)}: ${money(summary?.totalCredit)} |
+  ${t("ledger.closing", lang)}: ${money(summary?.closingBalance)}
 </div>
 
 <!-- ===== BLOCKS ===== -->
 
-${blocks
+${(blocks || [])
   .map(
     (blk) => `
 
 <div class="block">
 
 <div class="block-header">
-${blk.sourceLabel} #${blk.billNo}
+${getSourceLabel(blk.sourceType, blk.sourceLabel, lang)} #${safeText(blk.billNo)}
 &nbsp;&nbsp; | &nbsp;&nbsp;
-Date: ${blk.date}
+${t("common.date", lang)}: ${safeText(blk.date)}
 </div>
 
 ${
@@ -183,10 +226,10 @@ ${
 <table>
 <thead>
 <tr>
-<th style="width:60%">Product</th>
-<th style="width:10%">Qty</th>
-<th style="width:12%">Rate</th>
-<th style="width:18%">Total</th>
+<th style="width:60%">${t("inventory.product", lang)}</th>
+<th style="width:10%">${t("common.qty", lang)}</th>
+<th style="width:12%">${t("rate", lang)}</th>
+<th style="width:18%">${t("common.total", lang)}</th>
 </tr>
 </thead>
 
@@ -196,10 +239,10 @@ ${blk.items
   .map(
     (it) => `
 <tr>
-<td class="left">${it.productName}</td>
-<td>${it.quantity}</td>
-<td class="right">${it.rate.toFixed(2)}</td>
-<td class="right">${it.total.toFixed(2)}</td>
+<td class="left">${safeText(it.productName, t("inventory.product", lang))}</td>
+<td>${Number(it.quantity || 0)}</td>
+<td class="right">${money(it.rate)}</td>
+<td class="right">${money(it.total)}</td>
 </tr>
 `,
   )
@@ -214,20 +257,22 @@ ${blk.items
 <table class="totals-table">
 
 <tr>
-<td style="width:70%" class="right">Debit</td>
+<td style="width:70%" class="right">${t("credit", lang)}</td>
 <td style="width:30%" class="right">${
-      blk.debit !== null ? blk.debit.toFixed(2) : "-"
+      blk.debit !== null && blk.debit !== undefined ? money(blk.debit) : "-"
     }</td>
 </tr>
 
 <tr>
-<td class="right">Credit</td>
-<td class="right">${blk.credit !== null ? blk.credit.toFixed(2) : "-"}</td>
+<td class="right">${t("debit", lang)}</td>
+<td class="right">${
+      blk.credit !== null && blk.credit !== undefined ? money(blk.credit) : "-"
+    }</td>
 </tr>
 
 <tr>
-<td class="right">Balance</td>
-<td class="right">${blk.balance.toFixed(2)}</td>
+<td class="right">${t("common.balance", lang)}</td>
+<td class="right">${money(blk.balance)}</td>
 </tr>
 
 </table>
@@ -241,7 +286,7 @@ ${blk.items
 <!-- ===== FOOTER ===== -->
 
 <div class="footer">
-Generated by SmartKhata • ${new Date().toLocaleDateString("en-GB")}
+${t("print.generatedBy", lang)} ${t("app.name", lang)} • ${new Date().toLocaleDateString("en-GB")}
 </div>
 
 </div>

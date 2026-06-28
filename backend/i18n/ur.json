@@ -918,5 +918,8 @@
   "back": "واپس",
   "customerTotalBalance": "کسٹمر کل بیلنس",
   "receivePaymentDiscount": "رعایت",
-  "customerRemainingBalance": "کسٹمر باقی رقم"
+  "customerRemainingBalance": "کسٹمر باقی رقم",
+  "ledger.openingSaleInvoice": "اوپننگ سیل انوائس",
+  "ledger.period": "مدت",
+  "print.generatedBy": "تیار کردہ"
 }

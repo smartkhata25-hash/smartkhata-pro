@@ -281,6 +281,21 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
         >
           {isMobile ? 'History' : t('inventory.stockHistory')}
         </button>
+        <button
+          onClick={() => navigate('/inventory-adjust-list')}
+          style={{
+            background: 'linear-gradient(135deg,#0891b2,#164e63)',
+            color: '#fff',
+            padding: isMobile ? '5px 6px' : '7px 14px',
+            fontSize: isMobile ? 12 : 14,
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: isMobile ? 700 : 600,
+          }}
+        >
+          {isMobile ? 'Adj List' : 'Adjust List'}
+        </button>
 
         {/* 🖨 Print */}
         <button

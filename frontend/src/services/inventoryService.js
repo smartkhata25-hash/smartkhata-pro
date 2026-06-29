@@ -107,3 +107,8 @@ export const adjustInventoryBulk = async (rows) => {
 
   return res.data;
 };
+
+export const getInventoryAdjustList = async () => {
+  const res = await axios.get(`${TRANS_URL}/adjust-list`, getAuthHeader());
+  return res.data;
+};

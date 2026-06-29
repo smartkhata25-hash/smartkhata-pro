@@ -4,6 +4,7 @@ const Invoice = require("../models/Invoice");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const RefundInvoice = require("../models/RefundInvoice");
+const PurchaseReturn = require("../models/PurchaseReturn");
 
 exports.getProductLedger = async (req, res) => {
   try {
@@ -106,6 +107,34 @@ exports.getProductLedger = async (req, res) => {
       };
     });
 
+    // 🔹 Purchase Returns (OUT)
+    const purchaseReturns = await InventoryTransaction.find({
+      productId,
+      type: "OUT",
+      invoiceModel: "PurchaseReturn",
+      userId,
+      ...(startDate || endDate ? { date: dateFilter } : {}),
+    })
+      .populate({
+        path: "invoiceId",
+        model: "PurchaseReturn",
+        select: "supplierName billNo returnDate",
+      })
+      .sort({ date: 1 });
+
+    const purchaseReturnEntries = purchaseReturns.map((pr) => {
+      return {
+        date: pr.date,
+        billNo: pr.invoiceId?.billNo || "",
+        supplierName: pr.invoiceId?.supplierName || "Unknown",
+        quantity: pr.quantity,
+        rate: pr.rate || product.unitCost || 0,
+        type: "purchase_return",
+
+        invoiceId: pr.invoiceId?._id?.toString() || "",
+      };
+    });
+
     const salesInvoices = await Invoice.find({
       "items.productId": new mongoose.Types.ObjectId(productId),
       createdBy: userId,
@@ -152,6 +181,7 @@ exports.getProductLedger = async (req, res) => {
     const fullLedger = [
       ...purchaseEntries,
       ...refundEntries,
+      ...purchaseReturnEntries,
       ...saleEntries,
       ...adjustmentEntries,
     ].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -161,7 +191,7 @@ exports.getProductLedger = async (req, res) => {
     fullLedger.forEach((entry) => {
       if (entry.type === "purchase" || entry.type === "refund") {
         runningBalance += entry.quantity;
-      } else if (entry.type === "sale") {
+      } else if (entry.type === "sale" || entry.type === "purchase_return") {
         runningBalance -= entry.quantity;
       } else if (entry.type === "adjust") {
         if (entry.adjustType === "ADJUST_IN") {
@@ -185,6 +215,7 @@ exports.getProductLedger = async (req, res) => {
       openingStock: opening,
       purchases: purchaseEntries,
       refunds: refundEntries,
+      purchaseReturns: purchaseReturnEntries,
       sales: saleEntries,
       ledger: fullLedger,
     });

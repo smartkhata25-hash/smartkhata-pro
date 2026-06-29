@@ -27,4 +27,6 @@ router.post("/adjust", authMiddleware, controller.adjustInventory);
 // 🔧 Inventory Adjust (Bulk)
 router.post("/adjust/bulk", authMiddleware, controller.adjustInventoryBulk);
 
+router.get("/adjust-list", authMiddleware, controller.getAdjustList);
+
 module.exports = router;

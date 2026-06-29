@@ -67,7 +67,7 @@ const ProductLedger = ({ productId }) => {
 
   if (!ledger) return <p>{t('common.loading')}</p>;
 
-  const { openingStock, purchases = [], sales = [], refunds = [] } = ledger;
+  const { openingStock, purchases = [], sales = [], refunds = [], purchaseReturns = [] } = ledger;
 
   const combined = [
     ...purchases.map((p) => ({
@@ -97,6 +97,15 @@ const ProductLedger = ({ productId }) => {
       model: 'RefundInvoice',
       billNo: r.billNo || '-',
     })),
+    ...purchaseReturns.map((pr) => ({
+      type: 'Purchase Return',
+      party: pr.supplierName || 'Supplier',
+      qty: pr.quantity,
+      date: new Date(pr.date),
+      invoiceId: pr.invoiceId,
+      model: 'PurchaseReturn',
+      billNo: pr.billNo || '-',
+    })),
     ...(ledger.ledger || [])
       .filter((e) => e.type === 'adjust')
       .map((a) => ({
@@ -119,20 +128,27 @@ const ProductLedger = ({ productId }) => {
 
   const closing = combined.reduce((acc, entry) => {
     if (entry.type === 'Purchase' || entry.type === 'Refund') return acc + entry.qty;
-    if (entry.type === 'Sale') return acc - entry.qty;
+    if (entry.type === 'Sale' || entry.type === 'Purchase Return') return acc - entry.qty;
     if (entry.type === 'Adjust') return acc + entry.qty;
     return acc;
   }, openingStock);
 
   const handleRowClick = (entry) => {
+    if (entry.type === 'Adjust') {
+      navigate('/stock-history');
+      return;
+    }
+
     if (!entry.invoiceId) return;
 
     if (entry.model === 'PurchaseInvoice') {
-      window.open(`/purchase-invoice?edit=true&id=${entry.invoiceId}`, '_blank');
+      navigate(`/purchase-invoice/${entry.invoiceId}`);
     } else if (entry.model === 'Invoice') {
       navigate(`/sales?invoiceId=${entry.invoiceId}`);
     } else if (entry.model === 'RefundInvoice') {
-      navigate(`/refund-invoice?edit=true&id=${entry.invoiceId}`);
+      navigate(`/refunds/edit/${entry.invoiceId}`);
+    } else if (entry.model === 'PurchaseReturn') {
+      navigate(`/purchase-returns/edit/${entry.invoiceId}`);
     }
   };
 
@@ -242,6 +258,7 @@ const ProductLedger = ({ productId }) => {
           <option value="purchase">{t('inventory.purchaseOnly')}</option>
           <option value="sale">{t('inventory.saleOnly')}</option>
           <option value="refund">{t('inventory.refundOnly')}</option>
+          <option value="purchase return">{t('inventory.purchaseReturnOnly')}</option>
           <option value="adjust">{t('inventory.adjustOnly')}</option>
         </select>
 
@@ -352,7 +369,8 @@ const ProductLedger = ({ productId }) => {
                   onClick={() => handleRowClick(entry)}
                   className="text-center cursor-pointer odd:bg-white even:bg-gray-50 hover:bg-blue-50"
                   style={{
-                    textDecoration: entry.invoiceId ? 'underline' : 'none',
+                    textDecoration:
+                      entry.invoiceId || entry.type === 'Adjust' ? 'underline' : 'none',
                     backgroundColor:
                       entry.type === 'Purchase'
                         ? '#e6ffe6'
@@ -368,7 +386,7 @@ const ProductLedger = ({ productId }) => {
                   <td className="border p-2">{entry.type}</td>
                   <td className="border p-2">{entry.party}</td>
                   <td className="border p-2">
-                    {entry.type === 'Sale'
+                    {entry.type === 'Sale' || entry.type === 'Purchase Return'
                       ? `- ${entry.qty}`
                       : entry.type === 'Adjust'
                         ? `${entry.qty > 0 ? '+' : ''}${entry.qty}`

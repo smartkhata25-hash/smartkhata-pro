@@ -978,5 +978,6 @@
   "ledger.loadingLedger": "لیجر لوڈ ہو رہا ہے...",
   "active": "فعال",
   "hidden": "غیر فعال",
-  "both": "دونوں"
+  "both": "دونوں",
+  "purchaseReturnOnly": " خرید واپسی"
 }

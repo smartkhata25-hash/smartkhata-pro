@@ -978,5 +978,6 @@
   "active": "Active",
   "hidden": "Hidden",
   "both": "Both",
-  "reports.totalSales": "Total Sales"
+  "reports.totalSales": "Total Sales",
+  "purchaseReturnOnly": "Purchase Return"
 }

@@ -205,3 +205,36 @@ exports.adjustInventoryBulk = async (req, res) => {
     });
   }
 };
+
+exports.getAdjustList = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const adjustments = await InventoryTransaction.find({
+      userId,
+      type: { $in: ["ADJUST_IN", "ADJUST_OUT"] },
+    })
+      .populate("productId", "name unit")
+      .sort({ date: -1 });
+
+    const formatted = adjustments.map((a) => ({
+      _id: a._id,
+      date: a.date,
+      adjustNo: a.adjustNo || "-",
+      productName: a.productId?.name || "-",
+      productId: a.productId?._id || "",
+      unit: a.productId?.unit || "",
+      type: a.type,
+      quantity: a.quantity,
+      diff: a.type === "ADJUST_IN" ? a.quantity : -a.quantity,
+      note: a.note || "-",
+      rate: a.rate || 0,
+      createdAt: a.createdAt,
+    }));
+
+    res.json(formatted);
+  } catch (error) {
+    console.error("Adjust List Error:", error);
+    res.status(500).json({ message: "Failed to fetch adjust list" });
+  }
+};

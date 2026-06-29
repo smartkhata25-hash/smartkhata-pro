@@ -29,6 +29,7 @@ import PartyDetailLedgerPage from './pages/PartyDetailLedgerPage';
 import AgingReport from './pages/AgingReport';
 import InventoryPage from './pages/InventoryPage';
 import StockHistoryPage from './pages/StockHistoryPage';
+import InventoryAdjustListPage from './pages/InventoryAdjustListPage';
 import SalesPage from './pages/SalesPage';
 import ProductLedgerPage from './pages/ProductLedgerPage';
 import AccountDetailPage from './pages/AccountDetailPage';
@@ -281,6 +282,7 @@ function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/stock-history" element={<StockHistoryPage />} />
           <Route path="/inventory-adjust" element={<InventoryAdjustPage />} />
+          <Route path="/inventory-adjust-list" element={<InventoryAdjustListPage />} />
           <Route path="/categories" element={<CategoryManagement />} />
           <Route path="/product-ledger/:productId" element={<ProductLedgerPage />} />
           <Route path="/product-ledger" element={<ProductLedgerPage />} />

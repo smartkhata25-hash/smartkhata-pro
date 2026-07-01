@@ -17,9 +17,7 @@ const s3 = new S3Client({
   },
 });
 
-/* =====================================================
-   BUILD FILE KEY
-===================================================== */
+// BUILD FILE KEY
 
 function buildFileKey({ userId, moduleName, originalName, mimeType }) {
   const isImage = mimeType?.startsWith("image/");
@@ -30,9 +28,7 @@ function buildFileKey({ userId, moduleName, originalName, mimeType }) {
   return `users/${userId}/${moduleName}/${fileName}`;
 }
 
-/* =====================================================
-   UPLOAD FILE
-===================================================== */
+// UPLOAD FILE
 
 async function uploadFile({
   buffer,
@@ -87,9 +83,7 @@ async function uploadFile({
   };
 }
 
-/* =====================================================
-   DELETE FILE
-===================================================== */
+// DELETE FILE
 
 async function deleteFile(key) {
   if (!key) return;
@@ -101,10 +95,6 @@ async function deleteFile(key) {
 
   await s3.send(command);
 }
-
-/* =====================================================
-   FILE EXISTS
-===================================================== */
 
 async function fileExists(key) {
   try {
@@ -121,19 +111,13 @@ async function fileExists(key) {
   }
 }
 
-/* =====================================================
-   PUBLIC URL
-===================================================== */
-
 function getFileUrl(key) {
   if (!key) return "";
 
   return `${process.env.R2_PUBLIC_URL}/${key}`;
 }
 
-/* =====================================================
-   EXPORTS
-===================================================== */
+// EXPORTS
 
 module.exports = {
   uploadFile,

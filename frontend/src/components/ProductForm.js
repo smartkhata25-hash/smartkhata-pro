@@ -28,6 +28,8 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [newCategory, setNewCategory] = useState('');
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
   const nameInputRef = useRef(null);
 
   // 🔁 Load categories + products
@@ -74,11 +76,23 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         lowStockThreshold: editProduct.lowStockThreshold || '',
         description: editProduct.description || '',
       });
+
+      setImagePreview(editProduct.image?.url || '');
+      setImageFile(null);
     }
   }, [editProduct]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
   };
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -88,18 +102,26 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
   };
   const handleSubmit = async (e, saveNew = false) => {
     e.preventDefault();
+
     try {
+      const formData = new FormData();
+
+      Object.keys(form).forEach((key) => {
+        formData.append(key, form[key]);
+      });
+
+      if (imageFile) {
+        formData.append('image', imageFile);
+      }
+
       if (editProduct) {
-        await updateProduct(editProduct._id, form);
+        await updateProduct(editProduct._id, formData);
 
-        // ✅ Fresh updated products load کرو
         const refreshedProducts = await fetchProducts();
-
         onUpdate?.(refreshedProducts);
-
         clearEdit?.();
       } else {
-        const created = await createProduct(form);
+        const created = await createProduct(formData);
 
         localStorage.setItem('lastCreatedProductId', created._id);
 
@@ -115,7 +137,6 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         }
       }
 
-      // 🔄 Reset form
       setForm({
         name: '',
         rackNo: '',
@@ -127,6 +148,9 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         lowStockThreshold: '',
         description: '',
       });
+
+      setImageFile(null);
+      setImagePreview('');
       setNewCategory('');
 
       if (!saveNew) {
@@ -136,12 +160,10 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
       const msg =
         error.response?.data?.error || error.response?.data?.message || '❌ Error saving product';
 
-      // 🔔 Duplicate product case
       if (msg.toLowerCase().includes('already exists')) {
         const confirmMerge = window.confirm(t('alerts.productExists'));
 
         if (confirmMerge) {
-          // merge logic will be implemented later
           alert(t('alerts.mergeNotImplemented'));
         }
 
@@ -366,6 +388,35 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
             border: '1px solid #ccc',
           }}
         />
+        <div>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageChange}
+            style={{
+              padding: isMobile ? '6px' : '8px',
+              fontSize: isMobile ? 12 : 14,
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              width: '100%',
+            }}
+          />
+
+          {imagePreview && (
+            <img
+              src={imagePreview}
+              alt="Product Preview"
+              style={{
+                marginTop: '6px',
+                width: '55px',
+                height: '55px',
+                objectFit: 'cover',
+                borderRadius: '8px',
+                border: '1px solid #ddd',
+              }}
+            />
+          )}
+        </div>
       </div>
 
       <textarea
@@ -429,7 +480,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
         {/* Clear */}
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
             setForm({
               name: '',
               rackNo: '',
@@ -440,8 +491,11 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
               stock: '',
               lowStockThreshold: '',
               description: '',
-            })
-          }
+            });
+
+            setImageFile(null);
+            setImagePreview('');
+          }}
           style={{
             background: '#f59e0b',
             color: '#fff',

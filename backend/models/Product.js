@@ -45,6 +45,29 @@ const productSchema = new mongoose.Schema(
       min: 0,
     },
 
+    image: {
+      key: {
+        type: String,
+        default: "",
+      },
+      url: {
+        type: String,
+        default: "",
+      },
+      originalName: {
+        type: String,
+        default: "",
+      },
+      mimeType: {
+        type: String,
+        default: "",
+      },
+      size: {
+        type: Number,
+        default: 0,
+      },
+    },
+
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

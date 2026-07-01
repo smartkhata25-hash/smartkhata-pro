@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { t } from '../i18n/i18n';
 import { FaTrash, FaEdit } from 'react-icons/fa';
+import AttachmentViewerModal from './AttachmentViewerModal';
 
 const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick }) => {
   const [filters, setFilters] = useState({
@@ -13,7 +14,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
     stockFilter: '',
   });
   const [selectedRowIndex, setSelectedRowIndex] = useState(0);
-  // 📱 Mobile detection
+  const [previewAttachment, setPreviewAttachment] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   useEffect(() => {
@@ -353,9 +354,9 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
             }}
           >
             <tr className="bg-gray-100 text-center">
-              <th className="border p-2 w-1/4">{t('inventory.product')}</th>
+              <th className="border p-2 w-[340px]">{t('inventory.product')}</th>
 
-              {!isMobile && <th className="border p-2 w-64">{t('inventory.category')}</th>}
+              {!isMobile && <th className="border p-2 w-36">{t('inventory.category')}</th>}
               {!isMobile && <th className="border p-2 w-24">{t('inventory.rack')}</th>}
               {!isMobile && <th className="border p-2">{t('common.description')}</th>}
               {!isMobile && <th className="border p-2">{t('inventory.unit')}</th>}
@@ -388,9 +389,52 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
                   }
                 }}
               >
-                <td className={`border p-2 ${isMobile ? 'w-2/4' : 'w-1/4'}`}>{p.name}</td>
+                <td className={`border p-2 ${isMobile ? 'w-2/4' : 'w-[340px]'}`}>
+                  <div className="flex items-center justify-center gap-2">
+                    {p.image?.url ? (
+                      <img
+                        src={p.image.url}
+                        alt={p.name}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewAttachment({
+                            url: p.image.url,
+                            type: p.image.mimeType || 'image/webp',
+                          });
+                        }}
+                        style={{
+                          width: isMobile ? '28px' : '34px',
+                          height: isMobile ? '28px' : '34px',
+                          objectFit: 'cover',
+                          borderRadius: '6px',
+                          border: '1px solid #d1d5db',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          width: isMobile ? '28px' : '34px',
+                          height: isMobile ? '28px' : '34px',
+                          borderRadius: '6px',
+                          border: '1px solid #d1d5db',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: isMobile ? '12px' : '14px',
+                          background: '#f3f4f6',
+                          color: '#9ca3af',
+                        }}
+                      >
+                        📦
+                      </span>
+                    )}
 
-                {!isMobile && <td className="border p-2 w-64">{p.categoryId?.name || '-'}</td>}
+                    <span>{p.name}</span>
+                  </div>
+                </td>
+
+                {!isMobile && <td className="border p-2 w-36">{p.categoryId?.name || '-'}</td>}
                 {!isMobile && <td className="border p-2 w-24">{p.rackNo || '-'}</td>}
                 {!isMobile && <td className="border p-2">{p.description || '-'}</td>}
                 {!isMobile && <td className="border p-2">{p.unit}</td>}
@@ -449,6 +493,11 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
           </tbody>
         </table>
       </div>
+
+      <AttachmentViewerModal
+        attachment={previewAttachment}
+        onClose={() => setPreviewAttachment(null)}
+      />
     </div>
   );
 };

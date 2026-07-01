@@ -10,12 +10,16 @@ const getAuthHeader = () => {
   return { headers: { Authorization: `Bearer ${token}` } };
 };
 
-// =======================
 // 📦 PRODUCTS
-// =======================
 
 export const createProduct = async (productData) => {
-  const res = await axios.post(API_URL, productData, getAuthHeader());
+  const token = localStorage.getItem('token');
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  const res = await axios.post(API_URL, productData, { headers });
   return res.data;
 };
 
@@ -47,7 +51,13 @@ export const updateStock = async ({ productId, quantity, action }) => {
 };
 
 export const updateProduct = async (id, updatedData) => {
-  const res = await axios.put(`${API_URL}/${id}`, updatedData, getAuthHeader());
+  const token = localStorage.getItem('token');
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  const res = await axios.put(`${API_URL}/${id}`, updatedData, { headers });
   return res.data;
 };
 
@@ -55,10 +65,6 @@ export const deleteProduct = async (id) => {
   const res = await axios.delete(`${API_URL}/${id}`, getAuthHeader());
   return res.data;
 };
-
-// =======================
-// 🔁 INVENTORY TRANSACTIONS
-// =======================
 
 export const createTransaction = async (transactionData) => {
   const res = await axios.post(TRANS_URL, transactionData, getAuthHeader());
@@ -75,18 +81,12 @@ export const deleteTransaction = async (id) => {
   return res.data;
 };
 
-// =======================
-// 🔍 SEARCH
-// =======================
-
 export const searchProducts = async (query) => {
   const res = await axios.get(`${API_URL}/search?q=${query}`, getAuthHeader());
   return res.data;
 };
 
-// =======================
 // 🔧 INVENTORY ADJUST
-// =======================
 
 export const adjustInventory = async (data) => {
   const res = await axios.post(`${TRANS_URL}/adjust`, data, getAuthHeader());

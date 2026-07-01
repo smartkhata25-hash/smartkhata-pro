@@ -1,5 +1,10 @@
 const Product = require("../models/Product");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
 
 const mongoose = require("mongoose");
 
@@ -80,6 +85,26 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ error: "Product already exists." });
     }
 
+    let imageData = null;
+
+    if (req.file) {
+      const uploaded = await uploadFile({
+        buffer: req.file.buffer,
+        userId,
+        moduleName: "products",
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+
+      imageData = {
+        key: uploaded.key,
+        url: getFileUrl(uploaded.key),
+        originalName: uploaded.originalName,
+        mimeType: uploaded.mimeType,
+        size: uploaded.size,
+      };
+    }
+
     const product = new Product({
       name: req.body.name,
       rackNo: req.body.rackNo || "",
@@ -92,6 +117,9 @@ exports.createProduct = async (req, res) => {
 
       // ✅ Category optional ہے
       categoryId: req.body.categoryId || null,
+
+      // ✅ Product image
+      image: imageData || undefined,
     });
 
     await product.save();
@@ -213,14 +241,6 @@ exports.getProducts = async (req, res) => {
 
 // ✏️ Update Product
 exports.updateProduct = async (req, res) => {
-  console.log("🔥 UPDATE PRODUCT HIT");
-
-  console.log("req.params.id:", req.params.id);
-
-  console.log("req.body:", req.body);
-
-  console.log("req.body.name:", req.body.name);
-
   try {
     const updateData = {
       name: req.body.name,
@@ -231,6 +251,33 @@ exports.updateProduct = async (req, res) => {
       salePrice: req.body.salePrice,
       lowStockThreshold: req.body.lowStockThreshold,
     };
+
+    if (req.file) {
+      const oldProduct = await Product.findOne({
+        _id: req.params.id,
+        userId: req.user.id,
+      });
+
+      if (oldProduct?.image?.key) {
+        await deleteFile(oldProduct.image.key);
+      }
+
+      const uploaded = await uploadFile({
+        buffer: req.file.buffer,
+        userId: req.user.id,
+        moduleName: "products",
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+
+      updateData.image = {
+        key: uploaded.key,
+        url: getFileUrl(uploaded.key),
+        originalName: uploaded.originalName,
+        mimeType: uploaded.mimeType,
+        size: uploaded.size,
+      };
+    }
 
     // ✅ Category optional
     if ("categoryId" in req.body) {

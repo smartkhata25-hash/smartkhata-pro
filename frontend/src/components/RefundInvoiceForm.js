@@ -4,7 +4,7 @@ import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
-import { getAccounts } from '../services/accountService';
+import { getValidPaymentAccounts } from '../services/accountService';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getPrintSettings,
@@ -13,6 +13,7 @@ import {
 } from '../services/printSettingService';
 import ProductDropdown from './ProductDropdown';
 import useFormPersist from '../hooks/useFormPersist';
+import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
 const API = process.env.REACT_APP_API_BASE_URL;
 
@@ -54,6 +55,7 @@ const RefundInvoiceForm = ({
       setOriginalInvoiceId(data.originalInvoiceId || '');
       setIsOpeningRefund(data.isOpening === true);
       setOpeningRefundAmount(data.isOpening === true ? Number(data.totalAmount || 0) : 0);
+      setAttachments(data.attachments || []);
 
       const loadedItems = (data.items || []).map((i) => {
         const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
@@ -95,7 +97,8 @@ const RefundInvoiceForm = ({
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
   const [accounts, setAccounts] = useState([]);
-  const [attachment, setAttachment] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [modalAttachment, setModalAttachment] = useState(null);
   const [customerId, setCustomerId] = useState('');
   const [paymentType, setPaymentType] = useState('cash');
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
@@ -103,6 +106,7 @@ const RefundInvoiceForm = ({
   const [openingRefundAmount, setOpeningRefundAmount] = useState(0);
 
   const scrollRef = useRef();
+  const fileInputRef = useRef(null);
   // 🔵 Print Settings States
   const [showPrintSettings, setShowPrintSettings] = useState(false);
   const [printSettings, setPrintSettings] = useState(null);
@@ -192,19 +196,18 @@ const RefundInvoiceForm = ({
 
     fetchCustomers(token).then(setCustomers);
     fetchSaleParties().then(setParties);
-    getAccounts(token).then((all) => {
-      const filtered = all.filter(
-        (acc) =>
-          ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-          !acc.name?.toLowerCase().startsWith('customer:')
-      );
+    getValidPaymentAccounts().then((accounts) => {
+      const paymentAccounts = Array.isArray(accounts) ? accounts : [];
 
-      setAccounts(filtered);
+      setAccounts(paymentAccounts);
 
-      // 🟢 default cash account
+      // 🟢 Default Hand Cash
       if (refundMethod === 'cash') {
-        const handCash = filtered.find((a) => a.name.toLowerCase().includes('cash'));
-        if (handCash) setAccountId(handCash._id);
+        const handCash = paymentAccounts.find((a) => a.name?.toLowerCase().includes('cash'));
+
+        if (handCash) {
+          setAccountId(handCash._id);
+        }
       }
     });
   }, [token, refundMethod]);
@@ -245,6 +248,13 @@ const RefundInvoiceForm = ({
 
     setNotes('');
     setAccountId('');
+    setAttachments([]);
+    setModalAttachment(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
     localStorage.removeItem('app_state_refund_invoice_draft');
   };
 
@@ -280,6 +290,7 @@ const RefundInvoiceForm = ({
     partyId: selectedCustomerType === 'party' ? customerId : '',
     paymentType,
     originalInvoiceId,
+    attachments,
   };
 
   useEffect(() => {
@@ -389,7 +400,17 @@ const RefundInvoiceForm = ({
         )
       );
 
-      if (attachment) formData.append('attachment', attachment);
+      attachments.forEach((file) => {
+        if (file instanceof File) {
+          formData.append('attachments', file);
+        }
+      });
+
+      const keepAttachmentKeys = attachments
+        .filter((file) => !(file instanceof File))
+        .map((file) => file.key);
+
+      formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
       if (isOpeningRefund) {
         formData.append('isOpening', true);
       }
@@ -628,11 +649,90 @@ const RefundInvoiceForm = ({
           onChange={(e) => setNotes(e.target.value)}
         />
 
-        <input
-          type="file"
-          onChange={(e) => setAttachment(e.target.files[0])}
-          className="border p-1 text-sm col-span-2"
-        />
+        <div className="col-span-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
+            onChange={(e) => {
+              const newFiles = Array.from(e.target.files || []);
+
+              if (attachments.length + newFiles.length > 3) {
+                alert('Maximum 3 attachments allowed');
+                e.target.value = '';
+                return;
+              }
+
+              setAttachments((prev) => [...prev, ...newFiles]);
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={attachments.length >= 3}
+            className={`px-3 py-2 rounded-lg text-sm shadow ${
+              attachments.length >= 3
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            📎 Add Files ({attachments.length}/3)
+          </button>
+
+          {attachments.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap mt-2">
+              {attachments.map((file, index) => {
+                const isNewFile = file instanceof File;
+                const fileUrl = isNewFile
+                  ? URL.createObjectURL(file)
+                  : file.fullUrl || file.url || '';
+
+                return (
+                  <div
+                    key={file.key || index}
+                    className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+                  >
+                    <span className="text-blue-600">📎 File {index + 1}</span>
+
+                    {fileUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalAttachment({
+                            url: fileUrl,
+                            type: file.type || '',
+                          })
+                        }
+                        className="text-green-600 underline"
+                      >
+                        👁 View
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(t('alerts.removeAttachment'))) {
+                          setAttachments((prev) => prev.filter((_, i) => i !== index));
+
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = '';
+                          }
+                        }
+                      }}
+                      className="text-red-500"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {isOpeningRefund && (
@@ -1165,8 +1265,12 @@ shadow-sm hover:shadow-md"
           onClose={() => setShowSearchModal(false)}
         />
       )}
+
+      <AttachmentViewerModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
     </div>
   );
 };
-
 export default RefundInvoiceForm;

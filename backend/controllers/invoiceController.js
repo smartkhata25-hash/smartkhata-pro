@@ -6,7 +6,11 @@ const Account = require("../models/Account");
 
 const Product = require("../models/Product");
 const JournalEntry = require("../models/JournalEntry");
-const { uploadFile, deleteFile } = require("../services/r2FileService");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getCustomerBalanceFromJournal } = require("../utils/journalHelper");
 const {
@@ -18,6 +22,58 @@ const {
   createInventoryEntry,
   deleteTransactionsByReference,
 } = require("../utils/stockHelper");
+
+function formatAttachments(invoice) {
+  if (invoice.attachments?.length > 0) {
+    return invoice.attachments.map((a) => ({
+      ...a,
+      fullUrl: getFileUrl(a.key),
+    }));
+  }
+
+  if (invoice.attachmentUrl) {
+    return [
+      {
+        key: invoice.attachmentUrl,
+        type: invoice.attachmentType || "",
+        size: invoice.attachmentSize || 0,
+        originalName: invoice.attachmentOriginalName || "",
+        fullUrl: getFileUrl(invoice.attachmentUrl),
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function uploadInvoiceFiles(files, userId) {
+  const uploadedAttachments = [];
+
+  if (!files || files.length === 0) return uploadedAttachments;
+
+  if (files.length > 3) {
+    throw new Error("Maximum 3 attachments allowed");
+  }
+
+  for (const file of files) {
+    const uploadedFile = await uploadFile({
+      buffer: file.buffer,
+      userId,
+      moduleName: "invoices",
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    uploadedAttachments.push({
+      key: uploadedFile.key,
+      type: uploadedFile.mimeType,
+      size: uploadedFile.size,
+      originalName: uploadedFile.originalName,
+    });
+  }
+
+  return uploadedAttachments;
+}
 
 // ✅ Create Invoice - UPDATED
 exports.createInvoice = async (req, res) => {
@@ -120,17 +176,7 @@ exports.createInvoice = async (req, res) => {
       });
     }
 
-    let attachmentData = null;
-
-    if (req.file) {
-      attachmentData = await uploadFile({
-        buffer: req.file.buffer,
-        userId,
-        moduleName: "invoices",
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-      });
-    }
+    let uploadedAttachments = await uploadInvoiceFiles(req.files, userId);
 
     const invoice = new Invoice({
       billNo,
@@ -155,10 +201,12 @@ exports.createInvoice = async (req, res) => {
       accountId,
       isOpening: isOpening || false,
       createdBy: userId,
-      attachmentUrl: attachmentData?.key || "",
-      attachmentType: attachmentData?.mimeType || "",
-      attachmentSize: attachmentData?.size || 0,
-      attachmentOriginalName: attachmentData?.originalName || "",
+      attachments: uploadedAttachments,
+
+      attachmentUrl: uploadedAttachments[0]?.key || "",
+      attachmentType: uploadedAttachments[0]?.type || "",
+      attachmentSize: uploadedAttachments[0]?.size || 0,
+      attachmentOriginalName: uploadedAttachments[0]?.originalName || "",
     });
 
     let customer = null;
@@ -208,8 +256,6 @@ exports.createInvoice = async (req, res) => {
     invoice.partyId = party?._id || null;
 
     const saved = await invoice.save();
-
-    console.log("✅ Invoice Saved:", saved._id);
 
     // ✅ Stock Updates (skip for opening invoice)
     if (!isOpening || isOpening === "false") {
@@ -506,9 +552,9 @@ exports.getInvoices = async (req, res) => {
       formatted.push({
         ...inv,
 
-        attachmentFullUrl: inv.attachmentUrl
-          ? require("../services/r2FileService").getFileUrl(inv.attachmentUrl)
-          : "",
+        attachments: formatAttachments(inv),
+
+        attachmentFullUrl: formatAttachments(inv)[0]?.fullUrl || "",
 
         paymentMode: paymentLine?.paymentType || inv.paymentType || "-",
 
@@ -537,9 +583,8 @@ exports.getInvoiceById = async (req, res) => {
         message: "Invoice not found",
       });
 
-    invoice.attachmentFullUrl = invoice.attachmentUrl
-      ? require("../services/r2FileService").getFileUrl(invoice.attachmentUrl)
-      : "";
+    invoice.attachments = formatAttachments(invoice);
+    invoice.attachmentFullUrl = invoice.attachments[0]?.fullUrl || "";
 
     res.json(invoice);
   } catch (error) {
@@ -563,8 +608,10 @@ exports.deleteInvoice = async (req, res) => {
   invoice.isDeleted = true;
   await invoice.save();
 
-  if (invoice.attachmentUrl) {
-    await deleteFile(invoice.attachmentUrl);
+  const attachmentsToDelete = formatAttachments(invoice);
+
+  for (const att of attachmentsToDelete) {
+    await deleteFile(att.key);
   }
 
   // ❗ Delete related inventory transactions
@@ -640,9 +687,49 @@ exports.updateInvoice = async (req, res) => {
       });
     }
 
-    if (req.file && invoice.attachmentUrl) {
-      await deleteFile(invoice.attachmentUrl);
+    let currentAttachments = formatAttachments(invoice).map((a) => ({
+      key: a.key,
+      type: a.type,
+      size: a.size,
+      originalName: a.originalName,
+    }));
+
+    let keepAttachmentKeys = null;
+
+    if (req.body.keepAttachmentKeys) {
+      try {
+        keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys);
+      } catch (err) {
+        keepAttachmentKeys = null;
+      }
     }
+
+    if (Array.isArray(keepAttachmentKeys)) {
+      const removedAttachments = currentAttachments.filter(
+        (att) => !keepAttachmentKeys.includes(att.key),
+      );
+
+      for (const att of removedAttachments) {
+        await deleteFile(att.key);
+      }
+
+      currentAttachments = currentAttachments.filter((att) =>
+        keepAttachmentKeys.includes(att.key),
+      );
+    }
+
+    const newAttachments = await uploadInvoiceFiles(req.files, userId);
+
+    if (currentAttachments.length + newAttachments.length > 3) {
+      for (const att of newAttachments) {
+        await deleteFile(att.key);
+      }
+
+      return res.status(400).json({
+        message: "Maximum 3 attachments allowed",
+      });
+    }
+    const finalAttachments = [...currentAttachments, ...newAttachments];
 
     if (!invoice.isOpening) {
       await deleteTransactionsByReference({
@@ -714,20 +801,12 @@ exports.updateInvoice = async (req, res) => {
     invoice.status =
       finalPaid >= totalAmount ? "Paid" : finalPaid > 0 ? "Partial" : "Unpaid";
 
-    if (req.file) {
-      const uploadedFile = await uploadFile({
-        buffer: req.file.buffer,
-        userId,
-        moduleName: "invoices",
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-      });
+    invoice.attachments = finalAttachments;
 
-      invoice.attachmentUrl = uploadedFile.key;
-      invoice.attachmentType = uploadedFile.mimeType;
-      invoice.attachmentSize = uploadedFile.size;
-      invoice.attachmentOriginalName = uploadedFile.originalName;
-    }
+    invoice.attachmentUrl = finalAttachments[0]?.key || "";
+    invoice.attachmentType = finalAttachments[0]?.type || "";
+    invoice.attachmentSize = finalAttachments[0]?.size || 0;
+    invoice.attachmentOriginalName = finalAttachments[0]?.originalName || "";
 
     // ✅ Skip stock for opening invoice
     if (!isOpening || isOpening === "false") {
@@ -751,16 +830,6 @@ exports.updateInvoice = async (req, res) => {
       $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       isDeleted: false,
     });
-
-    console.log(
-      oldEntries.map((e) => ({
-        id: e._id,
-        sourceType: e.sourceType,
-        isDeleted: e.isDeleted,
-        debitLines: e.lines.filter((l) => l.type === "debit"),
-        creditLines: e.lines.filter((l) => l.type === "credit"),
-      })),
-    );
 
     // ✅ Remove old journal entries
     await JournalEntry.updateMany(
@@ -975,15 +1044,6 @@ exports.updateInvoice = async (req, res) => {
         $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
       });
 
-      console.log(
-        allEntries.map((e) => ({
-          id: e._id,
-          sourceType: e.sourceType,
-          isDeleted: e.isDeleted,
-          debitLines: e.lines.filter((l) => l.type === "debit"),
-          creditLines: e.lines.filter((l) => l.type === "credit"),
-        })),
-      );
       if ((!isOpening || isOpening === "false") && paidAmount > 0) {
         await createPaymentEntry({
           userId: userId,

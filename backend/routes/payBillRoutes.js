@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
-const upload = multer({ dest: "uploads/" });
+const upload = require("../middleware/uploadMiddleware");
 const { protect } = require("../middleware/authMiddleware");
 
 const {
@@ -13,10 +12,10 @@ const {
 } = require("../controllers/payBillController");
 
 // ✅ Secure routes with protect
-router.post("/", protect, upload.single("attachment"), createPayBill);
+router.post("/", protect, upload.array("attachments", 3), createPayBill);
 router.get("/", protect, getAllPayBills);
 router.get("/:id", protect, getPayBillById);
-router.put("/:id", protect, upload.single("attachment"), updatePayBill);
+router.put("/:id", protect, upload.array("attachments", 3), updatePayBill);
 router.delete("/:id", protect, deletePayBill);
 
 module.exports = router;

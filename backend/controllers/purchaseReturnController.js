@@ -12,6 +12,77 @@ const {
 
 const { createPaymentEntry } = require("../utils/paymentService");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
+
+function formatPurchaseReturnAttachments(pr) {
+  if (pr.attachments?.length > 0) {
+    return pr.attachments.map((att) => {
+      const plainAtt = att.toObject ? att.toObject() : att;
+
+      return {
+        ...plainAtt,
+        fullUrl: getFileUrl(plainAtt.key),
+      };
+    });
+  }
+
+  if (pr.attachmentUrl) {
+    return [
+      {
+        key: pr.attachmentUrl,
+        type: pr.attachmentType || "",
+        size: 0,
+        originalName: "",
+        fullUrl: pr.attachmentUrl.startsWith("users/")
+          ? getFileUrl(pr.attachmentUrl)
+          : `/uploads/${pr.attachmentUrl}`,
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function uploadPurchaseReturnFiles(files, userId) {
+  const attachments = [];
+
+  if (!files || files.length === 0) return attachments;
+
+  if (files.length > 3) {
+    throw new Error("Maximum 3 attachments allowed");
+  }
+
+  for (const file of files) {
+    const uploaded = await uploadFile({
+      buffer: file.buffer,
+      userId,
+      moduleName: "purchase-returns",
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    attachments.push({
+      key: uploaded.key,
+      type: uploaded.mimeType,
+      size: uploaded.size,
+      originalName: uploaded.originalName,
+    });
+  }
+
+  return attachments;
+}
+
+async function deletePurchaseReturnAttachment(att) {
+  if (!att?.key) return;
+
+  if (att.key.startsWith("users/")) {
+    await deleteFile(att.key);
+  }
+}
 
 /* =========================================================
    ✅ CREATE PURCHASE RETURN
@@ -37,6 +108,10 @@ exports.createPurchaseReturn = async (req, res) => {
     } = req.body;
 
     const items = JSON.parse(req.body.items || "[]");
+
+    const attachments = await uploadPurchaseReturnFiles(req.files, userId);
+    const attachmentUrl = attachments[0]?.key || "";
+    const attachmentType = attachments[0]?.type || "";
 
     /* =============================
        BASIC VALIDATION
@@ -147,8 +222,9 @@ exports.createPurchaseReturn = async (req, res) => {
       notes,
       items,
       createdBy: userId,
-      attachmentUrl: req.file?.filename || "",
-      attachmentType: req.file?.mimetype?.split("/")[0] || "",
+      attachments,
+      attachmentUrl,
+      attachmentType,
     });
 
     if (originalInvoiceId) {
@@ -256,8 +332,8 @@ exports.createPurchaseReturn = async (req, res) => {
       createdBy: userId,
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
-      attachmentUrl: req.file?.filename || "",
-      attachmentType: req.file?.mimetype?.split("/")[0] || "",
+      attachmentUrl,
+      attachmentType,
       lines,
     });
 
@@ -352,15 +428,15 @@ exports.getPurchaseReturnById = async (req, res) => {
 
     paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
 
+    const attachments = formatPurchaseReturnAttachments(pr);
+
     return res.json({
       ...pr.toObject(),
-
+      attachments,
+      attachmentFullUrl: attachments[0]?.fullUrl || "",
       paymentMode: paymentLine?.paymentType || pr.paymentType || "-",
-
       accountId: paymentLine?.account?._id || pr.accountId || "",
-
       accountName: paymentLine?.account?.name || "-",
-
       attachmentUrl: pr.attachmentUrl || "",
       attachmentType: pr.attachmentType || "",
     });
@@ -407,11 +483,13 @@ exports.getAllPurchaseReturns = async (req, res) => {
 
       paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
 
+      const attachments = formatPurchaseReturnAttachments(pr);
+
       formatted.push({
         ...pr,
-
+        attachments,
+        attachmentFullUrl: attachments[0]?.fullUrl || "",
         paymentMode: paymentLine?.paymentType || pr.paymentType || "-",
-
         accountName: paymentLine?.account?.name || "-",
       });
     }
@@ -466,6 +544,50 @@ exports.updatePurchaseReturn = async (req, res) => {
         error: "Purchase Return not found",
       });
     }
+
+    let attachments = formatPurchaseReturnAttachments(pr).map((att) => ({
+      key: att.key,
+      type: att.type || "",
+      size: att.size || 0,
+      originalName: att.originalName || "",
+    }));
+
+    let keepAttachmentKeys = [];
+
+    try {
+      keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys || "[]");
+    } catch (err) {
+      keepAttachmentKeys = [];
+    }
+
+    const removedAttachments = attachments.filter(
+      (att) => !keepAttachmentKeys.includes(att.key),
+    );
+
+    for (const att of removedAttachments) {
+      await deletePurchaseReturnAttachment(att);
+    }
+
+    attachments = attachments.filter((att) =>
+      keepAttachmentKeys.includes(att.key),
+    );
+
+    const newAttachments = await uploadPurchaseReturnFiles(req.files, userId);
+
+    if (attachments.length + newAttachments.length > 3) {
+      for (const att of newAttachments) {
+        await deletePurchaseReturnAttachment(att);
+      }
+
+      return res.status(400).json({
+        error: "Maximum 3 attachments allowed",
+      });
+    }
+
+    attachments = [...attachments, ...newAttachments];
+
+    const attachmentUrl = attachments[0]?.key || "";
+    const attachmentType = attachments[0]?.type || "";
 
     /* =============================
        BASIC VALIDATION
@@ -670,10 +792,9 @@ exports.updatePurchaseReturn = async (req, res) => {
     pr.notes = notes;
     pr.items = items;
 
-    if (req.file) {
-      pr.attachmentUrl = req.file.filename;
-      pr.attachmentType = req.file.mimetype?.split("/")[0] || "";
-    }
+    pr.attachments = attachments;
+    pr.attachmentUrl = attachmentUrl;
+    pr.attachmentType = attachmentType;
 
     await pr.save();
 
@@ -898,6 +1019,12 @@ exports.deletePurchaseReturn = async (req, res) => {
 
     if (party?.account) {
       await recalculateAccountBalance(party.account);
+    }
+
+    const attachmentsToDelete = formatPurchaseReturnAttachments(pr);
+
+    for (const att of attachmentsToDelete) {
+      await deletePurchaseReturnAttachment(att);
     }
 
     /* =============================

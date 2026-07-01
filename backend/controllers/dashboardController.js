@@ -53,8 +53,14 @@ const getDashboardSummary = async (req, res) => {
       filterType,
     });
 
-    const { totalSales, operatingExpenses, netProfit, grossProfit, cogs } =
-      profitData;
+    const {
+      totalSales,
+      netSales,
+      operatingExpenses,
+      netProfit,
+      grossProfit,
+      cogs,
+    } = profitData;
 
     /* ======================================================
    ✅ OTHER DASHBOARD DATA
@@ -233,7 +239,7 @@ const getDashboardSummary = async (req, res) => {
       .reduce((sum, item) => sum + Number(item.total || 0), 0);
 
     res.json({
-      totalSales: Number(totalSales.toFixed(2)),
+      totalSales: Number(netSales.toFixed(2)),
       totalExpenses: Number(dashboardExpenses.toFixed(2)),
       netProfit: Number(netProfit.toFixed(2)),
       grossProfit: Number(grossProfit.toFixed(2)),

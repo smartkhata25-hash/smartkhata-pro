@@ -15,6 +15,7 @@ import useFormPersist from '../hooks/useFormPersist';
 import SupplierForm from './SupplierForm';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
+import AttachmentViewerModal from './AttachmentViewerModal';
 import { useNavigate } from 'react-router-dom';
 const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
@@ -65,7 +66,8 @@ const PurchaseInvoiceForm = () => {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [paidAmount, setPaidAmount] = useState(0);
-  const [attachment, setAttachment] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [modalAttachment, setModalAttachment] = useState(null);
 
   const [paymentType, setPaymentType] = useState('cash');
 
@@ -148,6 +150,7 @@ const PurchaseInvoiceForm = () => {
       setPaidAmount(invoice.paidAmount || 0);
       setPaymentType(invoice.paymentType || 'credit');
       setSelectedAccountId(invoice.accountId || '');
+      setAttachments(invoice.attachments || []);
       const openingMode =
         invoice.isOpening === true ||
         invoice.billNo === 'OPENING' ||
@@ -399,7 +402,15 @@ const PurchaseInvoiceForm = () => {
   };
 
   const handleFileChange = (e) => {
-    setAttachment(e.target.files[0]);
+    const newFiles = Array.from(e.target.files || []);
+
+    if (attachments.length + newFiles.length > 3) {
+      alert('Maximum 3 attachments allowed');
+      e.target.value = '';
+      return;
+    }
+
+    setAttachments((prev) => [...prev, ...newFiles]);
   };
   const savePurchaseInvoice = async () => {
     if (paidAmount > 0 && (!selectedAccountId || selectedAccountId.trim() === '')) {
@@ -467,9 +478,17 @@ const PurchaseInvoiceForm = () => {
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
+    attachments.forEach((file) => {
+      if (file instanceof File) {
+        formData.append('attachments', file);
+      }
+    });
 
-    if (attachment) formData.append('attachment', attachment);
+    const keepAttachmentKeys = attachments
+      .filter((file) => !(file instanceof File))
+      .map((file) => file.key);
 
+    formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
@@ -517,7 +536,12 @@ const PurchaseInvoiceForm = () => {
       setPaidAmount(0);
       setSelectedAccountId('');
 
-      setAttachment(null);
+      setAttachments([]);
+      setModalAttachment(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       setShowHistory(false);
       setItemHistory([]);
       setSelectedProductId(null);
@@ -592,7 +616,17 @@ const PurchaseInvoiceForm = () => {
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
-    if (attachment) formData.append('attachment', attachment);
+    attachments.forEach((file) => {
+      if (file instanceof File) {
+        formData.append('attachments', file);
+      }
+    });
+
+    const keepAttachmentKeys = attachments
+      .filter((file) => !(file instanceof File))
+      .map((file) => file.key);
+
+    formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
@@ -682,7 +716,12 @@ const PurchaseInvoiceForm = () => {
     setDiscountAmount(0);
     setPaidAmount(0);
     setSelectedAccountId('');
-    setAttachment(null);
+    setAttachments([]);
+    setModalAttachment(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     setShowHistory(false);
     setItemHistory([]);
     setSelectedProductId(null);
@@ -758,7 +797,17 @@ const PurchaseInvoiceForm = () => {
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
-    if (attachment) formData.append('attachment', attachment);
+    attachments.forEach((file) => {
+      if (file instanceof File) {
+        formData.append('attachments', file);
+      }
+    });
+
+    const keepAttachmentKeys = attachments
+      .filter((file) => !(file instanceof File))
+      .map((file) => file.key);
+
+    formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
@@ -1081,12 +1130,76 @@ const PurchaseInvoiceForm = () => {
                       </select>
                       {accountError && <p className="text-red-600 text-xs mt-1">{accountError}</p>}
 
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileChange}
-                        className="border px-2 py-0 text-sm h-8 w-36"
-                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          hidden
+                          accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
+                          onChange={handleFileChange}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={attachments.length >= 3}
+                          className={`px-3 py-1.5 rounded-lg text-sm shadow ${
+                            attachments.length >= 3
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-blue-600 text-white hover:bg-blue-700'
+                          }`}
+                        >
+                          📎 Add Files ({attachments.length}/3)
+                        </button>
+
+                        {attachments.map((file, index) => {
+                          const isNewFile = file instanceof File;
+                          const fileUrl = isNewFile
+                            ? URL.createObjectURL(file)
+                            : file.fullUrl || file.url || '';
+
+                          return (
+                            <div
+                              key={file.key || index}
+                              className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+                            >
+                              <span className="text-blue-600">📎 File {index + 1}</span>
+
+                              {fileUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setModalAttachment({
+                                      url: fileUrl,
+                                      type: file.type || '',
+                                    })
+                                  }
+                                  className="text-green-600 underline"
+                                >
+                                  👁 View
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(t('alerts.removeAttachment'))) {
+                                    setAttachments((prev) => prev.filter((_, i) => i !== index));
+
+                                    if (fileInputRef.current) {
+                                      fileInputRef.current.value = '';
+                                    }
+                                  }
+                                }}
+                                className="text-red-500"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* SECOND ROW — Buttons */}
@@ -1337,6 +1450,10 @@ const PurchaseInvoiceForm = () => {
           }}
         />
       )}
+      <AttachmentViewerModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
     </>
   );
 };

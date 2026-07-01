@@ -90,6 +90,30 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       required: false,
     },
 
+    attachments: [
+      {
+        key: {
+          type: String,
+          default: "",
+        },
+
+        type: {
+          type: String,
+          default: "",
+        },
+
+        size: {
+          type: Number,
+          default: 0,
+        },
+
+        originalName: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+
     attachment: {
       type: String,
       default: "",
@@ -99,7 +123,6 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

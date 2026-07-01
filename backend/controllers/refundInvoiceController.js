@@ -15,6 +15,11 @@ const Counter = require("../models/Counter");
 
 const { createPaymentEntry } = require("../utils/paymentService");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
 
 // ✅ Create Refund - Updated Version (with InventoryTransaction)
 exports.createRefundInvoice = async (req, res) => {
@@ -137,6 +142,22 @@ exports.createRefundInvoice = async (req, res) => {
 
     const refundBillNo = `R-${counter.seq}`;
 
+    const attachments = [];
+
+    if (req.files?.length) {
+      for (const file of req.files) {
+        const uploaded = await uploadFile({
+          buffer: file.buffer,
+          userId,
+          moduleName: "refunds",
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+        });
+
+        attachments.push(uploaded);
+      }
+    }
+
     // ✅ Save Refund Invoice
     const refundInvoice = new RefundInvoice({
       billNo: refundBillNo,
@@ -154,8 +175,7 @@ exports.createRefundInvoice = async (req, res) => {
       isOpening: isOpening || false,
       items,
       createdBy: userId,
-      attachmentUrl: req.file?.filename || "",
-      attachmentType: req.file?.mimetype?.split("/")[0] || "",
+      attachments,
     });
 
     if (originalInvoiceId) {
@@ -309,8 +329,10 @@ exports.createRefundInvoice = async (req, res) => {
       createdBy: userId,
       customerId: customer?._id || null,
       partyId: party?._id || null,
-      attachmentUrl: req.file?.filename || "",
-      attachmentType: req.file?.mimetype?.split("/")[0] || "",
+      attachmentUrl:
+        attachments.length > 0 ? getFileUrl(attachments[0].key) : "",
+
+      attachmentType: attachments.length > 0 ? attachments[0].type : "",
       lines,
     });
 
@@ -402,8 +424,33 @@ exports.getRefundById = async (req, res) => {
       (line) => line.type === "credit" && line.paymentType,
     );
 
+    const formattedAttachments =
+      refund.attachments?.length > 0
+        ? refund.attachments.map((att) => {
+            const plainAtt = att.toObject ? att.toObject() : att;
+
+            return {
+              ...plainAtt,
+              fullUrl: getFileUrl(plainAtt.key),
+            };
+          })
+        : refund.attachmentUrl
+          ? [
+              {
+                key: refund.attachmentUrl,
+                type: refund.attachmentType || "",
+                size: 0,
+                originalName: "",
+                fullUrl: refund.attachmentUrl.startsWith("users/")
+                  ? getFileUrl(refund.attachmentUrl)
+                  : `/uploads/${refund.attachmentUrl}`,
+              },
+            ]
+          : [];
+
     res.json({
       ...refund.toObject(),
+      attachments: formattedAttachments,
       paymentMode: paymentLine?.paymentType || refund.paymentType || "cash",
       accountId: paymentLine?.account?._id || "",
       accountName: paymentLine?.account?.name || "-",
@@ -449,6 +496,71 @@ exports.updateRefundInvoice = async (req, res) => {
       typeof req.body.items === "string"
         ? JSON.parse(req.body.items || "[]")
         : req.body.items || [];
+
+    let attachments = refund.attachments?.length
+      ? refund.attachments.map((att) => ({
+          key: att.key,
+          type: att.type || "",
+          size: att.size || 0,
+          originalName: att.originalName || "",
+        }))
+      : refund.attachmentUrl
+        ? [
+            {
+              key: refund.attachmentUrl,
+              type: refund.attachmentType || "",
+              size: 0,
+              originalName: "",
+            },
+          ]
+        : [];
+
+    let keepAttachmentKeys = [];
+
+    try {
+      keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys || "[]");
+    } catch (err) {
+      keepAttachmentKeys = [];
+    }
+
+    const removedAttachments = attachments.filter(
+      (att) => !keepAttachmentKeys.includes(att.key),
+    );
+
+    for (const att of removedAttachments) {
+      if (att.key?.startsWith("users/")) {
+        await deleteFile(att.key);
+      }
+    }
+
+    attachments = attachments.filter((att) =>
+      keepAttachmentKeys.includes(att.key),
+    );
+
+    if (req.files?.length) {
+      for (const file of req.files) {
+        const uploaded = await uploadFile({
+          buffer: file.buffer,
+          userId,
+          moduleName: "refunds",
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+        });
+
+        attachments.push({
+          key: uploaded.key,
+          type: uploaded.mimeType,
+          size: uploaded.size,
+          originalName: uploaded.originalName,
+        });
+      }
+    }
+
+    if (attachments.length > 3) {
+      return res.status(400).json({
+        error: "Maximum 3 attachments allowed",
+      });
+    }
 
     // ✅ Normal refund needs items
     if ((!isOpening || isOpening === "false") && items.length === 0) {
@@ -537,10 +649,12 @@ exports.updateRefundInvoice = async (req, res) => {
 
     refund.items = items;
 
-    if (req.file) {
-      refund.attachmentUrl = req.file.filename;
-      refund.attachmentType = req.file.mimetype?.split("/")[0] || "";
-    }
+    refund.attachments = attachments;
+
+    refund.attachmentUrl =
+      attachments.length > 0 ? getFileUrl(attachments[0].key) : "";
+
+    refund.attachmentType = attachments.length > 0 ? attachments[0].type : "";
 
     if (originalInvoiceId) {
       const originalInvoice = await Invoice.findById(originalInvoiceId);
@@ -716,8 +830,10 @@ exports.updateRefundInvoice = async (req, res) => {
       createdBy: userId,
       customerId: customer?._id || null,
       partyId: party?._id || null,
-      attachmentUrl: refund.attachmentUrl || "",
-      attachmentType: refund.attachmentType || "",
+      attachmentUrl:
+        attachments.length > 0 ? getFileUrl(attachments[0].key) : "",
+
+      attachmentType: attachments.length > 0 ? attachments[0].type : "",
       lines,
     });
 
@@ -829,6 +945,25 @@ exports.getAllRefunds = async (req, res) => {
 
       formatted.push({
         ...r,
+        attachments:
+          r.attachments?.length > 0
+            ? r.attachments.map((att) => ({
+                ...att,
+                fullUrl: getFileUrl(att.key),
+              }))
+            : r.attachmentUrl
+              ? [
+                  {
+                    key: r.attachmentUrl,
+                    type: r.attachmentType || "",
+                    size: 0,
+                    originalName: "",
+                    fullUrl: r.attachmentUrl.startsWith("users/")
+                      ? getFileUrl(r.attachmentUrl)
+                      : `/uploads/${r.attachmentUrl}`,
+                  },
+                ]
+              : [],
         paymentMode: paymentLine?.paymentType || r.paymentType || "-",
         accountName: paymentLine?.account?.name || "-",
       });
@@ -853,12 +988,6 @@ exports.deleteRefundInvoice = async (req, res) => {
       createdBy: userId,
     });
 
-    if (!refundInvoice) {
-      return res
-        .status(404)
-        .json({ error: "Refund not found or already deleted" });
-    }
-
     // 🗑️ Step 2: Delete InventoryTransaction
     if (!refundInvoice.isOpening) {
       await deleteTransactionsByReference({
@@ -882,6 +1011,12 @@ exports.deleteRefundInvoice = async (req, res) => {
         $set: { isDeleted: true },
       },
     );
+
+    for (const att of refundInvoice.attachments || []) {
+      if (att.key?.startsWith("users/")) {
+        await deleteFile(att.key);
+      }
+    }
 
     // 🧾 Step 4: Delete refund invoice itself
     refundInvoice.isDeleted = true;

@@ -12,13 +12,94 @@ const Product = require("../models/Product");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
 
-const path = require("path");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
 const {
   createPaymentEntry,
   createDiscountEntry,
 } = require("../utils/paymentService");
+
+function formatPurchaseAttachments(invoice) {
+  if (invoice.attachments?.length > 0) {
+    return invoice.attachments.map((att) => {
+      const plainAtt = att.toObject ? att.toObject() : att;
+
+      return {
+        ...plainAtt,
+        fullUrl: getFileUrl(plainAtt.key),
+      };
+    });
+  }
+
+  if (invoice.attachment) {
+    return [
+      {
+        key: invoice.attachment,
+        type: invoice.attachmentType || "",
+        size: 0,
+        originalName: "",
+        fullUrl: invoice.attachment.startsWith("users/")
+          ? getFileUrl(invoice.attachment)
+          : `/${invoice.attachment}`,
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function uploadPurchaseFiles(files, userId) {
+  const attachments = [];
+
+  if (!files || files.length === 0) return attachments;
+
+  if (files.length > 3) {
+    throw new Error("Maximum 3 attachments allowed");
+  }
+
+  for (const file of files) {
+    const uploaded = await uploadFile({
+      buffer: file.buffer,
+      userId,
+      moduleName: "purchase-invoices",
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    attachments.push({
+      key: uploaded.key,
+      type: uploaded.mimeType,
+      size: uploaded.size,
+      originalName: uploaded.originalName,
+    });
+  }
+
+  return attachments;
+}
+
+async function deletePurchaseAttachment(att) {
+  if (!att?.key) return;
+
+  if (att.key.startsWith("users/")) {
+    await deleteFile(att.key);
+    return;
+  }
+
+  if (att.key.startsWith("uploads/")) {
+    try {
+      if (fs.existsSync(att.key)) {
+        fs.unlinkSync(att.key);
+      }
+    } catch (err) {
+      console.warn("Old local purchase attachment delete failed:", err.message);
+    }
+  }
+}
 
 // ✅ Create Purchase Invoice
 const addPurchaseInvoice = asyncHandler(async (req, res) => {
@@ -53,12 +134,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
   const userId = req.user?.id || req.userId;
 
-  let attachmentPath = "";
-  let attachmentType = "";
-  if (req.file) {
-    attachmentPath = req.file.path.replace(/\\/g, "/");
-    attachmentType = req.file.mimetype?.split("/")[0] || "";
-  }
+  const attachments = await uploadPurchaseFiles(req.files, userId);
+
+  const attachmentPath = attachments[0]?.key || "";
+  const attachmentType = attachments[0]?.type || "";
 
   let supplier = null;
   let party = null;
@@ -130,6 +209,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     paymentType,
     status,
     accountId: paidAmount > 0 ? accountId : null,
+    attachments,
     attachment: attachmentPath,
     attachmentType,
     items: parsedItems,
@@ -204,9 +284,8 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     attachmentType,
   });
 
-  /* =============================
-   CREATE DISCOUNT ENTRY
-============================== */
+  //CREATE DISCOUNT ENTRY
+
   if (Number(discountAmount || 0) > 0) {
     await createDiscountEntry({
       userId,
@@ -295,11 +374,19 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
     _id: req.params.id,
     isDeleted: false,
   }).populate("items.productId");
+
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
   }
-  res.status(200).json(invoice);
+
+  const formattedAttachments = formatPurchaseAttachments(invoice);
+
+  res.status(200).json({
+    ...invoice.toObject(),
+    attachments: formattedAttachments,
+    attachmentFullUrl: formattedAttachments[0]?.fullUrl || "",
+  });
 });
 
 // ✅ UPDATE PURCHASE INVOICE (SAFE PRO VERSION)
@@ -343,9 +430,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   const userId = req.user?.id || req.userId;
 
-  /* =============================
-     SAVE OLD ACCOUNTS
-  ============================== */
+  //SAVE OLD ACCOUNTS
+
   const oldSupplier = invoice.supplier
     ? await Supplier.findById(invoice.supplier)
     : null;
@@ -360,36 +446,62 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   const oldPaymentAccount = invoice.accountId || null;
 
-  /* =============================
-     ATTACHMENT HANDLING
-  ============================== */
-  let attachmentPath = invoice.attachment;
-  let attachmentType = "";
+  // ATTACHMENT HANDLING
 
-  if (req.file) {
-    if (invoice.attachment && fs.existsSync(invoice.attachment)) {
-      fs.unlinkSync(invoice.attachment);
-    }
+  let attachments = formatPurchaseAttachments(invoice).map((att) => ({
+    key: att.key,
+    type: att.type || "",
+    size: att.size || 0,
+    originalName: att.originalName || "",
+  }));
 
-    attachmentPath = req.file.path.replace(/\\/g, "/");
+  let keepAttachmentKeys = [];
 
-    attachmentType = req.file.mimetype?.split("/")[0] || "";
-  } else {
-    attachmentType = invoice.attachmentType || "";
+  try {
+    keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys || "[]");
+  } catch (err) {
+    keepAttachmentKeys = [];
   }
 
-  /* =============================
-     REMOVE OLD STOCK
-  ============================== */
+  const removedAttachments = attachments.filter(
+    (att) => !keepAttachmentKeys.includes(att.key),
+  );
+
+  for (const att of removedAttachments) {
+    await deletePurchaseAttachment(att);
+  }
+
+  attachments = attachments.filter((att) =>
+    keepAttachmentKeys.includes(att.key),
+  );
+
+  const newAttachments = await uploadPurchaseFiles(req.files, userId);
+
+  if (attachments.length + newAttachments.length > 3) {
+    for (const att of newAttachments) {
+      await deletePurchaseAttachment(att);
+    }
+
+    return res.status(400).json({
+      message: "Maximum 3 attachments allowed",
+    });
+  }
+
+  attachments = [...attachments, ...newAttachments];
+
+  const attachmentPath = attachments[0]?.key || "";
+  const attachmentType = attachments[0]?.type || "";
+
+  // REMOVE OLD STOCK
+
   await deleteTransactionsByReference({
     referenceId: invoice._id,
     invoiceModel: "PurchaseInvoice",
     userId,
   });
 
-  /* =============================
-     SOFT DELETE OLD JOURNALS
-  ============================== */
+  //SOFT DELETE OLD JOURNALS
+
   await JournalEntry.updateMany(
     {
       $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
@@ -443,9 +555,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     counterPartyAccountId = supplier.account;
   }
 
-  /* =============================
-     STATUS CALCULATION
-  ============================== */
+  // STATUS CALCULATION
+
   let status = "Unpaid";
 
   if (paidAmount >= grandTotal) {
@@ -454,9 +565,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     status = "Partial";
   }
 
-  /* =============================
-     UPDATE INVOICE
-  ============================== */
+  // UPDATE INVOICE
+
   Object.assign(invoice, {
     billNo,
     invoiceDate: parsedInvoiceDate,
@@ -473,6 +583,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     paymentType,
     status,
     accountId: paidAmount > 0 ? accountId : null,
+    attachments,
     attachment: attachmentPath,
     attachmentType,
     items: parsedItems,
@@ -481,9 +592,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   await invoice.save();
 
-  /* =============================
-     INVENTORY ACCOUNT
-  ============================== */
+  //INVENTORY ACCOUNT
+
   const inventoryAccount = await Account.findOne({
     code: "INVENTORY",
     userId,
@@ -493,9 +603,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     throw new Error("Inventory account not found");
   }
 
-  /* =============================
-     CREATE JOURNAL ENTRY
-  ============================== */
+  // CREATE JOURNAL ENTRY
+
   const openingBalanceAccount = await Account.findOne({
     code: "OPENING_BALANCE",
     userId,
@@ -548,9 +657,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     attachmentType,
   });
 
-  /* =============================
-   CREATE DISCOUNT ENTRY
-============================== */
+  //CREATE DISCOUNT ENTRY
+
   if (Number(discountAmount || 0) > 0) {
     await createDiscountEntry({
       userId,
@@ -580,9 +688,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  /* =============================
-     CREATE PAYMENT ENTRY
-  ============================== */
+  // CREATE PAYMENT ENTRY
+
   if (paidAmount > 0 && accountId) {
     await createPaymentEntry({
       userId,
@@ -603,12 +710,10 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  /* =============================
-     RE-APPLY STOCK
-  ============================== */
+  // RE-APPLY STOCK
+
   if (!(isOpening === true || isOpening === "true")) {
     for (const item of parsedItems) {
-      // ✅ Update Product Prices
       await Product.findByIdAndUpdate(item.productId, {
         unitCost: item.price || 0,
         salePrice: item.salePrice || 0,
@@ -627,18 +732,17 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       });
     }
   }
-  /* =============================
-     RECALCULATE NEW ACCOUNTS
-  ============================== */
+
+  // RECALCULATE NEW ACCOUNTS
+
   await recalculateAccountBalance(counterPartyAccountId);
 
   if (accountId) {
     await recalculateAccountBalance(accountId);
   }
 
-  /* =============================
-     RECALCULATE OLD SUPPLIER ACCOUNT
-  ============================== */
+  // RECALCULATE OLD SUPPLIER ACCOUNT
+
   if (
     oldPartyAccount &&
     oldPartyAccount.toString() !== counterPartyAccountId.toString()
@@ -646,9 +750,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     await recalculateAccountBalance(oldPartyAccount);
   }
 
-  /* =============================
-     RECALCULATE OLD PAYMENT ACCOUNT
-  ============================== */
+  // RECALCULATE OLD PAYMENT ACCOUNT
+
   if (
     oldPaymentAccount &&
     accountId &&
@@ -712,6 +815,12 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
     { isDeleted: true },
   );
 
+  const attachmentsToDelete = formatPurchaseAttachments(invoice);
+
+  for (const att of attachmentsToDelete) {
+    await deletePurchaseAttachment(att);
+  }
+
   // ✅ DELETE INVOICE
   invoice.isDeleted = true;
   await invoice.save();
@@ -770,7 +879,12 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
     if (inv.paidAmount >= inv.grandTotal) status = "Paid";
     else if (inv.paidAmount > 0) status = "Partial";
 
-    return { ...inv, status };
+    return {
+      ...inv,
+      status,
+      attachments: formatPurchaseAttachments(inv),
+      attachmentFullUrl: formatPurchaseAttachments(inv)[0]?.fullUrl || "",
+    };
   });
 
   res.status(200).json(formatted);
@@ -852,7 +966,18 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
     .populate("items.productId")
     .sort({ createdAt: -1 });
 
-  res.status(200).json(invoices);
+  const formatted = invoices.map((inv) => {
+    const obj = inv.toObject ? inv.toObject() : inv;
+    const attachments = formatPurchaseAttachments(obj);
+
+    return {
+      ...obj,
+      attachments,
+      attachmentFullUrl: attachments[0]?.fullUrl || "",
+    };
+  });
+
+  res.status(200).json(formatted);
 });
 
 const getItemPurchaseHistory = asyncHandler(async (req, res) => {

@@ -6,6 +6,7 @@ const {
 } = require("@aws-sdk/client-s3");
 
 const path = require("path");
+const sharp = require("sharp");
 
 const s3 = new S3Client({
   region: "auto",
@@ -20,8 +21,9 @@ const s3 = new S3Client({
    BUILD FILE KEY
 ===================================================== */
 
-function buildFileKey({ userId, moduleName, originalName }) {
-  const ext = path.extname(originalName || "");
+function buildFileKey({ userId, moduleName, originalName, mimeType }) {
+  const isImage = mimeType?.startsWith("image/");
+  const ext = isImage ? ".webp" : path.extname(originalName || "");
 
   const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`;
 
@@ -43,22 +45,45 @@ async function uploadFile({
     userId,
     moduleName,
     originalName,
+    mimeType,
   });
+
+  let finalBuffer = buffer;
+  let finalMimeType = mimeType || "application/octet-stream";
+
+  if (mimeType?.startsWith("image/")) {
+    if (buffer.length > 5 * 1024 * 1024) {
+      throw new Error("Image size must be 5MB or less");
+    }
+
+    finalBuffer = await sharp(buffer)
+      .rotate()
+      .resize({
+        width: 1600,
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: 75,
+      })
+      .toBuffer();
+
+    finalMimeType = "image/webp";
+  }
 
   const command = new PutObjectCommand({
     Bucket: process.env.R2_BUCKET,
     Key: key,
-    Body: buffer,
-    ContentType: mimeType || "application/octet-stream",
+    Body: finalBuffer,
+    ContentType: finalMimeType,
   });
 
   await s3.send(command);
 
   return {
     key,
-    size: buffer.length,
+    size: finalBuffer.length,
     originalName,
-    mimeType,
+    mimeType: finalMimeType,
   };
 }
 

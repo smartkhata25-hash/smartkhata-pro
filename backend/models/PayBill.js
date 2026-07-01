@@ -58,6 +58,30 @@ const payBillSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    attachments: [
+      {
+        key: {
+          type: String,
+          default: "",
+        },
+
+        type: {
+          type: String,
+          default: "",
+        },
+
+        size: {
+          type: Number,
+          default: 0,
+        },
+
+        originalName: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+
     attachment: {
       type: String,
       default: "",

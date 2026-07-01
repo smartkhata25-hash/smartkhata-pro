@@ -3,16 +3,120 @@ const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
 const Party = require("../models/Party");
+
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const {
   createPaymentEntry,
   createReceivePaymentDiscountEntry,
 } = require("../utils/paymentService");
 
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
+
 const fs = require("fs");
 const path = require("path");
 
-// ✅ Create Receive Payment (CENTRALIZED VERSION)
+/* =====================================================
+   ATTACHMENT HELPERS
+===================================================== */
+
+function formatAttachments(payment) {
+  if (payment.attachments?.length > 0) {
+    return payment.attachments.map((att) => {
+      const plainAtt = att.toObject ? att.toObject() : att;
+
+      return {
+        ...plainAtt,
+        fullUrl: getFileUrl(plainAtt.key),
+      };
+    });
+  }
+
+  if (payment.attachment) {
+    const oldAttachment = payment.attachment;
+
+    return [
+      {
+        key: oldAttachment,
+        type: "",
+        size: 0,
+        originalName: "",
+        fullUrl: oldAttachment.startsWith("users/")
+          ? getFileUrl(oldAttachment)
+          : `/${oldAttachment}`,
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function uploadReceivePaymentFiles(files, userId) {
+  const uploadedAttachments = [];
+
+  if (!files || files.length === 0) return uploadedAttachments;
+
+  if (files.length > 3) {
+    throw new Error("Maximum 3 attachments allowed");
+  }
+
+  for (const file of files) {
+    const uploadedFile = await uploadFile({
+      buffer: file.buffer,
+      userId,
+      moduleName: "receive-payments",
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    uploadedAttachments.push({
+      key: uploadedFile.key,
+      type: uploadedFile.mimeType,
+      size: uploadedFile.size,
+      originalName: uploadedFile.originalName,
+    });
+  }
+
+  return uploadedAttachments;
+}
+
+async function deleteAttachmentSafe(att) {
+  if (!att?.key) return;
+
+  if (att.key.startsWith("users/")) {
+    await deleteFile(att.key);
+    return;
+  }
+
+  if (att.key.startsWith("uploads/")) {
+    try {
+      const filePath = path.resolve(att.key);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (err) {
+      console.warn("⚠️ Old local attachment delete failed:", err.message);
+    }
+  }
+}
+
+async function safeRecalculate(id) {
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    try {
+      await recalculateAccountBalance(id);
+    } catch (err) {
+      console.warn("⚠️ Error recalculating balance:", err.message);
+    }
+  }
+}
+
+/* =====================================================
+   CREATE RECEIVE PAYMENT
+===================================================== */
+
 exports.createReceivePayment = async (req, res) => {
   try {
     const {
@@ -27,6 +131,7 @@ exports.createReceivePayment = async (req, res) => {
     } = req.body;
 
     const userId = req.user?.id || req.userId;
+
     if (!userId) {
       return res.status(400).json({ error: "User ID is required." });
     }
@@ -53,7 +158,10 @@ exports.createReceivePayment = async (req, res) => {
       return res.status(400).json({ error: "Invalid payment amount" });
     }
 
-    const attachmentPath = req.file ? `uploads/${req.file.filename}` : "";
+    const uploadedAttachments = await uploadReceivePaymentFiles(
+      req.files,
+      userId,
+    );
 
     const cleanPaymentType = paymentType?.toLowerCase() || "";
 
@@ -87,10 +195,8 @@ exports.createReceivePayment = async (req, res) => {
     }
 
     const count = await ReceivePayment.countDocuments({ userId });
-
     const billNo = `RCV-${1001 + count}`;
 
-    // ✅ Save ReceivePayment
     const newPayment = await ReceivePayment.create({
       customer: customerData?._id || null,
       partyId: partyData?._id || null,
@@ -100,12 +206,13 @@ exports.createReceivePayment = async (req, res) => {
       discountAmount: parsedDiscount,
       finalAmount,
       paymentType: cleanPaymentType,
+      billNo,
       description,
-      attachment: attachmentPath,
+      attachments: uploadedAttachments,
+      attachment: uploadedAttachments[0]?.key || "",
       userId,
     });
 
-    // 🔁 Create centralized payment entries (MULTIPLE SAFE)
     for (const p of payments) {
       await createPaymentEntry({
         userId,
@@ -143,16 +250,18 @@ exports.createReceivePayment = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Receive Payment Save Error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 };
 
-// ✅ Get all receive payments
+/* =====================================================
+   GET ALL RECEIVE PAYMENTS
+===================================================== */
+
 exports.getAllReceivePayments = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    // ✅ Sirf active customers
     const activeCustomers = await Customer.find({
       createdBy: userId,
       isActive: true,
@@ -168,7 +277,6 @@ exports.getAllReceivePayments = async (req, res) => {
 
     const activePartyIds = activeParties.map((p) => p._id);
 
-    // 🔹 Receive payments لائیں
     const payments = await ReceivePayment.find({
       userId,
       $or: [
@@ -179,7 +287,6 @@ exports.getAllReceivePayments = async (req, res) => {
       .populate("customer", "name")
       .sort({ createdAt: -1 });
 
-    // 🔹 Journal سے payment mode + account نکالیں
     const formatted = await Promise.all(
       payments.map(async (p) => {
         const journal = await JournalEntry.findOne({
@@ -191,8 +298,12 @@ exports.getAllReceivePayments = async (req, res) => {
           (line) => line.type === "debit",
         );
 
+        const attachments = formatAttachments(p);
+
         return {
           ...p.toObject(),
+          attachments,
+          attachmentFullUrl: attachments[0]?.fullUrl || "",
           paymentMode: firstDebitLine?.paymentType || p.paymentType || "-",
           accountName: firstDebitLine?.account?.name || "-",
         };
@@ -206,15 +317,18 @@ exports.getAllReceivePayments = async (req, res) => {
   }
 };
 
-// ✅ Get single receive payment
+/* =====================================================
+   GET SINGLE RECEIVE PAYMENT
+===================================================== */
+
 exports.getReceivePaymentById = async (req, res) => {
   try {
     const payment = await ReceivePayment.findById(req.params.id);
+
     if (!payment) {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    // 🔍 Journal se payment entries nikaalni hain
     const journal = await JournalEntry.findOne({
       referenceId: payment._id,
       sourceType: "receive_payment",
@@ -224,7 +338,7 @@ exports.getReceivePaymentById = async (req, res) => {
 
     if (journal?.lines?.length) {
       paymentEntries = journal.lines
-        .filter((line) => line.type === "debit") // cash/bank
+        .filter((line) => line.type === "debit")
         .map((line) => ({
           account: line.account,
           amount: line.amount,
@@ -232,10 +346,13 @@ exports.getReceivePaymentById = async (req, res) => {
         }));
     }
 
-    // ✅ Frontend ko sab kuch wapas bhejna
+    const attachments = formatAttachments(payment);
+
     res.json({
       ...payment.toObject(),
       paymentEntries,
+      attachments,
+      attachmentFullUrl: attachments[0]?.fullUrl || "",
     });
   } catch (err) {
     console.error("❌ Get ReceivePayment Error:", err);
@@ -243,7 +360,10 @@ exports.getReceivePaymentById = async (req, res) => {
   }
 };
 
-// ✅ Update Receive Payment (CENTRALIZED VERSION)
+/* =====================================================
+   UPDATE RECEIVE PAYMENT
+===================================================== */
+
 exports.updateReceivePayment = async (req, res) => {
   try {
     const {
@@ -290,24 +410,56 @@ exports.updateReceivePayment = async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
-    // ✅ Safe recalculation helper
-    const safeRecalculate = async (id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
-        try {
-          await recalculateAccountBalance(id);
-        } catch (err) {
-          console.warn("⚠️ Error recalculating balance:", err.message);
-        }
-      }
-    };
+    let currentAttachments = formatAttachments(payment).map((att) => ({
+      key: att.key,
+      type: att.type || "",
+      size: att.size || 0,
+      originalName: att.originalName || "",
+    }));
 
-    // 🔍 Get old journals before deleting
+    let keepAttachmentKeys = null;
+
+    if (req.body.keepAttachmentKeys) {
+      try {
+        keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys);
+      } catch (err) {
+        keepAttachmentKeys = null;
+      }
+    }
+
+    if (Array.isArray(keepAttachmentKeys)) {
+      const removedAttachments = currentAttachments.filter(
+        (att) => !keepAttachmentKeys.includes(att.key),
+      );
+
+      for (const att of removedAttachments) {
+        await deleteAttachmentSafe(att);
+      }
+
+      currentAttachments = currentAttachments.filter((att) =>
+        keepAttachmentKeys.includes(att.key),
+      );
+    }
+
+    const newAttachments = await uploadReceivePaymentFiles(req.files, userId);
+
+    if (currentAttachments.length + newAttachments.length > 3) {
+      for (const att of newAttachments) {
+        await deleteAttachmentSafe(att);
+      }
+
+      return res.status(400).json({
+        error: "Maximum 3 attachments allowed",
+      });
+    }
+
+    const finalAttachments = [...currentAttachments, ...newAttachments];
+
     const oldJournals = await JournalEntry.find({
       referenceId: payment._id,
       sourceType: "receive_payment",
     });
 
-    // 🔍 Get customer account
     let customerData = null;
     let partyData = null;
     let counterPartyAccountId = null;
@@ -342,22 +494,8 @@ exports.updateReceivePayment = async (req, res) => {
       sourceType: "receive_payment",
     });
 
-    const billNo = existingJournal?.billNo || "RCV-1001";
+    const billNo = existingJournal?.billNo || payment.billNo || "RCV-1001";
 
-    // 🧹 Remove old attachment if replaced
-    if (req.file && payment.attachment) {
-      try {
-        fs.unlinkSync(path.resolve(payment.attachment));
-      } catch (e) {
-        console.warn("⚠️ Attachment delete failed:", e.message);
-      }
-    }
-
-    const attachmentPath = req.file
-      ? `uploads/${req.file.filename}`
-      : payment.attachment;
-
-    // 🔄 Update payment
     payment.customer = customerData?._id || null;
     payment.partyId = partyData?._id || null;
     payment.date = date;
@@ -366,12 +504,13 @@ exports.updateReceivePayment = async (req, res) => {
     payment.discountAmount = parsedDiscount;
     payment.finalAmount = finalAmount;
     payment.paymentType = paymentType?.toLowerCase() || "";
+    payment.billNo = billNo;
     payment.description = description;
-    payment.attachment = attachmentPath;
+    payment.attachments = finalAttachments;
+    payment.attachment = finalAttachments[0]?.key || "";
 
     await payment.save();
 
-    // 🧹 Delete old journal entries
     await JournalEntry.deleteMany({
       referenceId: payment._id,
       sourceType: {
@@ -379,14 +518,12 @@ exports.updateReceivePayment = async (req, res) => {
       },
     });
 
-    // 🔄 Recalculate old accounts
     for (const entry of oldJournals) {
       for (const line of entry.lines) {
         await safeRecalculate(line.account);
       }
     }
 
-    // 🔁 Create new centralized payment entries
     for (const p of payments) {
       await createPaymentEntry({
         userId,
@@ -419,7 +556,6 @@ exports.updateReceivePayment = async (req, res) => {
       });
     }
 
-    // 🔄 Recalculate customer account
     await safeRecalculate(counterPartyAccountId);
 
     res.json({
@@ -432,7 +568,10 @@ exports.updateReceivePayment = async (req, res) => {
   }
 };
 
-// ✅ Delete Receive Payment (CENTRALIZED SAFE VERSION)
+/* =====================================================
+   DELETE RECEIVE PAYMENT
+===================================================== */
+
 exports.deleteReceivePayment = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -446,18 +585,6 @@ exports.deleteReceivePayment = async (req, res) => {
       return res.status(404).json({ error: "Not found" });
     }
 
-    // ✅ Safe recalculation helper
-    const safeRecalculate = async (id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
-        try {
-          await recalculateAccountBalance(id);
-        } catch (err) {
-          console.warn("⚠️ Error recalculating balance:", err.message);
-        }
-      }
-    };
-
-    // 🔍 Get all related journal entries
     const journals = await JournalEntry.find({
       referenceId: payment._id,
       sourceType: {
@@ -465,16 +592,12 @@ exports.deleteReceivePayment = async (req, res) => {
       },
     });
 
-    // 🧹 Remove attachment if exists
-    if (payment.attachment && fs.existsSync(path.resolve(payment.attachment))) {
-      try {
-        fs.unlinkSync(path.resolve(payment.attachment));
-      } catch (e) {
-        console.warn("⚠️ Attachment delete error:", e.message);
-      }
+    const attachmentsToDelete = formatAttachments(payment);
+
+    for (const att of attachmentsToDelete) {
+      await deleteAttachmentSafe(att);
     }
 
-    // 🧹 Delete journal entries
     await JournalEntry.deleteMany({
       referenceId: payment._id,
       sourceType: {
@@ -482,14 +605,12 @@ exports.deleteReceivePayment = async (req, res) => {
       },
     });
 
-    // 🔄 Recalculate all involved accounts
     for (const entry of journals) {
       for (const line of entry.lines) {
         await safeRecalculate(line.account);
       }
     }
 
-    // 🗑 Delete payment
     await payment.deleteOne();
 
     res.json({ message: "Payment deleted successfully" });

@@ -9,7 +9,7 @@ router.get("/by-bill/:billNo", protect, invoiceController.getInvoiceByBillNo);
 router.post(
   "/",
   protect,
-  upload.single("attachment"),
+  upload.array("attachments", 3),
   invoiceController.createInvoice,
 );
 
@@ -28,7 +28,7 @@ router.put("/:id/payment", protect, invoiceController.recordPayment);
 router.put(
   "/:id",
   protect,
-  upload.single("attachment"),
+  upload.array("attachments", 3),
   invoiceController.updateInvoice,
 );
 

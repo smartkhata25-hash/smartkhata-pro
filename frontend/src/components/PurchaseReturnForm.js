@@ -7,10 +7,11 @@ import {
 import { fetchSuppliers } from '../services/supplierService';
 import { fetchPurchaseParties } from '../services/partyService';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
-import { getAccounts } from '../services/accountService';
+import { getValidPaymentAccounts } from '../services/accountService';
 import { useNavigate, useParams } from 'react-router-dom';
 import ProductDropdown from './ProductDropdown';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
+import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 
@@ -23,6 +24,8 @@ const PurchaseReturnForm = ({ token }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const scrollRef = useRef();
+  const fileInputRef = useRef(null);
+  const didLoadEditRef = useRef(false);
 
   const [productList, setProductList] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -42,7 +45,8 @@ const PurchaseReturnForm = ({ token }) => {
   const [returnMethod, setReturnMethod] = useState('adjust');
   const [accountId, setAccountId] = useState('');
   const [accounts, setAccounts] = useState([]);
-  const [attachment, setAttachment] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [modalAttachment, setModalAttachment] = useState(null);
   const [paymentType, setPaymentType] = useState('cash');
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
@@ -86,6 +90,13 @@ const PurchaseReturnForm = ({ token }) => {
       setIsOpeningReturn(openingMode);
       setOpeningReturnAmount(openingMode ? Number(data.totalAmount || 0) : 0);
 
+      setAttachments(data.attachments || []);
+      setModalAttachment(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       const mappedItems = (data.items || []).map((i) => {
         const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
 
@@ -107,10 +118,14 @@ const PurchaseReturnForm = ({ token }) => {
 
   useEffect(() => {
     if (!id) return;
+    if (didLoadEditRef.current) return;
+
     const load = async () => {
       const data = await getPurchaseReturnById(id, token);
       populateForm(data);
+      didLoadEditRef.current = true;
     };
+
     load();
   }, [id, token, populateForm]);
 
@@ -119,32 +134,22 @@ const PurchaseReturnForm = ({ token }) => {
     fetchSuppliers().then(setSuppliers);
     fetchPurchaseParties().then(setParties);
 
-    getAccounts(token).then((all) => {
-      const filtered = all.filter((acc) =>
-        ['cash', 'bank', 'asset'].includes(acc.type?.toLowerCase())
-      );
-
-      setAccounts(filtered);
-
-      // 🟢 Default Cash Account Auto Select
-      if (returnMethod === 'cash') {
-        const cashAcc = filtered.find((a) => a.name?.toLowerCase().includes('cash'));
-        if (cashAcc) setAccountId(cashAcc._id);
-      }
+    getValidPaymentAccounts().then((paymentAccounts) => {
+      setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
     });
-  }, [token, returnMethod]);
+  }, [token]);
 
   // 🔁 Auto select cash account when method changes
   useEffect(() => {
-    if (returnMethod === 'cash' && accounts.length > 0) {
+    if (returnMethod === 'cash' && accounts.length > 0 && !accountId) {
       const cashAcc = accounts.find((a) => a.name?.toLowerCase().includes('cash'));
       if (cashAcc) setAccountId(cashAcc._id);
     }
 
-    if (returnMethod === 'adjust') {
+    if (returnMethod === 'adjust' && accountId) {
       setAccountId('');
     }
-  }, [returnMethod, accounts]);
+  }, [returnMethod, accounts, accountId]);
 
   const handleItemChange = (index, field, value) => {
     const updated = [...items];
@@ -184,6 +189,7 @@ const PurchaseReturnForm = ({ token }) => {
     accountId,
     paymentType,
     originalInvoiceId,
+    attachments,
   };
   useEffect(() => {
     if (id) return;
@@ -195,6 +201,8 @@ const PurchaseReturnForm = ({ token }) => {
       const parsed = JSON.parse(saved);
 
       const data = parsed.data;
+
+      setAttachments(data.attachments || []);
 
       if (!data) return;
 
@@ -252,6 +260,13 @@ const PurchaseReturnForm = ({ token }) => {
       setAccountId('');
       setPaymentType('cash');
       setItems(Array.from({ length: 20 }, () => blankRow()));
+      setAttachments([]);
+      setModalAttachment(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       localStorage.removeItem('app_state_purchase_return_draft');
       return;
     }
@@ -324,7 +339,17 @@ const PurchaseReturnForm = ({ token }) => {
       )
     );
 
-    if (attachment) formData.append('attachment', attachment);
+    attachments.forEach((file) => {
+      if (file instanceof File) {
+        formData.append('attachments', file);
+      }
+    });
+
+    const keepAttachmentKeys = attachments
+      .filter((file) => !(file instanceof File))
+      .map((file) => file.key);
+
+    formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
 
     if (id) {
       await updatePurchaseReturn(id, formData, token);
@@ -351,6 +376,12 @@ const PurchaseReturnForm = ({ token }) => {
       setReturnTime(getCurrentTime());
       setReturnMethod('adjust');
       setAccountId('');
+      setAttachments([]);
+      setModalAttachment(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -422,6 +453,13 @@ const PurchaseReturnForm = ({ token }) => {
     setSupplierPhone(invoice.supplierPhone);
     setSupplierId(invoice.supplier?._id || invoice.supplier);
     setSelectedSupplierType('supplier');
+
+    setAttachments([]);
+    setModalAttachment(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
 
     const loadedItems = invoice.items.map((i) => {
       const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
@@ -552,11 +590,90 @@ const PurchaseReturnForm = ({ token }) => {
           onChange={(e) => setNotes(e.target.value)}
         />
 
-        <input
-          type="file"
-          onChange={(e) => setAttachment(e.target.files[0])}
-          className="border p-1 text-sm col-span-2"
-        />
+        <div className="col-span-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
+              onChange={(e) => {
+                const newFiles = Array.from(e.target.files || []);
+
+                if (attachments.length + newFiles.length > 3) {
+                  alert('Maximum 3 attachments allowed');
+                  e.target.value = '';
+                  return;
+                }
+
+                setAttachments((prev) => [...prev, ...newFiles]);
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachments.length >= 3}
+              className={`px-3 py-2 rounded-lg text-sm shadow ${
+                attachments.length >= 3
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              📎 Add Files ({attachments.length}/3)
+            </button>
+
+            {attachments.map((file, index) => {
+              const isNewFile = file instanceof File;
+              const fileUrl = isNewFile
+                ? URL.createObjectURL(file)
+                : file.fullUrl || file.url || `${process.env.REACT_APP_R2_PUBLIC_URL}/${file.key}`;
+
+              return (
+                <div
+                  key={file.key || index}
+                  className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+                >
+                  <span className="text-blue-600">📎 File {index + 1}</span>
+
+                  {fileUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setModalAttachment({
+                          url: fileUrl,
+                          type: file.type || '',
+                        })
+                      }
+                      className="text-green-600 underline"
+                    >
+                      👁 View
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(t('alerts.removeAttachment'))) {
+                        const updated = attachments.filter((_, i) => i !== index);
+
+                        setAttachments(updated);
+
+                        if (updated.length === 0 && fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                        }
+                      }
+                    }}
+                    className="text-red-500"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
       {isOpeningReturn && (
         <div className="mb-2 px-3 py-2 rounded bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm font-semibold">
@@ -669,6 +786,11 @@ const PurchaseReturnForm = ({ token }) => {
           onClose={() => setShowSearchModal(false)}
         />
       )}
+
+      <AttachmentViewerModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
     </div>
   );
 };

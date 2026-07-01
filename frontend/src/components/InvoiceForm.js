@@ -11,7 +11,7 @@ import {
 } from '../services/salesService';
 import { fetchProductsWithToken } from '../services/inventoryService';
 
-import { getAccounts } from '../services/accountService';
+import { getValidPaymentAccounts } from '../services/accountService';
 import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 import { fetchSaleParties } from '../services/partyService';
 import { getPartyLedger } from '../services/partyLedgerService';
@@ -49,11 +49,8 @@ const InvoiceForm = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [by, setBy] = useState('');
   const [hideCost, setHideCost] = useState(false);
-
-  const [attachment, setAttachment] = useState(null);
-
-  const [existingAttachment, setExistingAttachment] = useState(null);
-
+  const [attachments, setAttachments] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
   const [footerText, setFooterText] = useState('');
   const [customers, setCustomers] = useState([]);
   const [parties, setParties] = useState([]);
@@ -61,7 +58,9 @@ const InvoiceForm = ({
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [products, setProducts] = useState([]);
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
-  const [showPreview, setShowPreview] = useState(false);
+
+  const [showAttachmentModal, setShowAttachmentModal] = useState(false);
+  const [modalAttachment, setModalAttachment] = useState(null);
   const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [customerFormName, setCustomerFormName] = useState('');
@@ -344,11 +343,15 @@ const InvoiceForm = ({
       setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
     }
 
-    setExistingAttachment({
-      url: editingInvoiceFromAPI.attachmentUrl || '',
-      name: editingInvoiceFromAPI.attachmentOriginalName || '',
-      type: editingInvoiceFromAPI.attachmentType || '',
-    });
+    setExistingAttachments(
+      (editingInvoiceFromAPI.attachments || []).map((att) => ({
+        key: att.key,
+        url: att.fullUrl || att.url || '',
+        name: att.originalName || '',
+        type: att.type || '',
+        size: att.size || 0,
+      }))
+    );
   }, [editingInvoiceFromAPI]);
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
@@ -401,8 +404,8 @@ const InvoiceForm = ({
       localStorage.setItem('products', JSON.stringify(data));
     });
 
-    getAccounts(token).then((all) => {
-      setAccounts(all);
+    getValidPaymentAccounts().then((all) => {
+      setAccounts(Array.isArray(all) ? all : []);
     });
   }, [token, onProductChange]);
 
@@ -667,11 +670,17 @@ const InvoiceForm = ({
     : totalAmount - finalDiscount;
 
   const handleFileChange = (e) => {
-    setAttachment(e.target.files[0]);
+    const selectedFiles = Array.from(e.target.files || []);
 
-    if (e.target.files[0]) {
-      setExistingAttachment(null);
+    const totalFiles = existingAttachments.length + selectedFiles.length;
+
+    if (totalFiles > 3) {
+      alert('Maximum 3 attachments allowed');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
     }
+
+    setAttachments(selectedFiles);
   };
   const formState = {
     billNo,
@@ -748,7 +757,6 @@ const InvoiceForm = ({
         setTimeout(() => {
           setEditingInvoiceFromAPI(freshInvoice);
         }, 0);
-        setShowPreview(false);
 
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -782,8 +790,10 @@ const InvoiceForm = ({
     setInvoiceDate(now.toISOString().split('T')[0]);
     setInvoiceTime(now.toTimeString().slice(0, 5));
 
-    setAttachment(null);
-    setShowPreview(false);
+    setAttachments([]);
+
+    setShowAttachmentModal(false);
+    setModalAttachment(null);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -890,7 +900,17 @@ const InvoiceForm = ({
       formData.append('accountId', selectedAccountId);
     }
 
-    if (attachment) formData.append('attachment', attachment);
+    if (editingInvoiceFromAPI) {
+      formData.append(
+        'keepAttachmentKeys',
+        JSON.stringify(existingAttachments.map((att) => att.key))
+      );
+    }
+
+    attachments.forEach((file) => {
+      formData.append('attachments', file);
+    });
+
     formData.append('items', JSON.stringify(mappedItems));
 
     if (isOpeningInvoice) {
@@ -941,8 +961,11 @@ const InvoiceForm = ({
         setPaymentType('credit');
         setSelectedAccountId('');
 
-        setAttachment(null);
-        setShowPreview(false);
+        setAttachments([]);
+        setExistingAttachments([]);
+
+        setShowAttachmentModal(false);
+        setModalAttachment(null);
 
         clear();
 
@@ -1245,18 +1268,11 @@ const InvoiceForm = ({
                       >
                         <option value="">{t('account')}</option>
 
-                        {accounts
-                          .filter((acc) => {
-                            return (
-                              ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-                              !acc.name?.toLowerCase().startsWith('customer:')
-                            );
-                          })
-                          .map((acc) => (
-                            <option key={acc._id} value={acc._id}>
-                              {acc.name}
-                            </option>
-                          ))}
+                        {accounts.map((acc) => (
+                          <option key={acc._id} value={acc._id}>
+                            {acc.name}
+                          </option>
+                        ))}
                       </select>
                     )}
 
@@ -1266,64 +1282,82 @@ const InvoiceForm = ({
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileChange}
+                        multiple
+                        accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
                         className="border px-2 py-0 text-sm h-8 w-28 relative z-10"
                       />
 
-                      {existingAttachment?.name && (
-                        <div className="flex items-center gap-2">
-                          <div className="text-xs text-blue-600">📎 {existingAttachment.name}</div>
+                      {existingAttachments.length > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {existingAttachments.map((att, index) => (
+                            <div key={att.key || index} className="flex items-center gap-1 text-xs">
+                              <span className="text-blue-600">📎 File {index + 1}</span>
 
-                          {existingAttachment?.url && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.open(existingAttachment.url, '_blank');
-                              }}
-                              className="text-green-600 text-xs underline"
-                            >
-                              👁 View
-                            </button>
-                          )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModalAttachment(att);
+                                  setShowAttachmentModal(true);
+                                }}
+                                className="text-green-600 underline"
+                              >
+                                👁 View
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm('Remove this attachment?')) {
+                                    setExistingAttachments((prev) =>
+                                      prev.filter((_, i) => i !== index)
+                                    );
+                                  }
+                                }}
+                                className="text-red-500"
+                              >
+                                ✖
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       )}
 
-                      {attachment && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setShowPreview((prev) => !prev)}
-                            className="text-blue-600 text-xs underline"
-                          >
-                            {showPreview ? t('hide') : t('preview')}
-                          </button>
+                      {attachments.length > 0 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {attachments.map((file, index) => (
+                            <div key={index} className="flex items-center gap-1 text-xs">
+                              <span className="text-blue-600">📎 New {index + 1}</span>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.confirm(t('alerts.removeAttachment'))) {
-                                setAttachment(null);
-                                setShowPreview(false);
-                                if (fileInputRef.current) fileInputRef.current.value = '';
-                              }
-                            }}
-                            className="text-red-500 text-xs"
-                          >
-                            ✖
-                          </button>
-                        </>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModalAttachment({
+                                    url: URL.createObjectURL(file),
+                                    name: file.name,
+                                    type: file.type,
+                                  });
+                                  setShowAttachmentModal(true);
+                                }}
+                                className="text-green-600 underline"
+                              >
+                                👁 View
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAttachments((prev) => prev.filter((_, i) => i !== index));
+                                  if (fileInputRef.current) fileInputRef.current.value = '';
+                                }}
+                                className="text-red-500"
+                              >
+                                ✖
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                  </div>
-                )}
-
-                {/* Attachment Preview */}
-                {attachment && showPreview && (
-                  <div>
-                    <img
-                      src={URL.createObjectURL(attachment)}
-                      alt="Attachment Preview"
-                      className="max-h-32 border rounded"
-                    />
                   </div>
                 )}
 
@@ -2098,6 +2132,44 @@ const InvoiceForm = ({
                 })}
               </ul>
             )}
+          </div>
+        </div>
+      )}
+      {showAttachmentModal && modalAttachment && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[9999] p-3">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="flex justify-between items-center px-4 py-2 border-b">
+              <div className="text-sm font-semibold text-gray-700 truncate">
+                📎 Attachment Preview
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAttachmentModal(false);
+                  setModalAttachment(null);
+                }}
+                className="bg-red-500 text-white px-3 py-1 rounded text-sm"
+              >
+                ✖ Close
+              </button>
+            </div>
+
+            <div className="p-3 flex items-center justify-center bg-gray-100 max-h-[80vh] overflow-auto">
+              {modalAttachment.type?.includes('pdf') ? (
+                <iframe
+                  src={modalAttachment.url}
+                  title="Attachment PDF"
+                  className="w-full h-[75vh] bg-white border rounded"
+                />
+              ) : (
+                <img
+                  src={modalAttachment.url}
+                  alt="Attachment"
+                  className="max-w-full max-h-[75vh] object-contain rounded border bg-white"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

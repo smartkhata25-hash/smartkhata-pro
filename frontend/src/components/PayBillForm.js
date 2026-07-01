@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import AttachmentViewerModal from './AttachmentViewerModal';
 import { fetchSuppliers as getSuppliers, fetchSupplierLedger } from '../services/supplierService';
 import { fetchPurchaseParties } from '../services/partyService';
 import { getPartyLedger } from '../services/partyLedgerService';
-import { getAccounts } from '../services/accountService';
+import { getValidPaymentAccounts } from '../services/accountService';
 import { createPayBill, updatePayBill, getPayBillById } from '../services/payBillService';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -17,8 +18,11 @@ const PayBillForm = () => {
   const [accounts, setAccounts] = useState([]);
   const [supplierLedger, setSupplierLedger] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [existingAttachments, setExistingAttachments] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [modalAttachment, setModalAttachment] = useState(null);
 
+  const fileInputRef = useRef(null);
   const printRef = useRef();
 
   const [formData, setFormData] = useState({
@@ -31,7 +35,7 @@ const PayBillForm = () => {
     discountAmount: '',
 
     description: '',
-    attachment: null,
+    attachment: '',
   });
   const [paymentEntries, setPaymentEntries] = useState([
     { account: '', amount: '', paymentType: 'Cash' },
@@ -63,10 +67,10 @@ const PayBillForm = () => {
   useEffect(() => {
     async function fetchData() {
       if (id) {
-        const [sData, pData, aData] = await Promise.all([
+        const [sData, pData, paymentAccounts] = await Promise.all([
           getSuppliers(),
           fetchPurchaseParties(),
-          getAccounts(),
+          getValidPaymentAccounts(),
         ]);
 
         let existing = JSON.parse(localStorage.getItem(`paybill_${id}`) || 'null');
@@ -78,13 +82,7 @@ const PayBillForm = () => {
 
         setSuppliers(sData);
         setParties(pData);
-        const paymentAccounts = aData.filter(
-          (acc) =>
-            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-            !acc.name?.toLowerCase().startsWith('customer:')
-        );
-
-        setAccounts(paymentAccounts);
+        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
 
         setFormData({
           supplier: existing.supplier?._id || '',
@@ -93,8 +91,11 @@ const PayBillForm = () => {
           paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
           discountAmount: existing.discountAmount || '',
           description: existing.description || '',
-          attachment: null,
+          attachment: '',
         });
+
+        setExistingAttachments(existing.attachments || []);
+        setAttachments([]);
 
         setPaymentEntries(
           existing.paymentEntries && existing.paymentEntries.length > 0
@@ -124,22 +125,16 @@ const PayBillForm = () => {
 
         loadLedger(existing.supplier?._id);
       } else {
-        const [sData, pData, aData] = await Promise.all([
+        const [sData, pData, paymentAccounts] = await Promise.all([
           getSuppliers(),
           fetchPurchaseParties(),
-          getAccounts(),
+          getValidPaymentAccounts(),
         ]);
 
         setSuppliers(sData);
         setParties(pData);
 
-        const paymentAccounts = aData.filter(
-          (acc) =>
-            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-            !acc.name?.toLowerCase().startsWith('customer:')
-        );
-
-        setAccounts(paymentAccounts);
+        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
 
         const handCash = paymentAccounts.find((acc) => acc.name?.toLowerCase() === 'hand cash');
 
@@ -178,9 +173,20 @@ const PayBillForm = () => {
   };
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    setFormData((prev) => ({ ...prev, attachment: file }));
-    setShowPreview(false);
+    const files = Array.from(e.target.files);
+
+    if (!files.length) return;
+
+    setAttachments((prev) => {
+      const updated = [...prev, ...files];
+
+      if (updated.length > 3) {
+        alert('Maximum 3 attachments allowed');
+        return prev;
+      }
+
+      return updated;
+    });
   };
 
   const resetForm = () => {
@@ -200,7 +206,13 @@ const PayBillForm = () => {
 
     setSupplierLedger([]);
     setSelectedSupplierType('supplier');
-    setShowPreview(false);
+    setExistingAttachments([]);
+    setAttachments([]);
+    setModalAttachment(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
 
     localStorage.removeItem('app_state_pay_bill_draft');
   };
@@ -222,8 +234,11 @@ const PayBillForm = () => {
         paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
         discountAmount: existing.discountAmount || '',
         description: existing.description || '',
-        attachment: null,
+        attachment: '',
       });
+
+      setExistingAttachments(existing.attachments || []);
+      setAttachments([]);
 
       setPaymentEntries(
         existing.paymentEntries && existing.paymentEntries.length > 0
@@ -295,13 +310,21 @@ const PayBillForm = () => {
 
     const data = new FormData();
     Object.entries(formData).forEach(([key, value]) => {
-      if (value !== null) data.append(key, value);
+      if (key !== 'attachment' && value !== null) {
+        data.append(key, value);
+      }
     });
 
     // ✅ IMPORTANT: multiple payments backend ko bhejna
     data.append('paymentEntries', JSON.stringify(paymentEntries));
 
     data.append('discountAmount', formData.discountAmount || 0);
+
+    attachments.forEach((file) => {
+      data.append('attachments', file);
+    });
+
+    data.append('keepAttachmentKeys', JSON.stringify(existingAttachments.map((a) => a.key)));
 
     try {
       setLoading(true);
@@ -454,11 +477,100 @@ const PayBillForm = () => {
       </div>
       <div>
         <label>{t('common.attachment')}:</label>
-        <input
-          type="file"
-          onChange={handleFileChange}
-          className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
-        />
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
+            onChange={handleFileChange}
+          />
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={existingAttachments.length + attachments.length >= 3}
+            className={`px-3 py-2 rounded-lg text-sm shadow ${
+              existingAttachments.length + attachments.length >= 3
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            📎 Add Files ({existingAttachments.length + attachments.length}/3)
+          </button>
+
+          {existingAttachments.map((att, index) => (
+            <div
+              key={att.key || index}
+              className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+            >
+              <span className="text-blue-600">📎 File {index + 1}</span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setModalAttachment({
+                    url: att.fullUrl || att.url || '',
+                    type: att.type || '',
+                  })
+                }
+                className="text-green-600 underline"
+              >
+                👁 View
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(t('alerts.removeAttachment'))) {
+                    setExistingAttachments((prev) => prev.filter((_, i) => i !== index));
+                  }
+                }}
+                className="text-red-500"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+
+          {attachments.map((file, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+            >
+              <span className="text-blue-600">📎 New {index + 1}</span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setModalAttachment({
+                    url: URL.createObjectURL(file),
+                    type: file.type || '',
+                  })
+                }
+                className="text-green-600 underline"
+              >
+                👁 View
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachments((prev) => prev.filter((_, i) => i !== index));
+
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                  }
+                }}
+                className="text-red-500"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
       {/* DESCRIPTION (same width as Time) */}
       <div>
@@ -599,36 +711,7 @@ const PayBillForm = () => {
           </div>
         </div>
       </div>
-      {formData.attachment && (
-        <div className="md:col-span-2 flex items-center justify-between bg-gray-100 px-3 py-2 rounded-xl">
-          <span
-            onClick={() => setShowPreview(!showPreview)}
-            className="text-blue-700 cursor-pointer underline"
-          >
-            {t('common.preview')}
-          </span>
-          <span
-            onClick={() => {
-              if (window.confirm(t('alerts.removeAttachment'))) {
-                setFormData((prev) => ({ ...prev, attachment: null }));
-                setShowPreview(false);
-              }
-            }}
-            className="text-red-600 font-bold cursor-pointer"
-          >
-            ✕
-          </span>
-        </div>
-      )}
-      {showPreview && formData.attachment && (
-        <div className="md:col-span-2">
-          <iframe
-            src={URL.createObjectURL(formData.attachment)}
-            title="Preview"
-            className="w-full h-64 border rounded"
-          />
-        </div>
-      )}
+
       <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
         <button
           type="submit"
@@ -711,6 +794,10 @@ const PayBillForm = () => {
           </table>
         </div>
       )}
+      <AttachmentViewerModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
     </form>
   );
 };

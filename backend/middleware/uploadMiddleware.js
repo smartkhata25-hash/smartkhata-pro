@@ -1,14 +1,6 @@
 const multer = require("multer");
 
-/* =====================================================
-   MEMORY STORAGE
-===================================================== */
-
 const storage = multer.memoryStorage();
-
-/* =====================================================
-   FILE FILTER
-===================================================== */
 
 const allowedMimeTypes = [
   "image/jpeg",
@@ -26,17 +18,12 @@ const fileFilter = (req, file, cb) => {
   cb(null, true);
 };
 
-/* =====================================================
-   MULTER INSTANCE
-===================================================== */
-
 const upload = multer({
   storage,
-
   fileFilter,
-
   limits: {
     fileSize: 10 * 1024 * 1024,
+    files: 3,
   },
 });
 

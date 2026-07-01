@@ -103,6 +103,30 @@ const PurchaseReturnSchema = new mongoose.Schema(
 
     items: [PurchaseReturnItemSchema],
 
+    attachments: [
+      {
+        key: {
+          type: String,
+          default: "",
+        },
+
+        type: {
+          type: String,
+          default: "",
+        },
+
+        size: {
+          type: Number,
+          default: 0,
+        },
+
+        originalName: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+
     attachmentUrl: {
       type: String,
       default: "",
@@ -110,7 +134,6 @@ const PurchaseReturnSchema = new mongoose.Schema(
 
     attachmentType: {
       type: String,
-      enum: ["image", "pdf", "voice", "other", ""],
       default: "",
     },
 

@@ -81,7 +81,7 @@ const DashboardPage = () => {
         if (filterType === 'today') {
           url += `?filterType=today`;
         } else if (startDate && endDate) {
-          url += `?startDate=${startDate}&endDate=${endDate}`;
+          url += `?filterType=${filterType}&startDate=${startDate}&endDate=${endDate}`;
         }
 
         const res = await axios.get(url, {

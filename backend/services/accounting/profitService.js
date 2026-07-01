@@ -4,18 +4,14 @@ const JournalEntry = require("../../models/JournalEntry");
 
 const Invoice = require("../../models/Invoice");
 
-/* ======================================================
-   ✅ DATE FILTER HELPER
-====================================================== */
+// DATE FILTER HELPER
 
 const buildDateFilter = ({ filterType, startDate, endDate }) => {
   let dateFilter = {};
 
   const now = new Date();
 
-  /* =========================
-     TODAY
-  ========================= */
+  // TODAY
 
   if (filterType === "today") {
     const start = new Date();
@@ -31,9 +27,8 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
       },
     };
   } else if (filterType === "this_month") {
-    /* =========================
-     THIS MONTH
-  ========================= */
+    // THIS MONTH
+
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const end = new Date(
@@ -53,9 +48,8 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
       },
     };
   } else if (filterType === "last_month") {
-    /* =========================
-     LAST MONTH
-  ========================= */
+    // LAST MONTH
+
     const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
@@ -67,9 +61,8 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
       },
     };
   } else if (filterType === "this_year") {
-    /* =========================
-     THIS YEAR
-  ========================= */
+    // THIS YEAR
+
     const start = new Date(now.getFullYear(), 0, 1);
 
     const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
@@ -81,9 +74,8 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
       },
     };
   } else if (filterType === "last_year") {
-    /* =========================
-     LAST YEAR
-  ========================= */
+    // LAST YEAR
+
     const start = new Date(now.getFullYear() - 1, 0, 1);
 
     const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
@@ -94,10 +86,15 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
         $lte: end,
       },
     };
-  } else if (filterType === "custom" && startDate && endDate) {
-    /* =========================
-     CUSTOM RANGE
-  ========================= */
+  } else if (
+    (filterType === "custom" ||
+      filterType === "month" ||
+      filterType === "year") &&
+    startDate &&
+    endDate
+  ) {
+    // CUSTOM RANGE
+
     dateFilter = {
       date: {
         $gte: new Date(startDate),
@@ -109,9 +106,7 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
   return dateFilter;
 };
 
-/* ======================================================
-   ✅ PROFIT SUMMARY
-====================================================== */
+// PROFIT SUMMARY
 
 const getProfitSummary = async ({
   userId,
@@ -123,9 +118,7 @@ const getProfitSummary = async ({
 }) => {
   const objectUserId = new mongoose.Types.ObjectId(userId);
 
-  /* ======================================================
-     DATE FILTER
-  ====================================================== */
+  // DATE FILTER
 
   const dateFilter = buildDateFilter({
     filterType,
@@ -133,9 +126,7 @@ const getProfitSummary = async ({
     endDate,
   });
 
-  /* ======================================================
-     PRODUCT FILTERS
-  ====================================================== */
+  // PRODUCT FILTERS
 
   const invoiceFilters = {};
 
@@ -151,9 +142,7 @@ const getProfitSummary = async ({
     invoiceFilters["items.productId"] = new mongoose.Types.ObjectId(productId);
   }
 
-  /* ======================================================
-     PRODUCT / CATEGORY MODE
-  ====================================================== */
+  // PRODUCT / CATEGORY MODE
 
   if (isProductMode) {
     const rawDateFilter = buildDateFilter({
@@ -259,8 +248,6 @@ const getProfitSummary = async ({
 
       grossProfit: Number((summary.grossProfit || 0).toFixed(2)),
 
-      // ✅ Global expenses hidden in product mode
-
       operatingExpenses: 0,
 
       netProfit: Number((summary.grossProfit || 0).toFixed(2)),
@@ -271,9 +258,7 @@ const getProfitSummary = async ({
     };
   }
 
-  /* ======================================================
-     NORMAL BUSINESS MODE
-  ====================================================== */
+  // NORMAL BUSINESS MODE
 
   const data = await JournalEntry.aggregate([
     {
@@ -315,9 +300,7 @@ const getProfitSummary = async ({
     },
   ]);
 
-  /* ======================================================
-     CALCULATIONS
-  ====================================================== */
+  // CALCULATIONS
 
   let totalSales = 0;
 
@@ -333,46 +316,61 @@ const getProfitSummary = async ({
 
   data.forEach((item) => {
     const account = item._id;
-
     const amount = Number(item.total || 0);
 
-    /* =========================
-       SALES
-    ========================= */
+    const accountCode = String(account.accountCode || "").toUpperCase();
+    const accountName = String(account.accountName || "").toLowerCase();
 
-    if (account.accountType === "Income" && account.lineType === "credit") {
-      if (String(account.accountCode || "").toUpperCase() === "SALES_RETURN") {
-        salesReturn += amount;
-      } else {
-        totalSales += amount;
+    //SALES
+
+    if (
+      account.accountType === "Income" &&
+      account.lineType === "credit" &&
+      accountCode !== "SALES_RETURN" &&
+      accountCode !== "PURCHASE_RETURN" &&
+      accountCode !== "PURCHASE_DISCOUNT" &&
+      !accountName.includes("return") &&
+      !accountName.includes("discount")
+    ) {
+      totalSales += amount;
+    }
+
+    if (
+      account.accountType === "Income" &&
+      account.lineType === "debit" &&
+      (accountCode === "SALES_RETURN" || accountName.includes("sales return"))
+    ) {
+      salesReturn += amount;
+    }
+
+    // COGS
+
+    if (account.accountType === "Expense" && accountCode === "COGS") {
+      if (account.lineType === "debit") {
+        cogs += amount;
+
+        cogsBreakdown.push({
+          accountName: account.accountName,
+          amount,
+        });
+      }
+
+      if (account.lineType === "credit") {
+        cogs -= amount;
+
+        cogsBreakdown.push({
+          accountName: account.accountName,
+          amount: -amount,
+        });
       }
     }
 
-    /* =========================
-       COGS
-    ========================= */
+    // OPERATING EXPENSES
 
     if (
       account.accountType === "Expense" &&
       account.lineType === "debit" &&
-      String(account.accountCode || "").toUpperCase() === "COGS"
-    ) {
-      cogs += amount;
-
-      cogsBreakdown.push({
-        accountName: account.accountName,
-        amount,
-      });
-    }
-
-    /* =========================
-       OPERATING EXPENSES
-    ========================= */
-
-    if (
-      account.accountType === "Expense" &&
-      account.lineType === "debit" &&
-      String(account.accountCode || "").toUpperCase() !== "COGS"
+      accountCode !== "COGS"
     ) {
       operatingExpenses += amount;
 
@@ -382,10 +380,6 @@ const getProfitSummary = async ({
       });
     }
   });
-
-  /* ======================================================
-     FINAL TOTALS
-  ====================================================== */
 
   const netSales = totalSales - salesReturn;
 

@@ -7,9 +7,78 @@ const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { createPaymentEntry } = require("../utils/paymentService");
 const Account = require("../models/Account");
 
-const fs = require("fs");
-const path = require("path");
+const {
+  uploadFile,
+  deleteFile,
+  getFileUrl,
+} = require("../services/r2FileService");
 const ALLOWED_PAYMENT_TYPES = ["cash", "online", "cheque"];
+
+function formatPayBillAttachments(bill) {
+  if (bill.attachments?.length > 0) {
+    return bill.attachments.map((att) => {
+      const plainAtt = att.toObject ? att.toObject() : att;
+
+      return {
+        ...plainAtt,
+        fullUrl: getFileUrl(plainAtt.key),
+      };
+    });
+  }
+
+  if (bill.attachment) {
+    return [
+      {
+        key: bill.attachment,
+        type: "",
+        size: 0,
+        originalName: "",
+        fullUrl: bill.attachment.startsWith("users/")
+          ? getFileUrl(bill.attachment)
+          : `/${bill.attachment}`,
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function uploadPayBillFiles(files, userId) {
+  const attachments = [];
+
+  if (!files || files.length === 0) return attachments;
+
+  if (files.length > 3) {
+    throw new Error("Maximum 3 attachments allowed");
+  }
+
+  for (const file of files) {
+    const uploaded = await uploadFile({
+      buffer: file.buffer,
+      userId,
+      moduleName: "pay-bills",
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    attachments.push({
+      key: uploaded.key,
+      type: uploaded.mimeType,
+      size: uploaded.size,
+      originalName: uploaded.originalName,
+    });
+  }
+
+  return attachments;
+}
+
+async function deletePayBillAttachment(att) {
+  if (!att?.key) return;
+
+  if (att.key.startsWith("users/")) {
+    await deleteFile(att.key);
+  }
+}
 
 // ✅ Create Pay Bill
 exports.createPayBill = async (req, res) => {
@@ -66,7 +135,8 @@ exports.createPayBill = async (req, res) => {
     const userId = req.user?.id || req.userId;
     if (!userId) return res.status(400).json({ error: "User ID is required." });
 
-    const attachmentPath = req.file ? `uploads/${req.file.filename}` : null;
+    const attachments = await uploadPayBillFiles(req.files, userId);
+    const attachmentPath = attachments[0]?.key || "";
 
     let supplierData = null;
     let partyData = null;
@@ -116,6 +186,7 @@ exports.createPayBill = async (req, res) => {
       paymentType: normalizedPaymentType,
 
       description,
+      attachments,
       attachment: attachmentPath,
       userId,
     });
@@ -237,8 +308,12 @@ exports.getAllPayBills = async (req, res) => {
         accountName = creditLine?.account?.name || "-";
       }
 
+      const attachments = formatPayBillAttachments(bill);
+
       result.push({
         ...bill.toObject(),
+        attachments,
+        attachmentFullUrl: attachments[0]?.fullUrl || "",
         paymentMode,
         accountName,
       });
@@ -283,11 +358,12 @@ exports.getPayBillById = async (req, res) => {
       }
     }
 
-    // ✅ Frontend ko complete data
-    console.log("🔥 paymentEntries backend", paymentEntries);
+    const attachments = formatPayBillAttachments(bill);
 
     res.json({
       ...bill.toObject(),
+      attachments,
+      attachmentFullUrl: attachments[0]?.fullUrl || "",
       paymentEntries,
     });
   } catch (err) {
@@ -415,14 +491,46 @@ exports.updatePayBill = async (req, res) => {
 
     const billNo = bill.billNo || "PB-1001";
 
-    // ✅ Remove old attachment if replaced
-    if (req.file && bill.attachment) {
-      try {
-        fs.unlinkSync(path.join(__dirname, "..", bill.attachment));
-      } catch (e) {
-        console.warn("⚠️ Could not remove old attachment:", e.message);
-      }
+    let attachments = formatPayBillAttachments(bill).map((att) => ({
+      key: att.key,
+      type: att.type || "",
+      size: att.size || 0,
+      originalName: att.originalName || "",
+    }));
+
+    let keepAttachmentKeys = [];
+
+    try {
+      keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys || "[]");
+    } catch (err) {
+      keepAttachmentKeys = [];
     }
+
+    const removedAttachments = attachments.filter(
+      (att) => !keepAttachmentKeys.includes(att.key),
+    );
+
+    for (const att of removedAttachments) {
+      await deletePayBillAttachment(att);
+    }
+
+    attachments = attachments.filter((att) =>
+      keepAttachmentKeys.includes(att.key),
+    );
+
+    const newAttachments = await uploadPayBillFiles(req.files, userId);
+
+    if (attachments.length + newAttachments.length > 3) {
+      for (const att of newAttachments) {
+        await deletePayBillAttachment(att);
+      }
+
+      return res.status(400).json({
+        error: "Maximum 3 attachments allowed",
+      });
+    }
+
+    attachments = [...attachments, ...newAttachments];
 
     // ✅ Update bill fields
     bill.supplier = supplierData?._id || null;
@@ -438,9 +546,8 @@ exports.updatePayBill = async (req, res) => {
     bill.billNo = billNo;
     bill.description = description;
 
-    if (req.file) {
-      bill.attachment = `uploads/${req.file.filename}`;
-    }
+    bill.attachments = attachments;
+    bill.attachment = attachments[0]?.key || "";
 
     await bill.save();
 
@@ -586,12 +693,10 @@ exports.deletePayBill = async (req, res) => {
       sourceType: "pay_bill",
     });
 
-    if (bill.attachment) {
-      try {
-        fs.unlinkSync(path.join(__dirname, "..", bill.attachment));
-      } catch (e) {
-        console.warn("⚠️ Attachment removal error:", e.message);
-      }
+    const attachmentsToDelete = formatPayBillAttachments(bill);
+
+    for (const att of attachmentsToDelete) {
+      await deletePayBillAttachment(att);
     }
 
     // 🧹 Delete bill

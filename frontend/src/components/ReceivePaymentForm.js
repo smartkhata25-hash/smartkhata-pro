@@ -6,7 +6,7 @@ import {
   updateReceivePayment,
   getReceivePaymentById,
 } from '../services/receivePaymentService';
-import { getAccounts } from '../services/accountService';
+import { getValidPaymentAccounts } from '../services/accountService';
 import { fetchCustomers } from '../services/customerService';
 import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
 import { fetchSaleParties } from '../services/partyService';
@@ -15,6 +15,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import AttachmentViewerModal from './AttachmentViewerModal';
 import './ReceivePaymentForm.css';
 
 const ReceivePaymentForm = () => {
@@ -26,9 +27,10 @@ const ReceivePaymentForm = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [customerLedger, setCustomerLedger] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [modalAttachment, setModalAttachment] = useState(null);
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const printRef = useRef();
+  const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     customer: '',
@@ -39,7 +41,7 @@ const ReceivePaymentForm = () => {
     discountAmount: '',
     account: '',
     description: '',
-    attachment: null,
+    attachments: [],
   });
   const [printSize, setPrintSize] = useState(localStorage.getItem('receivePrintSize') || 'narrow');
   const [paymentEntries, setPaymentEntries] = useState([
@@ -64,18 +66,11 @@ const ReceivePaymentForm = () => {
       try {
         const cData = await fetchCustomers();
         const pData = await fetchSaleParties();
-        const aData = await getAccounts();
-
-        // ✅ Sirf Receive Payment ke liye valid accounts
-        const paymentAccounts = aData.filter(
-          (acc) =>
-            ['Cash', 'Bank', 'Asset'].includes(acc.type) &&
-            !acc.name?.toLowerCase().startsWith('customer:')
-        );
+        const paymentAccounts = await getValidPaymentAccounts();
 
         setCustomers(cData);
         setParties(pData);
-        setAccounts(paymentAccounts);
+        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
 
         const loadedCustomers = cData;
 
@@ -104,7 +99,7 @@ const ReceivePaymentForm = () => {
             paymentType: existing.paymentType || 'Cash',
             discountAmount: existing.discountAmount || '',
             description: existing.description || '',
-            attachment: null,
+            attachments: existing.attachments || [],
           });
 
           // ✅ IMPORTANT: customer name set for search input
@@ -189,9 +184,19 @@ const ReceivePaymentForm = () => {
   };
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    setFormData((prev) => ({ ...prev, attachment: file }));
-    setShowPreview(false);
+    const newFiles = Array.from(e.target.files || []);
+    const oldFiles = formData.attachments || [];
+
+    if (oldFiles.length + newFiles.length > 3) {
+      alert('Maximum 3 attachments allowed');
+      e.target.value = '';
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      attachments: [...oldFiles, ...newFiles],
+    }));
   };
 
   const resetForm = () => {
@@ -204,7 +209,7 @@ const ReceivePaymentForm = () => {
       paymentType: 'Cash',
       account: '',
       description: '',
-      attachment: null,
+      attachments: [],
     });
 
     setCustomerName('');
@@ -222,7 +227,6 @@ const ReceivePaymentForm = () => {
 
     setCustomerLedger([]);
 
-    setShowPreview(false);
     clear();
   };
 
@@ -242,7 +246,7 @@ const ReceivePaymentForm = () => {
         paymentType: existing.paymentType || '',
         description: existing.description || '',
         discountAmount: existing.discountAmount || '',
-        attachment: null,
+        attachments: existing.attachments || [],
       });
 
       setPaymentEntries(
@@ -404,8 +408,22 @@ const ReceivePaymentForm = () => {
 
     const data = new FormData();
     Object.entries(formData).forEach(([key, value]) => {
-      if (value !== null) data.append(key, value);
+      if (key !== 'attachments' && value !== null) {
+        data.append(key, value);
+      }
     });
+
+    (formData.attachments || []).forEach((file) => {
+      if (file instanceof File) {
+        data.append('attachments', file);
+      }
+    });
+
+    const keepAttachmentKeys = (formData.attachments || [])
+      .filter((f) => !('lastModified' in f))
+      .map((f) => f.key);
+
+    data.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
 
     data.append('paymentEntries', JSON.stringify(paymentEntries));
 
@@ -554,50 +572,88 @@ const ReceivePaymentForm = () => {
               />
             </div>
           </div>
-          {/* ATTACHMENT */}
-          <div>
+          {/* ATTACHMENTS */}
+          <div className="md:col-span-2">
             <label className="text-xs font-semibold text-gray-600 mb-1 block">
-              {t('attachment')}
+              {t('attachment')} <span className="text-gray-400">(Max 3)</span>
             </label>
+
             <input
+              ref={fileInputRef}
               type="file"
+              multiple
+              hidden
+              accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
               onChange={handleFileChange}
-              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm"
             />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={(formData.attachments || []).length >= 3}
+              className={`px-3 py-2 rounded-lg text-sm shadow ${
+                (formData.attachments || []).length >= 3
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              📎 Add Files ({(formData.attachments || []).length}/3)
+            </button>
+
+            {formData.attachments?.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap mt-2">
+                {formData.attachments.map((file, index) => {
+                  const isNewFile = file instanceof File;
+                  const fileUrl = isNewFile
+                    ? URL.createObjectURL(file)
+                    : file.fullUrl || file.url || '';
+
+                  return (
+                    <div
+                      key={file.key || index}
+                      className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+                    >
+                      <span className="text-blue-600">📎 File {index + 1}</span>
+
+                      {fileUrl && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModalAttachment({
+                              url: fileUrl,
+                              type: file.type || '',
+                            })
+                          }
+                          className="text-green-600 underline"
+                        >
+                          👁 View
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(t('alerts.removeAttachment'))) {
+                            setFormData((prev) => ({
+                              ...prev,
+                              attachments: prev.attachments.filter((_, i) => i !== index),
+                            }));
+
+                            if (fileInputRef.current) {
+                              fileInputRef.current.value = '';
+                            }
+                          }
+                        }}
+                        className="text-red-500"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-
-          {/* DESCRIPTION */}
-          {formData.attachment && (
-            <div className="md:col-span-2 flex items-center justify-between bg-gray-100 px-3 py-2 rounded-xl">
-              <span
-                onClick={() => setShowPreview(!showPreview)}
-                className="text-blue-600 cursor-pointer text-sm"
-              >
-                {t('preview')}
-              </span>
-              <span
-                onClick={() => {
-                  if (window.confirm(t('alerts.removeAttachment'))) {
-                    setFormData((prev) => ({ ...prev, attachment: null }));
-                    setShowPreview(false);
-                  }
-                }}
-                className="text-red-500 cursor-pointer"
-              >
-                ✕
-              </span>
-            </div>
-          )}
-
-          {showPreview && formData.attachment && (
-            <div className="md:col-span-2">
-              <iframe
-                src={URL.createObjectURL(formData.attachment)}
-                title="Preview"
-                className="w-full h-64 border rounded-xl"
-              />
-            </div>
-          )}
           <div className="md:col-span-2">
             <label className="text-xs font-semibold text-gray-600 mb-1 block">
               {t('description')}
@@ -855,6 +911,10 @@ const ReceivePaymentForm = () => {
           </div>
         )}
       </div>
+      <AttachmentViewerModal
+        attachment={modalAttachment}
+        onClose={() => setModalAttachment(null)}
+      />
     </div>
   );
 };

@@ -354,7 +354,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
             }}
           >
             <tr className="bg-gray-100 text-center">
-              <th className="border p-2 w-[340px]">{t('inventory.product')}</th>
+              <th className="border p-2 w-[380px]">{t('inventory.product')}</th>
 
               {!isMobile && <th className="border p-2 w-36">{t('inventory.category')}</th>}
               {!isMobile && <th className="border p-2 w-24">{t('inventory.rack')}</th>}
@@ -390,7 +390,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
                 }}
               >
                 <td className={`border p-2 ${isMobile ? 'w-2/4' : 'w-[340px]'}`}>
-                  <div className="flex items-center justify-center gap-2">
+                  <div className="flex items-center gap-2">
                     {p.image?.url ? (
                       <img
                         src={p.image.url}

@@ -61,6 +61,13 @@ export const deleteParty = async (id, token = null) => {
   return res.data;
 };
 
+// ✅ Restore Hidden Party
+export const restoreParty = async (id, token = null) => {
+  const res = await axios.post(`${API_URL}/${id}/restore`, {}, getAuthHeaders(token));
+
+  return res.data;
+};
+
 // ✅ Convert Party → Customer
 export const convertPartyToCustomer = async (id, token = null) => {
   const res = await axios.post(`${API_URL}/${id}/convert-to-customer`, {}, getAuthHeaders(token));
@@ -102,6 +109,7 @@ const partyService = {
   addParty,
   updateParty,
   deleteParty,
+  restoreParty,
 
   convertPartyToCustomer,
   convertPartyToSupplier,

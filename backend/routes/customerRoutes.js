@@ -6,6 +6,7 @@ const {
   addCustomer,
   updateCustomer,
   deleteCustomer,
+  restoreCustomer,
   confirmMergeCustomers,
   convertCustomerToParty,
 
@@ -25,6 +26,9 @@ router.put("/:id", protect, updateCustomer);
 
 // ✅ DELETE customer
 router.delete("/:id", protect, deleteCustomer);
+
+// ✅ RESTORE hidden customer
+router.post("/:id/restore", protect, restoreCustomer);
 
 // ✅ CONFIRM MERGE
 router.post("/merge/confirm", protect, confirmMergeCustomers);

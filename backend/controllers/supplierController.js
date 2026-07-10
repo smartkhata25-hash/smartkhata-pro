@@ -216,51 +216,106 @@ exports.createSupplier = async (req, res) => {
 
 /* ───────────── Get Suppliers ───────────── */
 exports.getSuppliers = async (req, res) => {
-  const {
-    search = "",
-    type = "",
-    blocked = "",
-    sort = "createdAt",
-    page = 1,
-    limit = 0,
-  } = req.query;
-
-  const query = { userId: req.user.id, isDeleted: false };
-
-  if (search) {
-    query.$or = [
-      { name: { $regex: search, $options: "i" } },
-      { phone: { $regex: search, $options: "i" } },
-      { email: { $regex: search, $options: "i" } },
-    ];
-  }
-
-  if (type) query.supplierType = type;
-  if (blocked) query.supplierType = "blocked";
-
   try {
-    const cursor = Supplier.find(query).sort({ [sort]: 1 });
-    if (+limit) cursor.skip((page - 1) * limit).limit(+limit);
-    const suppliers = await cursor;
+    const userId = req.user.id;
+
+    const {
+      search = "",
+      type = "",
+      status = "active",
+      sort = "createdAt",
+      page = 1,
+      limit = 0,
+    } = req.query;
+
+    const query = {
+      userId,
+    };
+
+    // ✅ Active / Hidden / All
+    if (status === "active") {
+      query.isDeleted = false;
+    } else if (status === "hidden") {
+      query.isDeleted = true;
+    }
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (type) {
+      query.supplierType = type;
+    }
+
+    let suppliers = await Supplier.find(query).sort({ [sort]: 1 });
+
+    // ✅ پرانے hidden records کی وجہ خود پہچاننا
+    if (status === "hidden" || status === "all") {
+      const oldHiddenSuppliers = suppliers.filter(
+        (supplier) => supplier.isDeleted === true && !supplier.hiddenReason,
+      );
+
+      for (const supplier of oldHiddenSuppliers) {
+        const matchingParty = await Party.exists({
+          name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
+          userId,
+          isDeleted: false,
+          isActive: true,
+        });
+
+        const matchingActiveSupplier = await Supplier.exists({
+          _id: { $ne: supplier._id },
+          name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
+          userId,
+          isDeleted: false,
+        });
+
+        if (matchingParty) {
+          supplier.hiddenReason = "converted";
+        } else if (matchingActiveSupplier) {
+          supplier.hiddenReason = "merged";
+        } else {
+          supplier.hiddenReason = "deleted";
+        }
+
+        supplier.supplierType = "blocked";
+        await supplier.save();
+      }
+
+      suppliers = await Supplier.find(query).sort({ [sort]: 1 });
+    }
+
+    if (Number(limit) > 0) {
+      const start = (Number(page) - 1) * Number(limit);
+      suppliers = suppliers.slice(start, start + Number(limit));
+    }
 
     const suppliersWithBalance = await Promise.all(
-      suppliers.map(async (sup) => {
+      suppliers.map(async (supplier) => {
         const balance = await getSupplierBalanceFromJournal(
-          sup._id,
-          req.user.id,
+          supplier._id,
+          userId,
         );
 
         return {
-          ...sup.toObject(),
+          ...supplier.toObject(),
           balance,
         };
       }),
     );
 
-    res.json(suppliersWithBalance);
+    return res.json(suppliersWithBalance);
   } catch (err) {
     console.error("❌ Supplier fetch error:", err);
-    res.status(500).json({ message: err.message });
+
+    return res.status(500).json({
+      message: "Supplier fetch failed",
+      error: err.message,
+    });
   }
 };
 
@@ -586,9 +641,7 @@ exports.confirmMergeSupplier = async (req, res) => {
       });
     }
 
-    // =====================================================
     // ✅ MOVE ALL JOURNAL ENTRIES SAFELY
-    // =====================================================
 
     const journals = await JournalEntry.find({
       supplierId: sourceSupplier._id,
@@ -599,11 +652,10 @@ exports.confirmMergeSupplier = async (req, res) => {
     let movedTransactions = 0;
 
     for (const journal of journals) {
-      // ✅ Change supplierId
       journal.supplierId = targetSupplier._id;
 
       // ✅ IMPORTANT:
-      // Replace old supplier account inside journal lines
+
       journal.lines = journal.lines.map((line) => {
         if (line.account?.toString() === sourceSupplier.account.toString()) {
           return {
@@ -619,25 +671,16 @@ exports.confirmMergeSupplier = async (req, res) => {
       movedTransactions++;
     }
 
-    // =====================================================
-    // ✅ RECALCULATE BOTH ACCOUNTS
-    // =====================================================
-
     await recalculateAccountBalance(targetSupplier.account);
     await recalculateAccountBalance(sourceSupplier.account);
 
-    // =====================================================
     // ✅ DEACTIVATE OLD SUPPLIER
-    // =====================================================
 
     sourceSupplier.isDeleted = true;
     sourceSupplier.supplierType = "blocked";
+    sourceSupplier.hiddenReason = "merged";
 
     await sourceSupplier.save();
-
-    // =====================================================
-    // ✅ DEACTIVATE OLD ACCOUNT
-    // =====================================================
 
     await Account.updateOne(
       { _id: sourceSupplier.account },
@@ -686,15 +729,27 @@ exports.deleteSupplier = async (req, res) => {
       isDeleted: false,
     });
 
-    // 🟥 CASE 1: Ledger exists → supplier ko inactive karo
     if (hasLedger) {
       supplier.isDeleted = true;
-      supplier.supplierType = "blocked"; // optional but useful
+      supplier.supplierType = "blocked";
+      supplier.hiddenReason = "deleted";
+
       await supplier.save();
 
+      // ✅ Linked account بھی inactive
+      await Account.updateOne(
+        { _id: supplier.account, userId },
+        {
+          $set: {
+            isActive: false,
+          },
+        },
+      );
+
       return res.json({
-        message: "Supplier has transactions, marked as inactive",
+        message: "Supplier has transactions, moved to hidden",
         status: "inactive",
+        hiddenReason: "deleted",
       });
     }
 
@@ -711,6 +766,91 @@ exports.deleteSupplier = async (req, res) => {
   } catch (error) {
     console.error("❌ Smart Delete Supplier Error:", error);
     res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// ✅ Restore deleted Supplier from Hidden
+exports.restoreSupplier = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const supplierId = req.params.id;
+
+    const supplier = await Supplier.findOne({
+      _id: supplierId,
+      userId,
+      isDeleted: true,
+    });
+
+    if (!supplier) {
+      return res.status(404).json({
+        message: "Hidden supplier not found",
+      });
+    }
+
+    // ❌ Converted یا merged restore نہیں ہوگا
+    if (supplier.hiddenReason !== "deleted") {
+      return res.status(400).json({
+        message: "Only deleted suppliers can be restored",
+      });
+    }
+
+    // ✅ Same-name active Supplier check
+    const activeSupplierExists = await Supplier.exists({
+      _id: { $ne: supplier._id },
+      name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+    });
+
+    if (activeSupplierExists) {
+      return res.status(400).json({
+        message: "Active supplier with same name already exists",
+      });
+    }
+
+    // ✅ Same-name active Party check
+    const activePartyExists = await Party.exists({
+      name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (activePartyExists) {
+      return res.status(400).json({
+        message: "Active party with same name already exists",
+      });
+    }
+
+    supplier.isDeleted = false;
+    supplier.supplierType = "vendor";
+    supplier.hiddenReason = null;
+
+    await supplier.save();
+
+    await Account.updateOne(
+      {
+        _id: supplier.account,
+        userId,
+      },
+      {
+        $set: {
+          isActive: true,
+        },
+      },
+    );
+
+    return res.json({
+      message: "Supplier restored successfully",
+      supplier,
+    });
+  } catch (error) {
+    console.error("❌ Restore Supplier Error:", error);
+
+    return res.status(500).json({
+      message: "Supplier restore failed",
+      error: error.message,
+    });
   }
 };
 
@@ -918,7 +1058,7 @@ exports.convertSupplierToParty = async (req, res) => {
       email: supplier.email || "",
       address: supplier.address || "",
       notes: supplier.notes || "",
-      role: "supplier",
+      role: "both",
       openingBalance: partyOpeningBalance,
       account: partyAccount._id,
       userId,
@@ -933,6 +1073,8 @@ exports.convertSupplierToParty = async (req, res) => {
 
     supplier.isDeleted = true;
     supplier.supplierType = "blocked";
+    supplier.hiddenReason = "converted";
+
     await supplier.save();
 
     await Account.updateOne(
@@ -968,7 +1110,6 @@ exports.getSupplierDetailedLedger = async (req, res) => {
     const supplier = await Supplier.findOne({
       _id: supplierId,
       userId,
-      isDeleted: false,
     }).populate("account");
 
     if (!supplier || !supplier.account) {
@@ -1000,9 +1141,8 @@ exports.getSupplierDetailedLedger = async (req, res) => {
       }
     }
 
-    // ===============================
     // 🔄 STEP 2: MAIN LEDGER
-    // ===============================
+
     const match = {
       createdBy: userId,
       supplierId: supplier._id,
@@ -1110,11 +1250,11 @@ exports.getSupplierDetailedLedger = async (req, res) => {
       ledger.push(row);
     }
 
-    // ===============================
-    // ✅ FINAL RESPONSE
-    // ===============================
     res.json({
+      supplierId: supplier._id,
       supplierName: supplier.name,
+      isDeleted: supplier.isDeleted,
+      hiddenReason: supplier.hiddenReason || null,
       openingBalance,
       totalDebit,
       totalCredit,

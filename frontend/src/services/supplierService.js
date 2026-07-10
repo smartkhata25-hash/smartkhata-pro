@@ -46,6 +46,16 @@ export const deleteSupplier = (id) =>
       throw err;
     });
 
+// ✅ Restore Hidden Supplier
+export const restoreSupplier = (id) =>
+  axios
+    .post(`${API}/${id}/restore`, {}, getConfig())
+    .then((r) => r.data)
+    .catch((err) => {
+      console.error('❌ Error restoring supplier:', err.response?.data || err.message);
+      throw err;
+    });
+
 // 🔥 ✅ CONFIRM MERGE SUPPLIER (NEW – PRO LEVEL)
 export const confirmMergeSupplier = (data) =>
   axios

@@ -6,7 +6,6 @@ const ctrl = require("../controllers/supplierController");
 const protect = require("../middleware/authMiddleware");
 const upload = require("../middleware/upload");
 
-// ✅ Apply protect middleware to all routes
 router.use(protect);
 
 // ✅ Supplier CRUD Routes
@@ -17,6 +16,9 @@ router.route("/:id").put(ctrl.updateSupplier).delete(ctrl.deleteSupplier);
 router.post("/merge/confirm", ctrl.confirmMergeSupplier);
 
 router.post("/:id/convert-to-party", ctrl.convertSupplierToParty);
+
+// ✅ Restore hidden supplier
+router.post("/:id/restore", ctrl.restoreSupplier);
 
 // 📘 Supplier Detailed Ledger
 router.get("/:id/detailed-ledger", ctrl.getSupplierDetailedLedger);

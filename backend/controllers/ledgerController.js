@@ -173,7 +173,10 @@ const getCustomerLedger = async (req, res) => {
 
     // ✅ Final Response
     res.json({
+      customerId: customer._id,
       customerName: customer.name,
+      isActive: customer.isActive,
+      hiddenReason: customer.hiddenReason || null,
       openingBalance: opening,
       ledger,
     });

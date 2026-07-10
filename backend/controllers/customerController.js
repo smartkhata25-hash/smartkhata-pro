@@ -13,82 +13,140 @@ const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
-// ✅ 1. Get all customers with balance
+// ✅ 1. Get customers with Active / Hidden support
 const getCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+    const objectUserId = new mongoose.Types.ObjectId(userId);
 
-    const { search = "" } = req.query;
+    const { search = "", status = "active" } = req.query;
 
     const query = {
-      createdBy: new mongoose.Types.ObjectId(userId),
-      isActive: true,
+      createdBy: objectUserId,
     };
+
+    // ✅ Active / Hidden / All filter
+    if (status === "active") {
+      query.isActive = true;
+    } else if (status === "hidden") {
+      query.isActive = false;
+    }
 
     if (search) {
       query.name = { $regex: search, $options: "i" };
     }
 
-    const customers = await Customer.find(query).populate("account");
+    let customers = await Customer.find(query).populate("account");
 
-    // ⚡ Step 1: accounts collect
-    const accountIds = customers.map((c) => c.account?._id).filter(Boolean);
+    // ✅ Old hidden records automatically identify
+    if (status === "hidden" || status === "all") {
+      const legacyHiddenCustomers = customers.filter(
+        (customer) => customer.isActive === false && !customer.hiddenReason,
+      );
 
-    // ⚡ Step 2: single aggregation
-    const balances = await JournalEntry.aggregate([
-      {
-        $match: {
-          createdBy: new (require("mongoose").Types.ObjectId)(userId),
+      for (const customer of legacyHiddenCustomers) {
+        const matchingParty = await Party.exists({
+          name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
+          userId,
           isDeleted: false,
-          "lines.account": { $in: accountIds }, // ✅ FIX
-        },
-      },
-      { $unwind: "$lines" },
-      {
-        $match: {
-          "lines.account": { $in: accountIds },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            account: "$lines.account",
-            type: "$lines.type",
-          },
-          total: { $sum: "$lines.amount" },
-        },
-      },
-    ]);
+          isActive: true,
+        });
 
-    // ⚡ Step 3: map
+        const matchingActiveCustomer = await Customer.exists({
+          _id: { $ne: customer._id },
+          name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
+          createdBy: userId,
+          isActive: true,
+        });
+
+        if (matchingParty) {
+          customer.hiddenReason = "converted";
+        } else if (matchingActiveCustomer) {
+          customer.hiddenReason = "merged";
+        } else {
+          customer.hiddenReason = "deleted";
+        }
+
+        await customer.save();
+      }
+
+      customers = await Customer.find(query).populate("account");
+    }
+
+    // ⚡ Accounts collect
+    const accountIds = customers
+      .map((customer) => customer.account?._id)
+      .filter(Boolean);
+
+    const balances =
+      accountIds.length > 0
+        ? await JournalEntry.aggregate([
+            {
+              $match: {
+                createdBy: objectUserId,
+                isDeleted: false,
+                "lines.account": { $in: accountIds },
+              },
+            },
+            { $unwind: "$lines" },
+            {
+              $match: {
+                "lines.account": { $in: accountIds },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  account: "$lines.account",
+                  type: "$lines.type",
+                },
+                total: { $sum: "$lines.amount" },
+              },
+            },
+          ])
+        : [];
+
     const balanceMap = {};
 
-    balances.forEach((b) => {
-      const id = b._id.account.toString();
-      if (!balanceMap[id]) balanceMap[id] = { debit: 0, credit: 0 };
+    balances.forEach((item) => {
+      const id = item._id.account.toString();
 
-      if (b._id.type === "debit") balanceMap[id].debit = b.total;
-      else balanceMap[id].credit = b.total;
+      if (!balanceMap[id]) {
+        balanceMap[id] = {
+          debit: 0,
+          credit: 0,
+        };
+      }
+
+      if (item._id.type === "debit") {
+        balanceMap[id].debit = item.total;
+      } else {
+        balanceMap[id].credit = item.total;
+      }
     });
 
-    // ⚡ Step 4: attach balance
-    const result = customers.map((c) => {
-      const data = balanceMap[c.account?._id?.toString()] || {
+    const result = customers.map((customer) => {
+      const accountId = customer.account?._id?.toString();
+
+      const data = balanceMap[accountId] || {
         debit: 0,
         credit: 0,
       };
 
-      const balance = data.debit - data.credit;
-
       return {
-        ...c.toObject(),
-        balance,
+        ...customer.toObject(),
+        balance: data.debit - data.credit,
       };
     });
 
-    res.json(result);
+    return res.json(result);
   } catch (error) {
-    res.status(500).json({ message: "Server Error" });
+    console.error("❌ Get Customers Error:", error);
+
+    return res.status(500).json({
+      message: "Server Error",
+      error: error.message,
+    });
   }
 };
 
@@ -394,9 +452,11 @@ const deleteCustomer = async (req, res) => {
     // 🟥 CASE 1: Ledger exists → Hide only
     if (hasLedger) {
       customer.isActive = false;
+      customer.hiddenReason = "deleted";
+
       await customer.save();
 
-      // ✅ deactivate linked account also
+      // ✅ Deactivate linked account also
       await Account.updateOne(
         { _id: customer.account },
         {
@@ -407,8 +467,9 @@ const deleteCustomer = async (req, res) => {
       );
 
       return res.json({
-        message: "Customer has transactions, marked as inactive",
+        message: "Customer has transactions, moved to hidden",
         status: "inactive",
+        hiddenReason: "deleted",
       });
     }
 
@@ -448,6 +509,90 @@ const deleteCustomer = async (req, res) => {
   } catch (error) {
     console.error("❌ Delete/Deactivate customer error:", error);
     res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// ✅ Restore deleted Customer from Hidden
+const restoreCustomer = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const customerId = req.params.id;
+
+    const customer = await Customer.findOne({
+      _id: customerId,
+      createdBy: userId,
+      isActive: false,
+    });
+
+    if (!customer) {
+      return res.status(404).json({
+        message: "Hidden customer not found",
+      });
+    }
+
+    // ❌ Converted or merged customer cannot be restored
+    if (customer.hiddenReason !== "deleted") {
+      return res.status(400).json({
+        message: "Only deleted customers can be restored",
+      });
+    }
+
+    // ✅ Check same-name active customer
+    const activeCustomerExists = await Customer.exists({
+      _id: { $ne: customer._id },
+      name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
+      createdBy: userId,
+      isActive: true,
+    });
+
+    if (activeCustomerExists) {
+      return res.status(400).json({
+        message: "Active customer with same name already exists",
+      });
+    }
+
+    // ✅ Check same-name active party
+    const activePartyExists = await Party.exists({
+      name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (activePartyExists) {
+      return res.status(400).json({
+        message: "Active party with same name already exists",
+      });
+    }
+
+    customer.isActive = true;
+    customer.hiddenReason = null;
+
+    await customer.save();
+
+    await Account.updateOne(
+      {
+        _id: customer.account,
+        userId,
+      },
+      {
+        $set: {
+          isActive: true,
+        },
+      },
+    );
+
+    return res.json({
+      message: "Customer restored successfully",
+      customer,
+    });
+  } catch (error) {
+    console.error("❌ Restore Customer Error:", error);
+
+    return res.status(500).json({
+      message: "Customer restore failed",
+      error: error.message,
+    });
   }
 };
 
@@ -661,7 +806,7 @@ const convertCustomerToParty = async (req, res) => {
       phone: customer.phone || "",
       email: customer.email || "",
       address: customer.address || "",
-      role: "customer",
+      role: "both",
       openingBalance: closingBalance,
       account: partyAccount._id,
       userId,
@@ -675,6 +820,8 @@ const convertCustomerToParty = async (req, res) => {
     });
 
     customer.isActive = false;
+    customer.hiddenReason = "converted";
+
     await customer.save();
 
     await Account.updateOne(
@@ -756,6 +903,8 @@ const confirmMergeCustomers = async (req, res) => {
 
     // 🔥 3️⃣ Deactivate source customer
     sourceCustomer.isActive = false;
+    sourceCustomer.hiddenReason = "merged";
+
     await sourceCustomer.save();
 
     // 🔥 4️⃣ Deactivate source account
@@ -967,6 +1116,7 @@ module.exports = {
   addCustomer,
   updateCustomer,
   deleteCustomer,
+  restoreCustomer,
   confirmMergeCustomers,
   convertCustomerToParty,
 

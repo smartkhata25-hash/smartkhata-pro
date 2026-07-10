@@ -252,6 +252,25 @@ exports.updateProduct = async (req, res) => {
       lowStockThreshold: req.body.lowStockThreshold,
     };
 
+    if (req.body.removeImage === "true") {
+      const oldProduct = await Product.findOne({
+        _id: req.params.id,
+        userId: req.user.id,
+      });
+
+      if (oldProduct?.image?.key) {
+        await deleteFile(oldProduct.image.key);
+      }
+
+      updateData.image = {
+        key: "",
+        url: "",
+        originalName: "",
+        mimeType: "",
+        size: 0,
+      };
+    }
+
     if (req.file) {
       const oldProduct = await Product.findOne({
         _id: req.params.id,

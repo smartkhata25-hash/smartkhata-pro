@@ -149,6 +149,11 @@ const getPartyLedger = async (req, res) => {
       partyName: party.name,
       partyPhone: party.phone || "",
       role: party.role,
+
+      isActive: party.isActive,
+      isDeleted: party.isDeleted,
+      hiddenReason: party.hiddenReason || null,
+
       accountId,
       openingBalance: Number(openingBalance.toFixed(2)),
       totalDebit: Number(totalDebit.toFixed(2)),
@@ -165,9 +170,7 @@ const getPartyLedger = async (req, res) => {
   }
 };
 
-/* =========================================================
-   SOURCE LABEL HELPER
-========================================================= */
+// SOURCE LABEL HELPER
 
 const getPartySourceLabel = (entry) => {
   const type = entry.sourceType || "";

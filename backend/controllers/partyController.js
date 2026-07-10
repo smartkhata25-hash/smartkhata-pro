@@ -583,9 +583,7 @@ exports.createParty = async (req, res) => {
   }
 };
 
-/* =========================================================
-   GET PARTIES
-========================================================= */
+//GET PARTIES
 
 exports.getParties = async (req, res) => {
   try {
@@ -601,10 +599,15 @@ exports.getParties = async (req, res) => {
 
     const query = {
       userId,
+      isDeleted: false,
     };
 
-    if (status === "active") query.isActive = true;
-    if (status === "inactive") query.isActive = false;
+    // ✅ Active / Hidden / All
+    if (status === "active") {
+      query.isActive = true;
+    } else if (status === "hidden" || status === "inactive") {
+      query.isActive = false;
+    }
 
     if (role && ["customer", "supplier", "both"].includes(role)) {
       query.role = role;
@@ -612,6 +615,7 @@ exports.getParties = async (req, res) => {
 
     if (search.trim()) {
       const safe = escapeRegex(search.trim());
+
       query.$or = [
         { name: { $regex: safe, $options: "i" } },
         { phone: { $regex: safe, $options: "i" } },
@@ -619,15 +623,47 @@ exports.getParties = async (req, res) => {
       ];
     }
 
-    const cursor = Party.find(query)
+    let parties = await Party.find(query)
       .populate("account")
       .sort({ createdAt: -1 });
 
-    if (Number(limit) > 0) {
-      cursor.skip((Number(page) - 1) * Number(limit)).limit(Number(limit));
+    // ✅ پرانے Hidden records کی وجہ پہچانیں
+    if (status === "hidden" || status === "inactive" || status === "all") {
+      const oldHiddenParties = parties.filter(
+        (party) => party.isActive === false && !party.hiddenReason,
+      );
+
+      for (const party of oldHiddenParties) {
+        const activeCustomer = await Customer.exists({
+          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+          createdBy: userId,
+          isActive: true,
+        });
+
+        const activeSupplier = await Supplier.exists({
+          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+          userId,
+          isDeleted: false,
+        });
+
+        if (activeCustomer || activeSupplier) {
+          party.hiddenReason = "converted";
+        } else {
+          party.hiddenReason = "deleted";
+        }
+
+        await party.save();
+      }
+
+      parties = await Party.find(query)
+        .populate("account")
+        .sort({ createdAt: -1 });
     }
 
-    const parties = await cursor.lean();
+    if (Number(limit) > 0) {
+      const start = (Number(page) - 1) * Number(limit);
+      parties = parties.slice(start, start + Number(limit));
+    }
 
     const result = await Promise.all(
       parties.map(async (party) => {
@@ -635,7 +671,7 @@ exports.getParties = async (req, res) => {
         const balance = await getPartyBalance(accountId, userId);
 
         return {
-          ...party,
+          ...party.toObject(),
           balance,
         };
       }),
@@ -644,6 +680,7 @@ exports.getParties = async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("❌ Get Parties Error:", err);
+
     return res.status(500).json({
       message: "Failed to fetch parties",
       error: err.message,
@@ -745,7 +782,7 @@ exports.updateParty = async (req, res) => {
     party.role = role;
     party.openingBalance = newOpening;
 
-    if (typeof isActive === "boolean") {
+    if (typeof isActive === "boolean" && party.hiddenReason !== "converted") {
       party.isActive = isActive;
     }
 
@@ -882,6 +919,7 @@ exports.deleteParty = async (req, res) => {
 
     if (hasLedger) {
       party.isActive = false;
+      party.hiddenReason = "deleted";
 
       await party.save();
 
@@ -891,8 +929,9 @@ exports.deleteParty = async (req, res) => {
       );
 
       return res.json({
-        message: "Party has transactions, marked as inactive",
+        message: "Party has transactions, moved to hidden",
         status: "inactive",
+        hiddenReason: "deleted",
       });
     }
 
@@ -907,6 +946,104 @@ exports.deleteParty = async (req, res) => {
     console.error("❌ Delete Party Error:", err);
     return res.status(500).json({
       message: "Party delete failed",
+      error: err.message,
+    });
+  }
+};
+
+// ✅ Restore deleted Party from Hidden
+exports.restoreParty = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const partyId = req.params.id;
+
+    const party = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+      isActive: false,
+    });
+
+    if (!party) {
+      return res.status(404).json({
+        message: "Hidden party not found",
+      });
+    }
+
+    // ❌ Converted Party restore نہیں ہوگی
+    if (party.hiddenReason !== "deleted") {
+      return res.status(400).json({
+        message: "Only deleted parties can be restored",
+      });
+    }
+
+    // ✅ Same-name active Party check
+    const activePartyExists = await Party.exists({
+      _id: { $ne: party._id },
+      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (activePartyExists) {
+      return res.status(400).json({
+        message: "Active party with same name already exists",
+      });
+    }
+
+    // ✅ Same-name active Customer check
+    const activeCustomerExists = await Customer.exists({
+      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+      createdBy: userId,
+      isActive: true,
+    });
+
+    if (activeCustomerExists) {
+      return res.status(400).json({
+        message: "Active customer with same name already exists",
+      });
+    }
+
+    // ✅ Same-name active Supplier check
+    const activeSupplierExists = await Supplier.exists({
+      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+      userId,
+      isDeleted: false,
+    });
+
+    if (activeSupplierExists) {
+      return res.status(400).json({
+        message: "Active supplier with same name already exists",
+      });
+    }
+
+    party.isActive = true;
+    party.hiddenReason = null;
+
+    await party.save();
+
+    await Account.updateOne(
+      {
+        _id: party.account,
+        userId,
+      },
+      {
+        $set: {
+          isActive: true,
+        },
+      },
+    );
+
+    return res.json({
+      message: "Party restored successfully",
+      party,
+    });
+  } catch (err) {
+    console.error("❌ Restore Party Error:", err);
+
+    return res.status(500).json({
+      message: "Party restore failed",
       error: err.message,
     });
   }
@@ -973,6 +1110,8 @@ exports.convertPartyToCustomer = async (req, res) => {
     });
 
     party.isActive = false;
+    party.hiddenReason = "converted";
+
     await party.save();
 
     await Account.updateOne(
@@ -1063,6 +1202,8 @@ exports.convertPartyToSupplier = async (req, res) => {
     });
 
     party.isActive = false;
+    party.hiddenReason = "converted";
+
     await party.save();
 
     await Account.updateOne(

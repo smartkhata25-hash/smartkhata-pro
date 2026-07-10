@@ -8,6 +8,7 @@ import {
   addParty,
   updateParty,
   deleteParty,
+  restoreParty,
   convertPartyToCustomer,
   convertPartyToSupplier,
 } from '../services/partyService';
@@ -42,14 +43,17 @@ const PartiesPage = () => {
 
   const loadParties = useCallback(async () => {
     try {
-      const data = await fetchParties();
+      const data = await fetchParties({
+        status: 'all',
+      });
+
       setParties(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Party load failed:', err);
+      setParties([]);
       alert(t('alerts.partyListLoadFailed'));
     }
   }, []);
-
   useEffect(() => {
     loadParties();
   }, [loadParties]);
@@ -155,6 +159,35 @@ const PartiesPage = () => {
       alert('Party supplier میں convert ہو گئی');
     } catch (err) {
       alert(err?.response?.data?.message || 'Convert failed');
+    }
+  };
+
+  const handleRestoreParty = async (e, party) => {
+    e.stopPropagation();
+
+    if (party.hiddenReason !== 'deleted') {
+      alert('صرف Delete کی گئی Party restore ہو سکتی ہے');
+      return;
+    }
+
+    if (!window.confirm(`${party.name} کو دوبارہ Active کرنا ہے؟`)) {
+      return;
+    }
+
+    try {
+      await restoreParty(party._id);
+
+      if (selectedPartyId === party._id) {
+        setSelectedPartyId('');
+        setSelectedPartyName('');
+        setLedgerData(null);
+      }
+
+      await loadParties();
+
+      alert('Party restore ہو گئی');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Party restore failed');
     }
   };
 
@@ -417,8 +450,29 @@ const PartiesPage = () => {
                   <div style={{ paddingRight: 70 }}>
                     <div style={{ fontWeight: 800, fontSize: 14 }}>
                       {party.name}
+
                       {party.isActive === false && (
-                        <span style={{ color: '#dc2626', fontSize: 11 }}>{t('hidden')}</span>
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color:
+                              party.hiddenReason === 'deleted'
+                                ? '#dc2626'
+                                : party.hiddenReason === 'converted'
+                                  ? '#7c3aed'
+                                  : '#6b7280',
+                          }}
+                        >
+                          {party.hiddenReason === 'deleted'
+                            ? 'Deleted'
+                            : party.hiddenReason === 'converted'
+                              ? 'Converted'
+                              : party.hiddenReason === 'merged'
+                                ? 'Merged'
+                                : 'Hidden'}
+                        </div>
                       )}
                     </div>
 
@@ -456,34 +510,63 @@ const PartiesPage = () => {
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        onClick={(e) => handleEditClick(e, party)}
-                        style={iconButton('#3b82f6', '#eff6ff', '#1d4ed8')}
-                      >
-                        <FaEdit size={12} />
-                      </button>
+                      {/* ✅ Active Party Actions */}
+                      {party.isActive !== false && (
+                        <>
+                          <button
+                            onClick={(e) => handleEditClick(e, party)}
+                            style={iconButton('#3b82f6', '#eff6ff', '#1d4ed8')}
+                            title="Edit"
+                          >
+                            <FaEdit size={12} />
+                          </button>
 
-                      <button
-                        onClick={(e) => handleDeleteClick(e, party._id)}
-                        style={iconButton('#ef4444', '#fef2f2', '#b91c1c')}
-                      >
-                        <FaTrash size={12} />
-                      </button>
-                      <button
-                        onClick={(e) => handleConvertToCustomer(e, party)}
-                        style={iconButton('#16a34a', '#f0fdf4', '#15803d')}
-                        title="Convert to Customer"
-                      >
-                        C
-                      </button>
+                          <button
+                            onClick={(e) => handleDeleteClick(e, party._id)}
+                            style={iconButton('#ef4444', '#fef2f2', '#b91c1c')}
+                            title="Delete"
+                          >
+                            <FaTrash size={12} />
+                          </button>
 
-                      <button
-                        onClick={(e) => handleConvertToSupplier(e, party)}
-                        style={iconButton('#7c3aed', '#f5f3ff', '#6d28d9')}
-                        title="Convert to Supplier"
-                      >
-                        S
-                      </button>
+                          <button
+                            onClick={(e) => handleConvertToCustomer(e, party)}
+                            style={iconButton('#16a34a', '#f0fdf4', '#15803d')}
+                            title="Convert to Customer"
+                          >
+                            C
+                          </button>
+
+                          <button
+                            onClick={(e) => handleConvertToSupplier(e, party)}
+                            style={iconButton('#7c3aed', '#f5f3ff', '#6d28d9')}
+                            title="Convert to Supplier"
+                          >
+                            S
+                          </button>
+                        </>
+                      )}
+
+                      {/* ✅ Restore صرف Deleted Party */}
+                      {party.isActive === false && party.hiddenReason === 'deleted' && (
+                        <button
+                          onClick={(e) => handleRestoreParty(e, party)}
+                          style={{
+                            height: 26,
+                            padding: '0 8px',
+                            borderRadius: 6,
+                            border: '1px solid #16a34a',
+                            background: '#f0fdf4',
+                            color: '#15803d',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                          title="Restore Party"
+                        >
+                          Restore
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -516,7 +599,9 @@ const PartiesPage = () => {
           {!ledgerLoading && ledgerData && (
             <>
               <PartyLedgerHeader
-                parties={parties}
+                parties={parties.filter((party) =>
+                  activeTab === 'active' ? party.isActive !== false : party.isActive === false
+                )}
                 partyId={selectedPartyId}
                 setPartyId={setSelectedPartyId}
                 start={ledgerStartDate}

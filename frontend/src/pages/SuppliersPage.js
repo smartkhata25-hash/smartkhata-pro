@@ -4,6 +4,7 @@ import {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  restoreSupplier,
   confirmMergeSupplier,
   convertSupplierToParty,
 } from '../services/supplierService';
@@ -73,12 +74,16 @@ const SuppliersPage = () => {
 
   const loadSuppliers = useCallback(async () => {
     try {
-      const data = await fetchSuppliers({ search: '', type: '' });
-      console.log('🔥 SUPPLIERS API RESPONSE:', data);
-      console.log('🔥 STEP4 FRONT DATA:', data);
-      setSuppliers(data);
+      const data = await fetchSuppliers({
+        search: '',
+        type: '',
+        status: 'all',
+      });
+
+      setSuppliers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(t('alerts.loadSuppliersError'), error);
+      setSuppliers([]);
     }
   }, []);
 
@@ -212,6 +217,35 @@ const SuppliersPage = () => {
     }
   };
 
+  const handleRestoreSupplier = async (e, supplier) => {
+    e.stopPropagation();
+
+    if (supplier.hiddenReason !== 'deleted') {
+      alert('صرف Delete کیا ہوا Supplier restore ہو سکتا ہے');
+      return;
+    }
+
+    if (!window.confirm(`${supplier.name} کو دوبارہ Active کرنا ہے؟`)) {
+      return;
+    }
+
+    try {
+      await restoreSupplier(supplier._id);
+
+      if (selectedSupplierId === supplier._id) {
+        setSelectedSupplierId(null);
+        setSupplierName('');
+        setLedgerData(null);
+      }
+
+      await loadSuppliers();
+
+      alert('Supplier restore ہو گیا');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Supplier restore failed');
+    }
+  };
+
   const cancelDelete = () => {
     setDeleteId(null);
     setShowConfirm(false);
@@ -271,7 +305,7 @@ const SuppliersPage = () => {
     });
 
   const activeSuppliers = filteredSuppliers
-    .filter((s) => s.supplierType !== 'blocked')
+    .filter((s) => s.isDeleted !== true)
     .filter((s) => {
       const bal = Number(s.balance) || 0;
 
@@ -300,7 +334,7 @@ const SuppliersPage = () => {
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
-  const hiddenSuppliers = filteredSuppliers.filter((s) => s.supplierType === 'blocked');
+  const hiddenSuppliers = filteredSuppliers.filter((s) => s.isDeleted === true);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -628,7 +662,33 @@ const SuppliersPage = () => {
                 >
                   {/* LEFT */}
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{supplier.name}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>
+                      {supplier.name}
+
+                      {supplier.isDeleted === true && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color:
+                              supplier.hiddenReason === 'deleted'
+                                ? '#dc2626'
+                                : supplier.hiddenReason === 'converted'
+                                  ? '#7c3aed'
+                                  : '#6b7280',
+                          }}
+                        >
+                          {supplier.hiddenReason === 'deleted'
+                            ? 'Deleted'
+                            : supplier.hiddenReason === 'converted'
+                              ? 'Converted to Party'
+                              : supplier.hiddenReason === 'merged'
+                                ? 'Merged'
+                                : 'Hidden'}
+                        </div>
+                      )}
+                    </div>
 
                     <div
                       style={{
@@ -654,61 +714,90 @@ const SuppliersPage = () => {
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        onClick={(e) => handleEditClick(e, supplier)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #7c3aed',
-                          background: '#f3e8ff',
-                          color: '#6b21a8',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <FaEdit size={12} />
-                      </button>
+                      {/* ✅ ACTIVE SUPPLIER ACTIONS */}
+                      {supplier.isDeleted !== true && (
+                        <>
+                          <button
+                            onClick={(e) => handleEditClick(e, supplier)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #7c3aed',
+                              background: '#f3e8ff',
+                              color: '#6b21a8',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                            title="Edit"
+                          >
+                            <FaEdit size={12} />
+                          </button>
 
-                      <button
-                        onClick={(e) => handleDeleteClick(e, supplier._id)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #ef4444',
-                          background: '#fef2f2',
-                          color: '#b91c1c',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <FaTrash size={12} />
-                      </button>
-                      <button
-                        onClick={(e) => handleConvertToParty(e, supplier)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #7c3aed',
-                          background: '#f5f3ff',
-                          color: '#6d28d9',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          fontWeight: 800,
-                          fontSize: 12,
-                        }}
-                        title="Convert to Party"
-                      >
-                        P
-                      </button>
+                          <button
+                            onClick={(e) => handleDeleteClick(e, supplier._id)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #ef4444',
+                              background: '#fef2f2',
+                              color: '#b91c1c',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                            title="Delete"
+                          >
+                            <FaTrash size={12} />
+                          </button>
+
+                          <button
+                            onClick={(e) => handleConvertToParty(e, supplier)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #7c3aed',
+                              background: '#f5f3ff',
+                              color: '#6d28d9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              fontWeight: 800,
+                              fontSize: 12,
+                            }}
+                            title="Convert to Party"
+                          >
+                            P
+                          </button>
+                        </>
+                      )}
+
+                      {/* ✅ RESTORE ONLY DELETED SUPPLIER */}
+                      {supplier.isDeleted === true && supplier.hiddenReason === 'deleted' && (
+                        <button
+                          onClick={(e) => handleRestoreSupplier(e, supplier)}
+                          style={{
+                            height: 26,
+                            padding: '0 8px',
+                            borderRadius: 6,
+                            border: '1px solid #16a34a',
+                            background: '#f0fdf4',
+                            color: '#15803d',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                          title="Restore Supplier"
+                        >
+                          Restore
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -776,7 +865,7 @@ const SuppliersPage = () => {
           {!ledgerLoading && ledgerData && (
             <>
               <SupplierLedgerHeader
-                suppliers={suppliers}
+                suppliers={activeTab === 'active' ? activeSuppliers : hiddenSuppliers}
                 sid={selectedSupplierId}
                 setSid={setSelectedSupplierId}
                 pageSize={10}

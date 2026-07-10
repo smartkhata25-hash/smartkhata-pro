@@ -17,8 +17,12 @@ export const fetchCustomers = async (token) => {
 };
 
 // ✅ Get Customers (same as fetchCustomers, but separated for compatibility)
-export const getCustomers = async (token) => {
-  const response = await axios.get(API_URL, getAuthHeaders(token));
+export const getCustomers = async (token = null, params = {}) => {
+  const response = await axios.get(API_URL, {
+    ...getAuthHeaders(token),
+    params,
+  });
+
   return response.data;
 };
 
@@ -37,6 +41,13 @@ export const updateCustomer = async (id, customerData, token) => {
 // ✅ Delete Customer
 export const deleteCustomer = async (id, token) => {
   const response = await axios.delete(`${API_URL}/${id}`, getAuthHeaders(token));
+  return response.data;
+};
+
+// ✅ Restore Hidden Customer
+export const restoreCustomer = async (id, token = null) => {
+  const response = await axios.post(`${API_URL}/${id}/restore`, {}, getAuthHeaders(token));
+
   return response.data;
 };
 

@@ -36,11 +36,19 @@ const SupplierSchema = new mongoose.Schema(
 
     /* Soft Delete */
     isDeleted: { type: Boolean, default: false },
+    hiddenReason: {
+      type: String,
+      enum: ["deleted", "converted", "merged", null],
+      default: null,
+    },
   },
+
   { timestamps: true },
 );
 
 /* 🔍 Text Search Support */
 SupplierSchema.index({ name: "text", phone: "text", email: "text" });
+
+SupplierSchema.index({ userId: 1, isDeleted: 1, hiddenReason: 1 });
 
 module.exports = mongoose.model("Supplier", SupplierSchema);

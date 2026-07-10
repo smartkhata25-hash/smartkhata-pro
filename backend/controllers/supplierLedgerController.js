@@ -107,15 +107,24 @@ exports.getSupplierLedger = async (req, res) => {
       }
     }
 
-    // ✅ Final response (SAME SHAPE AS CUSTOMER LEDGER)
+    // ✅ Final response
     res.json({
       supplier: {
         _id: supplier._id,
         name: supplier.name,
         phone: supplier.phone,
+        isDeleted: supplier.isDeleted,
+        hiddenReason: supplier.hiddenReason || null,
       },
+
+      supplierId: supplier._id,
+      supplierName: supplier.name,
+      isDeleted: supplier.isDeleted,
+      hiddenReason: supplier.hiddenReason || null,
+
       openingBalance:
         balance - formattedEntries.reduce((s, e) => s + e.debit - e.credit, 0),
+
       ledger: formattedEntries,
     });
   } catch (err) {

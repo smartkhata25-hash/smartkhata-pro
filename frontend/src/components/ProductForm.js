@@ -30,6 +30,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
   const [newCategory, setNewCategory] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [removeImage, setRemoveImage] = useState(false);
   const nameInputRef = useRef(null);
 
   // 🔁 Load categories + products
@@ -79,6 +80,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
 
       setImagePreview(editProduct.image?.url || '');
       setImageFile(null);
+      setRemoveImage(false);
     }
   }, [editProduct]);
 
@@ -93,6 +95,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
 
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
+    setRemoveImage(false);
   };
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -113,6 +116,8 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
       if (imageFile) {
         formData.append('image', imageFile);
       }
+
+      formData.append('removeImage', removeImage);
 
       if (editProduct) {
         await updateProduct(editProduct._id, formData);
@@ -323,13 +328,52 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
           }}
         >
           <option value="piece">{t('units.piece')}</option>
+          <option value="pcs">{t('units.pcs')}</option>
+          <option value="pair">{t('units.pair')}</option>
+          <option value="set">{t('units.set')}</option>
+          <option value="dozen">{t('units.dozen')}</option>
+          <option value="gross">{t('units.gross')}</option>
+
           <option value="kg">{t('units.kg')}</option>
           <option value="gram">{t('units.gram')}</option>
+          <option value="mg">{t('units.mg')}</option>
+          <option value="ton">{t('units.ton')}</option>
+
           <option value="liter">{t('units.liter')}</option>
+          <option value="ml">{t('units.ml')}</option>
+
           <option value="meter">{t('units.meter')}</option>
+          <option value="cm">{t('units.cm')}</option>
+          <option value="mm">{t('units.mm')}</option>
+          <option value="inch">{t('units.inch')}</option>
+          <option value="foot">{t('units.foot')}</option>
+          <option value="yard">{t('units.yard')}</option>
+
+          <option value="sqft">{t('units.sqft')}</option>
+          <option value="sqm">{t('units.sqm')}</option>
+
           <option value="box">{t('units.box')}</option>
-          <option value="dozen">{t('units.dozen')}</option>
+          <option value="carton">{t('units.carton')}</option>
           <option value="packet">{t('units.packet')}</option>
+          <option value="bag">{t('units.bag')}</option>
+          <option value="bundle">{t('units.bundle')}</option>
+          <option value="roll">{t('units.roll')}</option>
+          <option value="sheet">{t('units.sheet')}</option>
+          <option value="coil">{t('units.coil')}</option>
+
+          <option value="bottle">{t('units.bottle')}</option>
+          <option value="can">{t('units.can')}</option>
+          <option value="jar">{t('units.jar')}</option>
+          <option value="drum">{t('units.drum')}</option>
+
+          <option value="tube">{t('units.tube')}</option>
+          <option value="rod">{t('units.rod')}</option>
+          <option value="pipe">{t('units.pipe')}</option>
+          <option value="wire">{t('units.wire')}</option>
+
+          <option value="kit">{t('units.kit')}</option>
+          <option value="pack">{t('units.pack')}</option>
+          <option value="ream">{t('units.ream')}</option>
         </select>
 
         <input
@@ -403,18 +447,47 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
           />
 
           {imagePreview && (
-            <img
-              src={imagePreview}
-              alt="Product Preview"
-              style={{
-                marginTop: '6px',
-                width: '55px',
-                height: '55px',
-                objectFit: 'cover',
-                borderRadius: '8px',
-                border: '1px solid #ddd',
-              }}
-            />
+            <div style={{ position: 'relative', width: '55px', marginTop: '6px' }}>
+              <img
+                src={imagePreview}
+                alt="Product Preview"
+                style={{
+                  width: '55px',
+                  height: '55px',
+                  objectFit: 'cover',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd',
+                }}
+              />
+
+              {editProduct && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImagePreview('');
+                    setImageFile(null);
+                    setRemoveImage(true);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '-7px',
+                    right: '-7px',
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: '#dc2626',
+                    color: '#fff',
+                    fontSize: '14px',
+                    lineHeight: '20px',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -495,6 +568,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
 
             setImageFile(null);
             setImagePreview('');
+            setRemoveImage(false);
           }}
           style={{
             background: '#f59e0b',

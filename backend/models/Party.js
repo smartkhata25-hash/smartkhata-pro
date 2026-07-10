@@ -72,6 +72,12 @@ const partySchema = new mongoose.Schema(
       default: false,
     },
 
+    hiddenReason: {
+      type: String,
+      enum: ["deleted", "converted", "merged", null],
+      default: null,
+    },
+
     /* Ownership */
     userId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -87,6 +93,11 @@ const partySchema = new mongoose.Schema(
 
 /* Search / Performance Indexes */
 partySchema.index({ userId: 1, isDeleted: 1, isActive: 1 });
+partySchema.index({
+  userId: 1,
+  isActive: 1,
+  hiddenReason: 1,
+});
 partySchema.index({ userId: 1, role: 1, isDeleted: 1 });
 partySchema.index({ userId: 1, account: 1 });
 

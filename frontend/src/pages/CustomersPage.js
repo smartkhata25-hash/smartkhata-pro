@@ -6,6 +6,7 @@ import {
   addCustomer,
   updateCustomer,
   deleteCustomer,
+  restoreCustomer,
   convertCustomerToParty,
 } from '../services/customerService';
 import CustomerForm from '../components/CustomerForm';
@@ -58,10 +59,14 @@ const CustomersPage = () => {
   const restoredRef = useRef(false);
   const loadCustomers = useCallback(async () => {
     try {
-      const data = await getCustomers(token);
-      setCustomers(data);
+      const data = await getCustomers(token, {
+        status: 'all',
+      });
+
+      setCustomers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(t('alerts.customersLoadFailed'), error);
+      setCustomers([]);
     }
   }, [token]);
 
@@ -120,8 +125,11 @@ const CustomersPage = () => {
 
         if (!customer) return;
 
-        const data = await getLedgerByCustomerAccount(customer.account?._id, startDate, endDate);
-
+        const data = await getLedgerByCustomerAccount(
+          customer.account?._id || customer.account,
+          startDate,
+          endDate
+        );
         setLedgerData(data);
       } catch (error) {
         console.error(t('alerts.ledgerLoadFailed'), error);
@@ -213,6 +221,35 @@ const CustomersPage = () => {
       alert('Customer party میں convert ہو گیا');
     } catch (err) {
       alert(err?.response?.data?.message || 'Convert failed');
+    }
+  };
+
+  const handleRestoreCustomer = async (e, customer) => {
+    e.stopPropagation();
+
+    if (customer.hiddenReason !== 'deleted') {
+      alert('صرف Delete کیا ہوا Customer restore ہو سکتا ہے');
+      return;
+    }
+
+    if (!window.confirm(`${customer.name} کو دوبارہ Active کرنا ہے؟`)) {
+      return;
+    }
+
+    try {
+      await restoreCustomer(customer._id, token);
+
+      if (selectedCustomerId === customer._id) {
+        setSelectedCustomerId('');
+        setCustomerName('');
+        setLedgerData(null);
+      }
+
+      await loadCustomers();
+
+      alert('Customer restore ہو گیا');
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Customer restore failed');
     }
   };
 
@@ -685,6 +722,30 @@ const CustomersPage = () => {
 
                       {customer.type === 'vip' && ' ⭐'}
                       {customer.type === 'blocked' && ' ⛔'}
+
+                      {customer.isActive === false && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color:
+                              customer.hiddenReason === 'deleted'
+                                ? '#dc2626'
+                                : customer.hiddenReason === 'converted'
+                                  ? '#7c3aed'
+                                  : '#6b7280',
+                          }}
+                        >
+                          {customer.hiddenReason === 'deleted'
+                            ? 'Deleted'
+                            : customer.hiddenReason === 'converted'
+                              ? 'Converted to Party'
+                              : customer.hiddenReason === 'merged'
+                                ? 'Merged'
+                                : 'Hidden'}
+                        </div>
+                      )}
                     </div>
                     <div
                       style={{
@@ -710,91 +771,116 @@ const CustomersPage = () => {
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* EDIT */}
+                      {/* ✅ ACTIVE CUSTOMER ACTIONS */}
+                      {customer.isActive !== false && (
+                        <>
+                          <button
+                            onClick={(e) => handleEditClick(e, customer)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #3b82f6',
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                            title="Edit"
+                          >
+                            <FaEdit size={12} />
+                          </button>
 
-                      <button
-                        onClick={(e) => handleEditClick(e, customer)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #3b82f6',
-                          background: '#eff6ff',
-                          color: '#1d4ed8',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <FaEdit size={12} />
-                      </button>
+                          <button
+                            onClick={(e) => handleDeleteClick(e, customer._id)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #ef4444',
+                              background: '#fef2f2',
+                              color: '#b91c1c',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                            title="Delete"
+                          >
+                            <FaTrash size={12} />
+                          </button>
 
-                      {/* DELETE */}
-                      <button
-                        onClick={(e) => handleDeleteClick(e, customer._id)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #ef4444',
-                          background: '#fef2f2',
-                          color: '#b91c1c',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <FaTrash size={12} />
-                      </button>
-                      <button
-                        onClick={(e) => handleConvertToParty(e, customer)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: '1px solid #7c3aed',
-                          background: '#f5f3ff',
-                          color: '#6d28d9',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          fontWeight: 800,
-                          fontSize: 12,
-                        }}
-                        title="Convert to Party"
-                      >
-                        P
-                      </button>
+                          <button
+                            onClick={(e) => handleConvertToParty(e, customer)}
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              border: '1px solid #7c3aed',
+                              background: '#f5f3ff',
+                              color: '#6d28d9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              fontWeight: 800,
+                              fontSize: 12,
+                            }}
+                            title="Convert to Party"
+                          >
+                            P
+                          </button>
 
-                      {/* WHATSAPP ONLY IF PHONE */}
-                      {customer.phone && (
+                          {customer.phone && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+
+                                sendWhatsAppReminder({
+                                  phone: customer.phone,
+                                  customerName: customer.name,
+                                  balance: Number(customer.balance || 0).toFixed(2),
+                                  businessName,
+                                  lang: getCurrentLanguage(),
+                                });
+                              }}
+                              style={{
+                                fontSize: 12,
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                border: '1px solid #22c55e',
+                                background: '#ecfdf5',
+                                color: '#16a34a',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                              }}
+                            >
+                              <FaWhatsapp size={12} />
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {/* ✅ RESTORE ONLY DELETED CUSTOMER */}
+                      {customer.isActive === false && customer.hiddenReason === 'deleted' && (
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-
-                            sendWhatsAppReminder({
-                              phone: customer.phone,
-                              customerName: customer.name,
-                              balance: Number(customer.balance || 0).toFixed(2),
-                              businessName,
-                              lang: getCurrentLanguage(),
-                            });
-                          }}
+                          onClick={(e) => handleRestoreCustomer(e, customer)}
                           style={{
-                            fontSize: 12,
-                            padding: '4px 8px',
+                            height: 26,
+                            padding: '0 8px',
                             borderRadius: 6,
-                            border: '1px solid #22c55e',
-                            background: '#ecfdf5',
-                            color: '#16a34a',
+                            border: '1px solid #16a34a',
+                            background: '#f0fdf4',
+                            color: '#15803d',
                             cursor: 'pointer',
+                            fontSize: 11,
                             fontWeight: 700,
                           }}
+                          title="Restore Customer"
                         >
-                          <FaWhatsapp size={12} />
+                          Restore
                         </button>
                       )}
                     </div>

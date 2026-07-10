@@ -36,6 +36,11 @@ const customerSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    hiddenReason: {
+      type: String,
+      enum: ["deleted", "converted", "merged", null],
+      default: null,
+    },
 
     openingBalance: {
       type: Number,
@@ -58,5 +63,7 @@ const customerSchema = new mongoose.Schema(
 );
 
 customerSchema.index({ createdBy: 1, name: 1, phone: 1 });
+
+customerSchema.index({ createdBy: 1, isActive: 1, hiddenReason: 1 });
 
 module.exports = mongoose.model("Customer", customerSchema);

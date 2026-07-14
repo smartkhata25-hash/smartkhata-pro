@@ -14,6 +14,7 @@ import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import { hasPermission } from '../utils/permissionHelper';
 
 const PurchaseReturnForm = ({ token }) => {
   const getCurrentTime = () => {
@@ -23,6 +24,9 @@ const PurchaseReturnForm = ({ token }) => {
 
   const { id } = useParams();
   const navigate = useNavigate();
+  const canViewPurchaseReturns = hasPermission('purchase_returns.view');
+  const canCreatePurchaseReturns = hasPermission('purchase_returns.create');
+  const canEditPurchaseReturns = hasPermission('purchase_returns.edit');
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
   const didLoadEditRef = useRef(false);
@@ -121,13 +125,20 @@ const PurchaseReturnForm = ({ token }) => {
     if (didLoadEditRef.current) return;
 
     const load = async () => {
+      if (!canViewPurchaseReturns || !canEditPurchaseReturns) {
+        alert('You do not have permission to edit purchase returns');
+        navigate('/purchase-returns');
+        return;
+      }
+
       const data = await getPurchaseReturnById(id, token);
+
       populateForm(data);
       didLoadEditRef.current = true;
     };
 
     load();
-  }, [id, token, populateForm]);
+  }, [id, token, populateForm, canViewPurchaseReturns, canEditPurchaseReturns, navigate]);
 
   useEffect(() => {
     getProducts(token).then(setProductList);
@@ -277,6 +288,15 @@ const PurchaseReturnForm = ({ token }) => {
   };
 
   const handleSubmit = async (action) => {
+    if (id && !canEditPurchaseReturns) {
+      alert('You do not have permission to edit purchase returns');
+      return;
+    }
+
+    if (!id && !canCreatePurchaseReturns) {
+      alert('You do not have permission to create purchase returns');
+      return;
+    }
     const filteredItems = isOpeningReturn ? [] : items.filter((i) => i.productId && i.quantity > 0);
 
     if (!returnDate) return alert(t('alerts.fillRequiredFields'));
@@ -764,23 +784,37 @@ const PurchaseReturnForm = ({ token }) => {
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => handleSubmit('close')} className="btn btn-success">
-            💾 {t('saveClose')}
-          </button>
+          {((id && canEditPurchaseReturns) || (!id && canCreatePurchaseReturns)) && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleSubmit('close')}
+                className="btn btn-success"
+              >
+                💾 {id ? t('updateClose') : t('saveClose')}
+              </button>
 
-          <button onClick={() => handleSubmit('new')} className="btn btn-primary">
-            💾 {t('saveNew')}
-          </button>
+              <button type="button" onClick={() => handleSubmit('new')} className="btn btn-primary">
+                💾 {t('saveNew')}
+              </button>
+            </>
+          )}
           <button onClick={handleRevert} className="btn btn-warning">
             {id ? `↩️ ${t('common.revert')}` : `🧹 ${t('clear')}`}
           </button>
 
-          <button onClick={() => setShowSearchModal(true)} className="btn btn-secondary">
-            🔍 {t('purchase.findInvoice')}
-          </button>
+          {canViewPurchaseReturns && (
+            <button
+              type="button"
+              onClick={() => setShowSearchModal(true)}
+              className="btn btn-secondary"
+            >
+              🔍 {t('purchase.findInvoice')}
+            </button>
+          )}
         </div>
       </div>
-      {showSearchModal && (
+      {canViewPurchaseReturns && showSearchModal && (
         <PurchaseInvoiceSearchModal
           onSelect={handleInvoiceSelect}
           onClose={() => setShowSearchModal(false)}

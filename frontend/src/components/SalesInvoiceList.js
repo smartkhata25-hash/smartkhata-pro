@@ -2,12 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { getInvoices, deleteInvoice } from '../services/salesService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const SalesInvoiceList = () => {
   const [invoices, setInvoices] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const navigate = useNavigate();
+  const canCreateSales = hasPermission('sales.create');
+  const canEditSales = hasPermission('sales.edit');
+  const canDeleteSales = hasPermission('sales.delete');
 
   useEffect(() => {
     fetchInvoices();
@@ -36,6 +40,11 @@ const SalesInvoiceList = () => {
   };
 
   const handleDelete = async (id) => {
+    if (!canDeleteSales) {
+      alert('You do not have permission to delete sales invoices');
+      return;
+    }
+
     if (!window.confirm('Delete invoice?')) return;
 
     try {
@@ -75,12 +84,14 @@ const SalesInvoiceList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">📦 {t('sales.invoiceList')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/sales')}
-        >
-          + {t('sales.newInvoice')}
-        </button>
+        {canCreateSales && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/sales')}
+          >
+            + {t('sales.newInvoice')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
@@ -163,21 +174,25 @@ const SalesInvoiceList = () => {
 
                   <td className="border px-2 py-1 md:p-2">
                     <div className="flex gap-1 md:gap-2 justify-center">
-                      <button
-                        className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
-                        onClick={() => navigate(`/sales?invoiceId=${inv._id}`)}
-                      >
-                        {t('edit')}
-                      </button>
-
-                      {!inv.isOpening && inv.sourceType !== 'opening_sale_invoice' && (
+                      {canEditSales && (
                         <button
-                          className="bg-red-600 text-white px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
-                          onClick={() => handleDelete(inv._id)}
+                          className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
+                          onClick={() => navigate(`/create-sale?invoiceId=${inv._id}`)}
                         >
-                          {t('delete')}
+                          {t('edit')}
                         </button>
                       )}
+
+                      {canDeleteSales &&
+                        !inv.isOpening &&
+                        inv.sourceType !== 'opening_sale_invoice' && (
+                          <button
+                            className="bg-red-600 text-white px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
+                            onClick={() => handleDelete(inv._id)}
+                          >
+                            {t('delete')}
+                          </button>
+                        )}
                     </div>
                   </td>
                 </tr>

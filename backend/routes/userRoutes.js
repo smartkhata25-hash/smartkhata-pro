@@ -1,20 +1,22 @@
 const express = require("express");
 const router = express.Router();
+
 const authMiddleware = require("../middleware/authMiddleware");
+const { ownerOnly } = require("../middleware/permissionMiddleware");
+
 const {
   savePersonalInfo,
   saveBusinessInfo,
   getProfile,
 } = require("../controllers/userController");
 
-// ✅ Existing routes (اگر کوئی اور ہے تو رکھیں)
+// Personal Info
+router.post("/personal-info", authMiddleware, ownerOnly, savePersonalInfo);
 
-// ✅ Personal Info Save
-router.post("/personal-info", authMiddleware, savePersonalInfo);
+// Business Info
+router.post("/business-info", authMiddleware, ownerOnly, saveBusinessInfo);
 
-// ✅ Business Info Save
-router.post("/business-info", authMiddleware, saveBusinessInfo);
-
+// Profile (Owner & Staff)
 router.get("/profile", authMiddleware, getProfile);
 
 module.exports = router;

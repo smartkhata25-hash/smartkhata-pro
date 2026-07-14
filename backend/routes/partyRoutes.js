@@ -3,6 +3,8 @@ const router = express.Router();
 
 const { protect } = require("../middleware/authMiddleware");
 
+const { requirePermission } = require("../middleware/permissionMiddleware");
+
 const {
   createParty,
   getParties,
@@ -14,22 +16,39 @@ const {
   convertPartyToSupplier,
 } = require("../controllers/partyController");
 
-// PARTY ROUTES
-
-// ✅ Protect all party routes
+// تمام Routes محفوظ کریں
 router.use(protect);
 
-// ✅ Get all parties / Create party
-router.route("/").get(getParties).post(createParty);
+// Get All Parties
+router.get("/", requirePermission("parties.view"), getParties);
 
-// ✅ Convert Party
-router.post("/:id/convert-to-customer", convertPartyToCustomer);
-router.post("/:id/convert-to-supplier", convertPartyToSupplier);
+// Create Party
+router.post("/", requirePermission("parties.create"), createParty);
 
-// ✅ Restore hidden party
-router.post("/:id/restore", restoreParty);
+// Convert Party To Customer
+router.post(
+  "/:id/convert-to-customer",
+  requirePermission("parties.convert"),
+  convertPartyToCustomer,
+);
 
-// ✅ Get single / Update / Delete party
-router.route("/:id").get(getPartyById).put(updateParty).delete(deleteParty);
+// Convert Party To Supplier
+router.post(
+  "/:id/convert-to-supplier",
+  requirePermission("parties.convert"),
+  convertPartyToSupplier,
+);
+
+// Restore Hidden Party
+router.post("/:id/restore", requirePermission("parties.restore"), restoreParty);
+
+// Get Single Party
+router.get("/:id", requirePermission("parties.view"), getPartyById);
+
+// Update Party
+router.put("/:id", requirePermission("parties.edit"), updateParty);
+
+// Delete Party
+router.delete("/:id", requirePermission("parties.delete"), deleteParty);
 
 module.exports = router;

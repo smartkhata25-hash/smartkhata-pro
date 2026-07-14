@@ -12,7 +12,7 @@ const sendNotification = async (req, res) => {
 
     const notification = await Notification.create({
       message,
-      userId: userId || null, // null = all users
+      userId: userId || null,
       type: type || "info",
     });
 

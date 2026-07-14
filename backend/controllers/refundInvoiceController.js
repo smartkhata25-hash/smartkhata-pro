@@ -20,6 +20,7 @@ const {
   deleteFile,
   getFileUrl,
 } = require("../services/r2FileService");
+const { logActivity } = require("../utils/activityLogger");
 
 // ✅ Create Refund - Updated Version (with InventoryTransaction)
 exports.createRefundInvoice = async (req, res) => {
@@ -172,6 +173,7 @@ exports.createRefundInvoice = async (req, res) => {
       paymentType: isOpening ? "credit" : paymentType,
       accountId: Number(paidAmount || 0) > 0 ? accountId : null,
       notes,
+      originalInvoiceId: originalInvoiceId || null,
       isOpening: isOpening || false,
       items,
       createdBy: userId,
@@ -384,6 +386,30 @@ exports.createRefundInvoice = async (req, res) => {
       }
     }
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "refunds",
+      entityType: "RefundInvoice",
+      entityId: refundInvoice._id,
+      title: `Refund Invoice ${refundInvoice.billNo}`,
+      description: `${refundInvoice.customerName} کی Refund Invoice بنائی گئی`,
+      billNo: refundInvoice.billNo,
+      after: {
+        customerName: refundInvoice.customerName,
+        customerPhone: refundInvoice.customerPhone,
+        invoiceDate: refundInvoice.invoiceDate,
+        invoiceTime: refundInvoice.invoiceTime,
+        totalAmount: refundInvoice.totalAmount,
+        paidAmount: refundInvoice.paidAmount,
+        paymentType: refundInvoice.paymentType,
+        accountId: refundInvoice.accountId,
+        notes: refundInvoice.notes,
+        itemCount: refundInvoice.items?.length || 0,
+        isOpening: refundInvoice.isOpening,
+      },
+    });
+
     res.status(201).json({
       message: "✅ Refund created successfully",
       refundInvoice,
@@ -473,8 +499,27 @@ exports.updateRefundInvoice = async (req, res) => {
     });
 
     if (!refund) {
-      return res.status(404).json({ error: "Refund not found" });
+      return res.status(404).json({
+        error: "Refund not found",
+      });
     }
+
+    const beforeUpdate = {
+      billNo: refund.billNo,
+      invoiceDate: refund.invoiceDate,
+      invoiceTime: refund.invoiceTime,
+      customerId: refund.customerId,
+      partyId: refund.partyId,
+      customerName: refund.customerName,
+      customerPhone: refund.customerPhone,
+      totalAmount: refund.totalAmount,
+      paidAmount: refund.paidAmount,
+      paymentType: refund.paymentType,
+      accountId: refund.accountId,
+      notes: refund.notes,
+      itemCount: refund.items?.length || 0,
+      isOpening: refund.isOpening,
+    };
 
     const {
       billNo,
@@ -645,6 +690,7 @@ exports.updateRefundInvoice = async (req, res) => {
     refund.paymentType = isOpening ? "credit" : paymentType;
     refund.accountId = paymentType === "cash" ? accountId : null;
     refund.notes = notes;
+    refund.originalInvoiceId = originalInvoiceId || null;
     refund.isOpening = isOpening || false;
 
     refund.items = items;
@@ -885,6 +931,34 @@ exports.updateRefundInvoice = async (req, res) => {
       }
     }
 
+    await logActivity({
+      req,
+      action: "update",
+      module: "refunds",
+      entityType: "RefundInvoice",
+      entityId: refund._id,
+      title: `Refund Invoice ${refund.billNo}`,
+      description: `${refund.customerName} کی Refund Invoice Update کی گئی`,
+      billNo: refund.billNo,
+      before: beforeUpdate,
+      after: {
+        billNo: refund.billNo,
+        invoiceDate: refund.invoiceDate,
+        invoiceTime: refund.invoiceTime,
+        customerId: refund.customerId,
+        partyId: refund.partyId,
+        customerName: refund.customerName,
+        customerPhone: refund.customerPhone,
+        totalAmount: refund.totalAmount,
+        paidAmount: refund.paidAmount,
+        paymentType: refund.paymentType,
+        accountId: refund.accountId,
+        notes: refund.notes,
+        itemCount: refund.items?.length || 0,
+        isOpening: refund.isOpening,
+      },
+    });
+
     res.json({
       message: "✅ Refund updated successfully",
       refund,
@@ -982,25 +1056,49 @@ exports.deleteRefundInvoice = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { id } = req.params;
 
-    // 🔍 Step 0: Find refund invoice with items
     const refundInvoice = await RefundInvoice.findOne({
       _id: id,
       createdBy: userId,
+      isDeleted: { $ne: true },
     });
 
-    // 🗑️ Step 2: Delete InventoryTransaction
+    if (!refundInvoice) {
+      return res.status(404).json({
+        error: "Refund not found or already deleted",
+      });
+    }
+
+    const beforeDelete = {
+      billNo: refundInvoice.billNo,
+      invoiceDate: refundInvoice.invoiceDate,
+      invoiceTime: refundInvoice.invoiceTime,
+      customerId: refundInvoice.customerId,
+      partyId: refundInvoice.partyId,
+      customerName: refundInvoice.customerName,
+      customerPhone: refundInvoice.customerPhone,
+      totalAmount: refundInvoice.totalAmount,
+      paidAmount: refundInvoice.paidAmount,
+      paymentType: refundInvoice.paymentType,
+      accountId: refundInvoice.accountId,
+      notes: refundInvoice.notes,
+      itemCount: refundInvoice.items?.length || 0,
+      isOpening: refundInvoice.isOpening,
+    };
+
     if (!refundInvoice.isOpening) {
       await deleteTransactionsByReference({
-        referenceId: id,
+        referenceId: refundInvoice._id,
         invoiceModel: "RefundInvoice",
         userId,
       });
     }
 
-    // 🧾 Step 3: Delete journal entry
     await JournalEntry.updateMany(
       {
-        $or: [{ referenceId: id }, { invoiceId: id }],
+        $or: [
+          { referenceId: refundInvoice._id },
+          { invoiceId: refundInvoice._id },
+        ],
         sourceType: {
           $in: ["refund_invoice", "opening_refund_invoice", "refund_payment"],
         },
@@ -1008,7 +1106,9 @@ exports.deleteRefundInvoice = async (req, res) => {
         isDeleted: false,
       },
       {
-        $set: { isDeleted: true },
+        $set: {
+          isDeleted: true,
+        },
       },
     );
 
@@ -1018,19 +1118,37 @@ exports.deleteRefundInvoice = async (req, res) => {
       }
     }
 
-    // 🧾 Step 4: Delete refund invoice itself
     refundInvoice.isDeleted = true;
     await refundInvoice.save();
 
-    if (!refundInvoice) {
-      return res
-        .status(404)
-        .json({ error: "Refund not found or already deleted" });
+    if (refundInvoice.accountId) {
+      await recalculateAccountBalance(refundInvoice.accountId);
     }
 
-    res.json({ message: "✅ Refund deleted successfully" });
+    await logActivity({
+      req,
+      action: "delete",
+      module: "refunds",
+      entityType: "RefundInvoice",
+      entityId: refundInvoice._id,
+      title: `Refund Invoice ${refundInvoice.billNo}`,
+      description: `${refundInvoice.customerName} کی Refund Invoice Delete کی گئی`,
+      billNo: refundInvoice.billNo,
+      before: beforeDelete,
+      after: {
+        isDeleted: true,
+      },
+    });
+
+    return res.json({
+      message: "✅ Refund deleted successfully",
+    });
   } catch (err) {
     console.error("❌ Delete Refund Error:", err);
-    res.status(500).json({ error: "Server Error" });
+
+    return res.status(500).json({
+      error: "Server Error",
+      detail: err.message,
+    });
   }
 };

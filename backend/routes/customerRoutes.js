@@ -9,33 +9,65 @@ const {
   restoreCustomer,
   confirmMergeCustomers,
   convertCustomerToParty,
-
   getCustomerDetailedLedger,
 } = require("../controllers/customerController");
 
 const { protect } = require("../middleware/authMiddleware");
 
-// ✅ GET all customers
-router.get("/", protect, getCustomers);
+const { requirePermission } = require("../middleware/permissionMiddleware");
 
-// ✅ POST add new customer
-router.post("/", protect, addCustomer);
+// Get All Customers
+router.get("/", protect, requirePermission("customers.view"), getCustomers);
 
-// ✅ PUT update customer
-router.put("/:id", protect, updateCustomer);
+// Add Customer
+router.post("/", protect, requirePermission("customers.create"), addCustomer);
 
-// ✅ DELETE customer
-router.delete("/:id", protect, deleteCustomer);
+// Confirm Customer Merge
+router.post(
+  "/merge/confirm",
+  protect,
+  requirePermission("customers.merge"),
+  confirmMergeCustomers,
+);
 
-// ✅ RESTORE hidden customer
-router.post("/:id/restore", protect, restoreCustomer);
+// Restore Hidden Customer
+router.post(
+  "/:id/restore",
+  protect,
+  requirePermission("customers.restore"),
+  restoreCustomer,
+);
 
-// ✅ CONFIRM MERGE
-router.post("/merge/confirm", protect, confirmMergeCustomers);
+// Convert Customer To Party
+router.post(
+  "/:id/convert-to-party",
+  protect,
+  requirePermission("customers.convert"),
+  convertCustomerToParty,
+);
 
-router.post("/:id/convert-to-party", protect, convertCustomerToParty);
+// Customer Detailed Ledger
+router.get(
+  "/:id/detailed-ledger",
+  protect,
+  requirePermission("customers.view"),
+  getCustomerDetailedLedger,
+);
 
-// 📘 Customer Detailed Ledger (Invoice + Payment + Refund)
-router.get("/:id/detailed-ledger", protect, getCustomerDetailedLedger);
+// Update Customer
+router.put(
+  "/:id",
+  protect,
+  requirePermission("customers.edit"),
+  updateCustomer,
+);
+
+// Delete Customer
+router.delete(
+  "/:id",
+  protect,
+  requirePermission("customers.delete"),
+  deleteCustomer,
+);
 
 module.exports = router;

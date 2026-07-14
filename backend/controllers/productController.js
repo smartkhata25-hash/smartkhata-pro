@@ -7,12 +7,12 @@ const {
 } = require("../services/r2FileService");
 
 const mongoose = require("mongoose");
+const { logActivity } = require("../utils/activityLogger");
 
 // 🧾 Bulk Create Products
 exports.bulkCreateProducts = async (req, res) => {
   try {
-    const userId = req.user.id;
-
+    const userId = req.user?.id || req.userId;
     const products = req.body.map((p) => ({
       name: p.name,
       rackNo: p.rackNo || "",
@@ -66,6 +66,21 @@ exports.bulkCreateProducts = async (req, res) => {
       _id: { $in: created.map((p) => p._id) },
     }).populate("categoryId", "name");
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "products",
+      entityType: "Product",
+      entityId: created[0]?._id || null,
+      title: `Bulk Products (${created.length})`,
+      description: `${created.length} Products ایک ساتھ بنائے گئے`,
+      after: {
+        productCount: created.length,
+        productNames: created.map((p) => p.name),
+        openingStockEntries: stockTransactions.length,
+      },
+    });
+
     res.status(201).json(populated);
   } catch (err) {
     console.error("Bulk Create Error:", err);
@@ -77,7 +92,7 @@ exports.bulkCreateProducts = async (req, res) => {
 exports.createProduct = async (req, res) => {
   try {
     const { name } = req.body;
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
 
     // ✅ Duplicate check
     const exists = await Product.findOne({ name, userId });
@@ -141,6 +156,28 @@ exports.createProduct = async (req, res) => {
       "name",
     );
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "products",
+      entityType: "Product",
+      entityId: product._id,
+      title: `Product ${product.name}`,
+      description: `${product.name} Product بنایا گیا`,
+      after: {
+        name: product.name,
+        rackNo: product.rackNo,
+        description: product.description,
+        unit: product.unit,
+        unitCost: product.unitCost,
+        salePrice: product.salePrice,
+        lowStockThreshold: product.lowStockThreshold,
+        categoryId: product.categoryId,
+        openingStock: Number(req.body.stock || 0),
+        hasImage: Boolean(product.image?.key),
+      },
+    });
+
     res.status(201).json(populated);
   } catch (error) {
     console.error("Create Product Error:", error);
@@ -151,7 +188,8 @@ exports.createProduct = async (req, res) => {
 // 📃 Get All Products with calculated stock
 exports.getProducts = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const ownerId = req.user?.id || req.userId;
+    const userId = new mongoose.Types.ObjectId(ownerId);
 
     const { search = "", page = 1, limit = 0 } = req.query;
 
@@ -242,73 +280,25 @@ exports.getProducts = async (req, res) => {
 // ✏️ Update Product
 exports.updateProduct = async (req, res) => {
   try {
-    const updateData = {
-      name: req.body.name,
-      rackNo: req.body.rackNo || "",
-      description: req.body.description || "",
-      unit: req.body.unit,
-      unitCost: req.body.unitCost,
-      salePrice: req.body.salePrice,
-      lowStockThreshold: req.body.lowStockThreshold,
-    };
+    const userId = req.user?.id || req.userId;
+    const productId = req.params.id;
 
-    if (req.body.removeImage === "true") {
-      const oldProduct = await Product.findOne({
-        _id: req.params.id,
-        userId: req.user.id,
+    const existingProduct = await Product.findOne({
+      _id: productId,
+      userId,
+    });
+
+    if (!existingProduct) {
+      return res.status(404).json({
+        error: "Product not found.",
       });
-
-      if (oldProduct?.image?.key) {
-        await deleteFile(oldProduct.image.key);
-      }
-
-      updateData.image = {
-        key: "",
-        url: "",
-        originalName: "",
-        mimeType: "",
-        size: 0,
-      };
     }
 
-    if (req.file) {
-      const oldProduct = await Product.findOne({
-        _id: req.params.id,
-        userId: req.user.id,
-      });
-
-      if (oldProduct?.image?.key) {
-        await deleteFile(oldProduct.image.key);
-      }
-
-      const uploaded = await uploadFile({
-        buffer: req.file.buffer,
-        userId: req.user.id,
-        moduleName: "products",
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-      });
-
-      updateData.image = {
-        key: uploaded.key,
-        url: getFileUrl(uploaded.key),
-        originalName: uploaded.originalName,
-        mimeType: uploaded.mimeType,
-        size: uploaded.size,
-      };
-    }
-
-    // ✅ Category optional
-    if ("categoryId" in req.body) {
-      updateData.categoryId = req.body.categoryId || null;
-    }
-
-    // ✅ Current stock نکالو
     const stockResult = await InventoryTransaction.aggregate([
       {
         $match: {
-          productId: new mongoose.Types.ObjectId(req.params.id),
-          userId: new mongoose.Types.ObjectId(req.user.id),
+          productId: new mongoose.Types.ObjectId(productId),
+          userId: new mongoose.Types.ObjectId(userId),
         },
       },
       {
@@ -318,7 +308,10 @@ exports.updateProduct = async (req, res) => {
             $sum: {
               $switch: {
                 branches: [
-                  { case: { $eq: ["$type", "IN"] }, then: "$quantity" },
+                  {
+                    case: { $eq: ["$type", "IN"] },
+                    then: "$quantity",
+                  },
                   {
                     case: { $eq: ["$type", "OUT"] },
                     then: { $multiply: ["$quantity", -1] },
@@ -341,52 +334,152 @@ exports.updateProduct = async (req, res) => {
     ]);
 
     const currentStock = stockResult[0]?.stock || 0;
+
+    const beforeUpdate = {
+      name: existingProduct.name,
+      rackNo: existingProduct.rackNo,
+      description: existingProduct.description,
+      unit: existingProduct.unit,
+      unitCost: existingProduct.unitCost,
+      salePrice: existingProduct.salePrice,
+      lowStockThreshold: existingProduct.lowStockThreshold,
+      categoryId: existingProduct.categoryId,
+      stock: currentStock,
+      imageKey: existingProduct.image?.key || "",
+    };
+
+    const updateData = {
+      name: req.body.name,
+      rackNo: req.body.rackNo || "",
+      description: req.body.description || "",
+      unit: req.body.unit,
+      unitCost: req.body.unitCost,
+      salePrice: req.body.salePrice,
+      lowStockThreshold: req.body.lowStockThreshold,
+    };
+
+    if ("categoryId" in req.body) {
+      updateData.categoryId = req.body.categoryId || null;
+    }
+
+    if (req.file) {
+      if (existingProduct.image?.key) {
+        await deleteFile(existingProduct.image.key);
+      }
+
+      const uploaded = await uploadFile({
+        buffer: req.file.buffer,
+        userId,
+        moduleName: "products",
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+
+      updateData.image = {
+        key: uploaded.key,
+        url: getFileUrl(uploaded.key),
+        originalName: uploaded.originalName,
+        mimeType: uploaded.mimeType,
+        size: uploaded.size,
+      };
+    } else if (req.body.removeImage === "true") {
+      if (existingProduct.image?.key) {
+        await deleteFile(existingProduct.image.key);
+      }
+
+      updateData.image = {
+        key: "",
+        url: "",
+        originalName: "",
+        mimeType: "",
+        size: 0,
+      };
+    }
+
     const newStock =
       req.body.stock === "" || req.body.stock === undefined
         ? currentStock
         : Number(req.body.stock);
 
-    // ✅ فرق نکالو
+    if (Number.isNaN(newStock) || newStock < 0) {
+      return res.status(400).json({
+        error: "Invalid stock quantity",
+      });
+    }
+
     const difference = newStock - currentStock;
 
-    // ✅ اگر فرق ہے تو transaction بنا دو
     if (difference > 0) {
       await InventoryTransaction.create({
-        productId: req.params.id,
+        productId,
         type: "ADJUST_IN",
         quantity: difference,
         note: "Stock Edited From Product Form",
-        userId: new mongoose.Types.ObjectId(req.user.id),
+        userId: new mongoose.Types.ObjectId(userId),
         date: new Date(),
       });
     }
 
     if (difference < 0) {
       await InventoryTransaction.create({
-        productId: req.params.id,
+        productId,
         type: "ADJUST_OUT",
         quantity: Math.abs(difference),
         note: "Stock Edited From Product Form",
-        userId: new mongoose.Types.ObjectId(req.user.id),
+        userId: new mongoose.Types.ObjectId(userId),
         date: new Date(),
       });
     }
 
-    // ✅ Product update
     const updated = await Product.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user.id },
+      {
+        _id: productId,
+        userId,
+      },
       updateData,
-      { new: true },
-    );
+      {
+        new: true,
+        runValidators: true,
+      },
+    ).populate("categoryId", "name");
 
     if (!updated) {
-      return res.status(404).json({ error: "Product not found." });
+      return res.status(404).json({
+        error: "Product not found.",
+      });
     }
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "products",
+      entityType: "Product",
+      entityId: updated._id,
+      title: `Product ${updated.name}`,
+      description: `${updated.name} Product Update کیا گیا`,
+      before: beforeUpdate,
+      after: {
+        name: updated.name,
+        rackNo: updated.rackNo,
+        description: updated.description,
+        unit: updated.unit,
+        unitCost: updated.unitCost,
+        salePrice: updated.salePrice,
+        lowStockThreshold: updated.lowStockThreshold,
+        categoryId: updated.categoryId?._id || updated.categoryId,
+        stock: newStock,
+        stockDifference: difference,
+        imageKey: updated.image?.key || "",
+      },
+    });
 
     res.json(updated);
   } catch (error) {
     console.error("Update Product Error:", error);
-    res.status(400).json({ error: error.message });
+
+    res.status(400).json({
+      error: error.message,
+    });
   }
 };
 
@@ -394,12 +487,22 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const productId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
 
-    // 🔎 Check: product used anywhere?
+    const product = await Product.findOne({
+      _id: productId,
+      userId,
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
     const used = await InventoryTransaction.findOne({
-      productId: productId,
-      userId: userId,
+      productId,
+      userId,
     });
 
     if (used) {
@@ -408,19 +511,50 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-    const deleted = await Product.findOneAndDelete({
+    const beforeDelete = {
+      name: product.name,
+      rackNo: product.rackNo,
+      description: product.description,
+      unit: product.unit,
+      unitCost: product.unitCost,
+      salePrice: product.salePrice,
+      lowStockThreshold: product.lowStockThreshold,
+      categoryId: product.categoryId,
+      imageKey: product.image?.key || "",
+    };
+
+    await Product.deleteOne({
       _id: productId,
-      userId: userId,
+      userId,
     });
 
-    if (!deleted) {
-      return res.status(404).json({ message: "Product not found" });
+    if (product.image?.key) {
+      await deleteFile(product.image.key);
     }
 
-    res.json({ message: "Product deleted successfully" });
+    await logActivity({
+      req,
+      action: "delete",
+      module: "products",
+      entityType: "Product",
+      entityId: product._id,
+      title: `Product ${product.name}`,
+      description: `${product.name} Product Delete کیا گیا`,
+      before: beforeDelete,
+      after: {
+        isDeleted: true,
+      },
+    });
+
+    res.json({
+      message: "Product deleted successfully",
+    });
   } catch (error) {
     console.error("Delete Product Error:", error);
-    res.status(400).json({ message: error.message });
+
+    res.status(400).json({
+      message: error.message,
+    });
   }
 };
 
@@ -428,15 +562,34 @@ exports.deleteProduct = async (req, res) => {
 exports.updateStock = async (req, res) => {
   try {
     const { productId, quantity, action, note = "" } = req.body;
-    const userId = req.user.id;
-    const qty = Number(quantity);
 
-    const product = await Product.findById(productId);
-    if (!product || product.userId.toString() !== userId) {
-      return res.status(404).json({ error: "Product not found" });
+    const userId = req.user?.id || req.userId;
+    const qty = Number(quantity);
+    const normalizedAction = String(action || "").toLowerCase();
+
+    if (!["in", "out"].includes(normalizedAction)) {
+      return res.status(400).json({
+        error: "Invalid stock action",
+      });
     }
 
-    // 🔎 current stock InventoryTransaction سے
+    if (Number.isNaN(qty) || qty <= 0) {
+      return res.status(400).json({
+        error: "Invalid stock quantity",
+      });
+    }
+
+    const product = await Product.findOne({
+      _id: productId,
+      userId,
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        error: "Product not found",
+      });
+    }
+
     const result = await InventoryTransaction.aggregate([
       {
         $match: {
@@ -451,12 +604,18 @@ exports.updateStock = async (req, res) => {
             $sum: {
               $switch: {
                 branches: [
-                  { case: { $eq: ["$type", "IN"] }, then: "$quantity" },
+                  {
+                    case: { $eq: ["$type", "IN"] },
+                    then: "$quantity",
+                  },
                   {
                     case: { $eq: ["$type", "OUT"] },
                     then: { $multiply: ["$quantity", -1] },
                   },
-                  { case: { $eq: ["$type", "ADJUST_IN"] }, then: "$quantity" },
+                  {
+                    case: { $eq: ["$type", "ADJUST_IN"] },
+                    then: "$quantity",
+                  },
                   {
                     case: { $eq: ["$type", "ADJUST_OUT"] },
                     then: { $multiply: ["$quantity", -1] },
@@ -472,23 +631,52 @@ exports.updateStock = async (req, res) => {
 
     const currentStock = result[0]?.stock || 0;
 
-    if (action === "out" && currentStock < qty) {
-      return res.status(400).json({ error: "Not enough stock" });
+    if (normalizedAction === "out" && currentStock < qty) {
+      return res.status(400).json({
+        error: "Not enough stock",
+      });
     }
 
-    // ✅ صرف transaction create کرو
-    await InventoryTransaction.create({
+    const transaction = await InventoryTransaction.create({
       productId,
       quantity: qty,
-      type: action.toUpperCase(),
+      type: normalizedAction.toUpperCase(),
       date: new Date(),
       note,
       userId: new mongoose.Types.ObjectId(userId),
     });
 
-    res.json({ message: "Stock updated successfully" });
+    const newStock =
+      normalizedAction === "in" ? currentStock + qty : currentStock - qty;
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "products",
+      entityType: "Product",
+      entityId: product._id,
+      title: `Stock Update - ${product.name}`,
+      description: `${product.name} کا Stock Update کیا گیا`,
+      before: {
+        stock: currentStock,
+      },
+      after: {
+        stock: newStock,
+        quantity: qty,
+        stockAction: normalizedAction,
+        note,
+        transactionId: transaction._id,
+      },
+    });
+
+    res.json({
+      message: "Stock updated successfully",
+    });
   } catch (error) {
     console.error("Update Stock Error:", error);
-    res.status(400).json({ error: error.message });
+
+    res.status(400).json({
+      error: error.message,
+    });
   }
 };

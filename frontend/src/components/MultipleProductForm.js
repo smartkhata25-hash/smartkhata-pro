@@ -48,6 +48,7 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
 
   const blankProduct = () => ({
     name: '',
+    rackNo: '',
     categoryId: '',
     unit: 'piece',
     unitCost: '',
@@ -123,11 +124,11 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (inputs[currentIndex + 9]) inputs[currentIndex + 9].focus();
+      if (inputs[currentIndex + 10]) inputs[currentIndex + 10].focus();
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (inputs[currentIndex - 9]) inputs[currentIndex - 9].focus();
+      if (inputs[currentIndex - 10]) inputs[currentIndex - 10].focus();
     }
     if (e.key === 'ArrowRight') {
       e.preventDefault();
@@ -159,7 +160,7 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
       >
         <table
           style={{
-            width: isMobile ? '550px' : '100%',
+            width: isMobile ? '650px' : '100%',
             borderCollapse: 'collapse',
             tableLayout: 'auto',
             fontSize: isMobile ? '11px' : '13px',
@@ -187,6 +188,17 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                 }}
               >
                 {t('inventory.category')}
+              </th>
+
+              <th
+                style={{
+                  width: '9%',
+                  border: '1px solid #d1d5db',
+                  padding: isMobile ? '3px' : '6px',
+                  textAlign: 'center',
+                }}
+              >
+                {t('inventory.rack')}
               </th>
 
               <th
@@ -274,6 +286,7 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                 {[
                   'name',
                   'categoryId',
+                  'rackNo',
                   'unit',
                   'unitCost',
                   'salePrice',
@@ -309,13 +322,52 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                           style={inputStyle(isMobile)}
                         >
                           <option value="piece">{t('units.piece')}</option>
+                          <option value="pcs">{t('units.pcs')}</option>
+                          <option value="pair">{t('units.pair')}</option>
+                          <option value="set">{t('units.set')}</option>
+                          <option value="dozen">{t('units.dozen')}</option>
+                          <option value="gross">{t('units.gross')}</option>
+
                           <option value="kg">{t('units.kg')}</option>
                           <option value="gram">{t('units.gram')}</option>
+                          <option value="mg">{t('units.mg')}</option>
+                          <option value="ton">{t('units.ton')}</option>
+
                           <option value="liter">{t('units.liter')}</option>
+                          <option value="ml">{t('units.ml')}</option>
+
                           <option value="meter">{t('units.meter')}</option>
+                          <option value="cm">{t('units.cm')}</option>
+                          <option value="mm">{t('units.mm')}</option>
+                          <option value="inch">{t('units.inch')}</option>
+                          <option value="foot">{t('units.foot')}</option>
+                          <option value="yard">{t('units.yard')}</option>
+
+                          <option value="sqft">{t('units.sqft')}</option>
+                          <option value="sqm">{t('units.sqm')}</option>
+
                           <option value="box">{t('units.box')}</option>
-                          <option value="dozen">{t('units.dozen')}</option>
+                          <option value="carton">{t('units.carton')}</option>
                           <option value="packet">{t('units.packet')}</option>
+                          <option value="bag">{t('units.bag')}</option>
+                          <option value="bundle">{t('units.bundle')}</option>
+                          <option value="roll">{t('units.roll')}</option>
+                          <option value="sheet">{t('units.sheet')}</option>
+                          <option value="coil">{t('units.coil')}</option>
+
+                          <option value="bottle">{t('units.bottle')}</option>
+                          <option value="can">{t('units.can')}</option>
+                          <option value="jar">{t('units.jar')}</option>
+                          <option value="drum">{t('units.drum')}</option>
+
+                          <option value="tube">{t('units.tube')}</option>
+                          <option value="rod">{t('units.rod')}</option>
+                          <option value="pipe">{t('units.pipe')}</option>
+                          <option value="wire">{t('units.wire')}</option>
+
+                          <option value="kit">{t('units.kit')}</option>
+                          <option value="pack">{t('units.pack')}</option>
+                          <option value="ream">{t('units.ream')}</option>
                         </select>
                       ) : field === 'name' ? (
                         <div>

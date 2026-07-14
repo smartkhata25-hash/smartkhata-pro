@@ -1,117 +1,229 @@
 const User = require("../models/User");
 const PrintSetting = require("../models/PrintSetting");
 const { defaultSettings } = require("./printSettingController");
+const { logActivity } = require("../utils/activityLogger");
 
-/* ================= PERSONAL INFO SAVE ================= */
+const ownerOnlyCheck = (req, res) => {
+  if (req.user?.accountRole !== "owner") {
+    res.status(403).json({
+      msg: "Only business owner can update this information",
+    });
+
+    return false;
+  }
+
+  return true;
+};
+
+const getOrCreatePrintSetting = async (ownerId) => {
+  let printSetting = await PrintSetting.findOne({
+    userId: ownerId,
+  });
+
+  if (!printSetting) {
+    const defaults = await defaultSettings(ownerId);
+    return PrintSetting.create(defaults);
+  }
+
+  if (!printSetting.sales?.header) {
+    const defaults = await defaultSettings(ownerId);
+
+    if (!printSetting.sales) {
+      printSetting.sales = defaults.sales;
+    } else {
+      printSetting.sales.header = defaults.sales.header;
+    }
+  }
+
+  return printSetting;
+};
+
+/* Personal Info */
 
 const savePersonalInfo = async (req, res) => {
   try {
+    if (!ownerOnlyCheck(req, res)) return;
+
+    const ownerId = req.userId;
     const { fullName, cnic, mobile, address } = req.body;
 
-    const user = await User.findById(req.userId);
+    const user = await User.findById(ownerId);
+
     if (!user) {
-      return res.status(404).json({ msg: "User not found" });
+      return res.status(404).json({
+        msg: "User not found",
+      });
     }
 
-    user.fullName = fullName;
-    user.cnic = cnic;
-    user.mobile = mobile;
-    user.address = address;
+    const before = {
+      fullName: user.fullName || "",
+      cnic: user.cnic || "",
+      mobile: user.mobile || "",
+      address: user.address || "",
+    };
+
+    user.fullName = String(fullName || "").trim();
+    user.cnic = String(cnic || "").trim();
+    user.mobile = String(mobile || "").trim();
+    user.address = String(address || "").trim();
 
     await user.save();
 
-    /* ================= FIND OR CREATE PRINT SETTING ================= */
+    const printSetting = await getOrCreatePrintSetting(ownerId);
 
-    let printSetting = await PrintSetting.findOne({ userId: user._id });
+    printSetting.sales.header.address = user.address;
+    printSetting.sales.header.phone = user.mobile;
 
-    if (!printSetting) {
-      const defaults = await defaultSettings(user._id);
-      printSetting = await PrintSetting.create(defaults);
-    } else {
-      if (!printSetting.sales?.header) {
-        const defaults = await defaultSettings(user._id);
-        printSetting.sales.header = defaults.sales.header;
-      }
+    await printSetting.save();
 
-      printSetting.sales.header.address = user.address || "";
-      printSetting.sales.header.phone = user.mobile || "";
+    await logActivity({
+      req,
+      action: "update",
+      module: "settings",
+      entityType: "User",
+      entityId: user._id,
+      title: "Personal Information",
+      description: "Business owner updated personal information",
+      before,
+      after: {
+        fullName: user.fullName,
+        cnic: user.cnic,
+        mobile: user.mobile,
+        address: user.address,
+      },
+    });
 
-      await printSetting.save();
-    }
-
-    res.json({ msg: "Personal Info saved successfully" });
+    return res.json({
+      msg: "Personal Info saved successfully",
+    });
   } catch (err) {
     console.error("Personal Info Save Error:", err);
-    res.status(500).json({ msg: "Server error" });
+
+    return res.status(500).json({
+      msg: "Server error",
+    });
   }
 };
 
-/* ================= BUSINESS INFO SAVE ================= */
+/* Business Info */
 
 const saveBusinessInfo = async (req, res) => {
   try {
+    if (!ownerOnlyCheck(req, res)) return;
+
+    const ownerId = req.userId;
     const { businessName, businessType, currency, taxNumber } = req.body;
 
-    const user = await User.findById(req.userId);
+    const user = await User.findById(ownerId);
+
     if (!user) {
-      return res.status(404).json({ msg: "User not found" });
+      return res.status(404).json({
+        msg: "User not found",
+      });
     }
 
-    user.businessName = businessName;
-    user.businessType = businessType;
-    user.currency = currency;
-    user.taxNumber = taxNumber;
+    const before = {
+      businessName: user.businessName || "",
+      businessType: user.businessType || "",
+      currency: user.currency || "",
+      taxNumber: user.taxNumber || "",
+    };
+
+    user.businessName = String(businessName || "").trim();
+    user.businessType = String(businessType || "").trim();
+    user.currency = String(currency || "").trim();
+    user.taxNumber = String(taxNumber || "").trim();
 
     await user.save();
 
-    /* ================= FIND OR CREATE PRINT SETTING ================= */
+    const printSetting = await getOrCreatePrintSetting(ownerId);
 
-    let printSetting = await PrintSetting.findOne({ userId: user._id });
+    printSetting.sales.header.companyName = user.businessName;
+    printSetting.sales.header.taxNumber = user.taxNumber;
 
-    if (!printSetting) {
-      const defaults = await defaultSettings(user._id);
-      printSetting = await PrintSetting.create(defaults);
-    } else {
-      if (!printSetting.sales?.header) {
-        const defaults = await defaultSettings(user._id);
-        printSetting.sales.header = defaults.sales.header;
-      }
+    await printSetting.save();
 
-      printSetting.sales.header.companyName = user.businessName || "";
-      printSetting.sales.header.taxNumber = user.taxNumber || "";
+    await logActivity({
+      req,
+      action: "update",
+      module: "settings",
+      entityType: "User",
+      entityId: user._id,
+      title: "Business Information",
+      description: "Business owner updated business information",
+      before,
+      after: {
+        businessName: user.businessName,
+        businessType: user.businessType,
+        currency: user.currency,
+        taxNumber: user.taxNumber,
+      },
+    });
 
-      await printSetting.save();
-    }
-
-    res.json({ msg: "Business Info saved successfully" });
+    return res.json({
+      msg: "Business Info saved successfully",
+    });
   } catch (err) {
     console.error("Business Info Save Error:", err);
-    res.status(500).json({ msg: "Server error" });
+
+    return res.status(500).json({
+      msg: "Server error",
+    });
   }
 };
 
+/* Profile */
+
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    const ownerId = req.userId;
+    const actorId = req.actorId || ownerId;
 
-    if (!user) {
-      return res.status(404).json({ msg: "User not found" });
+    const [owner, loggedInUser] = await Promise.all([
+      User.findById(ownerId).select(
+        "name fullName email cnic mobile address businessName businessType currency taxNumber",
+      ),
+
+      User.findById(actorId).select(
+        "name fullName email mobile accountRole permissions staffStatus mustChangePassword",
+      ),
+    ]);
+
+    if (!owner || !loggedInUser) {
+      return res.status(404).json({
+        msg: "User not found",
+      });
     }
 
-    res.json({
-      fullName: user.fullName,
-      cnic: user.cnic,
-      mobile: user.mobile,
-      address: user.address,
+    return res.json({
+      fullName: owner.fullName || "",
+      cnic: owner.cnic || "",
+      mobile: owner.mobile || "",
+      address: owner.address || "",
 
-      businessName: user.businessName,
-      businessType: user.businessType,
-      currency: user.currency,
-      taxNumber: user.taxNumber,
+      businessName: owner.businessName || "",
+      businessType: owner.businessType || "",
+      currency: owner.currency || "",
+      taxNumber: owner.taxNumber || "",
+
+      loggedInUser: {
+        _id: loggedInUser._id,
+        name: loggedInUser.name || "",
+        fullName: loggedInUser.fullName || "",
+        email: loggedInUser.email || "",
+        mobile: loggedInUser.mobile || "",
+        accountRole: loggedInUser.accountRole || "owner",
+        permissions: loggedInUser.permissions || [],
+        staffStatus: loggedInUser.staffStatus || "active",
+        mustChangePassword: Boolean(loggedInUser.mustChangePassword),
+      },
     });
   } catch (err) {
     console.error("Profile Fetch Error:", err);
-    res.status(500).json({ msg: "Server error" });
+
+    return res.status(500).json({
+      msg: "Server error",
+    });
   }
 };
 

@@ -4,6 +4,7 @@ import { fetchSuppliers } from '../services/supplierService';
 import { fetchPurchaseParties } from '../services/partyService';
 import { getAllPurchaseReturns, deletePurchaseReturn } from '../services/purchaseReturnService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const PurchaseReturnList = () => {
   const [returns, setReturns] = useState([]);
@@ -24,6 +25,10 @@ const PurchaseReturnList = () => {
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const canViewPurchaseReturns = hasPermission('purchase_returns.view');
+  const canCreatePurchaseReturns = hasPermission('purchase_returns.create');
+  const canEditPurchaseReturns = hasPermission('purchase_returns.edit');
+  const canDeletePurchaseReturns = hasPermission('purchase_returns.delete');
 
   const getSupplierOrPartyName = useCallback(
     (row) => {
@@ -68,12 +73,17 @@ const PurchaseReturnList = () => {
   }, [token]);
 
   useEffect(() => {
+    if (!canViewPurchaseReturns) {
+      navigate('/dashboard');
+      return;
+    }
+
     fetchData();
 
     const interval = setInterval(fetchData, 30000);
 
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, canViewPurchaseReturns, navigate]);
 
   useEffect(() => {
     let result = [...returns];
@@ -128,6 +138,11 @@ const PurchaseReturnList = () => {
   }, [filters, returns, getSupplierOrPartyName]);
 
   const handleDelete = async (id) => {
+    if (!canDeletePurchaseReturns) {
+      alert('You do not have permission to delete purchase returns');
+      return;
+    }
+
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
     try {
@@ -148,12 +163,14 @@ const PurchaseReturnList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('purchase.returnList')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/purchase-returns/new')}
-        >
-          {t('add')}
-        </button>
+        {canCreatePurchaseReturns && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/purchase-returns/new')}
+          >
+            {t('add')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
@@ -261,19 +278,27 @@ const PurchaseReturnList = () => {
 
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
-                    <button
-                      className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/purchase-returns/edit/${row._id}`)}
-                    >
-                      {t('edit')}
-                    </button>
+                    {canEditPurchaseReturns && (
+                      <button
+                        className="bg-yellow-400 px-2 py-1 rounded"
+                        onClick={() => navigate(`/purchase-returns/edit/${row._id}`)}
+                      >
+                        {t('edit')}
+                      </button>
+                    )}
 
-                    <button
-                      className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(row._id)}
-                    >
-                      {t('delete')}
-                    </button>
+                    {canDeletePurchaseReturns && (
+                      <button
+                        className="bg-red-600 text-white px-2 py-1 rounded"
+                        onClick={() => handleDelete(row._id)}
+                      >
+                        {t('delete')}
+                      </button>
+                    )}
+
+                    {!canEditPurchaseReturns && !canDeletePurchaseReturns && (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </div>
                 </td>
               </tr>

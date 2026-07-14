@@ -17,6 +17,8 @@ import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
 import { t } from '../i18n/i18n';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { useNavigate } from 'react-router-dom';
+
+import { hasPermission } from '../utils/permissionHelper';
 const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
@@ -24,6 +26,11 @@ const PurchaseInvoiceForm = () => {
   const fileInputRef = useRef();
   const { id } = useParams();
   const navigate = useNavigate();
+
+  const canViewPurchases = hasPermission('purchases.view');
+  const canCreatePurchases = hasPermission('purchases.create');
+  const canEditPurchases = hasPermission('purchases.edit');
+  const canPayPurchaseBill = hasPermission('purchases.pay_bill');
 
   const [isEdit, setIsEdit] = useState(false);
   const [invoiceId, setInvoiceId] = useState(null);
@@ -135,6 +142,12 @@ const PurchaseInvoiceForm = () => {
     if (!id || products.length === 0) return;
 
     const loadInvoice = async () => {
+      if (!canViewPurchases || !canEditPurchases) {
+        alert('You do not have permission to edit purchase invoices');
+        navigate('/purchase-invoices');
+        return;
+      }
+
       const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(id);
 
       setIsEdit(true);
@@ -204,7 +217,7 @@ const PurchaseInvoiceForm = () => {
     };
 
     loadInvoice();
-  }, [id, products]);
+  }, [id, products, canViewPurchases, canEditPurchases, navigate]);
 
   const filterSuppliers = (value) => {
     const query = value.toLowerCase();
@@ -413,6 +426,20 @@ const PurchaseInvoiceForm = () => {
     setAttachments((prev) => [...prev, ...newFiles]);
   };
   const savePurchaseInvoice = async () => {
+    if (isEdit && !canEditPurchases) {
+      alert('You do not have permission to edit purchase invoices');
+      return false;
+    }
+
+    if (!isEdit && !canCreatePurchases) {
+      alert('You do not have permission to create purchase invoices');
+      return false;
+    }
+
+    if (Number(paidAmount || 0) > 0 && !canPayPurchaseBill) {
+      alert('You do not have permission to pay purchase bills');
+      return false;
+    }
     if (paidAmount > 0 && (!selectedAccountId || selectedAccountId.trim() === '')) {
       setAccountError('Please select payment account');
 
@@ -555,6 +582,15 @@ const PurchaseInvoiceForm = () => {
   };
 
   const handleUpdate = async () => {
+    if (!canEditPurchases) {
+      alert('You do not have permission to edit purchase invoices');
+      return;
+    }
+
+    if (Number(paidAmount || 0) > 0 && !canPayPurchaseBill) {
+      alert('You do not have permission to pay purchase bills');
+      return;
+    }
     const selectedSupplier =
       selectedSupplierType === 'supplier'
         ? suppliers.find((s) => s._id === selectedSupplierId || s.name === supplierName)
@@ -1087,48 +1123,56 @@ const PurchaseInvoiceForm = () => {
                         className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
                       />
 
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder={t('paid')}
-                        value={paidAmount === 0 ? '' : paidAmount}
-                        onChange={(e) => setPaidAmount(+e.target.value || 0)}
-                        className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
-                      />
+                      {canPayPurchaseBill && (
+                        <>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={t('paid')}
+                            value={paidAmount === 0 ? '' : paidAmount}
+                            onChange={(e) => setPaidAmount(+e.target.value || 0)}
+                            className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
+                          />
 
-                      <select
-                        value={paymentType}
-                        onChange={(e) => setPaymentType(e.target.value)}
-                        className="border px-2 py-1 h-8 text-sm cursor-pointer"
-                      >
-                        <option value="cash">{t('payment.cash')}</option>
-                        <option value="cheque">{t('payment.cheque')}</option>
-                        <option value="online">{t('payment.online')}</option>
-                      </select>
+                          <select
+                            value={paymentType}
+                            onChange={(e) => setPaymentType(e.target.value)}
+                            className="border px-2 py-1 h-8 text-sm cursor-pointer"
+                          >
+                            <option value="cash">{t('payment.cash')}</option>
+                            <option value="cheque">{t('payment.cheque')}</option>
+                            <option value="online">{t('payment.online')}</option>
+                          </select>
 
-                      <select
-                        name="selectedAccountId"
-                        value={selectedAccountId}
-                        onChange={(e) => {
-                          setSelectedAccountId(e.target.value);
+                          <select
+                            name="selectedAccountId"
+                            value={selectedAccountId}
+                            onChange={(e) => {
+                              setSelectedAccountId(e.target.value);
 
-                          if (e.target.value) {
-                            setAccountError('');
-                          }
-                        }}
-                        disabled={paidAmount === 0}
-                        className={`px-2 py-1 h-8 w-28 text-sm cursor-pointer border ${
-                          accountError ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                        }`}
-                      >
-                        <option value="">{t('alerts.selectAccount')}</option>
-                        {accounts.map((acc) => (
-                          <option key={acc._id} value={acc._id}>
-                            {acc.name}
-                          </option>
-                        ))}
-                      </select>
-                      {accountError && <p className="text-red-600 text-xs mt-1">{accountError}</p>}
+                              if (e.target.value) {
+                                setAccountError('');
+                              }
+                            }}
+                            disabled={paidAmount === 0}
+                            className={`px-2 py-1 h-8 w-28 text-sm cursor-pointer border ${
+                              accountError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                            }`}
+                          >
+                            <option value="">{t('alerts.selectAccount')}</option>
+
+                            {accounts.map((acc) => (
+                              <option key={acc._id} value={acc._id}>
+                                {acc.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          {accountError && (
+                            <p className="text-red-600 text-xs mt-1">{accountError}</p>
+                          )}
+                        </>
+                      )}
 
                       <div className="flex items-center gap-2 flex-wrap">
                         <input
@@ -1204,7 +1248,7 @@ const PurchaseInvoiceForm = () => {
 
                     {/* SECOND ROW — Buttons */}
                     <div className="flex flex-wrap gap-3 mt-2 md:mt-8">
-                      {isEdit ? (
+                      {isEdit && canEditPurchases ? (
                         <button
                           type="button"
                           onClick={handleUpdate}
@@ -1213,31 +1257,36 @@ const PurchaseInvoiceForm = () => {
                           🔁 {t('updateClose')}
                         </button>
                       ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={handleSaveAndClose}
-                            disabled={loading}
-                            className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
-                              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600'
-                            }`}
-                          >
-                            <span className="md:hidden">{t('saveClose')}</span>
-                            <span className="hidden md:inline">💾 {t('saveClose')}</span>
-                          </button>
+                        !isEdit &&
+                        canCreatePurchases && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleSaveAndClose}
+                              disabled={loading}
+                              className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
+                                loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600'
+                              }`}
+                            >
+                              <span className="md:hidden">{t('saveClose')}</span>
 
-                          <button
-                            type="button"
-                            onClick={handleSaveAndNew}
-                            disabled={loading}
-                            className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
-                              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600'
-                            }`}
-                          >
-                            <span className="md:hidden">{t('saveNew')}</span>
-                            <span className="hidden md:inline">📄 {t('saveNew')}</span>
-                          </button>
-                        </>
+                              <span className="hidden md:inline">💾 {t('saveClose')}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleSaveAndNew}
+                              disabled={loading}
+                              className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
+                                loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600'
+                              }`}
+                            >
+                              <span className="md:hidden">{t('saveNew')}</span>
+
+                              <span className="hidden md:inline">📄 {t('saveNew')}</span>
+                            </button>
+                          </>
+                        )
                       )}
 
                       <button

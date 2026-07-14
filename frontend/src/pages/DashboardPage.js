@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ProfitSummaryModal from '../components/profit/ProfitSummaryModal';
 import { t } from '../i18n/i18n';
+import PermissionGuard from '../components/PermissionGuard';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -241,33 +242,41 @@ font-medium h-[36px]"
             onClick={() => navigate('/suppliers')}
           />
 
-          <QuickAction
-            label={t('saleInvoice')}
-            icon="📄"
-            gradient="from-emerald-600 via-emerald-500 to-green-600"
-            onClick={() => navigate('/sales')}
-          />
+          <PermissionGuard permission="sales.create">
+            <QuickAction
+              label={t('saleInvoice')}
+              icon="📄"
+              gradient="from-emerald-600 via-emerald-500 to-green-600"
+              onClick={() => navigate('/sales')}
+            />
+          </PermissionGuard>
 
-          <QuickAction
-            label={t('purchaseInvoice')}
-            icon="🧾"
-            gradient="from-blue-600 via-indigo-500 to-indigo-600"
-            onClick={() => navigate('/purchase-invoice')}
-          />
+          <PermissionGuard permission="purchases.create">
+            <QuickAction
+              label={t('purchaseInvoice')}
+              icon="🧾"
+              gradient="from-blue-600 via-indigo-500 to-indigo-600"
+              onClick={() => navigate('/purchase-invoice')}
+            />
+          </PermissionGuard>
 
-          <QuickAction
-            label={t('receivePayment')}
-            icon="💰"
-            gradient="from-teal-600 via-cyan-500 to-cyan-600"
-            onClick={() => navigate('/receive-payments/new')}
-          />
+          <PermissionGuard permission="receive_payments.create">
+            <QuickAction
+              label={t('receivePayment')}
+              icon="💰"
+              gradient="from-teal-600 via-cyan-500 to-cyan-600"
+              onClick={() => navigate('/receive-payments/new')}
+            />
+          </PermissionGuard>
 
-          <QuickAction
-            label={t('payBill')}
-            icon="💳"
-            gradient="from-orange-600 via-amber-500 to-orange-600"
-            onClick={() => navigate('/pay-bills/new')}
-          />
+          <PermissionGuard permission="pay_bills.create">
+            <QuickAction
+              label={t('payBill')}
+              icon="💳"
+              gradient="from-orange-600 via-amber-500 to-orange-600"
+              onClick={() => navigate('/pay-bills/new')}
+            />
+          </PermissionGuard>
 
           <QuickAction
             label={t('saleRefund')}

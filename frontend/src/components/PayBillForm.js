@@ -11,6 +11,7 @@ import jsPDF from 'jspdf';
 import Select from 'react-select';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import { hasPermission } from '../utils/permissionHelper';
 const PayBillForm = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [parties, setParties] = useState([]);
@@ -47,6 +48,9 @@ const PayBillForm = () => {
   const [searchParams] = useSearchParams();
   const queryId = searchParams.get('id');
   const id = paramId || queryId;
+  const canViewPayBills = hasPermission('pay_bills.view');
+  const canCreatePayBills = hasPermission('pay_bills.create');
+  const canEditPayBills = hasPermission('pay_bills.edit');
 
   const loadLedger = useCallback(async (id, type = 'supplier') => {
     if (!id) {
@@ -66,6 +70,18 @@ const PayBillForm = () => {
 
   useEffect(() => {
     async function fetchData() {
+      if (id && (!canViewPayBills || !canEditPayBills)) {
+        alert('You do not have permission to edit pay bills');
+        navigate('/pay-bills');
+        return;
+      }
+
+      if (!id && !canCreatePayBills) {
+        alert('You do not have permission to create pay bills');
+        navigate('/dashboard');
+        return;
+      }
+
       if (id) {
         const [sData, pData, paymentAccounts] = await Promise.all([
           getSuppliers(),
@@ -150,7 +166,7 @@ const PayBillForm = () => {
       }
     }
     fetchData();
-  }, [id, loadLedger]);
+  }, [id, loadLedger, canViewPayBills, canCreatePayBills, canEditPayBills, navigate]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -290,6 +306,16 @@ const PayBillForm = () => {
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
+
+    if (id && !canEditPayBills) {
+      alert('You do not have permission to edit pay bills');
+      return;
+    }
+
+    if (!id && !canCreatePayBills) {
+      alert('You do not have permission to create pay bills');
+      return;
+    }
 
     if (!formData.supplier && !formData.partyId) {
       alert(t('alerts.selectSupplier'));
@@ -713,57 +739,65 @@ const PayBillForm = () => {
       </div>
 
       <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
-        <button
-          type="submit"
-          disabled={loading}
-          className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
-            loading
-              ? 'bg-gray-400 cursor-not-allowed opacity-70'
-              : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105'
-          }`}
-        >
-          {loading ? t('saving') : id ? t('common.updateClose') : t('common.saveClose')}
-        </button>
-
-        <button
-          type="button"
-          onClick={(e) => handleSubmit(e, 'new')}
-          disabled={loading}
-          className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
-            loading
-              ? 'bg-gray-400 cursor-not-allowed opacity-70'
-              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:scale-105'
-          }`}
-        >
-          {loading ? t('saving') : t('common.saveNew')}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleRevert}
-          className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-3 py-1.5 rounded-xl shadow"
-        >
-          {id ? t('common.revert') : t('common.clear')}
-        </button>
-
-        {(formData.supplier || formData.partyId) && paymentEntries.length > 0 && (
+        {((id && canEditPayBills) || (!id && canCreatePayBills)) && (
           <>
             <button
-              onClick={handlePrint}
-              type="button"
-              className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
+              type="submit"
+              disabled={loading}
+              className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
+                loading
+                  ? 'bg-gray-400 cursor-not-allowed opacity-70'
+                  : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105'
+              }`}
             >
-              🖨 {t('common.print')}
+              {loading ? t('saving') : id ? t('common.updateClose') : t('common.saveClose')}
             </button>
+
             <button
-              onClick={handleExportPDF}
               type="button"
-              className="bg-gradient-to-r from-red-500 to-red-700 text-white px-3 py-1.5 rounded-xl shadow"
+              onClick={(e) => handleSubmit(e, 'new')}
+              disabled={loading}
+              className={`text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200 ${
+                loading
+                  ? 'bg-gray-400 cursor-not-allowed opacity-70'
+                  : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:scale-105'
+              }`}
             >
-              ⬇️ {t('pdf')}
+              {loading ? t('saving') : t('common.saveNew')}
             </button>
           </>
         )}
+
+        {((id && canEditPayBills) || (!id && canCreatePayBills)) && (
+          <button
+            type="button"
+            onClick={handleRevert}
+            className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-3 py-1.5 rounded-xl shadow"
+          >
+            {id ? t('common.revert') : t('common.clear')}
+          </button>
+        )}
+
+        {canViewPayBills &&
+          (formData.supplier || formData.partyId) &&
+          paymentEntries.length > 0 && (
+            <>
+              <button
+                onClick={handlePrint}
+                type="button"
+                className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
+              >
+                🖨 {t('common.print')}
+              </button>
+              <button
+                onClick={handleExportPDF}
+                type="button"
+                className="bg-gradient-to-r from-red-500 to-red-700 text-white px-3 py-1.5 rounded-xl shadow"
+              >
+                ⬇️ {t('pdf')}
+              </button>
+            </>
+          )}
       </div>
       {supplierLedger.length > 0 && (
         <div className="md:col-span-2 border-t pt-4" ref={printRef}>

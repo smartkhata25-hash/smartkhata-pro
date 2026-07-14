@@ -1,26 +1,66 @@
-// backend/routes/supplierRoutes.js
-
 const express = require("express");
 const router = express.Router();
+
 const ctrl = require("../controllers/supplierController");
+
 const protect = require("../middleware/authMiddleware");
 const upload = require("../middleware/upload");
 
+const { requirePermission } = require("../middleware/permissionMiddleware");
+
+// تمام Supplier Routes محفوظ کریں
 router.use(protect);
 
-// ✅ Supplier CRUD Routes
-router.route("/").post(ctrl.createSupplier).get(ctrl.getSuppliers);
-router.post("/import", upload.single("file"), ctrl.importSuppliers);
-router.route("/:id").put(ctrl.updateSupplier).delete(ctrl.deleteSupplier);
+// Get All Suppliers
+router.get("/", requirePermission("suppliers.view"), ctrl.getSuppliers);
 
-router.post("/merge/confirm", ctrl.confirmMergeSupplier);
+// Create Supplier
+router.post("/", requirePermission("suppliers.create"), ctrl.createSupplier);
 
-router.post("/:id/convert-to-party", ctrl.convertSupplierToParty);
+// Import Suppliers
+router.post(
+  "/import",
+  requirePermission("suppliers.import"),
+  upload.single("file"),
+  ctrl.importSuppliers,
+);
 
-// ✅ Restore hidden supplier
-router.post("/:id/restore", ctrl.restoreSupplier);
+// Confirm Supplier Merge
+router.post(
+  "/merge/confirm",
+  requirePermission("suppliers.merge"),
+  ctrl.confirmMergeSupplier,
+);
 
-// 📘 Supplier Detailed Ledger
-router.get("/:id/detailed-ledger", ctrl.getSupplierDetailedLedger);
+// Convert Supplier To Party
+router.post(
+  "/:id/convert-to-party",
+  requirePermission("suppliers.convert"),
+  ctrl.convertSupplierToParty,
+);
+
+// Restore Hidden Supplier
+router.post(
+  "/:id/restore",
+  requirePermission("suppliers.restore"),
+  ctrl.restoreSupplier,
+);
+
+// Supplier Detailed Ledger
+router.get(
+  "/:id/detailed-ledger",
+  requirePermission("suppliers.view"),
+  ctrl.getSupplierDetailedLedger,
+);
+
+// Update Supplier
+router.put("/:id", requirePermission("suppliers.edit"), ctrl.updateSupplier);
+
+// Delete Supplier
+router.delete(
+  "/:id",
+  requirePermission("suppliers.delete"),
+  ctrl.deleteSupplier,
+);
 
 module.exports = router;

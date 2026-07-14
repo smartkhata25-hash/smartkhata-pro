@@ -1,5 +1,3 @@
-// backend/routes/purchaseInvoiceRoutes.js
-
 const express = require("express");
 const router = express.Router();
 
@@ -16,35 +14,64 @@ const {
 const upload = require("../middleware/uploadMiddleware");
 const protect = require("../middleware/authMiddleware");
 
-//CREATE PURCHASE INVOICE
+const { requirePermission } = require("../middleware/permissionMiddleware");
 
-router.post("/", protect, upload.array("attachments", 3), addPurchaseInvoice);
+// Create Purchase Invoice
+router.post(
+  "/",
+  protect,
+  requirePermission("purchases.create"),
+  upload.array("attachments", 3),
+  addPurchaseInvoice,
+);
 
-router.get("/item-history/:productId", protect, getItemPurchaseHistory);
+// Item Purchase History
+router.get(
+  "/item-history/:productId",
+  protect,
+  requirePermission("purchases.view"),
+  getItemPurchaseHistory,
+);
 
-// SEARCH PURCHASE INVOICES
+// Search Purchase Invoices
+router.get(
+  "/search",
+  protect,
+  requirePermission("purchases.view"),
+  searchPurchaseInvoices,
+);
 
-router.get("/search", protect, searchPurchaseInvoices);
+// Get All Purchase Invoices
+router.get(
+  "/",
+  protect,
+  requirePermission("purchases.view"),
+  getAllPurchaseInvoices,
+);
 
-//GET ALL PURCHASE INVOICES
+// Get Purchase Invoice By ID
+router.get(
+  "/:id",
+  protect,
+  requirePermission("purchases.view"),
+  getPurchaseInvoiceById,
+);
 
-router.get("/", protect, getAllPurchaseInvoices);
-
-// GET PURCHASE INVOICE BY ID
-
-router.get("/:id", protect, getPurchaseInvoiceById);
-
-//UPDATE PURCHASE INVOICE
-
+// Update Purchase Invoice
 router.put(
   "/:id",
   protect,
+  requirePermission("purchases.edit"),
   upload.array("attachments", 3),
   updatePurchaseInvoice,
 );
 
-// DELETE PURCHASE INVOICE
-
-router.delete("/:id", protect, deletePurchaseInvoice);
+// Delete Purchase Invoice
+router.delete(
+  "/:id",
+  protect,
+  requirePermission("purchases.delete"),
+  deletePurchaseInvoice,
+);
 
 module.exports = router;

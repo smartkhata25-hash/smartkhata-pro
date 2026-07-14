@@ -5,6 +5,7 @@ import { fetchPurchaseParties } from '../services/partyService';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const PayBillList = () => {
   const [bills, setBills] = useState([]);
@@ -21,6 +22,10 @@ const PayBillList = () => {
   });
 
   const navigate = useNavigate();
+  const canViewPayBills = hasPermission('pay_bills.view');
+  const canCreatePayBills = hasPermission('pay_bills.create');
+  const canEditPayBills = hasPermission('pay_bills.edit');
+  const canDeletePayBills = hasPermission('pay_bills.delete');
 
   const getBillTotal = useCallback((bill) => {
     if (Array.isArray(bill.paymentEntries) && bill.paymentEntries.length > 0) {
@@ -79,6 +84,10 @@ const PayBillList = () => {
   );
 
   const fetchData = useCallback(async () => {
+    if (!canViewPayBills) {
+      navigate('/dashboard');
+      return;
+    }
     try {
       const cachedBills = JSON.parse(localStorage.getItem('paybills') || 'null');
       const cachedSuppliers = JSON.parse(localStorage.getItem('suppliers') || 'null');
@@ -119,7 +128,7 @@ const PayBillList = () => {
       console.error('❌ Failed to fetch bills:', err.message);
       alert(t('alerts.payBillLoadFailed'));
     }
-  }, []);
+  }, [canViewPayBills, navigate]);
 
   useEffect(() => {
     fetchData();
@@ -171,6 +180,10 @@ const PayBillList = () => {
   }, [filters, bills, getBillTotal, getPaymentTypes, getAccountNames, getSupplierOrPartyName]);
 
   const handleDelete = async (id) => {
+    if (!canDeletePayBills) {
+      alert('You do not have permission to delete pay bills');
+      return;
+    }
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
     try {
@@ -193,12 +206,14 @@ const PayBillList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('payment.payBillList')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/pay-bills/new')}
-        >
-          {t('payment.new')}
-        </button>
+        {canCreatePayBills && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/pay-bills/new')}
+          >
+            {t('payment.new')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
@@ -308,19 +323,23 @@ const PayBillList = () => {
 
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
-                    <button
-                      className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/pay-bills/edit/${bill._id}`)}
-                    >
-                      {t('common.edit')}
-                    </button>
+                    {canEditPayBills && (
+                      <button
+                        className="bg-yellow-400 px-2 py-1 rounded"
+                        onClick={() => navigate(`/pay-bills/edit/${bill._id}`)}
+                      >
+                        {t('common.edit')}
+                      </button>
+                    )}
 
-                    <button
-                      className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(bill._id)}
-                    >
-                      {t('common.delete')}
-                    </button>
+                    {canDeletePayBills && (
+                      <button
+                        className="bg-red-600 text-white px-2 py-1 rounded"
+                        onClick={() => handleDelete(bill._id)}
+                      >
+                        {t('common.delete')}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

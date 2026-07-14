@@ -17,6 +17,7 @@ const {
   deleteFile,
   getFileUrl,
 } = require("../services/r2FileService");
+const { logActivity } = require("../utils/activityLogger");
 
 function formatPurchaseReturnAttachments(pr) {
   if (pr.attachments?.length > 0) {
@@ -385,6 +386,29 @@ exports.createPurchaseReturn = async (req, res) => {
         });
       }
     }
+    await logActivity({
+      req,
+      action: "create",
+      module: "purchase_returns",
+      entityType: "PurchaseReturn",
+      entityId: purchaseReturn._id,
+      title: `Purchase Return ${purchaseReturn.billNo}`,
+      description: `${purchaseReturn.supplierName} کی Purchase Return بنائی گئی`,
+      billNo: purchaseReturn.billNo,
+      after: {
+        supplierName: purchaseReturn.supplierName,
+        supplierPhone: purchaseReturn.supplierPhone,
+        returnDate: purchaseReturn.returnDate,
+        returnTime: purchaseReturn.returnTime,
+        totalAmount: purchaseReturn.totalAmount,
+        paidAmount: purchaseReturn.paidAmount,
+        paymentType: purchaseReturn.paymentType,
+        accountId: purchaseReturn.accountId,
+        itemCount: purchaseReturn.items?.length || 0,
+        isOpening: openingMode,
+      },
+    });
+
     return res.status(201).json({
       message: "✅ Purchase Return created successfully",
       purchaseReturn,
@@ -544,6 +568,33 @@ exports.updatePurchaseReturn = async (req, res) => {
         error: "Purchase Return not found",
       });
     }
+
+    const beforeUpdate = {
+      billNo: pr.billNo,
+      returnDate: pr.returnDate,
+      returnTime: pr.returnTime,
+      supplierId: pr.supplierId,
+      partyId: pr.partyId,
+      supplierName: pr.supplierName,
+      supplierPhone: pr.supplierPhone,
+      totalAmount: pr.totalAmount,
+      paidAmount: pr.paidAmount,
+      paymentType: pr.paymentType,
+      accountId: pr.accountId,
+      notes: pr.notes,
+      itemCount: pr.items?.length || 0,
+      isOpening: pr.isOpening || false,
+    };
+
+    const oldSupplier = pr.supplierId
+      ? await Supplier.findById(pr.supplierId)
+      : null;
+
+    const oldParty = pr.partyId ? await Party.findById(pr.partyId) : null;
+
+    const oldSupplierAccount = oldSupplier?.account || null;
+    const oldPartyAccount = oldParty?.account || null;
+    const oldPaymentAccount = pr.accountId || null;
 
     let attachments = formatPurchaseReturnAttachments(pr).map((att) => ({
       key: att.key,
@@ -788,9 +839,10 @@ exports.updatePurchaseReturn = async (req, res) => {
     pr.totalAmount = totalAmount;
     pr.paidAmount = paidAmount;
     pr.paymentType = paymentType;
-    pr.accountId = paymentType ? accountId : null;
+    pr.accountId = paidAmount > 0 && paymentType ? accountId : null;
     pr.notes = notes;
     pr.items = items;
+    pr.isOpening = openingMode;
 
     pr.attachments = attachments;
     pr.attachmentUrl = attachmentUrl;
@@ -918,6 +970,55 @@ exports.updatePurchaseReturn = async (req, res) => {
       await recalculateAccountBalance(accountId);
     }
 
+    if (
+      oldSupplierAccount &&
+      oldSupplierAccount.toString() !== counterPartyAccountId.toString()
+    ) {
+      await recalculateAccountBalance(oldSupplierAccount);
+    }
+
+    if (
+      oldPartyAccount &&
+      oldPartyAccount.toString() !== counterPartyAccountId.toString()
+    ) {
+      await recalculateAccountBalance(oldPartyAccount);
+    }
+
+    if (
+      oldPaymentAccount &&
+      (!accountId || oldPaymentAccount.toString() !== accountId.toString())
+    ) {
+      await recalculateAccountBalance(oldPaymentAccount);
+    }
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "purchase_returns",
+      entityType: "PurchaseReturn",
+      entityId: pr._id,
+      title: `Purchase Return ${pr.billNo}`,
+      description: `${pr.supplierName} کی Purchase Return Update کی گئی`,
+      billNo: pr.billNo,
+      before: beforeUpdate,
+      after: {
+        billNo: pr.billNo,
+        returnDate: pr.returnDate,
+        returnTime: pr.returnTime,
+        supplierId: pr.supplierId,
+        partyId: pr.partyId,
+        supplierName: pr.supplierName,
+        supplierPhone: pr.supplierPhone,
+        totalAmount: pr.totalAmount,
+        paidAmount: pr.paidAmount,
+        paymentType: pr.paymentType,
+        accountId: pr.accountId,
+        notes: pr.notes,
+        itemCount: pr.items?.length || 0,
+        isOpening: pr.isOpening || false,
+      },
+    });
+
     return res.json({
       message: "✅ Purchase Return updated successfully",
       purchaseReturn: pr,
@@ -951,6 +1052,23 @@ exports.deletePurchaseReturn = async (req, res) => {
         error: "Purchase Return not found or already deleted",
       });
     }
+
+    const beforeDelete = {
+      billNo: pr.billNo,
+      returnDate: pr.returnDate,
+      returnTime: pr.returnTime,
+      supplierId: pr.supplierId,
+      partyId: pr.partyId,
+      supplierName: pr.supplierName,
+      supplierPhone: pr.supplierPhone,
+      totalAmount: pr.totalAmount,
+      paidAmount: pr.paidAmount,
+      paymentType: pr.paymentType,
+      accountId: pr.accountId,
+      notes: pr.notes,
+      itemCount: pr.items?.length || 0,
+      isOpening: pr.isOpening || false,
+    };
 
     /* =============================
        REVERSE STOCK ENTRIES
@@ -1033,6 +1151,21 @@ exports.deletePurchaseReturn = async (req, res) => {
     pr.isDeleted = true;
 
     await pr.save();
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "purchase_returns",
+      entityType: "PurchaseReturn",
+      entityId: pr._id,
+      title: `Purchase Return ${pr.billNo}`,
+      description: `${pr.supplierName} کی Purchase Return Delete کی گئی`,
+      billNo: pr.billNo,
+      before: beforeDelete,
+      after: {
+        isDeleted: true,
+      },
+    });
 
     return res.json({
       message: "✅ Purchase Return deleted successfully",

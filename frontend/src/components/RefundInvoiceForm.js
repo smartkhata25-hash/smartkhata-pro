@@ -15,6 +15,7 @@ import ProductDropdown from './ProductDropdown';
 import useFormPersist from '../hooks/useFormPersist';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const RefundInvoiceForm = ({
@@ -80,6 +81,10 @@ const RefundInvoiceForm = ({
 
   const { id } = useParams();
   const navigate = useNavigate();
+
+  const canViewRefunds = hasPermission('refunds.view');
+  const canCreateRefunds = hasPermission('refunds.create');
+  const canEditRefunds = hasPermission('refunds.edit');
 
   const [items, setItems] = useState([]);
   const [billNo, setBillNo] = useState('');
@@ -168,18 +173,24 @@ const RefundInvoiceForm = ({
   // ✅ Load for Edit (after productList available)
   useEffect(() => {
     async function loadForEdit() {
-      if (id) {
-        try {
-          const data = await getRefundById(id, token);
-          populateForm(data);
-        } catch (err) {
-          alert(t('alerts.invoiceSaveFailed'));
-        }
+      if (!id) return;
+
+      if (!canViewRefunds || !canEditRefunds) {
+        alert('You do not have permission to edit sale refunds');
+        navigate('/refunds');
+        return;
+      }
+
+      try {
+        const data = await getRefundById(id, token);
+        populateForm(data);
+      } catch (err) {
+        alert(t('alerts.invoiceSaveFailed'));
       }
     }
 
     loadForEdit();
-  }, [id, token, populateForm]);
+  }, [id, token, populateForm, canViewRefunds, canEditRefunds, navigate]);
 
   // ✅ Load Products, Customers, Accounts
   useEffect(() => {
@@ -341,6 +352,16 @@ const RefundInvoiceForm = ({
   useFormPersist(!id ? 'refund_invoice_draft' : null, formState, () => {});
 
   const handleSubmit = async (action) => {
+    if (id && !canEditRefunds) {
+      alert('You do not have permission to edit sale refunds');
+      return;
+    }
+
+    if (!id && !canCreateRefunds) {
+      alert('You do not have permission to create sale refunds');
+      return;
+    }
+
     const filteredItems = items.filter((item) => item.name && item.quantity > 0);
     const safeTime = invoiceTime || getCurrentTime();
 
@@ -840,26 +861,31 @@ const RefundInvoiceForm = ({
       <div className="sticky bottom-0 bg-white border-t py-3 flex flex-col md:flex-row md:justify-between md:items-center gap-2 px-4">
         {/* LEFT SIDE — Find + Print + PDF */}
         <div className="flex flex-wrap items-center gap-2 order-2 md:order-none">
-          <button
-            onClick={() => setShowSearchModal(true)}
-            className="flex items-center gap-1 px-2 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl
+          {canViewRefunds && (
+            <button
+              type="button"
+              onClick={() => setShowSearchModal(true)}
+              className="flex items-center gap-1 px-2 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl
 bg-gradient-to-r from-blue-700 to-blue-500
 text-white
 hover:from-blue-800 hover:to-blue-600
 transition-all duration-300 text-xs md:text-sm font-semibold
 shadow-md hover:shadow-lg"
-          >
-            <span>🔍</span>
-          </button>
+            >
+              <span>🔍</span>
+            </button>
+          )}
           {/* 📖 Mobile History Button */}
-          <button
-            type="button"
-            onClick={() => setShowHistoryModal(true)}
-            className="md:hidden flex items-center gap-2 px-3 py-2 rounded-xl
-  bg-yellow-600 text-white text-sm font-semibold shadow"
-          >
-            <span>📖</span>
-          </button>
+          {canViewRefunds && (
+            <button
+              type="button"
+              onClick={() => setShowHistoryModal(true)}
+              className="md:hidden flex items-center gap-2 px-3 py-2 rounded-xl
+    bg-yellow-600 text-white text-sm font-semibold shadow"
+            >
+              <span>📖</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -908,29 +934,33 @@ shadow-md hover:shadow-lg"
 
         {/* RIGHT SIDE — Save Buttons */}
         <div className="flex flex-wrap gap-2 justify-end order-3 md:order-none">
-          <button
-            onClick={() => handleSubmit('close')}
-            className="px-3 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm
+          {((id && canEditRefunds) || (!id && canCreateRefunds)) && (
+            <>
+              <button
+                onClick={() => handleSubmit('close')}
+                className="px-3 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm
            bg-gradient-to-r from-emerald-700 to-green-600
            text-white
            hover:from-emerald-800 hover:to-green-700
            transition-all duration-300 font-semibold
            shadow-md hover:shadow-lg"
-          >
-            {id ? t('updateClose') : t('saveClose')}
-          </button>
+              >
+                {id ? t('updateClose') : t('saveClose')}
+              </button>
 
-          <button
-            onClick={() => handleSubmit('new')}
-            className="px-3 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm
+              <button
+                onClick={() => handleSubmit('new')}
+                className="px-3 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm
            bg-gradient-to-r from-blue-700 to-indigo-600
            text-white
            hover:from-blue-800 hover:to-indigo-700
            transition-all duration-300 font-semibold
            shadow-md hover:shadow-lg"
-          >
-            {t('saveNew')}
-          </button>
+              >
+                {t('saveNew')}
+              </button>
+            </>
+          )}
 
           <button
             onClick={handleRevert}
@@ -1216,7 +1246,7 @@ shadow-sm hover:shadow-md"
         </div>
       )}
       {/* 📖 Mobile History Popup */}
-      {showHistoryModal && (
+      {canViewRefunds && showHistoryModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 md:hidden">
           <div className="bg-white rounded shadow-lg w-[90%] max-h-[70vh] overflow-auto p-4">
             <div className="flex justify-between items-center mb-3">
@@ -1259,7 +1289,7 @@ shadow-sm hover:shadow-md"
         </div>
       )}
 
-      {showSearchModal && (
+      {canViewRefunds && showSearchModal && (
         <InvoiceSearchModal
           onSelect={handleInvoiceSelect}
           onClose={() => setShowSearchModal(false)}

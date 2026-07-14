@@ -1,7 +1,11 @@
 const express = require("express");
 const router = express.Router();
+
 const upload = require("../middleware/uploadMiddleware");
 const { protect } = require("../middleware/authMiddleware");
+
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { PERMISSIONS } = require("../utils/permissionList");
 
 const {
   createExpense,
@@ -11,19 +15,46 @@ const {
   deleteExpense,
 } = require("../controllers/expenseController");
 
-// ✅ Create Expense with attachment
-router.post("/", protect, upload.single("attachment"), createExpense);
+// ✅ Create Expense
+router.post(
+  "/",
+  protect,
+  requirePermission(PERMISSIONS.EXPENSES.CREATE),
+  upload.single("attachment"),
+  createExpense,
+);
 
-// ✅ Get all Expenses
-router.get("/", protect, getAllExpenses);
+// ✅ Get All Expenses
+router.get(
+  "/",
+  protect,
+  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  getAllExpenses,
+);
 
-// ✅ Get single Expense by ID
-router.get("/:id", protect, getExpenseById);
+// ✅ Get Single Expense
+router.get(
+  "/:id",
+  protect,
+  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  getExpenseById,
+);
 
 // ✅ Update Expense
-router.put("/:id", protect, upload.single("attachment"), updateExpense);
+router.put(
+  "/:id",
+  protect,
+  requirePermission(PERMISSIONS.EXPENSES.EDIT),
+  upload.single("attachment"),
+  updateExpense,
+);
 
 // ✅ Delete Expense
-router.delete("/:id", protect, deleteExpense);
+router.delete(
+  "/:id",
+  protect,
+  requirePermission(PERMISSIONS.EXPENSES.DELETE),
+  deleteExpense,
+);
 
 module.exports = router;

@@ -10,6 +10,7 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
+const { logActivity } = require("../utils/activityLogger");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 const escapeRegex = (text = "") => {
@@ -39,10 +40,13 @@ exports.createSupplier = async (req, res) => {
   try {
     const { name, phone, email, address, notes, openingBalance, supplierType } =
       req.body;
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
 
-    // ❌ Duplicate check
-    const existing = await Supplier.findOne({ name, userId });
+    const existing = await Supplier.findOne({
+      name: new RegExp(`^${escapeRegex(name.trim())}$`, "i"),
+      userId,
+      isDeleted: false,
+    });
     if (existing) {
       return res.status(400).json({ message: "Supplier already exists" });
     }
@@ -207,6 +211,26 @@ exports.createSupplier = async (req, res) => {
       await recalculateAccountBalance(account._id);
     }
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Supplier ${supplier.name}`,
+      description: `${supplier.name} Supplier بنایا گیا`,
+      after: {
+        name: supplier.name,
+        phone: supplier.phone,
+        email: supplier.email,
+        address: supplier.address,
+        notes: supplier.notes,
+        supplierType: supplier.supplierType,
+        openingBalance: supplier.openingBalance,
+        account: supplier.account,
+      },
+    });
+
     res.status(201).json(supplier);
   } catch (err) {
     console.error("❌ Supplier create error:", err);
@@ -217,7 +241,7 @@ exports.createSupplier = async (req, res) => {
 /* ───────────── Get Suppliers ───────────── */
 exports.getSuppliers = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
 
     const {
       search = "",
@@ -320,10 +344,10 @@ exports.getSuppliers = async (req, res) => {
 };
 
 /* ───────────── Update Supplier ───────────── */
-// ✅ Update Supplier (with Merge Logic – PRO LEVEL)
+
 exports.updateSupplier = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const supplierId = req.params.id;
 
     const { name, phone, email, address, notes, openingBalance, supplierType } =
@@ -340,7 +364,17 @@ exports.updateSupplier = async (req, res) => {
       return res.status(404).json({ message: "Supplier not found" });
     }
 
-    // 2️⃣ اگر نام change ہو رہا ہے
+    const beforeUpdate = {
+      name: currentSupplier.name,
+      phone: currentSupplier.phone,
+      email: currentSupplier.email,
+      address: currentSupplier.address,
+      notes: currentSupplier.notes,
+      openingBalance: currentSupplier.openingBalance,
+      supplierType: currentSupplier.supplierType,
+      account: currentSupplier.account,
+    };
+
     if (
       name &&
       name.trim().toLowerCase() !== currentSupplier.name.trim().toLowerCase()
@@ -357,11 +391,13 @@ exports.updateSupplier = async (req, res) => {
         // 3️⃣ دونوں suppliers کے ledger check
         const currentLedgerCount = await JournalEntry.countDocuments({
           supplierId: currentSupplier._id,
+          createdBy: userId,
           isDeleted: false,
         });
 
         const otherLedgerCount = await JournalEntry.countDocuments({
           supplierId: otherSupplier._id,
+          createdBy: userId,
           isDeleted: false,
         });
 
@@ -401,6 +437,7 @@ exports.updateSupplier = async (req, res) => {
     await JournalEntry.updateMany(
       {
         supplierId: currentSupplier._id,
+        createdBy: userId,
         sourceType: {
           $in: [
             "opening_balance",
@@ -421,6 +458,7 @@ exports.updateSupplier = async (req, res) => {
     await PurchaseInvoice.updateMany(
       {
         supplier: currentSupplier._id,
+        userId,
         billNo: "OPENING",
         isDeleted: false,
       },
@@ -435,6 +473,7 @@ exports.updateSupplier = async (req, res) => {
     await PurchaseReturn.updateMany(
       {
         supplierId: currentSupplier._id,
+        createdBy: userId,
         billNo: "OPENING",
         isDeleted: false,
       },
@@ -464,10 +503,10 @@ exports.updateSupplier = async (req, res) => {
         });
       }
 
-      // 🔥 remove old opening invoice references
       await JournalEntry.updateMany(
         {
           supplierId: currentSupplier._id,
+          createdBy: userId,
           sourceType: {
             $in: ["opening_purchase_invoice", "opening_purchase_return"],
           },
@@ -590,6 +629,27 @@ exports.updateSupplier = async (req, res) => {
 
     await recalculateAccountBalance(currentSupplier.account);
 
+    await logActivity({
+      req,
+      action: "update",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: currentSupplier._id,
+      title: `Supplier ${currentSupplier.name}`,
+      description: `${currentSupplier.name} Supplier Update کیا گیا`,
+      before: beforeUpdate,
+      after: {
+        name: currentSupplier.name,
+        phone: currentSupplier.phone,
+        email: currentSupplier.email,
+        address: currentSupplier.address,
+        notes: currentSupplier.notes,
+        openingBalance: currentSupplier.openingBalance,
+        supplierType: currentSupplier.supplierType,
+        account: currentSupplier.account,
+      },
+    });
+
     res.json(currentSupplier);
   } catch (error) {
     console.error("❌ Update Supplier Error:", error);
@@ -600,7 +660,7 @@ exports.updateSupplier = async (req, res) => {
 // ✅ CONFIRM MERGE SUPPLIER (SAFE ACCOUNTING VERSION)
 exports.confirmMergeSupplier = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const { sourceSupplierId, targetSupplierId } = req.body;
 
     if (!sourceSupplierId || !targetSupplierId) {
@@ -633,6 +693,15 @@ exports.confirmMergeSupplier = async (req, res) => {
         message: "Supplier not found",
       });
     }
+
+    const beforeMerge = {
+      sourceSupplierId: sourceSupplier._id,
+      sourceName: sourceSupplier.name,
+      sourceAccount: sourceSupplier.account,
+      targetSupplierId: targetSupplier._id,
+      targetName: targetSupplier.name,
+      targetAccount: targetSupplier.account,
+    };
 
     // ✅ Safety checks
     if (!sourceSupplier.account || !targetSupplier.account) {
@@ -683,13 +752,32 @@ exports.confirmMergeSupplier = async (req, res) => {
     await sourceSupplier.save();
 
     await Account.updateOne(
-      { _id: sourceSupplier.account },
+      {
+        _id: sourceSupplier.account,
+        userId,
+      },
       {
         $set: {
           isActive: false,
         },
       },
     );
+
+    await logActivity({
+      req,
+      action: "merge",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: targetSupplier._id,
+      title: "Supplier Merge",
+      description: `${sourceSupplier.name} کو ${targetSupplier.name} میں Merge کیا گیا`,
+      before: beforeMerge,
+      after: {
+        mergedInto: targetSupplier._id,
+        sourceStatus: "merged",
+        movedTransactions,
+      },
+    });
 
     return res.json({
       message: "Suppliers merged successfully",
@@ -709,7 +797,7 @@ exports.confirmMergeSupplier = async (req, res) => {
 // ✅ Smart Delete Supplier (PRO LEVEL – Safe Accounting)
 exports.deleteSupplier = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const supplierId = req.params.id;
 
     // 1️⃣ Supplier نکالو
@@ -723,9 +811,21 @@ exports.deleteSupplier = async (req, res) => {
       return res.status(404).json({ message: "Supplier not found" });
     }
 
+    const beforeDelete = {
+      name: supplier.name,
+      phone: supplier.phone,
+      email: supplier.email,
+      address: supplier.address,
+      notes: supplier.notes,
+      openingBalance: supplier.openingBalance,
+      supplierType: supplier.supplierType,
+      account: supplier.account,
+    };
+
     // 2️⃣ Check: supplier ka ledger hai ya nahi
     const hasLedger = await JournalEntry.exists({
       supplierId: supplier._id,
+      createdBy: userId,
       isDeleted: false,
     });
 
@@ -746,6 +846,23 @@ exports.deleteSupplier = async (req, res) => {
         },
       );
 
+      await logActivity({
+        req,
+        action: "delete",
+        module: "suppliers",
+        entityType: "Supplier",
+        entityId: supplier._id,
+        title: `Supplier ${supplier.name}`,
+        description: `${supplier.name} Supplier Hidden کیا گیا`,
+        before: beforeDelete,
+        after: {
+          isDeleted: true,
+          hiddenReason: "deleted",
+          supplierType: "blocked",
+          status: "hidden",
+        },
+      });
+
       return res.json({
         message: "Supplier has transactions, moved to hidden",
         status: "inactive",
@@ -753,11 +870,30 @@ exports.deleteSupplier = async (req, res) => {
       });
     }
 
-    // 🟢 CASE 2: Ledger nahi hai → permanent delete
-    await Supplier.deleteOne({ _id: supplier._id });
+    await Supplier.deleteOne({
+      _id: supplier._id,
+      userId,
+    });
 
-    // delete linked account also
-    await Account.deleteOne({ _id: supplier.account });
+    await Account.deleteOne({
+      _id: supplier.account,
+      userId,
+    });
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Supplier ${supplier.name}`,
+      description: `${supplier.name} Supplier Permanently Delete کیا گیا`,
+      before: beforeDelete,
+      after: {
+        status: "deleted",
+        isDeleted: true,
+      },
+    });
 
     return res.json({
       message: "Supplier deleted permanently (no transactions)",
@@ -772,7 +908,7 @@ exports.deleteSupplier = async (req, res) => {
 // ✅ Restore deleted Supplier from Hidden
 exports.restoreSupplier = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const supplierId = req.params.id;
 
     const supplier = await Supplier.findOne({
@@ -839,6 +975,26 @@ exports.restoreSupplier = async (req, res) => {
         },
       },
     );
+
+    await logActivity({
+      req,
+      action: "restore",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Supplier ${supplier.name}`,
+      description: `${supplier.name} Supplier Restore کیا گیا`,
+      before: {
+        isDeleted: true,
+        hiddenReason: "deleted",
+        supplierType: "blocked",
+      },
+      after: {
+        isDeleted: false,
+        hiddenReason: null,
+        supplierType: "vendor",
+      },
+    });
 
     return res.json({
       message: "Supplier restored successfully",
@@ -1006,7 +1162,7 @@ const createPartyOpeningFromSupplier = async ({
 
 exports.convertSupplierToParty = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const supplierId = req.params.id;
 
     const supplier = await Supplier.findOne({
@@ -1078,11 +1234,37 @@ exports.convertSupplierToParty = async (req, res) => {
     await supplier.save();
 
     await Account.updateOne(
-      { _id: supplier.account },
+      {
+        _id: supplier.account,
+        userId,
+      },
       { $set: { isActive: false } },
     );
 
     await recalculateAccountBalance(partyAccount._id);
+
+    await logActivity({
+      req,
+      action: "convert",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Supplier ${supplier.name}`,
+      description: `${supplier.name} Supplier کو Party میں Convert کیا گیا`,
+      before: {
+        supplierId: supplier._id,
+        name: supplier.name,
+        supplierAccount: supplier.account,
+        closingBalance: supplierClosingBalance,
+        isDeleted: false,
+      },
+      after: {
+        partyId: party._id,
+        partyAccount: partyAccount._id,
+        openingBalance: partyOpeningBalance,
+        supplierStatus: "converted",
+      },
+    });
 
     return res.status(201).json({
       message: "Supplier converted to party successfully",
@@ -1102,7 +1284,7 @@ exports.convertSupplierToParty = async (req, res) => {
 // 📘 SUPPLIER DETAILED LEDGER (PRO LEVEL – FINAL)
 exports.getSupplierDetailedLedger = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.userId;
     const { id: supplierId } = req.params;
     const { startDate, endDate } = req.query;
 
@@ -1270,7 +1452,11 @@ exports.getSupplierDetailedLedger = async (req, res) => {
 /* ───────────── Import via Excel/CSV ───────────── */
 exports.importSuppliers = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "File missing" });
+    const userId = req.user?.id || req.userId;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "File missing" });
+    }
 
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
     const sh = wb.Sheets[wb.SheetNames[0]];
@@ -1279,11 +1465,16 @@ exports.importSuppliers = async (req, res) => {
     const inserted = [];
 
     for (let r of rows) {
+      const code = await generateAccountCode(userId);
+
       const account = await Account.create({
         name: r.Name || "",
         type: "Liability",
+        normalBalance: "credit",
+        code,
         category: "supplier",
-        userId: req.user.id,
+        openingBalance: Number(r.OpeningBalance) || 0,
+        userId,
       });
 
       const sup = await Supplier.create({
@@ -1425,6 +1616,20 @@ exports.importSuppliers = async (req, res) => {
 
       inserted.push(sup);
     }
+
+    await logActivity({
+      req,
+      action: "create",
+      module: "suppliers",
+      entityType: "Supplier",
+      entityId: inserted[0]?._id || null,
+      title: `Supplier Import (${inserted.length})`,
+      description: `${inserted.length} Suppliers Import کیے گئے`,
+      after: {
+        supplierCount: inserted.length,
+        supplierNames: inserted.map((supplier) => supplier.name),
+      },
+    });
 
     res.json({ message: `${inserted.length} suppliers imported.` });
   } catch (err) {

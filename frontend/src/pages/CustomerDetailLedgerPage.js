@@ -144,7 +144,7 @@ export default function CustomerDetailLedgerPage() {
               : row.sourceType === 'sale_invoice'
                 ? t('saleInvoice')
                 : row.sourceType === 'refund_invoice'
-                  ? t('refund.new')
+                  ? t('refund.sale')
                   : row.sourceType === 'receive_payment'
                     ? t('receivePayment')
                     : '-',

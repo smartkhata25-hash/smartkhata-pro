@@ -18,10 +18,9 @@ const {
 
 const fs = require("fs");
 const path = require("path");
+const { logActivity } = require("../utils/activityLogger");
 
-/* =====================================================
-   ATTACHMENT HELPERS
-===================================================== */
+// ATTACHMENT HELPERS
 
 function formatAttachments(payment) {
   if (payment.attachments?.length > 0) {
@@ -113,9 +112,7 @@ async function safeRecalculate(id) {
   }
 }
 
-/* =====================================================
-   CREATE RECEIVE PAYMENT
-===================================================== */
+// CREATE RECEIVE PAYMENT
 
 exports.createReceivePayment = async (req, res) => {
   try {
@@ -183,7 +180,11 @@ exports.createReceivePayment = async (req, res) => {
 
       counterPartyAccountId = partyData.account._id;
     } else {
-      customerData = await Customer.findById(customer).populate("account");
+      customerData = await Customer.findOne({
+        _id: customer,
+        createdBy: userId,
+        isActive: true,
+      }).populate("account");
 
       if (!customerData || !customerData.account) {
         return res.status(404).json({
@@ -244,6 +245,31 @@ exports.createReceivePayment = async (req, res) => {
       });
     }
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "receive_payments",
+      entityType: "ReceivePayment",
+      entityId: newPayment._id,
+      title: `Receive Payment ${newPayment.billNo}`,
+      description: `${
+        customerData?.name || partyData?.name || "Party"
+      } سے Payment وصول کی گئی`,
+      billNo: newPayment.billNo,
+      after: {
+        customer: newPayment.customer,
+        partyId: newPayment.partyId,
+        customerName: customerData?.name || partyData?.name || "",
+        date: newPayment.date,
+        time: newPayment.time,
+        amount: newPayment.amount,
+        discountAmount: newPayment.discountAmount,
+        finalAmount: newPayment.finalAmount,
+        paymentType: newPayment.paymentType,
+        paymentEntryCount: payments.length,
+      },
+    });
+
     res.status(201).json({
       message: "Receive payment saved successfully",
       data: newPayment,
@@ -254,9 +280,7 @@ exports.createReceivePayment = async (req, res) => {
   }
 };
 
-/* =====================================================
-   GET ALL RECEIVE PAYMENTS
-===================================================== */
+// GET ALL RECEIVE PAYMENTS
 
 exports.getAllReceivePayments = async (req, res) => {
   try {
@@ -279,6 +303,7 @@ exports.getAllReceivePayments = async (req, res) => {
 
     const payments = await ReceivePayment.find({
       userId,
+      isDeleted: { $ne: true },
       $or: [
         { customer: { $in: activeCustomerIds } },
         { partyId: { $in: activePartyIds } },
@@ -317,13 +342,17 @@ exports.getAllReceivePayments = async (req, res) => {
   }
 };
 
-/* =====================================================
-   GET SINGLE RECEIVE PAYMENT
-===================================================== */
+// GET SINGLE RECEIVE PAYMENT
 
 exports.getReceivePaymentById = async (req, res) => {
   try {
-    const payment = await ReceivePayment.findById(req.params.id);
+    const userId = req.user?.id || req.userId;
+
+    const payment = await ReceivePayment.findOne({
+      _id: req.params.id,
+      userId,
+      isDeleted: { $ne: true },
+    });
 
     if (!payment) {
       return res.status(404).json({ error: "Record not found" });
@@ -332,6 +361,8 @@ exports.getReceivePaymentById = async (req, res) => {
     const journal = await JournalEntry.findOne({
       referenceId: payment._id,
       sourceType: "receive_payment",
+      createdBy: userId,
+      isDeleted: false,
     });
 
     let paymentEntries = [];
@@ -360,9 +391,7 @@ exports.getReceivePaymentById = async (req, res) => {
   }
 };
 
-/* =====================================================
-   UPDATE RECEIVE PAYMENT
-===================================================== */
+// UPDATE RECEIVE PAYMENT
 
 exports.updateReceivePayment = async (req, res) => {
   try {
@@ -404,11 +433,42 @@ exports.updateReceivePayment = async (req, res) => {
     const payment = await ReceivePayment.findOne({
       _id: req.params.id,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!payment) {
       return res.status(404).json({ error: "Record not found" });
     }
+
+    const beforeUpdate = {
+      customer: payment.customer,
+      partyId: payment.partyId,
+      date: payment.date,
+      time: payment.time,
+      amount: payment.amount,
+      discountAmount: payment.discountAmount,
+      finalAmount: payment.finalAmount,
+      paymentType: payment.paymentType,
+      billNo: payment.billNo,
+      description: payment.description,
+    };
+
+    const oldJournals = await JournalEntry.find({
+      referenceId: payment._id,
+      sourceType: {
+        $in: ["receive_payment", "receive_payment_discount"],
+      },
+      createdBy: userId,
+      isDeleted: false,
+    });
+
+    const oldAccountIds = [
+      ...new Set(
+        oldJournals.flatMap((entry) =>
+          entry.lines.map((line) => line.account.toString()),
+        ),
+      ),
+    ];
 
     let currentAttachments = formatAttachments(payment).map((att) => ({
       key: att.key,
@@ -455,11 +515,6 @@ exports.updateReceivePayment = async (req, res) => {
 
     const finalAttachments = [...currentAttachments, ...newAttachments];
 
-    const oldJournals = await JournalEntry.find({
-      referenceId: payment._id,
-      sourceType: "receive_payment",
-    });
-
     let customerData = null;
     let partyData = null;
     let counterPartyAccountId = null;
@@ -478,7 +533,11 @@ exports.updateReceivePayment = async (req, res) => {
 
       counterPartyAccountId = partyData.account._id;
     } else {
-      customerData = await Customer.findById(customer).populate("account");
+      customerData = await Customer.findOne({
+        _id: customer,
+        createdBy: userId,
+        isActive: true,
+      }).populate("account");
 
       if (!customerData || !customerData.account) {
         return res.status(404).json({
@@ -511,17 +570,28 @@ exports.updateReceivePayment = async (req, res) => {
 
     await payment.save();
 
-    await JournalEntry.deleteMany({
-      referenceId: payment._id,
-      sourceType: {
-        $in: ["receive_payment", "refund_payment", "receive_payment_discount"],
+    await JournalEntry.updateMany(
+      {
+        referenceId: payment._id,
+        sourceType: {
+          $in: [
+            "receive_payment",
+            "refund_payment",
+            "receive_payment_discount",
+          ],
+        },
+        createdBy: userId,
+        isDeleted: false,
       },
-    });
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
-    for (const entry of oldJournals) {
-      for (const line of entry.lines) {
-        await safeRecalculate(line.account);
-      }
+    for (const accountId of oldAccountIds) {
+      await safeRecalculate(accountId);
     }
 
     for (const p of payments) {
@@ -558,6 +628,34 @@ exports.updateReceivePayment = async (req, res) => {
 
     await safeRecalculate(counterPartyAccountId);
 
+    await logActivity({
+      req,
+      action: "update",
+      module: "receive_payments",
+      entityType: "ReceivePayment",
+      entityId: payment._id,
+      title: `Receive Payment ${payment.billNo}`,
+      description: `${
+        customerData?.name || partyData?.name || "Party"
+      } کی Receive Payment Update کی گئی`,
+      billNo: payment.billNo,
+      before: beforeUpdate,
+      after: {
+        customer: payment.customer,
+        partyId: payment.partyId,
+        customerName: customerData?.name || partyData?.name || "",
+        date: payment.date,
+        time: payment.time,
+        amount: payment.amount,
+        discountAmount: payment.discountAmount,
+        finalAmount: payment.finalAmount,
+        paymentType: payment.paymentType,
+        billNo: payment.billNo,
+        description: payment.description,
+        paymentEntryCount: payments.length,
+      },
+    });
+
     res.json({
       message: "Payment updated successfully",
       data: payment,
@@ -568,9 +666,7 @@ exports.updateReceivePayment = async (req, res) => {
   }
 };
 
-/* =====================================================
-   DELETE RECEIVE PAYMENT
-===================================================== */
+// DELETE RECEIVE PAYMENT
 
 exports.deleteReceivePayment = async (req, res) => {
   try {
@@ -579,17 +675,33 @@ exports.deleteReceivePayment = async (req, res) => {
     const payment = await ReceivePayment.findOne({
       _id: req.params.id,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!payment) {
       return res.status(404).json({ error: "Not found" });
     }
 
+    const beforeDelete = {
+      customer: payment.customer,
+      partyId: payment.partyId,
+      date: payment.date,
+      time: payment.time,
+      amount: payment.amount,
+      discountAmount: payment.discountAmount,
+      finalAmount: payment.finalAmount,
+      paymentType: payment.paymentType,
+      billNo: payment.billNo,
+      description: payment.description,
+    };
+
     const journals = await JournalEntry.find({
       referenceId: payment._id,
       sourceType: {
         $in: ["receive_payment", "receive_payment_discount"],
       },
+      createdBy: userId,
+      isDeleted: false,
     });
 
     const attachmentsToDelete = formatAttachments(payment);
@@ -598,12 +710,21 @@ exports.deleteReceivePayment = async (req, res) => {
       await deleteAttachmentSafe(att);
     }
 
-    await JournalEntry.deleteMany({
-      referenceId: payment._id,
-      sourceType: {
-        $in: ["receive_payment", "receive_payment_discount"],
+    await JournalEntry.updateMany(
+      {
+        referenceId: payment._id,
+        sourceType: {
+          $in: ["receive_payment", "receive_payment_discount"],
+        },
+        createdBy: userId,
+        isDeleted: false,
       },
-    });
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
     for (const entry of journals) {
       for (const line of entry.lines) {
@@ -611,7 +732,23 @@ exports.deleteReceivePayment = async (req, res) => {
       }
     }
 
-    await payment.deleteOne();
+    payment.isDeleted = true;
+    await payment.save();
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "receive_payments",
+      entityType: "ReceivePayment",
+      entityId: payment._id,
+      title: `Receive Payment ${payment.billNo}`,
+      description: `Receive Payment ${payment.billNo} Delete کی گئی`,
+      billNo: payment.billNo,
+      before: beforeDelete,
+      after: {
+        isDeleted: true,
+      },
+    });
 
     res.json({ message: "Payment deleted successfully" });
   } catch (err) {

@@ -22,6 +22,7 @@ const {
   createInventoryEntry,
   deleteTransactionsByReference,
 } = require("../utils/stockHelper");
+const { logActivity } = require("../utils/activityLogger");
 
 function formatAttachments(invoice) {
   if (invoice.attachments?.length > 0) {
@@ -486,6 +487,27 @@ exports.createInvoice = async (req, res) => {
       await recalculateAccountBalance(finalCogsAccount._id);
     }
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "sales",
+      entityType: "Invoice",
+      entityId: saved._id,
+      title: `Sale Invoice ${saved.billNo}`,
+      description: `${saved.customerName} کی Sale Invoice بنائی گئی`,
+      billNo: saved.billNo,
+      after: {
+        customerName: saved.customerName,
+        customerPhone: saved.customerPhone,
+        invoiceDate: saved.invoiceDate,
+        totalAmount: saved.totalAmount,
+        paidAmount: saved.paidAmount,
+        status: saved.status,
+        itemCount: saved.items?.length || 0,
+        isOpening: saved.isOpening,
+      },
+    });
+
     res.status(201).json({
       invoice: saved,
       creditLimitExceeded,
@@ -594,53 +616,93 @@ exports.getInvoiceById = async (req, res) => {
 
 // ✅ Delete Invoice (Soft delete invoice + journal)
 exports.deleteInvoice = async (req, res) => {
-  const userId = req.user?.id || req.userId;
+  try {
+    const userId = req.user?.id || req.userId;
 
-  const invoice = await Invoice.findOne({
-    _id: req.params.id,
-    createdBy: userId,
-  });
-
-  if (!invoice) {
-    return res.status(404).json({ message: "Invoice not found" });
-  }
-
-  invoice.isDeleted = true;
-  await invoice.save();
-
-  const attachmentsToDelete = formatAttachments(invoice);
-
-  for (const att of attachmentsToDelete) {
-    await deleteFile(att.key);
-  }
-
-  // ❗ Delete related inventory transactions
-  if (!invoice.isOpening) {
-    await deleteTransactionsByReference({
-      referenceId: invoice._id,
-      invoiceModel: "Invoice",
-      userId,
+    const invoice = await Invoice.findOne({
+      _id: req.params.id,
+      createdBy: userId,
+      isDeleted: { $ne: true },
     });
-  }
 
-  // 🟡 Soft Delete Related Journal
-  await JournalEntry.updateMany(
-    {
-      referenceId: invoice._id,
-      isDeleted: false,
-    },
-    {
-      $set: {
+    if (!invoice) {
+      return res.status(404).json({
+        message: "Invoice not found",
+      });
+    }
+
+    const beforeDelete = {
+      customerName: invoice.customerName,
+      customerPhone: invoice.customerPhone,
+      invoiceDate: invoice.invoiceDate,
+      totalAmount: invoice.totalAmount,
+      paidAmount: invoice.paidAmount,
+      status: invoice.status,
+      itemCount: invoice.items?.length || 0,
+      isOpening: invoice.isOpening,
+    };
+
+    invoice.isDeleted = true;
+    await invoice.save();
+
+    const attachmentsToDelete = formatAttachments(invoice);
+
+    for (const att of attachmentsToDelete) {
+      if (att.key) {
+        await deleteFile(att.key);
+      }
+    }
+
+    if (!invoice.isOpening) {
+      await deleteTransactionsByReference({
+        referenceId: invoice._id,
+        invoiceModel: "Invoice",
+        userId,
+      });
+    }
+
+    await JournalEntry.updateMany(
+      {
+        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
+    if (invoice.accountId) {
+      await recalculateAccountBalance(invoice.accountId);
+    }
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "sales",
+      entityType: "Invoice",
+      entityId: invoice._id,
+      title: `Sale Invoice ${invoice.billNo}`,
+      description: `${invoice.customerName} کی Sale Invoice Delete کی گئی`,
+      billNo: invoice.billNo,
+      before: beforeDelete,
+      after: {
         isDeleted: true,
       },
-    },
-  );
+    });
 
-  if (invoice.accountId) {
-    await recalculateAccountBalance(invoice.accountId);
+    return res.json({
+      message: "Invoice and related journal deleted successfully",
+    });
+  } catch (error) {
+    console.error("Invoice Delete Error:", error);
+
+    return res.status(500).json({
+      message: "Invoice deletion failed",
+      error: error.message,
+    });
   }
-
-  res.json({ message: "Invoice and related journal deleted successfully" });
 };
 
 // ✅ Update Invoice - Safe DateTime Version
@@ -652,7 +714,29 @@ exports.updateInvoice = async (req, res) => {
       createdBy: userId,
     });
 
-    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+    if (!invoice) {
+      return res.status(404).json({
+        message: "Invoice not found",
+      });
+    }
+
+    const beforeUpdate = {
+      customerName: invoice.customerName,
+      customerPhone: invoice.customerPhone,
+      invoiceDate: invoice.invoiceDate,
+      invoiceTime: invoice.invoiceTime,
+      dueDate: invoice.dueDate,
+      totalAmount: invoice.totalAmount,
+      subTotal: invoice.subTotal,
+      discountAmount: invoice.discountAmount,
+      paidAmount: invoice.paidAmount,
+      status: invoice.status,
+      paymentType: invoice.paymentType,
+      accountId: invoice.accountId,
+      notes: invoice.notes,
+      itemCount: invoice.items?.length || 0,
+      isOpening: invoice.isOpening,
+    };
 
     const {
       customerName,
@@ -1073,6 +1157,35 @@ exports.updateInvoice = async (req, res) => {
       }
     }
 
+    await logActivity({
+      req,
+      action: "update",
+      module: "sales",
+      entityType: "Invoice",
+      entityId: invoice._id,
+      title: `Sale Invoice ${invoice.billNo}`,
+      description: `${invoice.customerName} کی Sale Invoice Update کی گئی`,
+      billNo: invoice.billNo,
+      before: beforeUpdate,
+      after: {
+        customerName: invoice.customerName,
+        customerPhone: invoice.customerPhone,
+        invoiceDate: invoice.invoiceDate,
+        invoiceTime: invoice.invoiceTime,
+        dueDate: invoice.dueDate,
+        totalAmount: invoice.totalAmount,
+        subTotal: invoice.subTotal,
+        discountAmount: invoice.discountAmount,
+        paidAmount: invoice.paidAmount,
+        status: invoice.status,
+        paymentType: invoice.paymentType,
+        accountId: invoice.accountId,
+        notes: invoice.notes,
+        itemCount: invoice.items?.length || 0,
+        isOpening: invoice.isOpening,
+      },
+    });
+
     res.json(invoice);
   } catch (error) {
     console.error("Invoice update error:", error);
@@ -1164,6 +1277,25 @@ exports.recordPayment = async (req, res) => {
 
     await recalculateAccountBalance(counterPartyAccountId);
     await recalculateAccountBalance(accountId);
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "sales",
+      entityType: "Invoice",
+      entityId: invoice._id,
+      title: `Invoice Payment ${invoice.billNo}`,
+      description: `Sale Invoice ${invoice.billNo} میں مزید Payment شامل کی گئی`,
+      billNo: invoice.billNo,
+      after: {
+        paymentAdded: payAmount,
+        paymentType,
+        accountId,
+        totalPaidAmount: invoice.paidAmount,
+        totalAmount: invoice.totalAmount,
+        status: invoice.status,
+      },
+    });
 
     res.json(invoice);
   } catch (error) {

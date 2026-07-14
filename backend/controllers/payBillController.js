@@ -12,6 +12,7 @@ const {
   deleteFile,
   getFileUrl,
 } = require("../services/r2FileService");
+const { logActivity } = require("../utils/activityLogger");
 const ALLOWED_PAYMENT_TYPES = ["cash", "online", "cheque"];
 
 function formatPayBillAttachments(bill) {
@@ -83,11 +84,6 @@ async function deletePayBillAttachment(att) {
 // ✅ Create Pay Bill
 exports.createPayBill = async (req, res) => {
   try {
-  } catch (e) {
-    console.log("❌ paymentEntries JSON parse error", e);
-  }
-
-  try {
     const {
       supplier,
       partyId,
@@ -100,7 +96,10 @@ exports.createPayBill = async (req, res) => {
     } = req.body;
     const normalizedPaymentType = paymentType?.toLowerCase();
 
-    const payments = JSON.parse(paymentEntries || "[]");
+    const payments =
+      typeof paymentEntries === "string"
+        ? JSON.parse(paymentEntries || "[]")
+        : paymentEntries || [];
     // ✅ Per-payment paymentType validation
     for (const p of payments) {
       if (!ALLOWED_PAYMENT_TYPES.includes(p.paymentType?.toLowerCase())) {
@@ -159,6 +158,7 @@ exports.createPayBill = async (req, res) => {
       supplierData = await Supplier.findOne({
         _id: supplier,
         userId,
+        isDeleted: false,
       }).populate("account");
 
       if (!supplierData || !supplierData.account) {
@@ -251,9 +251,36 @@ exports.createPayBill = async (req, res) => {
       });
     }
 
-    res
-      .status(201)
-      .json({ message: "Bill created successfully", data: newBill });
+    await logActivity({
+      req,
+      action: "create",
+      module: "pay_bills",
+      entityType: "PayBill",
+      entityId: newBill._id,
+      title: `Pay Bill ${newBill.billNo}`,
+      description: `${
+        supplierData?.name || partyData?.name || "Supplier"
+      } کو Payment کی گئی`,
+      billNo: newBill.billNo,
+      after: {
+        supplier: newBill.supplier,
+        partyId: newBill.partyId,
+        supplierName: supplierData?.name || partyData?.name || "",
+        date: newBill.date,
+        time: newBill.time,
+        amount: newBill.amount,
+        discountAmount: newBill.discountAmount,
+        finalAmount: newBill.finalAmount,
+        paymentType: newBill.paymentType,
+        description: newBill.description,
+        paymentEntryCount: payments.length,
+      },
+    });
+
+    res.status(201).json({
+      message: "Bill created successfully",
+      data: newBill,
+    });
   } catch (err) {
     console.error("❌ Pay Bill Save Error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -282,6 +309,7 @@ exports.getAllPayBills = async (req, res) => {
 
     const bills = await PayBill.find({
       userId,
+      isDeleted: { $ne: true },
       $or: [
         { supplier: { $in: activeSupplierIds } },
         { partyId: { $in: activePartyIds } },
@@ -296,6 +324,8 @@ exports.getAllPayBills = async (req, res) => {
       const journal = await JournalEntry.findOne({
         referenceId: bill._id,
         sourceType: "pay_bill",
+        createdBy: userId,
+        isDeleted: false,
       }).populate("lines.account", "name");
 
       let paymentMode = "-";
@@ -329,7 +359,13 @@ exports.getAllPayBills = async (req, res) => {
 // ✅ Get One Pay Bill
 exports.getPayBillById = async (req, res) => {
   try {
-    const bill = await PayBill.findById(req.params.id)
+    const userId = req.user?.id || req.userId;
+
+    const bill = await PayBill.findOne({
+      _id: req.params.id,
+      userId,
+      isDeleted: { $ne: true },
+    })
       .populate("supplier", "name phone email")
       .populate("partyId", "name phone email");
 
@@ -340,6 +376,8 @@ exports.getPayBillById = async (req, res) => {
     const journals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
+      createdBy: userId,
+      isDeleted: false,
     });
 
     let paymentEntries = [];
@@ -386,7 +424,11 @@ exports.updatePayBill = async (req, res) => {
     } = req.body;
 
     const normalizedPaymentType = paymentType?.toLowerCase();
-    const payments = JSON.parse(paymentEntries || "[]");
+
+    const payments =
+      typeof paymentEntries === "string"
+        ? JSON.parse(paymentEntries || "[]")
+        : paymentEntries || [];
 
     // ✅ Per-payment paymentType validation
     for (const p of payments) {
@@ -430,8 +472,30 @@ exports.updatePayBill = async (req, res) => {
 
     const userId = req.user?.id || req.userId;
 
-    const bill = await PayBill.findOne({ _id: req.params.id, userId });
-    if (!bill) return res.status(404).json({ error: "Record not found" });
+    const bill = await PayBill.findOne({
+      _id: req.params.id,
+      userId,
+      isDeleted: { $ne: true },
+    });
+
+    if (!bill) {
+      return res.status(404).json({
+        error: "Record not found",
+      });
+    }
+
+    const beforeUpdate = {
+      supplier: bill.supplier,
+      partyId: bill.partyId,
+      date: bill.date,
+      time: bill.time,
+      amount: bill.amount,
+      discountAmount: bill.discountAmount,
+      finalAmount: bill.finalAmount,
+      paymentType: bill.paymentType,
+      billNo: bill.billNo,
+      description: bill.description,
+    };
 
     // ✅ Safe recalculation helper
     const safeRecalculate = async (id) => {
@@ -478,6 +542,7 @@ exports.updatePayBill = async (req, res) => {
       supplierData = await Supplier.findOne({
         _id: supplier,
         userId,
+        isDeleted: false,
       }).populate("account");
 
       if (!supplierData || !supplierData.account) {
@@ -551,23 +616,37 @@ exports.updatePayBill = async (req, res) => {
 
     await bill.save();
 
-    // 🔍 Fetch old journals before deleting
     const oldJournals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
+      createdBy: userId,
+      isDeleted: false,
     });
 
-    // 🧹 Delete old journal entries
-    await JournalEntry.deleteMany({
-      referenceId: bill._id,
-      sourceType: "pay_bill",
-    });
+    const oldAccountIds = [
+      ...new Set(
+        oldJournals.flatMap((entry) =>
+          entry.lines.map((line) => line.account.toString()),
+        ),
+      ),
+    ];
 
-    // 🔄 Recalculate old accounts (before recreating)
-    for (const entry of oldJournals) {
-      for (const line of entry.lines) {
-        await safeRecalculate(line.account);
-      }
+    await JournalEntry.updateMany(
+      {
+        referenceId: bill._id,
+        sourceType: "pay_bill",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
+    for (const accountId of oldAccountIds) {
+      await safeRecalculate(accountId);
     }
 
     // 🔁 Create new payment entries (MULTIPLE SAFE)
@@ -638,6 +717,34 @@ exports.updatePayBill = async (req, res) => {
 
     await safeRecalculate(counterPartyAccountId);
 
+    await logActivity({
+      req,
+      action: "update",
+      module: "pay_bills",
+      entityType: "PayBill",
+      entityId: bill._id,
+      title: `Pay Bill ${bill.billNo}`,
+      description: `${
+        supplierData?.name || partyData?.name || "Supplier"
+      } کی Pay Bill Update کی گئی`,
+      billNo: bill.billNo,
+      before: beforeUpdate,
+      after: {
+        supplier: bill.supplier,
+        partyId: bill.partyId,
+        supplierName: supplierData?.name || partyData?.name || "",
+        date: bill.date,
+        time: bill.time,
+        amount: bill.amount,
+        discountAmount: bill.discountAmount,
+        finalAmount: bill.finalAmount,
+        paymentType: bill.paymentType,
+        billNo: bill.billNo,
+        description: bill.description,
+        paymentEntryCount: payments.length,
+      },
+    });
+
     res.json({
       message: "Bill updated successfully",
       data: bill,
@@ -653,10 +760,30 @@ exports.deletePayBill = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const bill = await PayBill.findOne({ _id: req.params.id, userId });
+    const bill = await PayBill.findOne({
+      _id: req.params.id,
+      userId,
+      isDeleted: { $ne: true },
+    });
+
     if (!bill) {
-      return res.status(404).json({ error: "Record not found" });
+      return res.status(404).json({
+        error: "Record not found",
+      });
     }
+
+    const beforeDelete = {
+      supplier: bill.supplier,
+      partyId: bill.partyId,
+      date: bill.date,
+      time: bill.time,
+      amount: bill.amount,
+      discountAmount: bill.discountAmount,
+      finalAmount: bill.finalAmount,
+      paymentType: bill.paymentType,
+      billNo: bill.billNo,
+      description: bill.description,
+    };
 
     // 🔍 Supplier account
     let supplierData = null;
@@ -678,6 +805,7 @@ exports.deletePayBill = async (req, res) => {
       supplierData = await Supplier.findOne({
         _id: bill.supplier,
         userId,
+        isDeleted: false,
       }).populate("account");
 
       if (!supplierData || !supplierData.account) {
@@ -691,6 +819,8 @@ exports.deletePayBill = async (req, res) => {
     const journals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
+      createdBy: userId,
+      isDeleted: false,
     });
 
     const attachmentsToDelete = formatPayBillAttachments(bill);
@@ -699,14 +829,22 @@ exports.deletePayBill = async (req, res) => {
       await deletePayBillAttachment(att);
     }
 
-    // 🧹 Delete bill
-    await bill.deleteOne();
+    await JournalEntry.updateMany(
+      {
+        referenceId: bill._id,
+        sourceType: "pay_bill",
+        createdBy: userId,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
 
-    // 🧹 Delete all related journals
-    await JournalEntry.deleteMany({
-      referenceId: bill._id,
-      sourceType: "pay_bill",
-    });
+    bill.isDeleted = true;
+    await bill.save();
 
     // ✅ Safe recalculation helper
     const safeRecalculate = async (id) => {
@@ -728,6 +866,21 @@ exports.deletePayBill = async (req, res) => {
 
     // 🔄 Recalculate supplier account
     await safeRecalculate(counterPartyAccountId);
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "pay_bills",
+      entityType: "PayBill",
+      entityId: bill._id,
+      title: `Pay Bill ${bill.billNo}`,
+      description: `Pay Bill ${bill.billNo} Delete کی گئی`,
+      billNo: bill.billNo,
+      before: beforeDelete,
+      after: {
+        isDeleted: true,
+      },
+    });
 
     res.json({
       message: "Bill deleted successfully",

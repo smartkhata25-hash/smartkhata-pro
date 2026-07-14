@@ -13,23 +13,38 @@ const {
 
 const { protect } = require("../middleware/authMiddleware");
 
-// ✅ Create Refund (with optional file)
-router.post("/", protect, upload.array("attachments", 3), createRefundInvoice);
+const { requirePermission } = require("../middleware/permissionMiddleware");
+
+// ✅ Create Refund
+router.post(
+  "/",
+  protect,
+  requirePermission("refunds.create"),
+  upload.array("attachments", 3),
+  createRefundInvoice,
+);
 
 // ✅ Get All Refunds
-router.get("/", protect, getAllRefunds);
+router.get("/", protect, requirePermission("refunds.view"), getAllRefunds);
 
 // ✅ Get Refund by ID
-router.get("/:id", protect, getRefundById);
+router.get("/:id", protect, requirePermission("refunds.view"), getRefundById);
 
+// ✅ Update Refund
 router.put(
   "/:id",
   protect,
+  requirePermission("refunds.edit"),
   upload.array("attachments", 3),
   updateRefundInvoice,
 );
 
-// ✅ DELETE route add کریں
-router.delete("/:id", protect, deleteRefundInvoice);
+// ✅ Delete Refund
+router.delete(
+  "/:id",
+  protect,
+  requirePermission("refunds.delete"),
+  deleteRefundInvoice,
+);
 
 module.exports = router;

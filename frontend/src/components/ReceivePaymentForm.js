@@ -15,6 +15,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import { hasPermission } from '../utils/permissionHelper';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import './ReceivePaymentForm.css';
 
@@ -50,6 +51,10 @@ const ReceivePaymentForm = () => {
 
   const navigate = useNavigate();
   const { id } = useParams();
+  const canViewReceivePayments = hasPermission('receive_payments.view');
+  const canCreateReceivePayments = hasPermission('receive_payments.create');
+  const canEditReceivePayments = hasPermission('receive_payments.edit');
+
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   useEffect(() => {
@@ -87,6 +92,12 @@ const ReceivePaymentForm = () => {
               paymentType: 'Cash',
             },
           ]);
+        }
+
+        if (id && (!canViewReceivePayments || !canEditReceivePayments)) {
+          alert('You do not have permission to edit receive payments');
+          navigate('/receive-payments');
+          return;
         }
 
         if (id) {
@@ -383,6 +394,16 @@ const ReceivePaymentForm = () => {
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
+
+    if (id && !canEditReceivePayments) {
+      alert('You do not have permission to edit receive payments');
+      return;
+    }
+
+    if (!id && !canCreateReceivePayments) {
+      alert('You do not have permission to create receive payments');
+      return;
+    }
 
     if ((!formData.customer && !formData.partyId) || paymentEntries.length === 0) {
       alert(t('alerts.addAtLeastOnePayment'));
@@ -780,27 +801,30 @@ const ReceivePaymentForm = () => {
 
           {/* ACTION BUTTONS */}
           <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
-            <button
-              type="submit"
-              disabled={loading}
-              className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
-                loading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {id ? t('updateClose') : t('saveClose')}
-            </button>
+            {((id && canEditReceivePayments) || (!id && canCreateReceivePayments)) && (
+              <>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                    loading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {id ? t('updateClose') : t('saveClose')}
+                </button>
 
-            <button
-              type="button"
-              onClick={(e) => handleSubmit(e, 'new')}
-              disabled={loading}
-              className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
-                loading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {loading ? t('saving') : t('saveNew')}
-            </button>
-
+                <button
+                  type="button"
+                  onClick={(e) => handleSubmit(e, 'new')}
+                  disabled={loading}
+                  className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                    loading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {loading ? t('saving') : t('saveNew')}
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={handleRevert}
@@ -821,36 +845,40 @@ const ReceivePaymentForm = () => {
               <option value="narrow">A5</option>
               <option value="thermal">Thermal</option>
             </select>
+            {canViewReceivePayments && (
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
+              >
+                🖨
+              </button>
+            )}
+            {canViewReceivePayments && (
+              <button
+                type="button"
+                disabled={pdfLoading}
+                onClick={async () => {
+                  try {
+                    setPdfLoading(true);
 
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
-            >
-              🖨
-            </button>
-
-            <button
-              type="button"
-              disabled={pdfLoading}
-              onClick={async () => {
-                try {
-                  setPdfLoading(true);
-
-                  await handleExportPDF();
-                } finally {
-                  setPdfLoading(false);
-                }
-              }}
-              className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
-              style={{
-                cursor: pdfLoading ? 'not-allowed' : 'pointer',
-                opacity: pdfLoading ? 0.7 : 1,
-                background: pdfLoading ? '#9ca3af' : 'linear-gradient(to right, #ef4444, #b91c1c)',
-              }}
-            >
-              {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
-            </button>
+                    await handleExportPDF();
+                  } finally {
+                    setPdfLoading(false);
+                  }
+                }}
+                className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
+                style={{
+                  cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                  opacity: pdfLoading ? 0.7 : 1,
+                  background: pdfLoading
+                    ? '#9ca3af'
+                    : 'linear-gradient(to right, #ef4444, #b91c1c)',
+                }}
+              >
+                {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
+              </button>
+            )}
           </div>
         </form>
 

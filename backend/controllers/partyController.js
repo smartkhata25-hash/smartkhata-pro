@@ -10,6 +10,7 @@ const PurchaseInvoice = require("../models/purchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 const Counter = require("../models/Counter");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { logActivity } = require("../utils/activityLogger");
 
 /* =========================================================
    HELPERS
@@ -570,6 +571,27 @@ exports.createParty = async (req, res) => {
 
     const balance = await getPartyBalance(account._id, userId);
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party بنائی گئی`,
+      after: {
+        name: party.name,
+        phone: party.phone,
+        email: party.email,
+        address: party.address,
+        notes: party.notes,
+        role: party.role,
+        openingBalance: party.openingBalance,
+        account: party.account,
+        balance,
+      },
+    });
+
     return res.status(201).json({
       ...party.toObject(),
       balance,
@@ -752,6 +774,19 @@ exports.updateParty = async (req, res) => {
       return res.status(404).json({ message: "Party not found" });
     }
 
+    const beforeUpdate = {
+      name: party.name,
+      phone: party.phone,
+      email: party.email,
+      address: party.address,
+      notes: party.notes,
+      role: party.role,
+      openingBalance: party.openingBalance,
+      isActive: party.isActive,
+      hiddenReason: party.hiddenReason,
+      account: party.account,
+    };
+
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Party name is required" });
     }
@@ -876,8 +911,37 @@ exports.updateParty = async (req, res) => {
     }
     await recalculateAccountBalance(party.account);
 
-    const updatedParty = await Party.findById(party._id).populate("account");
+    const updatedParty = await Party.findOne({
+      _id: party._id,
+      userId,
+      isDeleted: false,
+    }).populate("account");
+
     const balance = await getPartyBalance(party.account, userId);
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party Update کی گئی`,
+      before: beforeUpdate,
+      after: {
+        name: party.name,
+        phone: party.phone,
+        email: party.email,
+        address: party.address,
+        notes: party.notes,
+        role: party.role,
+        openingBalance: party.openingBalance,
+        isActive: party.isActive,
+        hiddenReason: party.hiddenReason,
+        account: party.account,
+        balance,
+      },
+    });
 
     return res.json({
       ...updatedParty.toObject(),
@@ -911,6 +975,19 @@ exports.deleteParty = async (req, res) => {
       return res.status(404).json({ message: "Party not found" });
     }
 
+    const beforeDelete = {
+      name: party.name,
+      phone: party.phone,
+      email: party.email,
+      address: party.address,
+      notes: party.notes,
+      role: party.role,
+      openingBalance: party.openingBalance,
+      isActive: party.isActive,
+      hiddenReason: party.hiddenReason,
+      account: party.account,
+    };
+
     const hasLedger = await JournalEntry.exists({
       partyId: party._id,
       createdBy: userId,
@@ -928,6 +1005,22 @@ exports.deleteParty = async (req, res) => {
         { $set: { isActive: false } },
       );
 
+      await logActivity({
+        req,
+        action: "delete",
+        module: "parties",
+        entityType: "Party",
+        entityId: party._id,
+        title: `Party ${party.name}`,
+        description: `${party.name} Party Hidden کی گئی`,
+        before: beforeDelete,
+        after: {
+          isActive: false,
+          hiddenReason: "deleted",
+          status: "hidden",
+        },
+      });
+
       return res.json({
         message: "Party has transactions, moved to hidden",
         status: "inactive",
@@ -937,6 +1030,21 @@ exports.deleteParty = async (req, res) => {
 
     await Party.deleteOne({ _id: party._id, userId });
     await Account.deleteOne({ _id: party.account, userId });
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party Permanently Delete کی گئی`,
+      before: beforeDelete,
+      after: {
+        status: "deleted",
+        isDeleted: true,
+      },
+    });
 
     return res.json({
       message: "Party deleted permanently",
@@ -1035,6 +1143,24 @@ exports.restoreParty = async (req, res) => {
       },
     );
 
+    await logActivity({
+      req,
+      action: "restore",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party Restore کی گئی`,
+      before: {
+        isActive: false,
+        hiddenReason: "deleted",
+      },
+      after: {
+        isActive: true,
+        hiddenReason: null,
+      },
+    });
+
     return res.json({
       message: "Party restored successfully",
       party,
@@ -1120,6 +1246,30 @@ exports.convertPartyToCustomer = async (req, res) => {
     );
 
     await recalculateAccountBalance(account._id);
+
+    await logActivity({
+      req,
+      action: "convert",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party کو Customer میں Convert کیا گیا`,
+      before: {
+        partyId: party._id,
+        name: party.name,
+        role: party.role,
+        account: party.account,
+        closingBalance,
+        isActive: true,
+      },
+      after: {
+        customerId: customer._id,
+        customerAccount: account._id,
+        openingBalance: closingBalance,
+        partyStatus: "converted",
+      },
+    });
 
     return res.status(201).json({
       message: "Party converted to customer successfully",
@@ -1212,6 +1362,30 @@ exports.convertPartyToSupplier = async (req, res) => {
     );
 
     await recalculateAccountBalance(account._id);
+
+    await logActivity({
+      req,
+      action: "convert",
+      module: "parties",
+      entityType: "Party",
+      entityId: party._id,
+      title: `Party ${party.name}`,
+      description: `${party.name} Party کو Supplier میں Convert کیا گیا`,
+      before: {
+        partyId: party._id,
+        name: party.name,
+        role: party.role,
+        account: party.account,
+        closingBalance: partyClosingBalance,
+        isActive: true,
+      },
+      after: {
+        supplierId: supplier._id,
+        supplierAccount: account._id,
+        openingBalance: supplierOpeningBalance,
+        partyStatus: "converted",
+      },
+    });
 
     return res.status(201).json({
       message: "Party converted to supplier successfully",

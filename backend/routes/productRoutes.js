@@ -1,27 +1,62 @@
 const express = require("express");
 const router = express.Router();
+
 const productController = require("../controllers/productController");
+
 const authMiddleware = require("../middleware/authMiddleware");
 const upload = require("../middleware/upload");
 
-router.put(
-  "/:id",
+const { requirePermission } = require("../middleware/permissionMiddleware");
+
+// Get All Products
+router.get(
+  "/",
   authMiddleware,
-  upload.single("image"),
-  productController.updateProduct,
+  requirePermission("products.view"),
+  productController.getProducts,
 );
 
-router.delete("/:id", authMiddleware, productController.deleteProduct);
+// Create Multiple Products
+router.post(
+  "/bulk",
+  authMiddleware,
+  requirePermission("products.create"),
+  productController.bulkCreateProducts,
+);
 
+// Create Single Product
 router.post(
   "/",
   authMiddleware,
+  requirePermission("products.create"),
   upload.single("image"),
   productController.createProduct,
 );
 
-router.post("/bulk", authMiddleware, productController.bulkCreateProducts);
-router.get("/", authMiddleware, productController.getProducts);
-router.put("/stock", authMiddleware, productController.updateStock);
+// Update Stock
+// یہ /:id سے پہلے رہنا ضروری ہے
+router.put(
+  "/stock",
+  authMiddleware,
+  requirePermission("products.edit"),
+  productController.updateStock,
+);
+
+// Update Product
+router.put(
+  "/:id",
+  authMiddleware,
+  requirePermission("products.edit"),
+  upload.single("image"),
+  productController.updateProduct,
+);
+
+// Delete Product
+router.delete(
+  "/:id",
+  authMiddleware,
+  requirePermission("products.delete"),
+  productController.deleteProduct,
+);
 
 module.exports = router;

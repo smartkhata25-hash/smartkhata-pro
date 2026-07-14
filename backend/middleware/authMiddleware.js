@@ -1,25 +1,81 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
-const protect = (req, res, next) => {
+const protect = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "No token provided" });
+      return res.status(401).json({
+        message: "No token provided",
+      });
     }
 
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    const user = await User.findById(decoded.id).select(
+      "_id role accountRole businessOwnerId staffStatus permissions isDeleted",
+    );
+
+    // Deleted یا موجود نہ ہونے والا User
+    if (!user || user.isDeleted === true) {
+      return res.status(401).json({
+        message: "User not found",
+      });
+    }
+
+    // پرانے Users جن میں accountRole موجود نہیں، Owner سمجھے جائیں گے
+    const accountRole = user.accountRole || "owner";
+
+    // Blocked Staff Access
+    if (accountRole === "staff" && user.staffStatus === "blocked") {
+      return res.status(403).json({
+        message: "Your account has been blocked",
+      });
+    }
+
+    // Business Owner ID
+    const businessOwnerId =
+      accountRole === "owner" ? user._id : user.businessOwnerId;
+
+    if (!businessOwnerId) {
+      return res.status(403).json({
+        message: "Business owner not found",
+      });
+    }
+
+    // Staff کے Business Owner کو بھی Verify کریں
+    if (accountRole === "staff") {
+      const businessOwner = await User.findOne({
+        _id: businessOwnerId,
+        isDeleted: { $ne: true },
+      }).select("_id accountRole");
+
+      if (!businessOwner) {
+        return res.status(403).json({
+          message: "Business owner account is unavailable",
+        });
+      }
+    }
+
+    // اصل Logged-in User
+    req.actorId = user._id;
+
     req.user = {
-      id: decoded.id,
-      role: decoded.role,
+      id: businessOwnerId,
+      role: user.role,
+      accountRole,
+      permissions: user.permissions || [],
+      businessOwnerId,
+      actorId: user._id,
     };
 
-    req.userId = decoded.id;
+    // پرانے Controllers کے لیے Business Owner ID
+    req.userId = businessOwnerId;
 
-    next();
+    return next();
   } catch (error) {
     console.error("Auth error:", error.message);
 

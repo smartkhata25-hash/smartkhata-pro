@@ -28,6 +28,9 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const [notificationMsg, setNotificationMsg] = useState('');
   const [showMessagePopup, setShowMessagePopup] = useState(false);
   const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  const isOwner = (user.accountRole || 'owner') === 'owner';
   const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
   useEffect(() => {
@@ -351,6 +354,32 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
                 🔑 Change PIN
               </div>
 
+              {isOwner && (
+                <>
+                  <div className="border-t my-1"></div>
+
+                  <div
+                    onClick={() => {
+                      navigate('/staff');
+                      setShowUserMenu(false);
+                    }}
+                    className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                  >
+                    👥 Staff Management
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      navigate('/activity-log');
+                      setShowUserMenu(false);
+                    }}
+                    className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                  >
+                    📋 Activity Log
+                  </div>
+                </>
+              )}
+
               <div
                 onClick={() => {
                   const userId = localStorage.getItem('userId');
@@ -416,6 +445,8 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
                   localStorage.removeItem('token');
                   localStorage.removeItem('userId');
+                  localStorage.removeItem('user');
+
                   navigate('/');
                 }}
                 className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 cursor-pointer"

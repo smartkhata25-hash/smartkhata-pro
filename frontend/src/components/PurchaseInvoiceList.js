@@ -2,17 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const PurchaseInvoiceList = () => {
   const [invoices, setInvoices] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const navigate = useNavigate();
+  const canViewPurchases = hasPermission('purchases.view');
+  const canCreatePurchases = hasPermission('purchases.create');
+  const canEditPurchases = hasPermission('purchases.edit');
+  const canDeletePurchases = hasPermission('purchases.delete');
 
   useEffect(() => {
-    fetchInvoices();
-  }, []);
+    if (!canViewPurchases) {
+      navigate('/dashboard');
+      return;
+    }
 
+    fetchInvoices();
+  }, [canViewPurchases, navigate]);
   const fetchInvoices = async () => {
     try {
       const data = await purchaseInvoiceService.getPurchaseInvoices();
@@ -35,6 +44,11 @@ const PurchaseInvoiceList = () => {
   };
 
   const handleDelete = async (id) => {
+    if (!canDeletePurchases) {
+      alert('You do not have permission to delete purchase invoices');
+      return;
+    }
+
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
     try {
@@ -65,12 +79,14 @@ const PurchaseInvoiceList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">📦 {t('purchase.invoiceList')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/purchase-invoice')}
-        >
-          {t('add')}
-        </button>
+        {canCreatePurchases && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/purchase-invoice')}
+          >
+            {t('add')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
@@ -139,19 +155,27 @@ const PurchaseInvoiceList = () => {
 
                   <td className="border p-2">
                     <div className="flex gap-1 md:gap-2 justify-center">
-                      <button
-                        className="bg-yellow-400 px-2 py-1 rounded"
-                        onClick={() => navigate(`/purchase-invoice/${inv._id}`)}
-                      >
-                        {t('edit')}
-                      </button>
+                      {canEditPurchases && (
+                        <button
+                          className="bg-yellow-400 px-2 py-1 rounded"
+                          onClick={() => navigate(`/purchase-invoice/${inv._id}`)}
+                        >
+                          {t('edit')}
+                        </button>
+                      )}
 
-                      <button
-                        className="bg-red-600 text-white px-2 py-1 rounded"
-                        onClick={() => handleDelete(inv._id)}
-                      >
-                        {t('delete')}
-                      </button>
+                      {canDeletePurchases && (
+                        <button
+                          className="bg-red-600 text-white px-2 py-1 rounded"
+                          onClick={() => handleDelete(inv._id)}
+                        >
+                          {t('delete')}
+                        </button>
+                      )}
+
+                      {!canEditPurchases && !canDeletePurchases && (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </div>
                   </td>
                 </tr>

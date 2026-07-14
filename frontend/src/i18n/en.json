@@ -36,6 +36,7 @@
   "purchaseInvoice": "Purchase Invoice",
   "saleRefund": "Sale Refund",
   "purchaseReturn": "Purchase Return",
+  "refund.sale": "Sale Refund",
 
   "performance": "Business Status",
   "financialPosition": "Income Status",

@@ -1,36 +1,58 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { hasPermission } from '../utils/permissionHelper';
 
-export default function ProtectedRoute({ children }) {
+export default function ProtectedRoute({ children, permission = null }) {
   const location = useLocation();
 
   const token = localStorage.getItem('token');
   const userId = localStorage.getItem('userId');
 
-  const lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
-  const isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
-
-  console.log('--- ProtectedRoute CHECK ---');
-  console.log('token:', token);
-  console.log('userId:', userId);
-  console.log('lockEnabled:', lockEnabled);
-  console.log('isUnlocked:', isUnlocked);
-
-  // 🔐 default values fix (important for new tabs)
-  if (!localStorage.getItem(`isUnlocked_${userId}`)) {
-    localStorage.setItem(`isUnlocked_${userId}`, 'false');
-  }
-
-  if (!localStorage.getItem(`lockEnabled_${userId}`)) {
-    localStorage.setItem(`lockEnabled_${userId}`, 'false');
-  }
-  // ❌ No token → login
-  if (!token) {
+  if (!token || !userId) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // 🔒 Lock enabled but not unlocked → lock screen
+  // Lock Settings
+  let lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
+  let isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
+
+  if (lockEnabled === null) {
+    localStorage.setItem(`lockEnabled_${userId}`, 'false');
+    lockEnabled = 'false';
+  }
+
+  if (isUnlocked === null) {
+    localStorage.setItem(`isUnlocked_${userId}`, 'false');
+    isUnlocked = 'false';
+  }
+
   if (lockEnabled === 'true' && isUnlocked !== 'true') {
     return <Navigate to="/lock" state={{ from: location }} replace />;
+  }
+
+  // Current User
+  let user = null;
+
+  try {
+    user = JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    user = {};
+  }
+
+  // Deleted / Inactive Staff
+  if (user?.isActive === false) {
+    localStorage.clear();
+    return <Navigate to="/login" replace />;
+  }
+
+  // Blocked Staff
+  if (user?.status === 'blocked') {
+    localStorage.clear();
+    return <Navigate to="/login" replace />;
+  }
+
+  // Permission Check
+  if (permission && !hasPermission(permission)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;

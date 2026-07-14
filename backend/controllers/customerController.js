@@ -8,6 +8,7 @@ const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const Counter = require("../models/Counter");
 const mongoose = require("mongoose");
+const { logActivity } = require("../utils/activityLogger");
 
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -348,6 +349,24 @@ const addCustomer = async (req, res) => {
       });
     }
 
+    await logActivity({
+      req,
+      action: "create",
+      module: "customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Customer ${customer.name}`,
+      description: `${customer.name} Customer بنایا گیا`,
+      after: {
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        type: customer.type,
+        openingBalance: customer.openingBalance,
+      },
+    });
+
     res.status(201).json(customer);
   } catch (error) {
     res.status(500).json({ message: "Server Error" });
@@ -419,7 +438,35 @@ const updateCustomer = async (req, res) => {
     currentCustomer.type = type || currentCustomer.type;
     currentCustomer.openingBalance = Number(openingBalance) || 0;
 
+    const beforeUpdate = {
+      name: currentCustomer.name,
+      phone: currentCustomer.phone,
+      email: currentCustomer.email,
+      address: currentCustomer.address,
+      type: currentCustomer.type,
+      openingBalance: currentCustomer.openingBalance,
+    };
+
     await currentCustomer.save();
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "customers",
+      entityType: "Customer",
+      entityId: currentCustomer._id,
+      title: `Customer ${currentCustomer.name}`,
+      description: `${currentCustomer.name} Customer Update کیا گیا`,
+      before: beforeUpdate,
+      after: {
+        name: currentCustomer.name,
+        phone: currentCustomer.phone,
+        email: currentCustomer.email,
+        address: currentCustomer.address,
+        type: currentCustomer.type,
+        openingBalance: currentCustomer.openingBalance,
+      },
+    });
 
     res.json(currentCustomer);
   } catch (error) {
@@ -455,6 +502,23 @@ const deleteCustomer = async (req, res) => {
       customer.hiddenReason = "deleted";
 
       await customer.save();
+
+      await logActivity({
+        req,
+        action: "delete",
+        module: "customers",
+        entityType: "Customer",
+        entityId: customer._id,
+        title: `Customer ${customer.name}`,
+        description: `${customer.name} Hidden کیا گیا`,
+        before: {
+          name: customer.name,
+          phone: customer.phone,
+        },
+        after: {
+          status: "hidden",
+        },
+      });
 
       // ✅ Deactivate linked account also
       await Account.updateOne(
@@ -495,6 +559,23 @@ const deleteCustomer = async (req, res) => {
     // ✅ delete customer
     await Customer.deleteOne({
       _id: customer._id,
+    });
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Customer ${customer.name}`,
+      description: `${customer.name} Permanently Delete کیا گیا`,
+      before: {
+        name: customer.name,
+        phone: customer.phone,
+      },
+      after: {
+        status: "deleted",
+      },
     });
 
     // ✅ delete linked account
@@ -569,6 +650,16 @@ const restoreCustomer = async (req, res) => {
     customer.hiddenReason = null;
 
     await customer.save();
+
+    await logActivity({
+      req,
+      action: "restore",
+      module: "customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Customer ${customer.name}`,
+      description: `${customer.name} Restore کیا گیا`,
+    });
 
     await Account.updateOne(
       {
@@ -831,6 +922,16 @@ const convertCustomerToParty = async (req, res) => {
 
     await recalculateAccountBalance(partyAccount._id);
 
+    await logActivity({
+      req,
+      action: "convert",
+      module: "customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Customer ${customer.name}`,
+      description: `${customer.name} کو Party میں Convert کیا گیا`,
+    });
+
     return res.status(201).json({
       message: "Customer converted to party successfully",
       party,
@@ -913,6 +1014,16 @@ const confirmMergeCustomers = async (req, res) => {
       { $set: { isActive: false } },
     );
     await recalculateAccountBalance(targetAccountId);
+
+    await logActivity({
+      req,
+      action: "merge",
+      module: "customers",
+      entityType: "Customer",
+      entityId: targetCustomer._id,
+      title: `Customer Merge`,
+      description: `${sourceCustomer.name} کو ${targetCustomer.name} میں Merge کیا گیا`,
+    });
     res.json({
       message: "Customers merged successfully",
       mergedInto: targetCustomer._id,

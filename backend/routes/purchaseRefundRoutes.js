@@ -13,24 +13,48 @@ const {
 
 const { protect } = require("../middleware/authMiddleware");
 
-// ✅ Create
-router.post("/", protect, upload.array("attachments", 3), createPurchaseReturn);
+const { requirePermission } = require("../middleware/permissionMiddleware");
 
-// ✅ Get All
-router.get("/", protect, getAllPurchaseReturns);
+// Create Purchase Return
+router.post(
+  "/",
+  protect,
+  requirePermission("purchase_returns.create"),
+  upload.array("attachments", 3),
+  createPurchaseReturn,
+);
 
-// ✅ Get By ID
-router.get("/:id", protect, getPurchaseReturnById);
+// Get All Purchase Returns
+router.get(
+  "/",
+  protect,
+  requirePermission("purchase_returns.view"),
+  getAllPurchaseReturns,
+);
 
-// ✅ Update
+// Get Purchase Return By ID
+router.get(
+  "/:id",
+  protect,
+  requirePermission("purchase_returns.view"),
+  getPurchaseReturnById,
+);
+
+// Update Purchase Return
 router.put(
   "/:id",
   protect,
+  requirePermission("purchase_returns.edit"),
   upload.array("attachments", 3),
   updatePurchaseReturn,
 );
 
-// ✅ Delete
-router.delete("/:id", protect, deletePurchaseReturn);
+// Delete Purchase Return
+router.delete(
+  "/:id",
+  protect,
+  requirePermission("purchase_returns.delete"),
+  deletePurchaseReturn,
+);
 
 module.exports = router;

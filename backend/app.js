@@ -54,6 +54,8 @@ app.use("/api/expense", require("./routes/expenseRoutes"));
 app.use("/api/backup", require("./routes/backupRoutes"));
 app.use("/api/import", require("./routes/importRoutes"));
 app.use("/api/notifications", require("./routes/notificationRoutes"));
+app.use("/api/staff", require("./routes/staffRoutes"));
+app.use("/api/activities", require("./routes/activityRoutes"));
 
 app.use("/api", require("./routes/salesHistoryRoutes"));
 app.use("/api/print-settings", require("./routes/printSettingRoutes"));

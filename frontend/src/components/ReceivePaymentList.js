@@ -6,6 +6,7 @@ import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const ReceivePaymentList = () => {
   const [payments, setPayments] = useState([]);
@@ -22,6 +23,10 @@ const ReceivePaymentList = () => {
   });
 
   const navigate = useNavigate();
+  const canViewReceivePayments = hasPermission('receive_payments.view');
+  const canCreateReceivePayments = hasPermission('receive_payments.create');
+  const canEditReceivePayments = hasPermission('receive_payments.edit');
+  const canDeleteReceivePayments = hasPermission('receive_payments.delete');
 
   const getPaymentTotal = useCallback((p) => {
     if (Array.isArray(p.paymentEntries) && p.paymentEntries.length > 0) {
@@ -85,8 +90,13 @@ const ReceivePaymentList = () => {
   }, []);
 
   useEffect(() => {
+    if (!canViewReceivePayments) {
+      navigate('/dashboard');
+      return;
+    }
+
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, canViewReceivePayments, navigate]);
 
   useEffect(() => {
     let result = [...payments];
@@ -140,6 +150,11 @@ const ReceivePaymentList = () => {
   ]);
 
   const handleDelete = async (id) => {
+    if (!canDeleteReceivePayments) {
+      alert('You do not have permission to delete receive payments');
+      return;
+    }
+
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
     try {
@@ -155,12 +170,14 @@ const ReceivePaymentList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('payment.payments')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/receive-payments/new')}
-        >
-          {t('payment.new')}
-        </button>
+        {canCreateReceivePayments && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/receive-payments/new')}
+          >
+            {t('payment.new')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
@@ -251,19 +268,27 @@ const ReceivePaymentList = () => {
 
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
-                    <button
-                      className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/receive-payments/edit/${p._id}`)}
-                    >
-                      {t('edit')}
-                    </button>
+                    {canEditReceivePayments && (
+                      <button
+                        className="bg-yellow-400 px-2 py-1 rounded"
+                        onClick={() => navigate(`/receive-payments/edit/${p._id}`)}
+                      >
+                        {t('edit')}
+                      </button>
+                    )}
 
-                    <button
-                      className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(p._id)}
-                    >
-                      {t('delete')}
-                    </button>
+                    {canDeleteReceivePayments && (
+                      <button
+                        className="bg-red-600 text-white px-2 py-1 rounded"
+                        onClick={() => handleDelete(p._id)}
+                      >
+                        {t('delete')}
+                      </button>
+                    )}
+
+                    {!canEditReceivePayments && !canDeleteReceivePayments && (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </div>
                 </td>
               </tr>

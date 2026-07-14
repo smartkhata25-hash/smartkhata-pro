@@ -4,6 +4,7 @@ import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
 import { getAllRefunds, deleteRefund } from '../services/refundService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const RefundInvoiceList = () => {
   const [refunds, setRefunds] = useState([]);
@@ -24,6 +25,10 @@ const RefundInvoiceList = () => {
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const canViewRefunds = hasPermission('refunds.view');
+  const canCreateRefunds = hasPermission('refunds.create');
+  const canEditRefunds = hasPermission('refunds.edit');
+  const canDeleteRefunds = hasPermission('refunds.delete');
 
   const getCustomerOrPartyName = useCallback(
     (refund) => {
@@ -69,12 +74,17 @@ const RefundInvoiceList = () => {
   }, [token]);
 
   useEffect(() => {
+    if (!canViewRefunds) {
+      navigate('/dashboard');
+      return;
+    }
+
     fetchData();
 
     const interval = setInterval(fetchData, 30000);
 
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, canViewRefunds, navigate]);
 
   useEffect(() => {
     let result = [...refunds];
@@ -129,6 +139,10 @@ const RefundInvoiceList = () => {
   }, [filters, refunds, getCustomerOrPartyName]);
 
   const handleDelete = async (id) => {
+    if (!canDeleteRefunds) {
+      alert('You do not have permission to delete sale refunds');
+      return;
+    }
     if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
 
     try {
@@ -149,12 +163,14 @@ const RefundInvoiceList = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('purchase.refundList')}</h2>
 
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => navigate('/refunds/new')}
-        >
-          {t('add')}
-        </button>
+        {canCreateRefunds && (
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+            onClick={() => navigate('/refunds/new')}
+          >
+            {t('add')}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
@@ -265,19 +281,23 @@ const RefundInvoiceList = () => {
 
                 <td className="border p-2">
                   <div className="flex gap-2 justify-center">
-                    <button
-                      className="bg-yellow-400 px-2 py-1 rounded"
-                      onClick={() => navigate(`/refunds/edit/${refund._id}`)}
-                    >
-                      {t('edit')}
-                    </button>
+                    {canEditRefunds && (
+                      <button
+                        className="bg-yellow-400 px-2 py-1 rounded"
+                        onClick={() => navigate(`/refunds/edit/${refund._id}`)}
+                      >
+                        {t('edit')}
+                      </button>
+                    )}
 
-                    <button
-                      className="bg-red-600 text-white px-2 py-1 rounded"
-                      onClick={() => handleDelete(refund._id)}
-                    >
-                      {t('delete')}
-                    </button>
+                    {canDeleteRefunds && (
+                      <button
+                        className="bg-red-600 text-white px-2 py-1 rounded"
+                        onClick={() => handleDelete(refund._id)}
+                      >
+                        {t('delete')}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

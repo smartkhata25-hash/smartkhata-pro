@@ -11,6 +11,7 @@ const {
 const Product = require("../models/Product");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
+const { logActivity } = require("../utils/activityLogger");
 
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
@@ -23,6 +24,15 @@ const {
   createPaymentEntry,
   createDiscountEntry,
 } = require("../utils/paymentService");
+const canPayPurchaseBill = (req) => {
+  if (req.user?.accountRole === "owner") {
+    return true;
+  }
+
+  return Array.isArray(req.user?.permissions)
+    ? req.user.permissions.includes("purchases.pay_bill")
+    : false;
+};
 
 function formatPurchaseAttachments(invoice) {
   if (invoice.attachments?.length > 0) {
@@ -133,6 +143,12 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       : parsedItems.filter((i) => i.productId && i.quantity > 0 && i.price > 0);
 
   const userId = req.user?.id || req.userId;
+
+  if (Number(paidAmount || 0) > 0 && !canPayPurchaseBill(req)) {
+    return res.status(403).json({
+      message: "You do not have permission to pay purchase bills",
+    });
+  }
 
   const attachments = await uploadPurchaseFiles(req.files, userId);
 
@@ -359,7 +375,37 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   await recalculateAccountBalance(counterPartyAccountId);
-  if (accountId) await recalculateAccountBalance(accountId);
+
+  if (accountId) {
+    await recalculateAccountBalance(accountId);
+  }
+
+  await logActivity({
+    req,
+    action: "create",
+    module: "purchases",
+    entityType: "PurchaseInvoice",
+    entityId: invoice._id,
+    title: `Purchase Invoice ${invoice.billNo}`,
+    description: `${invoice.supplierName} کی Purchase Invoice بنائی گئی`,
+    billNo: invoice.billNo,
+    after: {
+      supplierName: invoice.supplierName,
+      supplierPhone: invoice.supplierPhone,
+      invoiceDate: invoice.invoiceDate,
+      invoiceTime: invoice.invoiceTime,
+      totalAmount: invoice.totalAmount,
+      discountPercent: invoice.discountPercent,
+      discountAmount: invoice.discountAmount,
+      grandTotal: invoice.grandTotal,
+      paidAmount: invoice.paidAmount,
+      paymentType: invoice.paymentType,
+      status: invoice.status,
+      accountId: invoice.accountId,
+      itemCount: invoice.items?.length || 0,
+      isOpening: invoice.isOpening,
+    },
+  });
 
   res.status(201).json({
     success: true,
@@ -370,8 +416,11 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
 
 // ✅ Get invoice
 const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+
   const invoice = await PurchaseInvoice.findOne({
     _id: req.params.id,
+    userId,
     isDeleted: false,
   }).populate("items.productId");
 
@@ -391,8 +440,11 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
 
 // ✅ UPDATE PURCHASE INVOICE (SAFE PRO VERSION)
 const updatePurchaseInvoice = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+
   const invoice = await PurchaseInvoice.findOne({
     _id: req.params.id,
+    userId,
     isDeleted: false,
   });
 
@@ -400,6 +452,28 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Invoice not found");
   }
+
+  const beforeUpdate = {
+    billNo: invoice.billNo,
+    invoiceDate: invoice.invoiceDate,
+    invoiceTime: invoice.invoiceTime,
+    supplier: invoice.supplier,
+    partyId: invoice.partyId,
+    supplierName: invoice.supplierName,
+    supplierPhone: invoice.supplierPhone,
+    totalAmount: invoice.totalAmount,
+    discountPercent: invoice.discountPercent,
+    discountAmount: invoice.discountAmount,
+    grandTotal: invoice.grandTotal,
+    paidAmount: invoice.paidAmount,
+    paymentType: invoice.paymentType,
+    status: invoice.status,
+    accountId: invoice.accountId,
+    itemCount: invoice.items?.length || 0,
+    isOpening: invoice.isOpening,
+  };
+
+  const oldPaidAmount = Number(invoice.paidAmount || 0);
 
   const {
     billNo,
@@ -419,6 +493,14 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     isOpening,
   } = req.body;
 
+  const newPaidAmount = Number(paidAmount || 0);
+
+  if (newPaidAmount !== oldPaidAmount && !canPayPurchaseBill(req)) {
+    return res.status(403).json({
+      message: "You do not have permission to change purchase payment",
+    });
+  }
+
   const parsedInvoiceDate = new Date(invoiceDate);
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
@@ -427,8 +509,6 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     isOpening === true || isOpening === "true"
       ? []
       : parsedItems.filter((i) => i.productId && i.quantity > 0 && i.price > 0);
-
-  const userId = req.user?.id || req.userId;
 
   //SAVE OLD ACCOUNTS
 
@@ -750,6 +830,13 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     await recalculateAccountBalance(oldPartyAccount);
   }
 
+  if (
+    oldSupplierAccount &&
+    oldSupplierAccount.toString() !== counterPartyAccountId.toString()
+  ) {
+    await recalculateAccountBalance(oldSupplierAccount);
+  }
+
   // RECALCULATE OLD PAYMENT ACCOUNT
 
   if (
@@ -760,6 +847,37 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     await recalculateAccountBalance(oldPaymentAccount);
   }
 
+  await logActivity({
+    req,
+    action: "update",
+    module: "purchases",
+    entityType: "PurchaseInvoice",
+    entityId: invoice._id,
+    title: `Purchase Invoice ${invoice.billNo}`,
+    description: `${invoice.supplierName} کی Purchase Invoice Update کی گئی`,
+    billNo: invoice.billNo,
+    before: beforeUpdate,
+    after: {
+      billNo: invoice.billNo,
+      invoiceDate: invoice.invoiceDate,
+      invoiceTime: invoice.invoiceTime,
+      supplier: invoice.supplier,
+      partyId: invoice.partyId,
+      supplierName: invoice.supplierName,
+      supplierPhone: invoice.supplierPhone,
+      totalAmount: invoice.totalAmount,
+      discountPercent: invoice.discountPercent,
+      discountAmount: invoice.discountAmount,
+      grandTotal: invoice.grandTotal,
+      paidAmount: invoice.paidAmount,
+      paymentType: invoice.paymentType,
+      status: invoice.status,
+      accountId: invoice.accountId,
+      itemCount: invoice.items?.length || 0,
+      isOpening: invoice.isOpening,
+    },
+  });
+
   res.status(200).json({
     success: true,
     message: "Purchase invoice updated successfully.",
@@ -769,16 +887,38 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
 // ✅ Delete invoice
 const deletePurchaseInvoice = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+
   const invoice = await PurchaseInvoice.findOne({
     _id: req.params.id,
+    userId,
     isDeleted: false,
   });
+
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
   }
 
-  const userId = req.user?.id || req.userId;
+  const beforeDelete = {
+    billNo: invoice.billNo,
+    invoiceDate: invoice.invoiceDate,
+    invoiceTime: invoice.invoiceTime,
+    supplier: invoice.supplier,
+    partyId: invoice.partyId,
+    supplierName: invoice.supplierName,
+    supplierPhone: invoice.supplierPhone,
+    totalAmount: invoice.totalAmount,
+    discountPercent: invoice.discountPercent,
+    discountAmount: invoice.discountAmount,
+    grandTotal: invoice.grandTotal,
+    paidAmount: invoice.paidAmount,
+    paymentType: invoice.paymentType,
+    status: invoice.status,
+    accountId: invoice.accountId,
+    itemCount: invoice.items?.length || 0,
+    isOpening: invoice.isOpening,
+  };
 
   // ✅ Save old accounts
   const supplier = invoice.supplier
@@ -834,6 +974,21 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   if (paymentAccount) {
     await recalculateAccountBalance(paymentAccount);
   }
+
+  await logActivity({
+    req,
+    action: "delete",
+    module: "purchases",
+    entityType: "PurchaseInvoice",
+    entityId: invoice._id,
+    title: `Purchase Invoice ${invoice.billNo}`,
+    description: `${invoice.supplierName} کی Purchase Invoice Delete کی گئی`,
+    billNo: invoice.billNo,
+    before: beforeDelete,
+    after: {
+      isDeleted: true,
+    },
+  });
 
   res.status(200).json({
     success: true,

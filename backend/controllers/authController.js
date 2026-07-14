@@ -151,9 +151,8 @@ const loginUser = async (req, res) => {
 
     const user = await User.findOne({
       email: cleanEmail,
-      isDeleted: false,
+      $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
     });
-
     if (user) {
       const isMatch = await bcrypt.compare(password, user.password);
 

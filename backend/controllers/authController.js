@@ -572,7 +572,10 @@ const resetPassword = async (req, res) => {
     }
 
     const user = await User.findOne({
-      email: cleanEmail,
+      email: {
+        $regex: `^${escapeRegex(cleanEmail)}$`,
+        $options: "i",
+      },
     });
 
     if (!user) {

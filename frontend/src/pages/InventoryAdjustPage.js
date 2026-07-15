@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchProducts, adjustInventory, adjustInventoryBulk } from '../services/inventoryService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const InventoryAdjustPage = () => {
   const navigate = useNavigate();
+  const canAdjustInventory = hasPermission('inventory.adjust');
 
   const [mode, setMode] = useState('SINGLE'); // SINGLE | BULK
   const [products, setProducts] = useState([]);
@@ -44,8 +46,13 @@ const InventoryAdjustPage = () => {
   // 🔁 LOAD PRODUCTS
   // ===============================
   useEffect(() => {
+    if (!canAdjustInventory) {
+      navigate('/dashboard');
+      return;
+    }
+
     loadProducts();
-  }, []);
+  }, [canAdjustInventory, navigate]);
 
   const loadProducts = async () => {
     try {
@@ -87,6 +94,11 @@ const InventoryAdjustPage = () => {
   };
 
   const handleSingleSave = async () => {
+    if (!canAdjustInventory) {
+      alert('You do not have permission to adjust inventory');
+      return;
+    }
+
     if (!single.productId || single.newQty === '') {
       alert(t('alerts.productAndQtyRequired'));
       return;
@@ -166,6 +178,11 @@ const InventoryAdjustPage = () => {
   };
 
   const handleBulkSave = async () => {
+    if (!canAdjustInventory) {
+      alert('You do not have permission to adjust inventory');
+      return;
+    }
+
     const validRows = rows.filter(
       (r) =>
         r.productId &&

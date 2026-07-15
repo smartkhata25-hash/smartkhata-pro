@@ -544,34 +544,30 @@ const verifyOtp = async (req, res) => {
   }
 };
 
-/* Reset Password */
+/* Temporary Reset Password Without OTP */
 
 const resetPassword = async (req, res) => {
   try {
     const cleanEmail = normalizeEmail(req.body.email);
-    const otp = String(req.body.otp || "").trim();
     const newPassword = req.body.newPassword;
 
-    if (!cleanEmail || !otp || !newPassword) {
+    const allowedEmail = "muzammilarain85@gmail.com";
+
+    if (!cleanEmail || !newPassword) {
       return res.status(400).json({
-        msg: "Email, OTP and new password are required",
+        msg: "Email and new password are required",
+      });
+    }
+
+    if (cleanEmail !== allowedEmail) {
+      return res.status(403).json({
+        msg: "Password reset is not allowed for this email",
       });
     }
 
     if (String(newPassword).length < 6) {
       return res.status(400).json({
         msg: "Password must be at least 6 characters",
-      });
-    }
-
-    const record = await PasswordReset.findOne({
-      email: cleanEmail,
-      otp,
-    });
-
-    if (!record) {
-      return res.status(400).json({
-        msg: "Invalid or expired OTP",
       });
     }
 
@@ -603,10 +599,6 @@ const resetPassword = async (req, res) => {
         },
       },
     );
-
-    await PasswordReset.deleteMany({
-      email: cleanEmail,
-    });
 
     return res.json({
       msg: "Password reset successful",

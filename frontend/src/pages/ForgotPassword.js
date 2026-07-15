@@ -3,39 +3,29 @@ import { t } from '../i18n/i18n';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!navigator.onLine) {
       alert(t('auth.internetRequired'));
       return;
     }
-    if (!email) return alert(t('auth.enterEmail'));
 
-    setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    const allowedEmail = 'muzammilarain85@gmail.com';
 
-    try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/auth/forgot-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        alert(t('auth.otpSent'));
-        window.location.href = '/#/reset-password';
-      } else {
-        alert(data.msg || t('common.error'));
-      }
-    } catch (err) {
-      alert(t('common.serverError'));
+    if (!cleanEmail) {
+      alert(t('auth.enterEmail'));
+      return;
     }
 
-    setLoading(false);
+    if (cleanEmail !== allowedEmail) {
+      alert('یہ Email password reset کے لیے اجازت یافتہ نہیں ہے');
+      return;
+    }
+
+    sessionStorage.setItem('resetPasswordEmail', cleanEmail);
+
+    window.location.href = '/#/reset-password';
   };
 
   return (
@@ -49,7 +39,6 @@ export default function ForgotPassword() {
         padding: '20px',
       }}
     >
-      {/* Card */}
       <div
         className="card"
         style={{
@@ -58,15 +47,20 @@ export default function ForgotPassword() {
           padding: '28px',
         }}
       >
-        {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
           <h2 style={{ marginBottom: '5px' }}>SMART KHATA</h2>
+
           <p style={{ fontSize: '13px', color: '#6b7280' }}>{t('auth.forgotPassword')}</p>
         </div>
 
-        {/* Email */}
         <div style={{ marginBottom: '16px' }}>
-          <label style={{ fontSize: '13px', marginBottom: '4px', display: 'block' }}>
+          <label
+            style={{
+              fontSize: '13px',
+              marginBottom: '4px',
+              display: 'block',
+            }}
+          >
             {t('auth.emailAddress')}
           </label>
 
@@ -97,8 +91,8 @@ export default function ForgotPassword() {
           </div>
         </div>
 
-        {/* Button */}
         <button
+          type="button"
           onClick={handleSubmit}
           className="btn btn-primary"
           style={{
@@ -106,15 +100,11 @@ export default function ForgotPassword() {
             padding: '10px',
             fontWeight: '600',
             fontSize: '15px',
-            opacity: loading ? 0.7 : 1,
-            cursor: loading ? 'not-allowed' : 'pointer',
           }}
-          disabled={loading}
         >
-          {loading ? t('auth.sendingOtp') : t('auth.sendOtp')}
+          آگے جائیں
         </button>
 
-        {/* Back to Login */}
         <div
           style={{
             marginTop: '16px',

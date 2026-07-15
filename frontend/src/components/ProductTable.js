@@ -6,6 +6,7 @@ import html2canvas from 'html2canvas';
 import { t } from '../i18n/i18n';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import AttachmentViewerModal from './AttachmentViewerModal';
+import { hasPermission } from '../utils/permissionHelper';
 
 const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick }) => {
   const [filters, setFilters] = useState({
@@ -28,7 +29,19 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
 
   const tableRef = useRef();
   const navigate = useNavigate();
+  const canViewProducts = hasPermission('products.view');
+  const canCreateProducts = hasPermission('products.create');
+  const canEditProducts = hasPermission('products.edit');
+  const canDeleteProducts = hasPermission('products.delete');
+  const canViewProductCost = hasPermission('products.view_cost');
+  const canBulkCreateProducts = hasPermission('products.bulk_create');
   const searchRef = useRef();
+
+  useEffect(() => {
+    if (!canViewProducts) {
+      navigate('/dashboard');
+    }
+  }, [canViewProducts, navigate]);
 
   useEffect(() => {
     searchRef.current?.focus();
@@ -61,6 +74,11 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
   });
 
   const handleDelete = async (product) => {
+    if (!canDeleteProducts) {
+      alert('You do not have permission to delete products');
+      return;
+    }
+
     const confirm = window.confirm(`${t('inventory.deleteProduct')} "${product.name}"?`);
     if (!confirm) return;
 
@@ -199,22 +217,23 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
         </select>
 
         {/* 🔵 Add New Product */}
-        <button
-          onClick={onAddClick}
-          style={{
-            background: 'linear-gradient(135deg,#2563eb,#1e3a8a)',
-            color: '#fff',
-            padding: isMobile ? '5px 6px' : '7px 14px',
-            fontSize: isMobile ? 12 : 14,
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: isMobile ? 700 : 600,
-          }}
-        >
-          {isMobile ? 'Add' : t('inventory.addProduct')}
-        </button>
-
+        {canCreateProducts && (
+          <button
+            onClick={onAddClick}
+            style={{
+              background: 'linear-gradient(135deg,#2563eb,#1e3a8a)',
+              color: '#fff',
+              padding: isMobile ? '5px 6px' : '7px 14px',
+              fontSize: isMobile ? 12 : 14,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: isMobile ? 700 : 600,
+            }}
+          >
+            {isMobile ? 'Add' : t('inventory.addProduct')}
+          </button>
+        )}
         {/* 🔴 Low Stock Alerts */}
         <button
           onClick={onLowStockClick}
@@ -233,22 +252,23 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
         </button>
 
         {/* 🟢 Bulk Add Products */}
-        <button
-          onClick={onBulkClick}
-          style={{
-            background: 'linear-gradient(135deg,#16a34a,#14532d)',
-            color: '#fff',
-            padding: isMobile ? '5px 6px' : '7px 14px',
-            fontSize: isMobile ? 12 : 14,
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: isMobile ? 700 : 600,
-          }}
-        >
-          {isMobile ? 'Bulk' : t('inventory.bulkProducts')}
-        </button>
-
+        {canBulkCreateProducts && (
+          <button
+            onClick={onBulkClick}
+            style={{
+              background: 'linear-gradient(135deg,#16a34a,#14532d)',
+              color: '#fff',
+              padding: isMobile ? '5px 6px' : '7px 14px',
+              fontSize: isMobile ? 12 : 14,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: isMobile ? 700 : 600,
+            }}
+          >
+            {isMobile ? 'Bulk' : t('inventory.bulkProducts')}
+          </button>
+        )}
         {/* 🔧 Inventory Adjust */}
         <button
           onClick={() => navigate('/inventory-adjust')}
@@ -360,7 +380,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
               {!isMobile && <th className="border p-2 w-24">{t('inventory.rack')}</th>}
               {!isMobile && <th className="border p-2">{t('common.description')}</th>}
               {!isMobile && <th className="border p-2">{t('inventory.unit')}</th>}
-              <th className="border p-2">{t('inventory.cost')}</th>
+              {canViewProductCost && <th className="border p-2">{t('inventory.cost')}</th>}
 
               <th className="border p-2">{t('price')}</th>
 
@@ -438,52 +458,58 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
                 {!isMobile && <td className="border p-2 w-24">{p.rackNo || '-'}</td>}
                 {!isMobile && <td className="border p-2">{p.description || '-'}</td>}
                 {!isMobile && <td className="border p-2">{p.unit}</td>}
-                <td className="border p-2">{p.unitCost}</td>
+                {canViewProductCost && <td className="border p-2">{p.unitCost}</td>}
                 <td className="border p-2">{p.salePrice}</td>
                 <td className={`border p-2 ${isMobile ? 'w-12' : 'w-24'}`}>{p.stock}</td>
                 <td className="border p-2 no-print w-20">
                   <div className="flex justify-center gap-2">
                     {isMobile ? (
                       <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEdit(p);
-                          }}
-                        >
-                          <FaEdit />
-                        </button>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(p);
-                          }}
-                        >
-                          <FaTrash color="red" />
-                        </button>
+                        {canEditProducts && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(p);
+                            }}
+                          >
+                            <FaEdit />
+                          </button>
+                        )}
+                        {canDeleteProducts && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(p);
+                            }}
+                          >
+                            <FaTrash color="red" />
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
-                        <button
-                          className="bg-yellow-400 px-2 py-1 rounded"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEdit(p);
-                          }}
-                        >
-                          {t('common.edit')}
-                        </button>
-
-                        <button
-                          className="bg-red-600 text-white px-2 py-1 rounded"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(p);
-                          }}
-                        >
-                          {t('common.delete')}
-                        </button>
+                        {canEditProducts && (
+                          <button
+                            className="bg-yellow-400 px-2 py-1 rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(p);
+                            }}
+                          >
+                            {t('common.edit')}
+                          </button>
+                        )}
+                        {canDeleteProducts && (
+                          <button
+                            className="bg-red-600 text-white px-2 py-1 rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(p);
+                            }}
+                          >
+                            {t('common.delete')}
+                          </button>
+                        )}
                       </>
                     )}
                   </div>

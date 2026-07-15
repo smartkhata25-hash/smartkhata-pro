@@ -12,7 +12,12 @@ const { requirePermission } = require("../middleware/permissionMiddleware");
 router.get(
   "/",
   authMiddleware,
-  requirePermission("products.view"),
+  requirePermission(
+    "products.view",
+    "inventory.view",
+    "inventory.adjust",
+    "inventory.view_history",
+  ),
   productController.getProducts,
 );
 
@@ -20,7 +25,7 @@ router.get(
 router.post(
   "/bulk",
   authMiddleware,
-  requirePermission("products.create"),
+  requirePermission("products.bulk_create"),
   productController.bulkCreateProducts,
 );
 
@@ -33,8 +38,6 @@ router.post(
   productController.createProduct,
 );
 
-// Update Stock
-// یہ /:id سے پہلے رہنا ضروری ہے
 router.put(
   "/stock",
   authMiddleware,

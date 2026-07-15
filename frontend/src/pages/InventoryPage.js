@@ -8,6 +8,7 @@ import MultipleProductForm from '../components/MultipleProductForm';
 import { useLocation } from 'react-router-dom';
 import { fetchProducts } from '../services/inventoryService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const InventoryPage = () => {
   const [products, setProducts] = useState(() => {
@@ -22,6 +23,12 @@ const InventoryPage = () => {
 
   const location = useLocation();
 
+  const canViewInventory = hasPermission('inventory.view');
+
+  const canCreateProducts = hasPermission('products.create');
+  const canEditProducts = hasPermission('products.edit');
+  const canBulkCreateProducts = hasPermission('products.bulk_create');
+
   // 🔁 Load Products
   const loadProducts = async () => {
     const data = await fetchProducts();
@@ -34,19 +41,19 @@ const InventoryPage = () => {
 
     const query = new URLSearchParams(location.search);
 
-    if (query.get('bulk') === 'true') {
+    if (query.get('bulk') === 'true' && canBulkCreateProducts) {
       setShowMultipleForm(true);
     }
 
-    if (query.get('new') === 'true') {
+    if (query.get('new') === 'true' && canCreateProducts) {
       setEditProduct(null);
       setShowModal(true);
     }
 
-    if (query.get('lowstock') === 'true') {
+    if (query.get('lowstock') === 'true' && canViewInventory) {
       setShowLowStock(true);
     }
-  }, [location]);
+  }, [location, canBulkCreateProducts, canCreateProducts, canViewInventory]);
 
   // ➕ Add Product
   const handleAdd = async (closeModal = true) => {
@@ -74,6 +81,11 @@ const InventoryPage = () => {
 
   // ✏️ Edit Product
   const handleEdit = (product) => {
+    if (!canEditProducts) {
+      alert('You do not have permission to edit products');
+      return;
+    }
+
     setEditProduct(product);
     setShowModal(true);
   };
@@ -117,17 +129,27 @@ const InventoryPage = () => {
             onEdit={handleEdit}
             onDelete={handleDelete}
             onAddClick={() => {
+              if (!canCreateProducts) return;
+
               setEditProduct(null);
               setShowModal(true);
             }}
-            onLowStockClick={() => setShowLowStock(true)}
-            onBulkClick={() => setShowMultipleForm((prev) => !prev)}
+            onLowStockClick={() => {
+              if (!canViewInventory) return;
+
+              setShowLowStock(true);
+            }}
+            onBulkClick={() => {
+              if (!canBulkCreateProducts) return;
+
+              setShowMultipleForm((prev) => !prev);
+            }}
           />
         </>
       )}
 
       {/* 🧾 Bulk Add Products */}
-      {showMultipleForm && (
+      {canBulkCreateProducts && showMultipleForm && (
         <MultipleProductForm
           onBulkAdd={(updatedProducts) => {
             setProducts(updatedProducts);

@@ -150,7 +150,10 @@ const loginUser = async (req, res) => {
     const deviceId = generateDeviceId(req);
 
     const user = await User.findOne({
-      email: cleanEmail,
+      email: {
+        $regex: `^${escapeRegex(cleanEmail)}$`,
+        $options: "i",
+      },
       $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
     });
     if (user) {

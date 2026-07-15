@@ -29,9 +29,26 @@ export default function AdminDevices() {
       });
 
       const data = await res.json();
-      setUsers(Array.isArray(data) ? data : []);
+
+      if (!res.ok) {
+        console.error('Admin Users API Error:', data);
+        alert(data.msg || data.message || 'Failed to load users');
+        setUsers([]);
+        return;
+      }
+
+      if (!Array.isArray(data)) {
+        console.error('Invalid Users Response:', data);
+        alert('Users data format is incorrect');
+        setUsers([]);
+        return;
+      }
+
+      setUsers(data);
     } catch (err) {
-      alert('Failed to load users');
+      console.error('Fetch Users Error:', err);
+      alert('Server error while loading users');
+      setUsers([]);
     }
   };
 
@@ -188,7 +205,10 @@ export default function AdminDevices() {
             placeholder="Search user..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={styles.input}
+            style={{
+              ...styles.input,
+              color: '#000',
+            }}
           />
 
           <select value={filter} onChange={(e) => setFilter(e.target.value)} style={styles.select}>
@@ -346,6 +366,9 @@ const styles = {
     padding: '8px 10px',
     borderRadius: '6px',
     border: 'none',
+    background: '#fff',
+    color: '#000',
+    caretColor: '#000',
   },
 
   select: {

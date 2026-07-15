@@ -721,10 +721,24 @@ const getAllUsers = async (req, res) => {
 
     const users = await User.aggregate([
       {
-        // Business Staff کو Super Admin list میں نہیں دکھانا
         $match: {
-          isDeleted: false,
-          $or: [{ accountRole: "owner" }, { accountRole: { $exists: false } }],
+          $and: [
+            {
+              $or: [
+                { isDeleted: false },
+                { isDeleted: { $exists: false } },
+                { isDeleted: null },
+              ],
+            },
+            {
+              $or: [
+                { accountRole: "owner" },
+                { accountRole: { $exists: false } },
+                { accountRole: null },
+                { accountRole: "" },
+              ],
+            },
+          ],
         },
       },
       {

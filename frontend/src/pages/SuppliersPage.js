@@ -21,6 +21,7 @@ import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import useFormPersist from '../hooks/useFormPersist';
+import { hasPermission } from '../utils/permissionHelper';
 
 const SuppliersPage = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -54,7 +55,22 @@ const SuppliersPage = () => {
 
   const token = localStorage.getItem('token');
 
+  const canViewSuppliers = hasPermission('suppliers.view');
+  const canCreateSuppliers = hasPermission('suppliers.create');
+  const canEditSuppliers = hasPermission('suppliers.edit');
+  const canDeleteSuppliers = hasPermission('suppliers.delete');
+  const canRestoreSuppliers = hasPermission('suppliers.restore');
+  const canMergeSuppliers = hasPermission('suppliers.merge');
+  const canConvertSuppliers = hasPermission('suppliers.convert');
+  const canViewSupplierLedger = hasPermission('suppliers.view_ledger');
+
   const restoredRef = useRef(false);
+
+  useEffect(() => {
+    if (!canViewSuppliers) {
+      navigate('/dashboard');
+    }
+  }, [canViewSuppliers, navigate]);
 
   const persistState = {
     selectedSupplierId,
@@ -73,6 +89,10 @@ const SuppliersPage = () => {
   useFormPersist('suppliers_page_state', persistState, () => {});
 
   const loadSuppliers = useCallback(async () => {
+    if (!canViewSuppliers) {
+      return;
+    }
+
     try {
       const data = await fetchSuppliers({
         search: '',
@@ -85,7 +105,7 @@ const SuppliersPage = () => {
       console.error(t('alerts.loadSuppliersError'), error);
       setSuppliers([]);
     }
-  }, []);
+  }, [canViewSuppliers]);
 
   useEffect(() => {
     loadSuppliers();
@@ -105,15 +125,19 @@ const SuppliersPage = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
 
-    if (params.get('new') === 'true') {
+    if (params.get('new') === 'true' && canCreateSuppliers) {
       setEditingSupplier(null);
       setShowForm(true);
     }
-  }, [location.search]);
-
+  }, [location.search, canCreateSuppliers]);
   const loadSupplierLedger = useCallback(
     async (supplierId) => {
       if (!supplierId) return;
+
+      if (!canViewSupplierLedger) {
+        alert('You do not have permission to view supplier ledger');
+        return;
+      }
 
       setLedgerLoading(true);
       try {
@@ -128,7 +152,7 @@ const SuppliersPage = () => {
       }
       setLedgerLoading(false);
     },
-    [ledgerStartDate, ledgerEndDate]
+    [ledgerStartDate, ledgerEndDate, canViewSupplierLedger]
   );
 
   useEffect(() => {
@@ -163,23 +187,44 @@ const SuppliersPage = () => {
   }, [suppliers, loadSupplierLedger]);
 
   const handleAddClick = () => {
+    if (!canCreateSuppliers) {
+      alert('You do not have permission to create suppliers');
+      return;
+    }
+
     setEditingSupplier(null);
     setShowForm(true);
   };
 
   const handleEditClick = (e, supplier) => {
     e.stopPropagation();
+
+    if (!canEditSuppliers) {
+      alert('You do not have permission to edit suppliers');
+      return;
+    }
+
     setEditingSupplier(supplier);
     setShowForm(true);
   };
 
   const handleDeleteClick = (e, id) => {
     e.stopPropagation();
+
+    if (!canDeleteSuppliers) {
+      alert('You do not have permission to delete suppliers');
+      return;
+    }
+
     setDeleteId(id);
     setShowConfirm(true);
   };
-
   const confirmDelete = async () => {
+    if (!canDeleteSuppliers) {
+      alert('You do not have permission to delete suppliers');
+      return;
+    }
+
     try {
       if (deleteId) {
         await deleteSupplier(deleteId);
@@ -195,6 +240,11 @@ const SuppliersPage = () => {
 
   const handleConvertToParty = async (e, supplier) => {
     e.stopPropagation();
+
+    if (!canConvertSuppliers) {
+      alert('You do not have permission to convert suppliers');
+      return;
+    }
 
     if (!window.confirm(`${supplier.name} کو Party میں convert کرنا ہے؟`)) {
       return;
@@ -219,6 +269,11 @@ const SuppliersPage = () => {
 
   const handleRestoreSupplier = async (e, supplier) => {
     e.stopPropagation();
+
+    if (!canRestoreSuppliers) {
+      alert('You do not have permission to restore suppliers');
+      return;
+    }
 
     if (supplier.hiddenReason !== 'deleted') {
       alert('صرف Delete کیا ہوا Supplier restore ہو سکتا ہے');
@@ -252,6 +307,16 @@ const SuppliersPage = () => {
   };
 
   const handleFormSubmit = async (formData) => {
+    if (editingSupplier && !canEditSuppliers) {
+      alert('You do not have permission to edit suppliers');
+      return;
+    }
+
+    if (!editingSupplier && !canCreateSuppliers) {
+      alert('You do not have permission to create suppliers');
+      return;
+    }
+
     try {
       if (editingSupplier) {
         const res = await updateSupplier(editingSupplier._id, formData);
@@ -474,23 +539,24 @@ const SuppliersPage = () => {
               marginBottom: 10,
             }}
           >
-            <button
-              onClick={handleAddClick}
-              style={{
-                height: 30,
-                padding: '0 10px',
-                borderRadius: 6,
-                border: '1px solid #7c3aed',
-                background: '#7c3aed',
-                color: '#ffffff',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {t('add')}
-            </button>
-
+            {canCreateSuppliers && (
+              <button
+                onClick={handleAddClick}
+                style={{
+                  height: 30,
+                  padding: '0 10px',
+                  borderRadius: 6,
+                  border: '1px solid #7c3aed',
+                  background: '#7c3aed',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {t('add')}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('active')}
               style={{
@@ -717,128 +783,137 @@ const SuppliersPage = () => {
                       {/* ✅ ACTIVE SUPPLIER ACTIONS */}
                       {supplier.isDeleted !== true && (
                         <>
-                          <button
-                            onClick={(e) => handleEditClick(e, supplier)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #7c3aed',
-                              background: '#f3e8ff',
-                              color: '#6b21a8',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}
-                            title="Edit"
-                          >
-                            <FaEdit size={12} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleDeleteClick(e, supplier._id)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #ef4444',
-                              background: '#fef2f2',
-                              color: '#b91c1c',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}
-                            title="Delete"
-                          >
-                            <FaTrash size={12} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleConvertToParty(e, supplier)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #7c3aed',
-                              background: '#f5f3ff',
-                              color: '#6d28d9',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              fontWeight: 800,
-                              fontSize: 12,
-                            }}
-                            title="Convert to Party"
-                          >
-                            P
-                          </button>
+                          {canEditSuppliers && (
+                            <button
+                              onClick={(e) => handleEditClick(e, supplier)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #7c3aed',
+                                background: '#f3e8ff',
+                                color: '#6b21a8',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                              title="Edit"
+                            >
+                              <FaEdit size={12} />
+                            </button>
+                          )}
+                          {canDeleteSuppliers && (
+                            <button
+                              onClick={(e) => handleDeleteClick(e, supplier._id)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #ef4444',
+                                background: '#fef2f2',
+                                color: '#b91c1c',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                              title="Delete"
+                            >
+                              <FaTrash size={12} />
+                            </button>
+                          )}
+                          {canConvertSuppliers && (
+                            <button
+                              onClick={(e) => handleConvertToParty(e, supplier)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #7c3aed',
+                                background: '#f5f3ff',
+                                color: '#6d28d9',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                fontWeight: 800,
+                                fontSize: 12,
+                              }}
+                              title="Convert to Party"
+                            >
+                              P
+                            </button>
+                          )}
                         </>
                       )}
 
                       {/* ✅ RESTORE ONLY DELETED SUPPLIER */}
-                      {supplier.isDeleted === true && supplier.hiddenReason === 'deleted' && (
-                        <button
-                          onClick={(e) => handleRestoreSupplier(e, supplier)}
-                          style={{
-                            height: 26,
-                            padding: '0 8px',
-                            borderRadius: 6,
-                            border: '1px solid #16a34a',
-                            background: '#f0fdf4',
-                            color: '#15803d',
-                            cursor: 'pointer',
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                          title="Restore Supplier"
-                        >
-                          Restore
-                        </button>
-                      )}
+                      {canRestoreSuppliers &&
+                        supplier.isDeleted === true &&
+                        supplier.hiddenReason === 'deleted' && (
+                          <button
+                            onClick={(e) => handleRestoreSupplier(e, supplier)}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              borderRadius: 6,
+                              border: '1px solid #16a34a',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                            title="Restore Supplier"
+                          >
+                            Restore
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
               );
             })}
 
-            {activeTab === 'active' && searchTerm.trim() !== '' && activeSuppliers.length === 0 && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: '10px',
-                  borderRadius: 8,
-                  border: '1px dashed #a78bfa',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: '#faf5ff',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: '#7c3aed',
-                }}
-                onClick={() => {
-                  setEditingSupplier(null);
+            {canCreateSuppliers &&
+              activeTab === 'active' &&
+              searchTerm.trim() !== '' &&
+              activeSuppliers.length === 0 && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '10px',
+                    borderRadius: 8,
+                    border: '1px dashed #a78bfa',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: '#faf5ff',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#7c3aed',
+                  }}
+                  onClick={() => {
+                    setEditingSupplier(null);
 
-                  setShowForm(true);
+                    setShowForm(true);
 
-                  setTimeout(() => {
-                    const event = new CustomEvent('quick-supplier-fill', {
-                      detail: {
-                        name: searchTerm,
-                        supplierType: 'vendor',
-                        openingBalance: 0,
-                      },
-                    });
+                    setTimeout(() => {
+                      const event = new CustomEvent('quick-supplier-fill', {
+                        detail: {
+                          name: searchTerm,
+                          supplierType: 'vendor',
+                          openingBalance: 0,
+                        },
+                      });
 
-                    window.dispatchEvent(event);
-                  }, 50);
-                }}
-              >
-                + {t('supplier.addNew')} “{searchTerm}”
-              </div>
-            )}
+                      window.dispatchEvent(event);
+                    }, 50);
+                  }}
+                >
+                  + {t('supplier.addNew')} “{searchTerm}”
+                </div>
+              )}
           </div>
         </div>
 
@@ -862,7 +937,7 @@ const SuppliersPage = () => {
             <div style={{ textAlign: 'center', marginTop: 40 }}>{t('common.loadingLedger')}</div>
           )}
 
-          {!ledgerLoading && ledgerData && (
+          {canViewSupplierLedger && !ledgerLoading && ledgerData && (
             <>
               <SupplierLedgerHeader
                 suppliers={activeTab === 'active' ? activeSuppliers : hiddenSuppliers}
@@ -1105,6 +1180,11 @@ const SuppliersPage = () => {
 
               <button
                 onClick={async () => {
+                  if (!canMergeSuppliers) {
+                    alert('You do not have permission to merge suppliers');
+                    return;
+                  }
+
                   try {
                     await confirmMergeSupplier(mergeData, token);
 

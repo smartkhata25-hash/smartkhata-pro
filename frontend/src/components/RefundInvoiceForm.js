@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRefund, updateRefund, getRefundById } from '../services/refundService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
+import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+import { getPartyLedger } from '../services/partyLedgerService';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
 import { getValidPaymentAccounts } from '../services/accountService';
@@ -109,6 +111,7 @@ const RefundInvoiceForm = ({
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
   const [isOpeningRefund, setIsOpeningRefund] = useState(false);
   const [openingRefundAmount, setOpeningRefundAmount] = useState(0);
+  const [customerBalance, setCustomerBalance] = useState(0);
 
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
@@ -117,6 +120,7 @@ const RefundInvoiceForm = ({
   const [printSettings, setPrintSettings] = useState(null);
   const [previewHtml, setPreviewHtml] = useState('');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const loadPrintSettings = async () => {
     try {
@@ -287,6 +291,11 @@ const RefundInvoiceForm = ({
     ? Number(openingRefundAmount || 0)
     : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
+  const refundCustomerTotalBalance =
+    refundMethod === 'credit'
+      ? Number(customerBalance || 0) - Number(totalAmount || 0)
+      : Number(customerBalance || 0);
+
   const formState = {
     items,
     billNo,
@@ -354,28 +363,40 @@ const RefundInvoiceForm = ({
   const handleSubmit = async (action) => {
     if (id && !canEditRefunds) {
       alert('You do not have permission to edit sale refunds');
-      return;
+      return false;
     }
 
     if (!id && !canCreateRefunds) {
       alert('You do not have permission to create sale refunds');
-      return;
+      return false;
     }
 
     const filteredItems = items.filter((item) => item.name && item.quantity > 0);
     const safeTime = invoiceTime || getCurrentTime();
 
-    if (!invoiceDate) return alert(t('alerts.fillRequiredFields'));
-    if (!customerName.trim()) return alert(t('alerts.customerRequired'));
+    if (!invoiceDate) {
+      alert(t('alerts.fillRequiredFields'));
+      return false;
+    }
+
+    if (!customerName.trim()) {
+      alert(t('alerts.customerRequired'));
+      return false;
+    }
 
     const totalAmount = isOpeningRefund
       ? Number(openingRefundAmount || 0)
       : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
 
     if (filteredItems.length === 0 && !isOpeningRefund) {
-      return alert(t('alerts.addProduct'));
+      alert(t('alerts.addProduct'));
+      return false;
     }
-    if (refundMethod === 'cash' && !accountId) return alert(t('alerts.selectAccount'));
+
+    if (refundMethod === 'cash' && !accountId) {
+      alert(t('alerts.selectAccount'));
+      return false;
+    }
 
     try {
       const selectedCustomer =
@@ -383,9 +404,13 @@ const RefundInvoiceForm = ({
           ? parties.find((p) => p._id === customerId)
           : customers.find((c) => c._id === customerId);
 
-      if (!selectedCustomer) return alert(t('alerts.customerRequired'));
+      if (!selectedCustomer) {
+        alert(t('alerts.customerRequired'));
+        return false;
+      }
 
       const formData = new FormData();
+
       formData.append('billNo', billNo || '');
 
       if (originalInvoiceId) {
@@ -402,13 +427,12 @@ const RefundInvoiceForm = ({
       formData.append('customerPhone', customerPhone);
       formData.append('invoiceDate', invoiceDate);
       formData.append('invoiceTime', safeTime);
-
       formData.append('notes', notes);
       formData.append('totalAmount', totalAmount);
       formData.append('paidAmount', refundMethod === 'cash' ? totalAmount : 0);
       formData.append('paymentType', refundMethod === 'cash' ? paymentType : 'credit');
-
       formData.append('accountId', refundMethod === 'cash' ? accountId : '');
+
       formData.append(
         'items',
         JSON.stringify(
@@ -432,18 +456,19 @@ const RefundInvoiceForm = ({
         .map((file) => file.key);
 
       formData.append('keepAttachmentKeys', JSON.stringify(keepAttachmentKeys));
+
       if (isOpeningRefund) {
         formData.append('isOpening', true);
       }
 
+      let savedRefund;
+
       if (id) {
-        await updateRefund(id, formData, token);
+        savedRefund = await updateRefund(id, formData, token);
         localStorage.removeItem('app_state_refund_invoice_draft');
-        alert(t('alerts.invoiceUpdated'));
       } else {
-        await createRefund(formData, token);
+        savedRefund = await createRefund(formData, token);
         localStorage.removeItem('app_state_refund_invoice_draft');
-        alert(t('alerts.invoiceSaved'));
       }
 
       if (action === 'new') {
@@ -451,6 +476,8 @@ const RefundInvoiceForm = ({
       } else if (action === 'close') {
         navigate('/dashboard');
       }
+
+      return savedRefund || true;
     } catch (err) {
       console.error('Refund Error:', err);
 
@@ -462,6 +489,8 @@ const RefundInvoiceForm = ({
       } else {
         alert(t('alerts.invoiceSaveFailed'));
       }
+
+      return false;
     }
   };
 
@@ -537,17 +566,46 @@ const RefundInvoiceForm = ({
     }
   };
 
-  const handleCustomerSelect = (name, phone, id, type = 'customer') => {
+  const handleCustomerSelect = async (name, phone, id, type = 'customer') => {
     setCustomerName(name);
     setCustomerPhone(phone);
     setCustomerId(id);
-
     setSelectedCustomerType(type);
 
     onCustomerChange && onCustomerChange(id);
 
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
+
+    try {
+      let result;
+
+      if (type === 'party') {
+        result = await getPartyLedger(id);
+      } else {
+        const selectedCustomer = customers.find((c) => c._id === id);
+
+        const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+
+        if (!accountId) {
+          setCustomerBalance(0);
+          return;
+        }
+
+        result = await getLedgerByCustomerAccount(accountId);
+      }
+
+      const ledger = result?.ledger || [];
+
+      const lastEntry = ledger.length > 0 ? ledger[ledger.length - 1] : null;
+
+      const closingBalance = Number(lastEntry?.runningBalance ?? lastEntry?.balance ?? 0);
+
+      setCustomerBalance(closingBalance);
+    } catch (err) {
+      console.error('Refund customer balance load failed:', err);
+      setCustomerBalance(0);
+    }
   };
 
   return (
@@ -889,7 +947,7 @@ shadow-md hover:shadow-lg"
 
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               const previewItems = items
                 .filter((i) => i.productId && i.quantity > 0)
                 .map((i) => ({
@@ -899,27 +957,34 @@ shadow-md hover:shadow-lg"
                   price: i.price,
                   total: i.total,
                 }));
+              const printData = {
+                lang: localStorage.getItem('lang') || 'en',
+                invoiceDate,
+                invoiceTime,
+                billNo,
+                customerName,
+                customerPhone,
+                items: previewItems,
+                totalAmount,
+                paidAmount: refundMethod === 'cash' ? totalAmount : 0,
+                paymentType: refundMethod === 'cash' ? paymentType : 'credit',
 
-              if (id) {
-                navigate(`/print/refund/${id}`);
-              } else {
-                navigate(`/print/refund/preview`, {
-                  state: {
-                    isPreview: true,
-                    invoiceData: {
-                      invoiceDate,
-                      invoiceTime,
-                      billNo,
-                      customerName,
-                      customerPhone,
-                      items: previewItems,
-                      totalAmount,
-                      paidAmount: totalAmount,
-                      paymentType,
-                    },
-                  },
-                });
-              }
+                customerTotalBalance: refundCustomerTotalBalance,
+              };
+
+              const saved = await handleSubmit('print');
+
+              if (!saved) return;
+
+              navigate('/print/refund/preview', {
+                replace: true,
+                state: {
+                  autoPrint: true,
+                  isPreview: true,
+                  type: 'refund',
+                  invoiceData: printData,
+                },
+              });
             }}
             className="flex items-center gap-1 px-2 md:px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl
 bg-gradient-to-r from-gray-800 to-gray-600
@@ -929,6 +994,88 @@ transition-all duration-300 text-xs md:text-sm font-semibold
 shadow-md hover:shadow-lg"
           >
             🖨 <span>{t('print')}</span>
+          </button>
+          <button
+            type="button"
+            disabled={pdfLoading}
+            onClick={async () => {
+              try {
+                setPdfLoading(true);
+
+                const previewItems = items
+                  .filter((i) => i.productId && i.quantity > 0)
+                  .map((i) => ({
+                    productId: i.productId,
+                    name: i.name,
+                    quantity: Number(i.quantity),
+                    price: Number(i.price),
+                    total: Number(i.total),
+                  }));
+
+                if (previewItems.length === 0 && !isOpeningRefund) {
+                  alert(t('alerts.addProduct'));
+                  return;
+                }
+
+                if (!customerName.trim()) {
+                  alert(t('alerts.customerRequired'));
+                  return;
+                }
+
+                const payload = {
+                  lang: localStorage.getItem('lang') || 'en',
+                  invoiceDate,
+                  invoiceTime,
+                  billNo,
+                  customerName,
+                  customerPhone,
+                  items: previewItems,
+                  totalAmount,
+                  paidAmount: refundMethod === 'cash' ? totalAmount : 0,
+                  paymentType: refundMethod === 'cash' ? paymentType : 'credit',
+                  customerTotalBalance: refundCustomerTotalBalance,
+                };
+
+                const token = localStorage.getItem('token');
+
+                const res = await fetch(`${API}/api/print/sale-return-pdf`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify(payload),
+                });
+
+                if (!res.ok) {
+                  throw new Error('PDF generation failed');
+                }
+
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Sale-Return-${billNo || 'Preview'}.pdf`;
+
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                console.error('Refund PDF Error:', err);
+                alert(t('alerts.pdfFailed'));
+              } finally {
+                setPdfLoading(false);
+              }
+            }}
+            className={`flex items-center gap-1 px-2 md:px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl
+text-white transition-all duration-300 text-xs md:text-sm font-semibold shadow-md hover:shadow-lg ${
+              pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+          >
+            {pdfLoading ? `⏳ ${t('pdf.preparing')}` : `📄 ${t('pdf.download')}`}
           </button>
         </div>
 

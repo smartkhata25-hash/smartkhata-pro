@@ -3,6 +3,8 @@ const router = express.Router();
 
 // 🔒 Auth Middleware
 const authMiddleware = require("../middleware/authMiddleware");
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { PERMISSIONS } = require("../utils/permissionList");
 
 const {
   getExpenseTitles,
@@ -11,12 +13,32 @@ const {
   deleteExpenseTitle,
 } = require("../controllers/expenseTitleController");
 
-router.get("/", authMiddleware, getExpenseTitles);
+router.get(
+  "/",
+  authMiddleware,
+  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  getExpenseTitles,
+);
 
-router.post("/", authMiddleware, createExpenseTitle);
+router.post(
+  "/",
+  authMiddleware,
+  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  createExpenseTitle,
+);
 
-router.put("/:id", authMiddleware, updateExpenseTitle);
+router.put(
+  "/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  updateExpenseTitle,
+);
 
-router.delete("/:id", authMiddleware, deleteExpenseTitle);
+router.delete(
+  "/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  deleteExpenseTitle,
+);
 
 module.exports = router;

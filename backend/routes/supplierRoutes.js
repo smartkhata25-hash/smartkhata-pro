@@ -49,7 +49,7 @@ router.post(
 // Supplier Detailed Ledger
 router.get(
   "/:id/detailed-ledger",
-  requirePermission("suppliers.view"),
+  requirePermission("suppliers.view_ledger"),
   ctrl.getSupplierDetailedLedger,
 );
 

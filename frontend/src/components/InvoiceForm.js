@@ -76,6 +76,7 @@ const InvoiceForm = ({
   const [showCustomerAddOptions, setShowCustomerAddOptions] = useState(false);
   const [showOverpayModal, setShowOverpayModal] = useState(false);
   const [overpayAmount, setOverpayAmount] = useState(0);
+  const [pendingOverpayAction, setPendingOverpayAction] = useState(null);
 
   const [showSearchModal, setShowSearchModal] = useState(false);
 
@@ -330,32 +331,67 @@ const InvoiceForm = ({
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
 
-    setBillNo(editingInvoiceFromAPI.billNo);
-    setInvoiceDate(editingInvoiceFromAPI.invoiceDate?.split('T')[0] || '');
-    setInvoiceTime(editingInvoiceFromAPI.invoiceTime?.slice(0, 5) || '');
-    setCustomerName(editingInvoiceFromAPI.customerName);
-    setCustomerPhone(editingInvoiceFromAPI.customerPhone);
-    setBy(editingInvoiceFromAPI.by || '');
-    setPaidAmount(editingInvoiceFromAPI.paidAmount || 0);
+    const draftKey = `sale_edit_preview_draft_${editingInvoiceFromAPI._id}`;
+    const savedDraft = sessionStorage.getItem(draftKey);
 
-    setDiscountAmount(editingInvoiceFromAPI.discountAmount || 0);
+    // ✅ Preview سے واپس آئے ہیں تو عارضی تبدیلیاں بحال کریں
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
 
-    setDiscountPercent(0);
+        setBillNo(draft.billNo || editingInvoiceFromAPI.billNo);
+        setInvoiceDate(draft.invoiceDate || '');
+        setInvoiceTime(draft.invoiceTime || '');
+        setCustomerName(draft.customerName || '');
+        setCustomerPhone(draft.customerPhone || '');
+        setBy(draft.by || '');
 
-    setPaymentType(editingInvoiceFromAPI.paymentType || 'credit');
+        setDiscountPercent(Number(draft.discountPercent || 0));
+        setDiscountAmount(Number(draft.discountAmount || 0));
+        setPaidAmount(Number(draft.paidAmount || 0));
 
-    setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
+        setPaymentType(draft.paymentType || 'credit');
+        setSelectedAccountId(draft.selectedAccountId || '');
 
-    if (editingInvoiceFromAPI.partyId) {
-      setSelectedCustomerType('party');
-      setSelectedCustomerId(editingInvoiceFromAPI.partyId);
+        setSelectedCustomerId(draft.selectedCustomerId || '');
+        setSelectedCustomerType(draft.selectedCustomerType || 'customer');
+
+        setOpeningBalanceAmount(Number(draft.openingBalanceAmount || 0));
+
+        if (Array.isArray(draft.items)) {
+          setItems(draft.items);
+        }
+      } catch (err) {
+        console.error('Edit preview draft restore failed:', err);
+        sessionStorage.removeItem(draftKey);
+      }
     } else {
-      setSelectedCustomerType('customer');
-      setSelectedCustomerId(editingInvoiceFromAPI.customerId || '');
-    }
+      // ✅ عام Edit Mode میں Database والا محفوظ Data
+      setBillNo(editingInvoiceFromAPI.billNo);
+      setInvoiceDate(editingInvoiceFromAPI.invoiceDate?.split('T')[0] || '');
+      setInvoiceTime(editingInvoiceFromAPI.invoiceTime?.slice(0, 5) || '');
+      setCustomerName(editingInvoiceFromAPI.customerName);
+      setCustomerPhone(editingInvoiceFromAPI.customerPhone);
+      setBy(editingInvoiceFromAPI.by || '');
+      setPaidAmount(editingInvoiceFromAPI.paidAmount || 0);
 
-    if (editingInvoiceFromAPI.isOpening) {
-      setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
+      setDiscountAmount(editingInvoiceFromAPI.discountAmount || 0);
+      setDiscountPercent(0);
+
+      setPaymentType(editingInvoiceFromAPI.paymentType || 'credit');
+      setSelectedAccountId(editingInvoiceFromAPI.accountId || '');
+
+      if (editingInvoiceFromAPI.partyId) {
+        setSelectedCustomerType('party');
+        setSelectedCustomerId(editingInvoiceFromAPI.partyId);
+      } else {
+        setSelectedCustomerType('customer');
+        setSelectedCustomerId(editingInvoiceFromAPI.customerId || '');
+      }
+
+      if (editingInvoiceFromAPI.isOpening) {
+        setOpeningBalanceAmount(editingInvoiceFromAPI.totalAmount || 0);
+      }
     }
 
     setExistingAttachments(
@@ -371,6 +407,23 @@ const InvoiceForm = ({
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
 
+    const draftKey = `sale_edit_preview_draft_${editingInvoiceFromAPI._id}`;
+    const savedDraft = sessionStorage.getItem(draftKey);
+
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+
+        if (Array.isArray(draft.items)) {
+          setItems(draft.items);
+          return;
+        }
+      } catch (err) {
+        console.error('Edit preview items restore failed:', err);
+        sessionStorage.removeItem(draftKey);
+      }
+    }
+
     const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
       const matchedProduct = products.find((p) => p._id === item.productId);
 
@@ -380,6 +433,7 @@ const InvoiceForm = ({
         productId: item.productId || '',
         name: matchedProduct?.name || item.name || '',
         description: matchedProduct?.description || '',
+        uom: matchedProduct?.uom || item.uom || '',
         cost: matchedProduct?.unitCost || 0,
         quantity: item.quantity,
         rate: item.price,
@@ -389,10 +443,9 @@ const InvoiceForm = ({
 
     setItems([
       ...enrichedItems,
-      ...Array.from({ length: 20 - enrichedItems.length }, () => blankRow()),
+      ...Array.from({ length: Math.max(0, 20 - enrichedItems.length) }, () => blankRow()),
     ]);
   }, [editingInvoiceFromAPI, products]);
-
   useEffect(() => {
     if (!token) return;
 
@@ -540,9 +593,7 @@ const InvoiceForm = ({
     setSelectedCustomerId(id);
     setSelectedCustomerType(type);
 
-    if (type === 'customer') {
-      onCustomerChange && onCustomerChange(id);
-    }
+    onCustomerChange && onCustomerChange(id);
 
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
@@ -772,9 +823,10 @@ const InvoiceForm = ({
   );
 
   const handleClear = async () => {
-    // ✅ EDIT MODE → restore original invoice
     if (editingInvoiceFromAPI?._id) {
       try {
+        sessionStorage.removeItem(`sale_edit_preview_draft_${editingInvoiceFromAPI._id}`);
+
         const freshInvoice = await getInvoiceById(editingInvoiceFromAPI._id, token);
 
         setItems(Array.from({ length: 20 }, () => blankRow()));
@@ -824,7 +876,7 @@ const InvoiceForm = ({
       fileInputRef.current.value = '';
     }
   };
-  const handleSubmit = async (e, mode = 'close') => {
+  const handleSubmit = async (e, mode = 'close', skipOverpayCheck = false) => {
     e.preventDefault();
 
     if (editingInvoiceFromAPI && !canEditSales) {
@@ -868,11 +920,12 @@ const InvoiceForm = ({
     }
     const remaining = grandTotal - paidAmount;
 
-    if (remaining < 0 && !showOverpayModal) {
+    if (remaining < 0 && !skipOverpayCheck) {
       setOverpayAmount(Math.abs(remaining));
+      setPendingOverpayAction(mode);
       setShowOverpayModal(true);
       setSaveLoading(false);
-      return;
+      return false;
     }
 
     if (paidAmount > 0) {
@@ -955,6 +1008,8 @@ const InvoiceForm = ({
     try {
       if (editingInvoiceFromAPI) {
         await updateInvoice(editingInvoiceFromAPI._id, formData, token);
+
+        sessionStorage.removeItem(`sale_edit_preview_draft_${editingInvoiceFromAPI._id}`);
       } else {
         const response = await createInvoice(formData, token);
 
@@ -969,28 +1024,35 @@ const InvoiceForm = ({
 
       clear();
 
-      if (mode === 'new' && !editingInvoice) {
+      if (mode === 'print') {
+        return true;
+      }
+
+      if (mode === 'new') {
         const now = new Date();
         const today = now.toISOString().split('T')[0];
-        const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const currentTime = now.toTimeString().slice(0, 5);
 
+        // ✅ Edit Mode ختم کریں
+        setEditingInvoiceFromAPI(null);
+
+        // ✅ پرانی invoiceId URL سے ہٹائیں
+        navigate('/create-sale', { replace: true });
+
+        setBillNo('Auto');
         setInvoiceDate(today);
         setInvoiceTime(currentTime);
 
-        setItems(Array.from({ length: 20 }, () => blankRow()));
-
         setCustomerName('');
-
-        setTimeout(() => {
-          customerInputRef.current?.focus();
-        }, 0);
-
         setCustomerPhone('');
+        setSelectedCustomerId('');
+        setSelectedCustomerType('customer');
         setBy('');
+
+        setItems(Array.from({ length: 20 }, () => blankRow()));
 
         setDiscountPercent(0);
         setDiscountAmount(0);
-
         setPaidAmount(0);
 
         setPaymentType('credit');
@@ -1007,12 +1069,18 @@ const InvoiceForm = ({
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
+
+        setTimeout(() => {
+          customerInputRef.current?.focus();
+        }, 100);
       } else {
         navigate('/dashboard');
       }
+      return true;
     } catch (err) {
       console.error('Save error:', err);
       alert(t('alerts.invoiceSaveFailed'));
+      return false;
     } finally {
       setSaveLoading(false);
     }
@@ -1035,10 +1103,10 @@ const InvoiceForm = ({
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder={t('invoice.by')}
-                  value={by}
-                  onChange={(e) => setBy(e.target.value)}
-                  className="border px-2 py-1 h-8 text-sm w-40"
+                  placeholder={t('billNo')}
+                  value={billNo || 'Auto'}
+                  readOnly
+                  className="border px-2 py-1 h-8 w-full text-sm bg-gray-100"
                 />
 
                 {canViewCost && (
@@ -1182,10 +1250,10 @@ const InvoiceForm = ({
             <div className="col-span-2">
               <input
                 type="text"
-                placeholder={t('billNo')}
-                value={billNo || 'Auto'}
-                readOnly
-                className="border px-2 py-1 h-8 w-full text-sm bg-gray-100"
+                placeholder={t('invoice.by')}
+                value={by}
+                onChange={(e) => setBy(e.target.value)}
+                className="border px-2 py-1 h-8 text-sm w-40"
               />
             </div>
 
@@ -1469,6 +1537,30 @@ const InvoiceForm = ({
                                 total: i.amount,
                               }));
 
+                            // ✅ Edit Mode کی عارضی تبدیلیاں Preview سے پہلے محفوظ کریں
+                            if (editingInvoiceFromAPI?._id) {
+                              sessionStorage.setItem(
+                                `sale_edit_preview_draft_${editingInvoiceFromAPI._id}`,
+                                JSON.stringify({
+                                  billNo,
+                                  invoiceDate,
+                                  invoiceTime,
+                                  customerName,
+                                  customerPhone,
+                                  by,
+                                  items,
+                                  discountPercent,
+                                  discountAmount,
+                                  paidAmount,
+                                  paymentType,
+                                  selectedAccountId,
+                                  selectedCustomerId,
+                                  selectedCustomerType,
+                                  openingBalanceAmount,
+                                })
+                              );
+                            }
+
                             navigate(`/print/sale/preview`, {
                               state: {
                                 isPreview: true,
@@ -1544,21 +1636,19 @@ const InvoiceForm = ({
                                 : customerBalance + (grandTotal - paidAmount),
                             };
 
-                            // ✅ invoice save کریں
-                            await handleSubmit(e, 'new');
+                            const saved = await handleSubmit(e, 'print');
 
-                            // ✅ پھر print preview کھولیں
-                            setTimeout(() => {
-                              navigate(`/print/sale/preview`, {
-                                replace: true,
-                                state: {
-                                  autoPrint: true,
-                                  isPreview: true,
-                                  type: 'sale',
-                                  invoiceData: printData,
-                                },
-                              });
-                            }, 500);
+                            if (!saved) return;
+
+                            navigate(`/print/sale/preview`, {
+                              replace: true,
+                              state: {
+                                autoPrint: true,
+                                isPreview: true,
+                                type: 'sale',
+                                invoiceData: printData,
+                              },
+                            });
                           }}
                           className={`text-white px-4 py-2 rounded text-sm shadow-md ${
                             saveLoading
@@ -1748,16 +1838,77 @@ const InvoiceForm = ({
 
               <div className="flex justify-end gap-3">
                 <button
-                  onClick={() => setShowOverpayModal(false)}
+                  type="button"
+                  onClick={() => {
+                    setShowOverpayModal(false);
+                    setPendingOverpayAction(null);
+                  }}
                   className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
                 >
                   {t('cancel')}
                 </button>
 
                 <button
-                  onClick={() => {
+                  type="button"
+                  onClick={async (e) => {
+                    const action = pendingOverpayAction || 'close';
+
                     setShowOverpayModal(false);
-                    document.querySelector('form')?.requestSubmit();
+                    setPendingOverpayAction(null);
+
+                    if (action === 'print') {
+                      const previewItems = items
+                        .filter((i) => i.productId && i.quantity > 0)
+                        .map((i) => ({
+                          productId: i.productId,
+                          name: i.name,
+                          description: i.description,
+                          uom: i.uom,
+                          quantity: i.quantity,
+                          price: i.rate,
+                          total: i.amount,
+                        }));
+
+                      const printData = {
+                        lang: localStorage.getItem('lang'),
+                        invoiceDate,
+                        invoiceTime,
+                        billNo,
+                        customerName: customerName || '-',
+                        customerPhone: customerPhone || '',
+                        by,
+                        items: previewItems,
+                        totalAmount,
+                        discountAmount: finalDiscount,
+                        grandTotal,
+                        paidAmount,
+                        paymentType,
+                        customerTotalBalance: editingInvoiceFromAPI
+                          ? customerBalance -
+                            ((editingInvoiceFromAPI.totalAmount || 0) -
+                              (editingInvoiceFromAPI.paidAmount || 0)) +
+                            (grandTotal - paidAmount)
+                          : customerBalance + (grandTotal - paidAmount),
+                      };
+
+                      const saved = await handleSubmit(e, 'print', true);
+
+                      if (!saved) return;
+
+                      navigate(`/print/sale/preview`, {
+                        replace: true,
+                        state: {
+                          autoPrint: true,
+                          isPreview: true,
+                          type: 'sale',
+                          invoiceData: printData,
+                        },
+                      });
+
+                      return;
+                    }
+
+                    await handleSubmit(e, action, true);
                   }}
                   className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
                 >

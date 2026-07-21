@@ -50,7 +50,7 @@ router.post(
 router.get(
   "/:id/detailed-ledger",
   protect,
-  requirePermission("customers.view"),
+  requirePermission("customers.view_ledger"),
   getCustomerDetailedLedger,
 );
 

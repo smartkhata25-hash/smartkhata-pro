@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const ExpenseForm = () => {
   const [accounts, setAccounts] = useState([]);
@@ -36,6 +37,11 @@ const ExpenseForm = () => {
 
   const navigate = useNavigate();
   const { id } = useParams();
+  const canViewExpenses = hasPermission('expenses.view');
+  const canCreateExpenses = hasPermission('expenses.create');
+  const canEditExpenses = hasPermission('expenses.edit');
+
+  const canManageExpenseTitles = hasPermission('expenses.manage_titles');
 
   const expenseAccounts = accounts.filter((a) => a.type === 'Expense');
   const creditableAccounts = accounts.filter(
@@ -46,6 +52,18 @@ const ExpenseForm = () => {
 
   useEffect(() => {
     async function fetchData() {
+      if (id && (!canViewExpenses || !canEditExpenses)) {
+        alert('You do not have permission to edit expenses');
+        navigate('/expenses');
+        return;
+      }
+
+      if (!id && !canCreateExpenses) {
+        alert('You do not have permission to create expenses');
+        navigate('/dashboard');
+        return;
+      }
+
       const aData = await getAccounts();
       setAccounts(aData);
 
@@ -76,8 +94,7 @@ const ExpenseForm = () => {
       }
     }
     fetchData();
-  }, [id]);
-
+  }, [id, canViewExpenses, canCreateExpenses, canEditExpenses, navigate]);
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -88,20 +105,27 @@ const ExpenseForm = () => {
     setFormData((prev) => ({ ...prev, attachment: file }));
     setShowPreview(false);
   };
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     const data = await getAccounts();
     setAccounts(data);
-  };
+  }, []);
 
-  const fetchTitles = async (query = '') => {
-    try {
-      const data = await getExpenseTitles(query);
+  const fetchTitles = useCallback(
+    async (query = '') => {
+      if (!canViewExpenses) {
+        setTitles([]);
+        return;
+      }
 
-      setTitles(data || []);
-    } catch (err) {
-      console.error('Title fetch error', err);
-    }
-  };
+      try {
+        const data = await getExpenseTitles(query);
+        setTitles(data || []);
+      } catch (err) {
+        console.error('Title fetch error', err);
+      }
+    },
+    [canViewExpenses]
+  );
   const resetForm = () => {
     setFormData({
       title: '',
@@ -126,8 +150,7 @@ const ExpenseForm = () => {
   useEffect(() => {
     fetchAccounts();
     fetchTitles();
-  }, []);
-
+  }, [fetchAccounts, fetchTitles]);
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -144,6 +167,16 @@ const ExpenseForm = () => {
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
+
+    if (id && !canEditExpenses) {
+      alert('You do not have permission to edit expenses');
+      return;
+    }
+
+    if (!id && !canCreateExpenses) {
+      alert('You do not have permission to create expenses');
+      return;
+    }
 
     if (!formData.title && !formData.titleId) {
       alert(t('alerts.fillRequiredFields'));
@@ -292,12 +325,14 @@ const ExpenseForm = () => {
                   {item.name}
                 </div>
               ))}
-              <div
-                onClick={() => setShowModal(true)}
-                className="p-3 text-blue-600 font-semibold cursor-pointer hover:bg-gray-100"
-              >
-                + {t('expense.addNewTitle')} "{search}"
-              </div>
+              {canManageExpenseTitles && (
+                <div
+                  onClick={() => setShowModal(true)}
+                  className="p-3 text-blue-600 font-semibold cursor-pointer hover:bg-gray-100"
+                >
+                  + {t('expense.addNewTitle')} "{search}"
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -468,36 +503,42 @@ const ExpenseForm = () => {
         </div>
 
         <div className="md:col-span-2 flex flex-wrap justify-end items-center gap-3 mt-4">
-          <button
-            type="submit"
-            disabled={loading}
-            className={`bg-green-600 text-white px-4 py-2 rounded ${
-              loading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            {loading ? t('saving') : id ? t('expense.updateClose') : t('expense.saveClose')}
-          </button>
+          {((id && canEditExpenses) || (!id && canCreateExpenses)) && (
+            <>
+              <button
+                type="submit"
+                disabled={loading}
+                className={`bg-green-600 text-white px-4 py-2 rounded ${
+                  loading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {loading ? t('saving') : id ? t('expense.updateClose') : t('expense.saveClose')}
+              </button>
 
-          <button
-            type="button"
-            onClick={(e) => handleSubmit(e, 'new')}
-            disabled={loading}
-            className={`bg-blue-600 text-white px-4 py-2 rounded ${
-              loading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            {loading ? t('saving') : t('expense.saveNew')}
-          </button>
+              <button
+                type="button"
+                onClick={(e) => handleSubmit(e, 'new')}
+                disabled={loading}
+                className={`bg-blue-600 text-white px-4 py-2 rounded ${
+                  loading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {loading ? t('saving') : t('expense.saveNew')}
+              </button>
+            </>
+          )}
 
-          <button
-            type="button"
-            onClick={resetForm}
-            className="bg-gray-400 text-white px-4 py-2 rounded"
-          >
-            {t('clear')}
-          </button>
+          {((id && canEditExpenses) || (!id && canCreateExpenses)) && (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="bg-gray-400 text-white px-4 py-2 rounded"
+            >
+              {t('clear')}
+            </button>
+          )}
 
-          {formData.title && formData.category && (
+          {canViewExpenses && formData.title && formData.category && (
             <>
               <button
                 onClick={handlePrint}
@@ -518,7 +559,7 @@ const ExpenseForm = () => {
           )}
         </div>
       </form>
-      {showModal && (
+      {canManageExpenseTitles && showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-96 shadow-xl">
             <h3 className="text-xl font-bold mb-4 text-gray-800">{t('expense.addNewTitle')}</h3>
@@ -553,6 +594,11 @@ const ExpenseForm = () => {
 
               <button
                 onClick={async () => {
+                  if (!canManageExpenseTitles) {
+                    alert('You do not have permission to manage expense titles');
+                    return;
+                  }
+
                   const res = await createExpenseTitle({
                     name: newAccount.name,
                     categoryId: newAccount.category,

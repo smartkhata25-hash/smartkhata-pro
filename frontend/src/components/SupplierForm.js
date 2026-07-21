@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
+  const isEditMode = Boolean(initialData?._id);
+
+  const canCreateSuppliers = hasPermission('suppliers.create');
+  const canEditSuppliers = hasPermission('suppliers.edit');
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -72,6 +77,16 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    if (isEditMode && !canEditSuppliers) {
+      alert('You do not have permission to edit suppliers');
+      return;
+    }
+
+    if (!isEditMode && !canCreateSuppliers) {
+      alert('You do not have permission to create suppliers');
+      return;
+    }
 
     if (!formData.name.trim()) {
       alert(t('supplier.nameRequired'));
@@ -203,9 +218,11 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
               {t('cancel')}
             </button>
 
-            <button type="submit" style={button}>
-              {t('save')}
-            </button>
+            {((isEditMode && canEditSuppliers) || (!isEditMode && canCreateSuppliers)) && (
+              <button type="submit" style={button}>
+                {t('save')}
+              </button>
+            )}
           </div>
         </form>
       </div>

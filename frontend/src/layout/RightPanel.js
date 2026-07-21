@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
 const Section = ({ title, children }) => {
@@ -40,6 +41,7 @@ const AlertCard = ({ title, count, color, onClick }) => (
 );
 
 const RightPanel = () => {
+  const canViewRightPanel = hasPermission('dashboard.right_panel');
   const [summary, setSummary] = useState({});
   const [alerts, setAlerts] = useState({
     lowStock: 0,
@@ -52,6 +54,10 @@ const RightPanel = () => {
 
   // ✅ stable fetch function (no warning)
   const fetchData = useCallback(async () => {
+    if (!canViewRightPanel) {
+      return;
+    }
+
     try {
       const [summaryRes, alertsRes] = await Promise.all([
         axios.get(`${baseUrl}/api/dashboard-summary`, {
@@ -68,7 +74,7 @@ const RightPanel = () => {
     } catch (err) {
       console.error(t('alerts.panelLoadError'), err);
     }
-  }, [token]);
+  }, [token, canViewRightPanel]);
 
   // ✅ auto + initial load
   useEffect(() => {
@@ -78,6 +84,9 @@ const RightPanel = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  if (!canViewRightPanel) {
+    return null;
+  }
   return (
     <div className="h-full bg-white border-l border-gray-200 p-5 shadow-lg overflow-y-auto">
       {/* 🔄 Refresh Button */}

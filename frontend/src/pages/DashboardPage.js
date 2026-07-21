@@ -4,9 +4,12 @@ import axios from 'axios';
 import ProfitSummaryModal from '../components/profit/ProfitSummaryModal';
 import { t } from '../i18n/i18n';
 import PermissionGuard from '../components/PermissionGuard';
+import { hasPermission } from '../utils/permissionHelper';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
+
+  const canViewSummaryCards = hasPermission('dashboard.summary_cards');
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
@@ -43,6 +46,10 @@ const DashboardPage = () => {
 
   useEffect(() => {
     const fetchSummary = async () => {
+      if (!canViewSummaryCards) {
+        return;
+      }
+
       try {
         const token = localStorage.getItem('token');
         const baseUrl = process.env.REACT_APP_API_BASE_URL;
@@ -95,7 +102,7 @@ const DashboardPage = () => {
     };
 
     fetchSummary();
-  }, [selectedMonth, selectedYear, filterType]);
+  }, [selectedMonth, selectedYear, filterType, canViewSummaryCards]);
 
   return (
     <div className="space-y-10">
@@ -105,75 +112,76 @@ const DashboardPage = () => {
           {t('dashboard')}
         </h1>
 
-        {/* 👁 Toggle Button */}
-        <div className="flex items-center gap-2">
-          {/* 👁 Toggle */}
-          <button
-            onClick={() => setShowCards((prev) => !prev)}
-            className="text-xs md:text-sm px-3 rounded-full 
+        {canViewSummaryCards && (
+          <div className="flex items-center gap-2">
+            {/* 👁 Toggle */}
+            <button
+              onClick={() => setShowCards((prev) => !prev)}
+              className="text-xs md:text-sm px-3 rounded-full 
 bg-white/80 backdrop-blur-md border border-gray-300 
 shadow-sm hover:shadow-md hover:bg-gray-100 
 transition-all duration-200 
 font-medium h-[36px]"
-          >
-            {showCards ? 'Hide' : 'Show'}
-          </button>
+            >
+              {showCards ? 'Hide' : 'Show'}
+            </button>
 
-          {/* 📅 Month Dropdown */}
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
-          >
-            <option value="today">Today</option>
-            <option value="month">Month</option>
-            <option value="year">Year</option>
-            <option value="all">Total</option>
-          </select>
-          {filterType === 'month' && (
+            {/* 📅 Month Dropdown */}
             <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
               className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
             >
-              {[
-                'Jan',
-                'Feb',
-                'Mar',
-                'Apr',
-                'May',
-                'Jun',
-                'Jul',
-                'Aug',
-                'Sep',
-                'Oct',
-                'Nov',
-                'Dec',
-              ].map((m, i) => (
-                <option key={i} value={i}>
-                  {m}
-                </option>
-              ))}
+              <option value="today">Today</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+              <option value="all">Total</option>
             </select>
-          )}
-          {filterType === 'year' && (
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
-            >
-              {[2023, 2024, 2025, 2026].map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+            {filterType === 'month' && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
+              >
+                {[
+                  'Jan',
+                  'Feb',
+                  'Mar',
+                  'Apr',
+                  'May',
+                  'Jun',
+                  'Jul',
+                  'Aug',
+                  'Sep',
+                  'Oct',
+                  'Nov',
+                  'Dec',
+                ].map((m, i) => (
+                  <option key={i} value={i}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            )}
+            {filterType === 'year' && (
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
+              >
+                {[2023, 2024, 2025, 2026].map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}
-      {showCards && (
+      {canViewSummaryCards && showCards && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
           <DashboardCard
             title={t('totalSales')}

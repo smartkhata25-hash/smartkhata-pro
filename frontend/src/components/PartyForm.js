@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const PartyForm = ({ onSubmit, initialData = {}, onCancel }) => {
+  const isEditMode = Boolean(initialData?._id);
+
+  const canCreateParties = hasPermission('parties.create');
+  const canEditParties = hasPermission('parties.edit');
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -70,6 +75,16 @@ const PartyForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    if (isEditMode && !canEditParties) {
+      alert('You do not have permission to edit parties');
+      return;
+    }
+
+    if (!isEditMode && !canCreateParties) {
+      alert('You do not have permission to create parties');
+      return;
+    }
 
     if (!formData.name.trim()) {
       alert('Party name required');
@@ -231,9 +246,11 @@ const PartyForm = ({ onSubmit, initialData = {}, onCancel }) => {
               {t('cancel') || 'Cancel'}
             </button>
 
-            <button type="submit" style={button}>
-              {t('save') || 'Save'}
-            </button>
+            {((isEditMode && canEditParties) || (!isEditMode && canCreateParties)) && (
+              <button type="submit" style={button}>
+                {t('save') || 'Save'}
+              </button>
+            )}
           </div>
         </form>
       </div>

@@ -5,6 +5,8 @@ const router = express.Router();
 const accountController = require("../controllers/accountController");
 const { getAccountsSummary } = require("../controllers/accountController");
 const authenticate = require("../middleware/authMiddleware");
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { PERMISSIONS } = require("../utils/permissionList");
 
 // 🔍 OPTIONAL Middleware for validation (you can extend this)
 const validateAccount = (req, res, next) => {
@@ -17,45 +19,70 @@ const validateAccount = (req, res, next) => {
   next();
 };
 
-// ✅ Create a new Account (with optional validation)
 router.post(
   "/",
   authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.CREATE),
   validateAccount,
   accountController.createAccount,
 );
 
-// ✅ Get all accounts for logged-in user
-router.get("/", authenticate, accountController.getAccounts);
+router.get(
+  "/",
+  authenticate,
+  requirePermission(
+    PERMISSIONS.ACCOUNTS.VIEW,
+    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
+  ),
+  accountController.getAccounts,
+);
 
-// ✅ Update an account
-router.put("/:id", authenticate, accountController.updateAccount);
+router.put(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.updateAccount,
+);
 
-// ✅ Delete an account (controller will handle journal reference check)
-router.delete("/:id", authenticate, accountController.deleteAccount);
+router.delete(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.DELETE),
+  accountController.deleteAccount,
+);
 
-// ✅ Cash Summary Route
-router.get("/cash-summary", authenticate, accountController.getCashSummary);
+router.get(
+  "/cash-summary",
+  authenticate,
+  requirePermission(
+    PERMISSIONS.ACCOUNTS.VIEW,
+    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
+  ),
+  accountController.getCashSummary,
+);
 
-// ✅ Bank Summary Route
-router.get("/bank-summary", authenticate, accountController.getBankSummary);
+router.get(
+  "/bank-summary",
+  authenticate,
+  requirePermission(
+    PERMISSIONS.ACCOUNTS.VIEW,
+    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
+  ),
+  accountController.getBankSummary,
+);
 
 router.get("/summary", authenticate, getAccountsSummary);
 
-// ✅ NEW: Overall Balance Snapshot (Optional but useful for Dashboard)
 router.get(
   "/balance-summary",
   authenticate,
   accountController.getBalanceSnapshot,
-); // 🆕
+);
 
-/**
- * Note: This must come AFTER all other `/:id/...` routes
- * to avoid conflict with dynamic :id param
- */
 router.get(
   "/:id/transactions",
   authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS),
   accountController.getAccountTransactions,
 );
 

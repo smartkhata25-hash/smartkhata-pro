@@ -12,22 +12,36 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
       });
     }
 
+    const selectedCustomerOrPartyId = new mongoose.Types.ObjectId(customerId);
+
     const history = await Invoice.aggregate([
       {
         $match: {
           createdBy: new mongoose.Types.ObjectId(userId),
-          customerId: new mongoose.Types.ObjectId(customerId),
           isDeleted: false,
+
+          $or: [
+            {
+              customerId: selectedCustomerOrPartyId,
+            },
+            {
+              partyId: selectedCustomerOrPartyId,
+            },
+          ],
         },
       },
-      { $unwind: "$items" },
+      {
+        $unwind: "$items",
+      },
       {
         $match: {
           "items.productId": new mongoose.Types.ObjectId(productId),
         },
       },
       {
-        $sort: { createdAt: -1 },
+        $sort: {
+          createdAt: -1,
+        },
       },
       {
         $limit: 4,
@@ -45,12 +59,13 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
       },
     ]);
 
-    res.json(history);
+    return res.json(history);
   } catch (error) {
     console.error("Sales history error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       message: "Failed to fetch sales history",
-      error,
+      error: error.message,
     });
   }
 };

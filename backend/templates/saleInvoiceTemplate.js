@@ -233,14 +233,14 @@ td.left {
 
 .totals {
   margin-top: ${blockSpacing}px;
-  width: 260px;
+  width: 325px;
   margin-left: auto;
   font-weight: 700;
 }
 
 .totals-row {
   display: grid;
-  grid-template-columns: auto 70px;
+  grid-template-columns: minmax(0, 1fr) 80px;
   align-items: center;
   gap: 10px;
   border-bottom: 2px solid black;
@@ -250,6 +250,7 @@ td.left {
 .totals-row span:first-child {
   text-align: left;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .totals-row span:last-child {

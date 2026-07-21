@@ -19,6 +19,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const [searchTerm, setSearchTerm] = useState('');
   const [lang, setLang] = useState(getCurrentLanguage());
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = React.useRef(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [alertCount, setAlertCount] = useState(0);
@@ -47,6 +48,22 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
   useEffect(() => {
@@ -282,7 +299,8 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
 
           {/* Notification */}
           <div
-            onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+            data-right-panel-toggle="true"
+            onClick={() => setIsRightPanelOpen((prev) => !prev)}
             className="relative cursor-pointer text-lg hover:text-blue-600 transition"
           >
             🔔
@@ -296,7 +314,7 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
         </div>
 
         {/* USER MENU */}
-        <div className="relative">
+        <div className="relative" ref={userMenuRef}>
           <div
             onClick={() => setShowUserMenu(!showUserMenu)}
             className="cursor-pointer text-lg hover:text-blue-600 transition"

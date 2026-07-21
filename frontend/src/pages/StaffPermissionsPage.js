@@ -6,6 +6,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getStaffById, updateStaffPermissions } from '../services/staffService';
 
 const ACTION_LABELS = {
+  summary_cards: 'Summary Cards',
+  right_panel: 'Right Panel',
   view: 'View',
   create: 'Create',
   edit: 'Edit',
@@ -52,6 +54,7 @@ const ACTION_LABELS = {
 };
 
 const MODULE_LABELS = {
+  dashboard: 'Dashboard',
   sales: 'Sales',
   refunds: 'Sale Refunds',
   purchases: 'Purchases',

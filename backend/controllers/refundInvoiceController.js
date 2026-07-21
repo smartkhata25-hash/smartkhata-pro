@@ -339,6 +339,7 @@ exports.createRefundInvoice = async (req, res) => {
     });
 
     await journal.save();
+    await recalculateAccountBalance(counterPartyAccountId);
     if (
       (!isOpening || isOpening === "false") &&
       Number(paidAmount || 0) > 0 &&
@@ -884,6 +885,7 @@ exports.updateRefundInvoice = async (req, res) => {
     });
 
     await journal.save();
+    await recalculateAccountBalance(counterPartyAccountId);
     if (
       (!isOpening || isOpening === "false") &&
       Number(paidAmount || 0) > 0 &&

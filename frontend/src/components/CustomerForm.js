@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
+  const isEditMode = Boolean(initialData?._id);
+
+  const canCreateCustomers = hasPermission('customers.create');
+  const canEditCustomers = hasPermission('customers.edit');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -72,6 +77,16 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    if (isEditMode && !canEditCustomers) {
+      alert('You do not have permission to edit customers');
+      return;
+    }
+
+    if (!isEditMode && !canCreateCustomers) {
+      alert('You do not have permission to create customers');
+      return;
+    }
 
     if (!formData.name.trim()) {
       alert(t('alerts.customerRequired'));
@@ -206,9 +221,11 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
               {t('cancel')}
             </button>
 
-            <button type="submit" style={button}>
-              {t('save')}
-            </button>
+            {((isEditMode && canEditCustomers) || (!isEditMode && canCreateCustomers)) && (
+              <button type="submit" style={button}>
+                {t('save')}
+              </button>
+            )}
           </div>
         </form>
       </div>

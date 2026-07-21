@@ -2,6 +2,9 @@ const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const PrintSetting = require("../models/PrintSetting");
 const { defaultSettings } = require("./printSettingController");
+const Customer = require("../models/Customer");
+const Party = require("../models/Party");
+const Account = require("../models/Account");
 
 const {
   buildSaleInvoicePrint,
@@ -10,9 +13,50 @@ const {
 const { generatePdfFromHtml } = require("../services/pdfService");
 const generateSaleInvoiceHTML = require("../templates/saleInvoiceTemplate");
 
-/* =========================================================
-   ✅ GET SALE INVOICE PRINT DATA
-========================================================= */
+//CUSTOMER / PARTY CURRENT BALANCE FOR PRINT
+
+const attachCustomerTotalBalance = async (document, userId) => {
+  let accountId = null;
+
+  if (document.partyId) {
+    const partyId = document.partyId?._id || document.partyId;
+
+    const party = await Party.findOne({
+      _id: partyId,
+      userId,
+    }).select("account");
+
+    accountId = party?.account;
+  } else if (document.customerId) {
+    const customerId = document.customerId?._id || document.customerId;
+
+    const customer = await Customer.findOne({
+      _id: customerId,
+      createdBy: userId,
+    }).select("account");
+
+    accountId = customer?.account?._id || customer?.account;
+  }
+
+  const plainDocument = document.toObject ? document.toObject() : document;
+
+  if (!accountId) {
+    return {
+      ...plainDocument,
+      customerTotalBalance: 0,
+    };
+  }
+
+  const account = await Account.findById(accountId).select("balance");
+
+  return {
+    ...plainDocument,
+    customerTotalBalance: Number(account?.balance || 0),
+  };
+};
+
+// GET SALE INVOICE PRINT DATA
+
 const getSaleInvoicePrint = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -54,9 +98,8 @@ const getSaleInvoicePrint = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GET SALE RETURN PRINT DATA
-========================================================= */
+// GET SALE RETURN PRINT DATA
+
 const getSaleReturnPrint = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -81,7 +124,9 @@ const getSaleReturnPrint = async (req, res) => {
       });
     }
 
-    const formattedData = buildSaleReturnPrint(refund, printSetting);
+    const refundWithBalance = await attachCustomerTotalBalance(refund, userId);
+
+    const formattedData = buildSaleReturnPrint(refundWithBalance, printSetting);
 
     return res.json(formattedData);
   } catch (error) {
@@ -92,9 +137,8 @@ const getSaleReturnPrint = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ SALE PREVIEW
-========================================================= */
+// SALE PREVIEW
+
 const salePreview = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -132,9 +176,9 @@ const salePreview = async (req, res) => {
     return res.status(500).send("Preview failed");
   }
 };
-/* =========================================================
-   ✅ SALE RETURN PREVIEW
-========================================================= */
+
+// SALE RETURN PREVIEW
+
 const saleReturnPreview = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -148,7 +192,7 @@ const saleReturnPreview = async (req, res) => {
     }
 
     const built = buildSaleReturnPrint(refund, printSetting);
-
+    built.lang = refund.lang || "en";
     const html = generateSaleInvoiceHTML(built);
 
     res.set({ "Content-Type": "text/html" });
@@ -160,9 +204,8 @@ const saleReturnPreview = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GENERATE SALE PDF
-========================================================= */
+// GENERATE SALE PDF
+
 const generateSalePdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -204,9 +247,8 @@ const generateSalePdf = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GENERATE SALE RETURN PDF
-========================================================= */
+// GENERATE SALE RETURN PDF
+
 const generateSaleReturnPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -221,6 +263,13 @@ const generateSaleReturnPdf = async (req, res) => {
     }
 
     const built = buildSaleReturnPrint(refund, printSetting);
+
+    built.lang = refund.lang || "en";
+
+    built.page = {
+      ...built.page,
+      isPdf: true,
+    };
 
     const html = generateSaleInvoiceHTML(built);
 
@@ -238,9 +287,9 @@ const generateSaleReturnPdf = async (req, res) => {
     res.status(500).json({ message: "PDF generation failed" });
   }
 };
-/* =========================================================
-   ✅ GET SALE INVOICE HTML (MASTER PRINT ENGINE)
-========================================================= */
+
+// GET SALE INVOICE HTML (MASTER PRINT ENGINE)
+
 const getSaleInvoiceHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -279,9 +328,8 @@ const getSaleInvoiceHtml = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GET SALE RETURN HTML
-========================================================= */
+// GET SALE RETURN HTML
+
 const getSaleReturnHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -302,7 +350,11 @@ const getSaleReturnHtml = async (req, res) => {
       return res.status(400).send("Print settings not found");
     }
 
-    const built = buildSaleReturnPrint(refund, printSetting);
+    const refundWithBalance = await attachCustomerTotalBalance(refund, userId);
+
+    const built = buildSaleReturnPrint(refundWithBalance, printSetting);
+
+    built.lang = req.query.lang || "en";
 
     const html = generateSaleInvoiceHTML(built);
 
@@ -314,9 +366,9 @@ const getSaleReturnHtml = async (req, res) => {
     return res.status(500).send("Failed to generate sale return HTML");
   }
 };
-/* =========================================================
-   ✅ PREVIEW SETTINGS HTML (LIVE SETTINGS PREVIEW)
-========================================================= */
+
+// PREVIEW SETTINGS HTML (LIVE SETTINGS PREVIEW)
+
 const generatePreviewSettingsHtml = async (req, res) => {
   try {
     const { type, settings, lang } = req.body;

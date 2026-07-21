@@ -1,4 +1,9 @@
 const PERMISSIONS = {
+  DASHBOARD: {
+    SUMMARY_CARDS: "dashboard.summary_cards",
+    RIGHT_PANEL: "dashboard.right_panel",
+  },
+
   SALES: {
     VIEW: "sales.view",
     CREATE: "sales.create",

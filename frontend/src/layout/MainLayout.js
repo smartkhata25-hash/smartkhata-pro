@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import TopHeader from './TopHeader';
 import Sidebar from './Sidebar';
@@ -31,13 +31,40 @@ const MainLayout = () => {
       .catch(() => {});
   }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(() => {
     const savedState = localStorage.getItem('rightPanelOpen');
     return savedState !== null ? JSON.parse(savedState) : true;
   });
 
+  const rightPanelRef = useRef(null);
   useEffect(() => {
     localStorage.setItem('rightPanelOpen', JSON.stringify(isRightPanelOpen));
+  }, [isRightPanelOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Notification icon پر click ہو تو outside-click اسے بند نہ کرے
+      if (event.target.closest('[data-right-panel-toggle="true"]')) {
+        return;
+      }
+
+      if (
+        isRightPanelOpen &&
+        rightPanelRef.current &&
+        !rightPanelRef.current.contains(event.target)
+      ) {
+        setIsRightPanelOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, [isRightPanelOpen]);
   const location = useLocation();
 
@@ -91,18 +118,20 @@ const MainLayout = () => {
 
             {/* 📱 Mobile Panel */}
             <div
+              ref={rightPanelRef}
               className={`
-        fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
-        transform transition-transform duration-300
-        ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
-        md:hidden
-      `}
+    fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
+    transform transition-transform duration-300
+    ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+    md:hidden
+  `}
             >
               <RightPanel />
             </div>
 
             {/* 💻 Desktop Panel */}
             <div
+              ref={rightPanelRef}
               className={`hidden md:block transition-all duration-300 ${
                 isRightPanelOpen ? 'w-64' : 'w-0'
               } overflow-hidden`}

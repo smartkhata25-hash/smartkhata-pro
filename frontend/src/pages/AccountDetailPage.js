@@ -1,35 +1,52 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getCashSummary, getAccountTransactions, getAccounts } from '../services/accountService';
 import AccountTransactionTable from '../components/AccountTransactionTable';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const AccountDetailPage = () => {
   const location = useLocation();
 
+  const navigate = useNavigate();
+
+  const canViewAccountTransactions = hasPermission('accounts.view_transactions');
+
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [txnCache, setTxnCache] = useState({});
+  const txnCacheRef = useRef({});
 
   const pathname = location.pathname;
   const isCashView = pathname === '/accounts/cash';
   const isBankView = pathname === '/accounts/bank';
 
-  const calculateBalanceFromTxns = (txns = []) => {
+  useEffect(() => {
+    if (!canViewAccountTransactions) {
+      navigate('/dashboard');
+    }
+  }, [canViewAccountTransactions, navigate]);
+
+  const calculateBalanceFromTxns = useCallback((txns = []) => {
     let bal = 0;
+
     txns.forEach((t) => {
-      bal += t.debit || 0;
-      bal -= t.credit || 0;
+      bal += Number(t.debit || 0);
+      bal -= Number(t.credit || 0);
     });
+
     return bal;
-  };
+  }, []);
 
   const loadSingleAccount = useCallback(
     async (account) => {
+      if (!canViewAccountTransactions) {
+        return;
+      }
+
       // ✅ CACHE CHECK
-      if (txnCache[account._id]) {
-        const cached = txnCache[account._id];
+      if (txnCacheRef.current[account._id]) {
+        const cached = txnCacheRef.current[account._id];
 
         setTransactions(cached);
 
@@ -45,11 +62,7 @@ const AccountDetailPage = () => {
       const txns = await getAccountTransactions(account._id);
       const safeTxns = Array.isArray(txns) ? txns : [];
 
-      // ✅ SAVE IN CACHE
-      setTxnCache((prev) => ({
-        ...prev,
-        [account._id]: safeTxns,
-      }));
+      txnCacheRef.current[account._id] = safeTxns;
 
       setTransactions(safeTxns);
 
@@ -58,11 +71,15 @@ const AccountDetailPage = () => {
         balance: calculateBalanceFromTxns(safeTxns),
       });
     },
-    [txnCache]
+    [canViewAccountTransactions, calculateBalanceFromTxns]
   );
 
   useEffect(() => {
     const loadData = async () => {
+      if (!canViewAccountTransactions) {
+        return;
+      }
+
       try {
         /* ================= CASH ================= */
         if (isCashView) {
@@ -80,35 +97,25 @@ const AccountDetailPage = () => {
         if (isBankView) {
           const all = await getAccounts();
 
-          // ✅ ONLY BANK + WALLETS (STRICT FILTER)
           const bankAccounts = all.filter(
             (a) => a.category === 'bank' || a.category === 'online' || a.category === 'wallet'
           );
-          // ✅ attach balance to each account
 
           const txnResults = await Promise.all(
             bankAccounts.map(async (acc) => {
-              // ✅ اگر cache میں ہے تو وہی use کرو
-              if (txnCache[acc._id]) {
-                return txnCache[acc._id];
+              if (txnCacheRef.current[acc._id]) {
+                return txnCacheRef.current[acc._id];
               }
 
-              // 🔄 نہیں ہے تو API call
               const txns = await getAccountTransactions(acc._id);
               return Array.isArray(txns) ? txns : [];
             })
           );
 
-          // ✅ SAVE ALL IN CACHE (MERGE, overwrite نہیں)
-          setTxnCache((prev) => {
-            const updated = { ...prev };
+          bankAccounts.forEach((acc, i) => {
+            const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
 
-            bankAccounts.forEach((acc, i) => {
-              const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
-              updated[acc._id] = txns;
-            });
-
-            return updated;
+            txnCacheRef.current[acc._id] = txns;
           });
 
           const accountsWithBalance = bankAccounts.map((acc, i) => {
@@ -143,7 +150,6 @@ const AccountDetailPage = () => {
             balance: calculateBalanceFromTxns(allTxns),
           };
 
-          // ✅ VERY IMPORTANT: accounts + selectedAccount same object
           setAccounts([combinedWithBalance, ...accountsWithBalance]);
           setSelectedAccount(combinedWithBalance);
           setTransactions(allTxns);
@@ -155,10 +161,21 @@ const AccountDetailPage = () => {
     };
 
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, isCashView, isBankView, loadSingleAccount]);
+  }, [
+    pathname,
+    isCashView,
+    isBankView,
+    loadSingleAccount,
+    canViewAccountTransactions,
+    calculateBalanceFromTxns,
+  ]);
 
   const handleAccountChange = async (e) => {
+    if (!canViewAccountTransactions) {
+      alert('You do not have permission to view account transactions');
+      return;
+    }
+
     const acc = accounts.find((a) => a._id === e.target.value);
     if (!acc) return;
 
@@ -167,7 +184,7 @@ const AccountDetailPage = () => {
       const real = accounts.filter((a) => !a.isCombined);
 
       for (const r of real) {
-        const cached = txnCache[r._id] || [];
+        const cached = txnCacheRef.current[r._id] || [];
         allTxns.push(...cached);
       }
 

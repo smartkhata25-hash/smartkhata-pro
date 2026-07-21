@@ -15,8 +15,19 @@ import {
 import { getPartyLedger } from '../services/partyLedgerService';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
+import { useNavigate } from 'react-router-dom';
 
 const PartiesPage = () => {
+  const navigate = useNavigate();
+
+  const canViewParties = hasPermission('parties.view');
+  const canCreateParties = hasPermission('parties.create');
+  const canEditParties = hasPermission('parties.edit');
+  const canDeleteParties = hasPermission('parties.delete');
+  const canRestoreParties = hasPermission('parties.restore');
+  const canConvertParties = hasPermission('parties.convert');
+  const canViewPartyLedger = hasPermission('parties.view_ledger');
   const [parties, setParties] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -41,7 +52,17 @@ const PartiesPage = () => {
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
+  useEffect(() => {
+    if (!canViewParties) {
+      navigate('/dashboard');
+    }
+  }, [canViewParties, navigate]);
+
   const loadParties = useCallback(async () => {
+    if (!canViewParties) {
+      return;
+    }
+
     try {
       const data = await fetchParties({
         status: 'all',
@@ -53,7 +74,7 @@ const PartiesPage = () => {
       setParties([]);
       alert(t('alerts.partyListLoadFailed'));
     }
-  }, []);
+  }, [canViewParties]);
   useEffect(() => {
     loadParties();
   }, [loadParties]);
@@ -66,6 +87,11 @@ const PartiesPage = () => {
 
   const loadPartyLedger = async (partyId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
     if (!partyId) return;
+
+    if (!canViewPartyLedger) {
+      alert('You do not have permission to view party ledger');
+      return;
+    }
 
     setLedgerLoading(true);
 
@@ -82,23 +108,45 @@ const PartiesPage = () => {
   };
 
   const handleAddClick = () => {
+    if (!canCreateParties) {
+      alert('You do not have permission to create parties');
+      return;
+    }
+
     setEditingParty(null);
     setShowForm(true);
   };
 
   const handleEditClick = (e, party) => {
     e.stopPropagation();
+
+    if (!canEditParties) {
+      alert('You do not have permission to edit parties');
+      return;
+    }
+
     setEditingParty(party);
     setShowForm(true);
   };
 
   const handleDeleteClick = (e, id) => {
     e.stopPropagation();
+
+    if (!canDeleteParties) {
+      alert('You do not have permission to delete parties');
+      return;
+    }
+
     setDeleteId(id);
     setShowConfirm(true);
   };
 
   const confirmDelete = async () => {
+    if (!canDeleteParties) {
+      alert('You do not have permission to delete parties');
+      return;
+    }
+
     try {
       if (!deleteId) return;
 
@@ -123,6 +171,11 @@ const PartiesPage = () => {
   const handleConvertToCustomer = async (e, party) => {
     e.stopPropagation();
 
+    if (!canConvertParties) {
+      alert('You do not have permission to convert parties');
+      return;
+    }
+
     if (!window.confirm(`${party.name} کو Customer میں convert کرنا ہے؟`)) return;
 
     try {
@@ -144,6 +197,11 @@ const PartiesPage = () => {
   const handleConvertToSupplier = async (e, party) => {
     e.stopPropagation();
 
+    if (!canConvertParties) {
+      alert('You do not have permission to convert parties');
+      return;
+    }
+
     if (!window.confirm(`${party.name} کو Supplier میں convert کرنا ہے؟`)) return;
 
     try {
@@ -164,6 +222,11 @@ const PartiesPage = () => {
 
   const handleRestoreParty = async (e, party) => {
     e.stopPropagation();
+
+    if (!canRestoreParties) {
+      alert('You do not have permission to restore parties');
+      return;
+    }
 
     if (party.hiddenReason !== 'deleted') {
       alert('صرف Delete کی گئی Party restore ہو سکتی ہے');
@@ -192,6 +255,16 @@ const PartiesPage = () => {
   };
 
   const handleFormSubmit = async (formData) => {
+    if (editingParty?._id && !canEditParties) {
+      alert('You do not have permission to edit parties');
+      return;
+    }
+
+    if (!editingParty?._id && !canCreateParties) {
+      alert('You do not have permission to create parties');
+      return;
+    }
+
     try {
       if (editingParty?._id) {
         await updateParty(editingParty._id, formData);
@@ -284,23 +357,24 @@ const PartiesPage = () => {
           }}
         >
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <button
-              onClick={handleAddClick}
-              style={{
-                height: 30,
-                padding: '0 10px',
-                borderRadius: 6,
-                border: '1px solid #2563eb',
-                background: '#2563eb',
-                color: '#fff',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              + {t('add')}
-            </button>
-
+            {canCreateParties && (
+              <button
+                onClick={handleAddClick}
+                style={{
+                  height: 30,
+                  padding: '0 10px',
+                  borderRadius: 6,
+                  border: '1px solid #2563eb',
+                  background: '#2563eb',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                + {t('add')}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('active')}
               style={{
@@ -389,40 +463,43 @@ const PartiesPage = () => {
           />
 
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            {activeTab === 'active' && searchTerm.trim() !== '' && filteredParties.length === 0 && (
-              <div
-                onClick={() => {
-                  setEditingParty(null);
-                  setShowForm(true);
+            {canCreateParties &&
+              activeTab === 'active' &&
+              searchTerm.trim() !== '' &&
+              filteredParties.length === 0 && (
+                <div
+                  onClick={() => {
+                    setEditingParty(null);
+                    setShowForm(true);
 
-                  setTimeout(() => {
-                    window.dispatchEvent(
-                      new CustomEvent('quick-party-fill', {
-                        detail: {
-                          name: searchTerm,
-                          role: 'both',
-                          openingBalance: 0,
-                        },
-                      })
-                    );
-                  }, 50);
-                }}
-                style={{
-                  marginBottom: 10,
-                  padding: 10,
-                  borderRadius: 8,
-                  border: '1px dashed #94a3b8',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: '#f8fafc',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#2563eb',
-                }}
-              >
-                + {t('add')} “{searchTerm}”
-              </div>
-            )}
+                    setTimeout(() => {
+                      window.dispatchEvent(
+                        new CustomEvent('quick-party-fill', {
+                          detail: {
+                            name: searchTerm,
+                            role: 'both',
+                            openingBalance: 0,
+                          },
+                        })
+                      );
+                    }, 50);
+                  }}
+                  style={{
+                    marginBottom: 10,
+                    padding: 10,
+                    borderRadius: 8,
+                    border: '1px dashed #94a3b8',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: '#f8fafc',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#2563eb',
+                  }}
+                >
+                  + {t('add')} “{searchTerm}”
+                </div>
+              )}
 
             {filteredParties.map((party) => {
               const balance = Number(party.balance || 0);
@@ -513,60 +590,67 @@ const PartiesPage = () => {
                       {/* ✅ Active Party Actions */}
                       {party.isActive !== false && (
                         <>
-                          <button
-                            onClick={(e) => handleEditClick(e, party)}
-                            style={iconButton('#3b82f6', '#eff6ff', '#1d4ed8')}
-                            title="Edit"
-                          >
-                            <FaEdit size={12} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleDeleteClick(e, party._id)}
-                            style={iconButton('#ef4444', '#fef2f2', '#b91c1c')}
-                            title="Delete"
-                          >
-                            <FaTrash size={12} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleConvertToCustomer(e, party)}
-                            style={iconButton('#16a34a', '#f0fdf4', '#15803d')}
-                            title="Convert to Customer"
-                          >
-                            C
-                          </button>
-
-                          <button
-                            onClick={(e) => handleConvertToSupplier(e, party)}
-                            style={iconButton('#7c3aed', '#f5f3ff', '#6d28d9')}
-                            title="Convert to Supplier"
-                          >
-                            S
-                          </button>
+                          {canEditParties && (
+                            <button
+                              onClick={(e) => handleEditClick(e, party)}
+                              style={iconButton('#3b82f6', '#eff6ff', '#1d4ed8')}
+                              title="Edit"
+                            >
+                              <FaEdit size={12} />
+                            </button>
+                          )}
+                          {canDeleteParties && (
+                            <button
+                              onClick={(e) => handleDeleteClick(e, party._id)}
+                              style={iconButton('#ef4444', '#fef2f2', '#b91c1c')}
+                              title="Delete"
+                            >
+                              <FaTrash size={12} />
+                            </button>
+                          )}
+                          {canConvertParties && (
+                            <button
+                              onClick={(e) => handleConvertToCustomer(e, party)}
+                              style={iconButton('#16a34a', '#f0fdf4', '#15803d')}
+                              title="Convert to Customer"
+                            >
+                              C
+                            </button>
+                          )}
+                          {canConvertParties && (
+                            <button
+                              onClick={(e) => handleConvertToSupplier(e, party)}
+                              style={iconButton('#7c3aed', '#f5f3ff', '#6d28d9')}
+                              title="Convert to Supplier"
+                            >
+                              S
+                            </button>
+                          )}
                         </>
                       )}
 
                       {/* ✅ Restore صرف Deleted Party */}
-                      {party.isActive === false && party.hiddenReason === 'deleted' && (
-                        <button
-                          onClick={(e) => handleRestoreParty(e, party)}
-                          style={{
-                            height: 26,
-                            padding: '0 8px',
-                            borderRadius: 6,
-                            border: '1px solid #16a34a',
-                            background: '#f0fdf4',
-                            color: '#15803d',
-                            cursor: 'pointer',
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                          title="Restore Party"
-                        >
-                          Restore
-                        </button>
-                      )}
+                      {canRestoreParties &&
+                        party.isActive === false &&
+                        party.hiddenReason === 'deleted' && (
+                          <button
+                            onClick={(e) => handleRestoreParty(e, party)}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              borderRadius: 6,
+                              border: '1px solid #16a34a',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                            title="Restore Party"
+                          >
+                            Restore
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
@@ -596,7 +680,7 @@ const PartiesPage = () => {
             <div style={{ textAlign: 'center', marginTop: 40 }}>{t('ledger.loadingLedger')}</div>
           )}
 
-          {!ledgerLoading && ledgerData && (
+          {canViewPartyLedger && !ledgerLoading && ledgerData && (
             <>
               <PartyLedgerHeader
                 parties={parties.filter((party) =>

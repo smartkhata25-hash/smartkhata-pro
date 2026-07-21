@@ -24,6 +24,7 @@ import { FaEdit, FaTrash } from 'react-icons/fa';
 
 import { getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
+import { hasPermission } from '../utils/permissionHelper';
 
 const CustomersPage = () => {
   const [customers, setCustomers] = useState([]);
@@ -56,8 +57,26 @@ const CustomersPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const canViewCustomers = hasPermission('customers.view');
+  const canCreateCustomers = hasPermission('customers.create');
+  const canEditCustomers = hasPermission('customers.edit');
+  const canDeleteCustomers = hasPermission('customers.delete');
+  const canRestoreCustomers = hasPermission('customers.restore');
+  const canMergeCustomers = hasPermission('customers.merge');
+  const canConvertCustomers = hasPermission('customers.convert');
+  const canViewCustomerLedger = hasPermission('customers.view_ledger');
   const restoredRef = useRef(false);
+
+  useEffect(() => {
+    if (!canViewCustomers) {
+      navigate('/dashboard');
+    }
+  }, [canViewCustomers, navigate]);
   const loadCustomers = useCallback(async () => {
+    if (!canViewCustomers) {
+      return;
+    }
+
     try {
       const data = await getCustomers(token, {
         status: 'all',
@@ -68,7 +87,7 @@ const CustomersPage = () => {
       console.error(t('alerts.customersLoadFailed'), error);
       setCustomers([]);
     }
-  }, [token]);
+  }, [token, canViewCustomers]);
 
   useEffect(() => {
     loadCustomers();
@@ -106,17 +125,23 @@ const CustomersPage = () => {
     const params = new URLSearchParams(location.search);
 
     if (params.get('new') === 'true') {
-      setEditingCustomer(null);
-      setShowForm(true);
+      if (canCreateCustomers) {
+        setEditingCustomer(null);
+        setShowForm(true);
+      }
 
-      // URL صاف کر دو تاکہ refresh پر form نہ کھلے
       navigate('/customers', { replace: true });
     }
-  }, [location.search, navigate]);
+  }, [location.search, navigate, canCreateCustomers]);
 
   const loadCustomerLedger = useCallback(
     async (customerId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
       if (!customerId) return;
+
+      if (!canViewCustomerLedger) {
+        alert('You do not have permission to view customer ledger');
+        return;
+      }
 
       setLedgerLoading(true);
 
@@ -138,7 +163,7 @@ const CustomersPage = () => {
 
       setLedgerLoading(false);
     },
-    [customers, ledgerStartDate, ledgerEndDate]
+    [customers, ledgerStartDate, ledgerEndDate, canViewCustomerLedger]
   );
 
   useEffect(() => {
@@ -173,23 +198,45 @@ const CustomersPage = () => {
   }, [customers, loadCustomerLedger]);
 
   const handleAddClick = () => {
+    if (!canCreateCustomers) {
+      alert('You do not have permission to create customers');
+      return;
+    }
+
     setEditingCustomer(null);
     setShowForm(true);
   };
 
   const handleEditClick = (e, customer) => {
     e.stopPropagation();
+
+    if (!canEditCustomers) {
+      alert('You do not have permission to edit customers');
+      return;
+    }
+
     setEditingCustomer(customer);
     setShowForm(true);
   };
 
   const handleDeleteClick = async (e, id) => {
     e.stopPropagation();
+
+    if (!canDeleteCustomers) {
+      alert('You do not have permission to delete customers');
+      return;
+    }
+
     setDeleteId(id);
     setShowConfirm(true);
   };
 
   const confirmDelete = async () => {
+    if (!canDeleteCustomers) {
+      alert('You do not have permission to delete customers');
+      return;
+    }
+
     try {
       if (deleteId) {
         await deleteCustomer(deleteId);
@@ -205,6 +252,11 @@ const CustomersPage = () => {
 
   const handleConvertToParty = async (e, customer) => {
     e.stopPropagation();
+
+    if (!canConvertCustomers) {
+      alert('You do not have permission to convert customers');
+      return;
+    }
 
     if (!window.confirm(`${customer.name} کو Party میں convert کرنا ہے؟`)) return;
 
@@ -226,6 +278,11 @@ const CustomersPage = () => {
 
   const handleRestoreCustomer = async (e, customer) => {
     e.stopPropagation();
+
+    if (!canRestoreCustomers) {
+      alert('You do not have permission to restore customers');
+      return;
+    }
 
     if (customer.hiddenReason !== 'deleted') {
       alert('صرف Delete کیا ہوا Customer restore ہو سکتا ہے');
@@ -259,6 +316,16 @@ const CustomersPage = () => {
   };
 
   const handleFormSubmit = async (formData) => {
+    if (editingCustomer && !canEditCustomers) {
+      alert('You do not have permission to edit customers');
+      return;
+    }
+
+    if (!editingCustomer && !canCreateCustomers) {
+      alert('You do not have permission to create customers');
+      return;
+    }
+
     try {
       const finalData = {
         ...formData,
@@ -478,23 +545,24 @@ const CustomersPage = () => {
               flexWrap: 'wrap',
             }}
           >
-            <button
-              onClick={handleAddClick}
-              style={{
-                height: 30,
-                padding: '0 10px',
-                borderRadius: 6,
-                border: '1px solid #2563eb',
-                background: '#2563eb',
-                color: '#ffffff',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {t('add')}
-            </button>
-
+            {canCreateCustomers && (
+              <button
+                onClick={handleAddClick}
+                style={{
+                  height: 30,
+                  padding: '0 10px',
+                  borderRadius: 6,
+                  border: '1px solid #2563eb',
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {t('add')}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('active')}
               style={{
@@ -635,41 +703,44 @@ const CustomersPage = () => {
               minHeight: 0,
             }}
           >
-            {activeTab === 'active' && searchTerm.trim() !== '' && activeCustomers.length === 0 && (
-              <div
-                style={{
-                  marginBottom: 10,
-                  padding: '10px',
-                  borderRadius: 8,
-                  border: '1px dashed #94a3b8',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: '#f8fafc',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: '#2563eb',
-                }}
-                onClick={() => {
-                  setEditingCustomer(null);
+            {canCreateCustomers &&
+              activeTab === 'active' &&
+              searchTerm.trim() !== '' &&
+              activeCustomers.length === 0 && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    padding: '10px',
+                    borderRadius: 8,
+                    border: '1px dashed #94a3b8',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: '#f8fafc',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#2563eb',
+                  }}
+                  onClick={() => {
+                    setEditingCustomer(null);
 
-                  setShowForm(true);
+                    setShowForm(true);
 
-                  setTimeout(() => {
-                    const event = new CustomEvent('quick-customer-fill', {
-                      detail: {
-                        name: searchTerm,
-                        type: 'regular',
-                        openingBalance: 0,
-                      },
-                    });
+                    setTimeout(() => {
+                      const event = new CustomEvent('quick-customer-fill', {
+                        detail: {
+                          name: searchTerm,
+                          type: 'regular',
+                          openingBalance: 0,
+                        },
+                      });
 
-                    window.dispatchEvent(event);
-                  }, 50);
-                }}
-              >
-                + {t('customer.addNew')} “{searchTerm}”
-              </div>
-            )}
+                      window.dispatchEvent(event);
+                    }, 50);
+                  }}
+                >
+                  + {t('customer.addNew')} “{searchTerm}”
+                </div>
+              )}
             {(activeTab === 'active' ? activeCustomers : hiddenCustomers).map((customer) => {
               const balance = Number(customer.balance) || 0;
               const balanceColor = balance > 0 ? '#16a34a' : balance < 0 ? '#dc2626' : '#6b7280';
@@ -774,65 +845,69 @@ const CustomersPage = () => {
                       {/* ✅ ACTIVE CUSTOMER ACTIONS */}
                       {customer.isActive !== false && (
                         <>
-                          <button
-                            onClick={(e) => handleEditClick(e, customer)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #3b82f6',
-                              background: '#eff6ff',
-                              color: '#1d4ed8',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}
-                            title="Edit"
-                          >
-                            <FaEdit size={12} />
-                          </button>
+                          {canEditCustomers && (
+                            <button
+                              onClick={(e) => handleEditClick(e, customer)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #3b82f6',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                              title="Edit"
+                            >
+                              <FaEdit size={12} />
+                            </button>
+                          )}
+                          {canDeleteCustomers && (
+                            <button
+                              onClick={(e) => handleDeleteClick(e, customer._id)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #ef4444',
+                                background: '#fef2f2',
+                                color: '#b91c1c',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                              title="Delete"
+                            >
+                              <FaTrash size={12} />
+                            </button>
+                          )}
 
-                          <button
-                            onClick={(e) => handleDeleteClick(e, customer._id)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #ef4444',
-                              background: '#fef2f2',
-                              color: '#b91c1c',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}
-                            title="Delete"
-                          >
-                            <FaTrash size={12} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleConvertToParty(e, customer)}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              border: '1px solid #7c3aed',
-                              background: '#f5f3ff',
-                              color: '#6d28d9',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              fontWeight: 800,
-                              fontSize: 12,
-                            }}
-                            title="Convert to Party"
-                          >
-                            P
-                          </button>
-
+                          {canConvertCustomers && (
+                            <button
+                              onClick={(e) => handleConvertToParty(e, customer)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: '1px solid #7c3aed',
+                                background: '#f5f3ff',
+                                color: '#6d28d9',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                fontWeight: 800,
+                                fontSize: 12,
+                              }}
+                              title="Convert to Party"
+                            >
+                              P
+                            </button>
+                          )}
                           {customer.phone && (
                             <button
                               onClick={(e) => {
@@ -864,25 +939,27 @@ const CustomersPage = () => {
                       )}
 
                       {/* ✅ RESTORE ONLY DELETED CUSTOMER */}
-                      {customer.isActive === false && customer.hiddenReason === 'deleted' && (
-                        <button
-                          onClick={(e) => handleRestoreCustomer(e, customer)}
-                          style={{
-                            height: 26,
-                            padding: '0 8px',
-                            borderRadius: 6,
-                            border: '1px solid #16a34a',
-                            background: '#f0fdf4',
-                            color: '#15803d',
-                            cursor: 'pointer',
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                          title="Restore Customer"
-                        >
-                          Restore
-                        </button>
-                      )}
+                      {canRestoreCustomers &&
+                        customer.isActive === false &&
+                        customer.hiddenReason === 'deleted' && (
+                          <button
+                            onClick={(e) => handleRestoreCustomer(e, customer)}
+                            style={{
+                              height: 26,
+                              padding: '0 8px',
+                              borderRadius: 6,
+                              border: '1px solid #16a34a',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                            title="Restore Customer"
+                          >
+                            Restore
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
@@ -911,7 +988,7 @@ const CustomersPage = () => {
             <div style={{ textAlign: 'center', marginTop: 40 }}>{t('ledger.loading')}</div>
           )}
 
-          {!ledgerLoading && ledgerData && (
+          {canViewCustomerLedger && !ledgerLoading && ledgerData && (
             <>
               {/* 🔒 FIXED LEDGER HEADER */}
               <CustomerLedgerHeader
@@ -1142,6 +1219,11 @@ const CustomersPage = () => {
 
               <button
                 onClick={async () => {
+                  if (!canMergeCustomers) {
+                    alert('You do not have permission to merge customers');
+                    return;
+                  }
+
                   try {
                     await confirmMergeCustomers(mergeData, token);
 

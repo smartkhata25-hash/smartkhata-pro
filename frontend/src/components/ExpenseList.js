@@ -1,33 +1,55 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { getAllExpenses, deleteExpense } from '../services/expenseService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
 
 const ExpenseList = () => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const canViewExpenses = hasPermission('expenses.view');
+  const canCreateExpenses = hasPermission('expenses.create');
+  const canEditExpenses = hasPermission('expenses.edit');
+  const canDeleteExpenses = hasPermission('expenses.delete');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (!canViewExpenses) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const data = await getAllExpenses();
-      setExpenses(data);
+      setExpenses(Array.isArray(data) ? data : []);
     } catch (err) {
       alert(t('alerts.expenseLoadError'));
+      setExpenses([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [canViewExpenses]);
 
   useEffect(() => {
+    if (!canViewExpenses) {
+      navigate('/dashboard');
+      return;
+    }
+
     fetchData();
-  }, []);
+  }, [canViewExpenses, navigate, fetchData]);
 
   const handleDelete = async (id) => {
+    if (!canDeleteExpenses) {
+      alert('You do not have permission to delete expenses');
+      return;
+    }
+
     if (!window.confirm(t('alerts.confirmDeleteExpense'))) return;
+
     try {
       await deleteExpense(id);
-      fetchData(); // refresh list
+      fetchData();
     } catch (err) {
       alert(t('alerts.expenseDeleteFailed'));
     }
@@ -37,12 +59,14 @@ const ExpenseList = () => {
     <div className="p-6 bg-white rounded shadow-md">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">{t('expense.allExpenses')}</h2>
-        <button
-          onClick={() => navigate('/add-expense')}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-        >
-          + {t('expense.new')}
-        </button>
+        {canCreateExpenses && (
+          <button
+            onClick={() => navigate('/add-expense')}
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+          >
+            + {t('expense.new')}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -84,19 +108,22 @@ const ExpenseList = () => {
                   <td className="p-2 border">{Number(e.amount).toFixed(2)}</td>
                   <td className="p-2 border">
                     <div className="flex gap-2 justify-center">
-                      <button
-                        onClick={() => navigate(`/edit-expense/${e._id}`)}
-                        className="bg-yellow-500 text-white px-3 py-1 rounded"
-                      >
-                        {t('common.edit')}
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(e._id)}
-                        className="bg-red-600 text-white px-3 py-1 rounded"
-                      >
-                        {t('common.delete')}
-                      </button>
+                      {canEditExpenses && (
+                        <button
+                          onClick={() => navigate(`/edit-expense/${e._id}`)}
+                          className="bg-yellow-500 text-white px-3 py-1 rounded"
+                        >
+                          {t('common.edit')}
+                        </button>
+                      )}
+                      {canDeleteExpenses && (
+                        <button
+                          onClick={() => handleDelete(e._id)}
+                          className="bg-red-600 text-white px-3 py-1 rounded"
+                        >
+                          {t('common.delete')}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

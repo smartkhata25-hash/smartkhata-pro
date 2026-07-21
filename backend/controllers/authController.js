@@ -270,7 +270,7 @@ const loginUser = async (req, res) => {
         },
         process.env.JWT_SECRET,
         {
-          expiresIn: "30d",
+          expiresIn: "180d",
         },
       );
 
@@ -416,7 +416,7 @@ const loginUser = async (req, res) => {
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "30d",
+        expiresIn: "180d",
       },
     );
 

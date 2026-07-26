@@ -524,70 +524,147 @@ exports.createInvoice = async (req, res) => {
   }
 };
 
-// ✅ Get All Invoices (List Page)
+// ✅ Get Invoices - Fast Pagination List
 exports.getInvoices = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    // ✅ sirf active customers
-    const activeCustomers = await Customer.find({
-      createdBy: userId,
-      isActive: true,
-    }).select("_id");
+    // ✅ Pagination
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
 
-    const activeCustomerIds = activeCustomers.map((c) => c._id);
+    const requestedLimit = parseInt(req.query.limit || "50", 10);
 
-    const activeParties = await Party.find({
-      userId,
-      isDeleted: false,
-      isActive: true,
-    }).select("_id");
+    // ✅ Maximum 100 records at one time
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
 
-    const activePartyIds = activeParties.map((p) => p._id);
+    const skip = (page - 1) * limit;
 
-    const invoices = await Invoice.find({
+    // ✅ Filters
+    const search = (req.query.search || "").trim();
+    const status = (req.query.status || "").trim();
+
+    // ✅ Search text safety
+    const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // ✅ Active customers and parties together
+    const [activeCustomers, activeParties] = await Promise.all([
+      Customer.find({
+        createdBy: userId,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+
+      Party.find({
+        userId,
+        isDeleted: false,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+    ]);
+
+    const activeCustomerIds = activeCustomers.map((customer) => customer._id);
+    const activePartyIds = activeParties.map((party) => party._id);
+
+    // ✅ Main invoice filter
+    const filter = {
       createdBy: userId,
       isDeleted: { $ne: true },
 
-      $or: [
-        { customerId: { $in: activeCustomerIds } },
-        { partyId: { $in: activePartyIds } },
+      $and: [
+        {
+          $or: [
+            { customerId: { $in: activeCustomerIds } },
+            { partyId: { $in: activePartyIds } },
+          ],
+        },
       ],
-    })
-      .populate("items.productId", "name unit")
-      .sort({ createdAt: -1 })
-      .lean();
+    };
 
-    const formatted = [];
+    // ✅ Status filter
+    if (status) {
+      filter.status = status;
+    }
 
-    for (const inv of invoices) {
-      const journal = await JournalEntry.findOne({
-        referenceId: inv._id,
-        sourceType: "receive_payment",
-        isDeleted: false,
-      }).populate("lines.account", "name");
-
-      const paymentLine = journal?.lines?.find(
-        (l) => l.paymentType && l.account,
-      );
-
-      formatted.push({
-        ...inv,
-
-        attachments: formatAttachments(inv),
-
-        attachmentFullUrl: formatAttachments(inv)[0]?.fullUrl || "",
-
-        paymentMode: paymentLine?.paymentType || inv.paymentType || "-",
-
-        accountName: paymentLine?.account?.name || "-",
+    // ✅ Search by bill number, customer/party name or phone
+    if (safeSearch) {
+      filter.$and.push({
+        $or: [
+          {
+            billNo: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            customerName: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            customerPhone: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+        ],
       });
     }
 
-    res.json(formatted);
+    // ✅ List data and total count together
+    const [invoices, totalInvoices] = await Promise.all([
+      Invoice.find(filter)
+        // ✅ Only fields required on Sales Invoice List
+        .select(
+          [
+            "billNo",
+            "invoiceDate",
+            "customerName",
+            "customerPhone",
+            "customerId",
+            "partyId",
+            "totalAmount",
+            "paidAmount",
+            "status",
+            "paymentType",
+            "isOpening",
+            "createdAt",
+          ].join(" "),
+        )
+        .sort({
+          createdAt: -1,
+          _id: -1,
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Invoice.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(Math.ceil(totalInvoices / limit), 1);
+
+    return res.json({
+      invoices,
+
+      pagination: {
+        page,
+        limit,
+        totalInvoices,
+        totalPages,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+      },
+    });
   } catch (error) {
     console.error("Failed to fetch invoices:", error);
-    res.status(500).json({ message: "Failed to fetch invoices", error });
+
+    return res.status(500).json({
+      message: "Failed to fetch invoices",
+      error: error.message,
+    });
   }
 };
 

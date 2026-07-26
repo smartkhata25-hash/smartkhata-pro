@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
@@ -8,9 +8,9 @@ import { hasPermission } from '../utils/permissionHelper';
 
 const RefundInvoiceList = () => {
   const [refunds, setRefunds] = useState([]);
-  const [filtered, setFiltered] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [parties, setParties] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   const [filters, setFilters] = useState({
     customer: '',
@@ -21,142 +21,189 @@ const RefundInvoiceList = () => {
   });
 
   const [currentPage, setCurrentPage] = useState(1);
+
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 10,
+    totalRefunds: 0,
+    totalPages: 1,
+    hasPreviousPage: false,
+    hasNextPage: false,
+  });
+
   const itemsPerPage = 10;
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+
   const canViewRefunds = hasPermission('refunds.view');
   const canCreateRefunds = hasPermission('refunds.create');
   const canEditRefunds = hasPermission('refunds.edit');
   const canDeleteRefunds = hasPermission('refunds.delete');
 
-  const getCustomerOrPartyName = useCallback(
-    (refund) => {
-      const partyId = typeof refund.partyId === 'object' ? refund.partyId?._id : refund.partyId;
-      const customerId =
-        typeof refund.customerId === 'object' ? refund.customerId?._id : refund.customerId;
+  // ✅ List میں محفوظ customer/party name دکھانے کے لیے
+  const getCustomerOrPartyName = useCallback((refund) => {
+    if (refund.partyId) {
+      return refund.customerName ? `${refund.customerName} 🟣 Party` : '-';
+    }
 
-      if (partyId) {
-        const partyName =
-          refund.partyId?.name ||
-          parties.find((party) => String(party._id) === String(partyId))?.name ||
-          refund.customerName;
+    return refund.customerName || '-';
+  }, []);
 
-        return partyName ? `${partyName} 🟣 Party` : '-';
-      }
-
-      if (customerId) {
-        const customerName =
-          refund.customerId?.name ||
-          customers.find((customer) => String(customer._id) === String(customerId))?.name ||
-          refund.customerName;
-
-        return customerName || '-';
-      }
-
-      return refund.customerName || '-';
-    },
-    [customers, parties]
-  );
-
-  const fetchData = useCallback(async () => {
+  // ✅ Customer اور Party filter options صرف ایک بار load ہوں گے
+  const fetchFilterOptions = useCallback(async () => {
     try {
-      const refundData = await getAllRefunds(token);
-      const customerData = await fetchCustomers(token);
-      const partyData = await fetchSaleParties(token);
+      const [customerData, partyData] = await Promise.all([
+        fetchCustomers(token),
+        fetchSaleParties(token),
+      ]);
 
-      setRefunds(Array.isArray(refundData) ? refundData : []);
-      setCustomers(Array.isArray(customerData) ? customerData : []);
-      setParties(Array.isArray(partyData) ? partyData : []);
+      setCustomers(
+        Array.isArray(customerData)
+          ? customerData
+          : Array.isArray(customerData?.customers)
+            ? customerData.customers
+            : []
+      );
+
+      setParties(
+        Array.isArray(partyData)
+          ? partyData
+          : Array.isArray(partyData?.parties)
+            ? partyData.parties
+            : []
+      );
     } catch (err) {
-      alert(err.message);
+      console.error('❌ Refund filter options error:', err);
     }
   }, [token]);
 
+  // ✅ Backend pagination اور filters کے ساتھ refunds load کریں
+  const fetchRefunds = useCallback(
+    async (requestedPage = currentPage) => {
+      try {
+        setLoading(true);
+
+        const data = await getAllRefunds(token, {
+          page: requestedPage,
+          limit: itemsPerPage,
+          search: filters.search,
+          customer: filters.customer,
+          paymentType: filters.paymentType,
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+        });
+
+        setRefunds(Array.isArray(data?.refunds) ? data.refunds : []);
+
+        setPagination(
+          data?.pagination || {
+            page: requestedPage,
+            limit: itemsPerPage,
+            totalRefunds: 0,
+            totalPages: 1,
+            hasPreviousPage: requestedPage > 1,
+            hasNextPage: false,
+          }
+        );
+      } catch (err) {
+        console.error('❌ Refund invoices fetch error:', err.response?.data || err.message);
+
+        setRefunds([]);
+
+        alert(err.response?.data?.error || err.message || t('alerts.emptyServerResponse'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      token,
+      currentPage,
+      filters.search,
+      filters.customer,
+      filters.paymentType,
+      filters.fromDate,
+      filters.toDate,
+    ]
+  );
+
+  // ✅ Permission check اور dropdown data
   useEffect(() => {
     if (!canViewRefunds) {
       navigate('/dashboard');
       return;
     }
 
-    fetchData();
+    fetchFilterOptions();
+  }, [canViewRefunds, navigate, fetchFilterOptions]);
 
-    const interval = setInterval(fetchData, 30000);
-
-    return () => clearInterval(interval);
-  }, [fetchData, canViewRefunds, navigate]);
-
+  // ✅ Search پر تھوڑا delay، باقی filters فوراً apply ہوں گے
   useEffect(() => {
-    let result = [...refunds];
+    if (!canViewRefunds) return;
 
-    if (filters.customer) {
-      result = result.filter((refund) => {
-        const partyId = typeof refund.partyId === 'object' ? refund.partyId?._id : refund.partyId;
-        const customerId =
-          typeof refund.customerId === 'object' ? refund.customerId?._id : refund.customerId;
+    const timer = setTimeout(() => {
+      fetchRefunds(currentPage);
+    }, 400);
 
-        return (
-          String(customerId || '') === String(filters.customer) ||
-          String(partyId || '') === String(filters.customer)
-        );
-      });
-    }
+    return () => clearTimeout(timer);
+  }, [
+    canViewRefunds,
+    currentPage,
+    filters.search,
+    filters.customer,
+    filters.paymentType,
+    filters.fromDate,
+    filters.toDate,
+    fetchRefunds,
+  ]);
 
-    if (filters.paymentType) {
-      result = result.filter(
-        (refund) =>
-          String(refund.paymentType || '').toLowerCase() ===
-          String(filters.paymentType || '').toLowerCase()
-      );
-    }
+  const updateFilter = (name, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
 
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-
-      result = result.filter(
-        (refund) =>
-          refund.billNo?.toLowerCase().includes(q) ||
-          getCustomerOrPartyName(refund).toLowerCase().includes(q) ||
-          refund.customerName?.toLowerCase().includes(q) ||
-          refund.customerPhone?.includes(q) ||
-          refund.notes?.toLowerCase().includes(q) ||
-          String(refund.totalAmount || '').includes(q)
-      );
-    }
-
-    if (filters.fromDate) {
-      result = result.filter(
-        (refund) => new Date(refund.invoiceDate) >= new Date(filters.fromDate)
-      );
-    }
-
-    if (filters.toDate) {
-      result = result.filter((refund) => new Date(refund.invoiceDate) <= new Date(filters.toDate));
-    }
-
-    setFiltered(result);
     setCurrentPage(1);
-  }, [filters, refunds, getCustomerOrPartyName]);
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      customer: '',
+      paymentType: '',
+      search: '',
+      fromDate: '',
+      toDate: '',
+    });
+
+    setCurrentPage(1);
+  };
 
   const handleDelete = async (id) => {
     if (!canDeleteRefunds) {
       alert('You do not have permission to delete sale refunds');
       return;
     }
-    if (!window.confirm(t('alerts.confirmDeletePayment'))) return;
+
+    if (!window.confirm(t('alerts.confirmDeletePayment'))) {
+      return;
+    }
 
     try {
       await deleteRefund(id, token);
-      fetchData();
+
+      // ✅ اگر موجودہ page پر صرف ایک record تھا
+      // تو delete کے بعد پچھلے page پر جائیں
+      if (refunds.length === 1 && currentPage > 1) {
+        setCurrentPage((prev) => prev - 1);
+      } else {
+        await fetchRefunds(currentPage);
+      }
     } catch (err) {
-      alert(t('alerts.deletePaymentFailed') + ': ' + err.message);
+      console.error('❌ Delete Refund Error:', err.response?.data || err.message);
+
+      alert(`${t('alerts.deletePaymentFailed')}: ${err.response?.data?.error || err.message}`);
     }
   };
-
-  const startIdx = (currentPage - 1) * itemsPerPage;
-  const endIdx = startIdx + itemsPerPage;
-  const currentItems = filtered.slice(startIdx, endIdx);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
 
   return (
     <div className="p-4 bg-white shadow rounded">
@@ -165,6 +212,7 @@ const RefundInvoiceList = () => {
 
         {canCreateRefunds && (
           <button
+            type="button"
             className="bg-blue-600 text-white px-4 py-2 rounded"
             onClick={() => navigate('/refunds/new')}
           >
@@ -176,7 +224,7 @@ const RefundInvoiceList = () => {
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
         <select
           value={filters.customer}
-          onChange={(e) => setFilters((prev) => ({ ...prev, customer: e.target.value }))}
+          onChange={(e) => updateFilter('customer', e.target.value)}
           className="border rounded p-2"
         >
           <option value="">Customers / Parties</option>
@@ -196,114 +244,143 @@ const RefundInvoiceList = () => {
 
         <select
           value={filters.paymentType}
-          onChange={(e) => setFilters((prev) => ({ ...prev, paymentType: e.target.value }))}
+          onChange={(e) => updateFilter('paymentType', e.target.value)}
           className="border rounded p-2"
         >
           <option value="">{t('payment.allTypes')}</option>
+
           <option value="cash">{t('purchase.cashRefund')}</option>
+
           <option value="credit">{t('purchase.adjustCredit')}</option>
+
           <option value="bank">{t('bank')}</option>
+
           <option value="online">{t('payment.online')}</option>
+
           <option value="cheque">{t('payment.cheque')}</option>
         </select>
 
         <input
           type="date"
           value={filters.fromDate}
-          onChange={(e) => setFilters((prev) => ({ ...prev, fromDate: e.target.value }))}
+          onChange={(e) => updateFilter('fromDate', e.target.value)}
           className="border rounded p-2"
         />
 
         <input
           type="date"
           value={filters.toDate}
-          onChange={(e) => setFilters((prev) => ({ ...prev, toDate: e.target.value }))}
+          onChange={(e) => updateFilter('toDate', e.target.value)}
           className="border rounded p-2"
         />
 
         <input
           type="text"
           value={filters.search}
-          onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+          onChange={(e) => updateFilter('search', e.target.value)}
           placeholder={t('search')}
           className="border rounded p-2"
         />
 
         <button
           type="button"
-          onClick={() =>
-            setFilters({
-              customer: '',
-              paymentType: '',
-              search: '',
-              fromDate: '',
-              toDate: '',
-            })
-          }
+          onClick={clearFilters}
           className="bg-gray-200 text-black rounded px-4 py-2 hover:bg-gray-300"
         >
           🧹 {t('clear')}
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="flex justify-between items-center mb-3 text-sm text-gray-600">
+        <span>Total Refunds: {pagination.totalRefunds}</span>
+
+        {loading && <span>{t('common.loading')}</span>}
+      </div>
+
+      <div
+        className="overflow-x-auto"
+        style={{
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         <table className="w-full border text-sm">
           <thead>
             <tr className="bg-gray-100">
               <th className="border p-2">{t('date')}</th>
+
               <th className="border p-2">{t('billNo')}</th>
+
               <th className="border p-2">{t('customer')}</th>
+
               <th className="border p-2">{t('amount')}</th>
+
               <th className="border p-2">{t('paymentType')}</th>
+
               <th className="border p-2">{t('description')}</th>
+
               <th className="border p-2">{t('common.actions')}</th>
             </tr>
           </thead>
 
           <tbody>
-            {currentItems.map((refund) => (
-              <tr key={refund._id} className="text-center">
-                <td className="border p-2">
-                  {refund.invoiceDate ? new Date(refund.invoiceDate).toLocaleDateString() : '-'}
-                </td>
+            {!loading &&
+              refunds.map((refund) => (
+                <tr key={refund._id} className="text-center">
+                  <td className="border p-2">
+                    {refund.invoiceDate ? new Date(refund.invoiceDate).toLocaleDateString() : '-'}
+                  </td>
 
-                <td className="border p-2">{refund.billNo || '-'}</td>
+                  <td className="border p-2">{refund.billNo || '-'}</td>
 
-                <td className="border p-2">{getCustomerOrPartyName(refund)}</td>
+                  <td className="border p-2">{getCustomerOrPartyName(refund)}</td>
 
-                <td className="border p-2 text-center">
-                  {Number(refund.totalAmount || 0).toFixed(2)}
-                </td>
+                  <td className="border p-2 text-center">
+                    Rs. {Number(refund.totalAmount || 0).toFixed(2)}
+                  </td>
 
-                <td className="border p-2 capitalize">{refund.paymentType || '-'}</td>
+                  <td className="border p-2 capitalize">{refund.paymentType || '-'}</td>
 
-                <td className="border p-2">{refund.notes || '-'}</td>
+                  <td className="border p-2">{refund.notes || '-'}</td>
 
-                <td className="border p-2">
-                  <div className="flex gap-2 justify-center">
-                    {canEditRefunds && (
-                      <button
-                        className="bg-yellow-400 px-2 py-1 rounded"
-                        onClick={() => navigate(`/refunds/edit/${refund._id}`)}
-                      >
-                        {t('edit')}
-                      </button>
-                    )}
+                  <td className="border p-2">
+                    <div className="flex gap-2 justify-center">
+                      {canEditRefunds && (
+                        <button
+                          type="button"
+                          className="bg-yellow-400 px-2 py-1 rounded"
+                          onClick={() => navigate(`/refunds/edit/${refund._id}`)}
+                        >
+                          {t('edit')}
+                        </button>
+                      )}
 
-                    {canDeleteRefunds && (
-                      <button
-                        className="bg-red-600 text-white px-2 py-1 rounded"
-                        onClick={() => handleDelete(refund._id)}
-                      >
-                        {t('delete')}
-                      </button>
-                    )}
-                  </div>
+                      {canDeleteRefunds && (
+                        <button
+                          type="button"
+                          className="bg-red-600 text-white px-2 py-1 rounded"
+                          onClick={() => handleDelete(refund._id)}
+                        >
+                          {t('delete')}
+                        </button>
+                      )}
+
+                      {!canEditRefunds && !canDeleteRefunds && (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+            {loading && (
+              <tr>
+                <td colSpan="7" className="text-center p-4">
+                  {t('common.loading')}
                 </td>
               </tr>
-            ))}
+            )}
 
-            {currentItems.length === 0 && (
+            {!loading && refunds.length === 0 && (
               <tr>
                 <td colSpan="7" className="text-center p-4">
                   {t('common.noRecords')}
@@ -314,25 +391,25 @@ const RefundInvoiceList = () => {
         </table>
       </div>
 
-      <div className="flex justify-center gap-2 mt-4">
+      <div className="flex justify-center items-center gap-2 mt-4">
         <button
           type="button"
-          disabled={currentPage === 1}
-          className="px-3 py-1 border rounded disabled:opacity-50"
+          disabled={!pagination.hasPreviousPage || loading}
+          className="px-3 py-1 border rounded disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
         >
           ◀️ {t('previous')}
         </button>
 
-        <span className="px-3 py-1">
-          {t('page')} {currentPage} {t('of')} {totalPages}
+        <span className="px-3 py-1 text-sm">
+          {t('page')} {pagination.page} {t('of')} {pagination.totalPages}
         </span>
 
         <button
           type="button"
-          disabled={currentPage === totalPages}
-          className="px-3 py-1 border rounded disabled:opacity-50"
-          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+          disabled={!pagination.hasNextPage || loading}
+          className="px-3 py-1 border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => setCurrentPage((prev) => prev + 1)}
         >
           {t('next')} ▶️
         </button>

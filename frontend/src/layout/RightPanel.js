@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import BalanceBreakdownModal from '../components/BalanceBreakdownModal';
 const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
 const Section = ({ title, children }) => {
@@ -23,11 +24,30 @@ const Section = ({ title, children }) => {
   );
 };
 
-const StatCard = ({ label, value, color }) => (
-  <div className={`p-3 rounded-lg text-sm font-medium border border-gray-200 ${color}`}>
-    <div>{label}</div>
-    <div className="text-lg font-bold mt-1">Rs. {Number(value || 0).toLocaleString()}</div>
-  </div>
+const StatCard = ({ label, value, color, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-full p-3 rounded-lg text-sm font-medium border border-gray-200 text-left transition ${
+      onClick
+        ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-200'
+        : 'cursor-default'
+    } ${color}`}
+  >
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+
+      {onClick && <span className="text-xs font-semibold opacity-70">View Details →</span>}
+    </div>
+
+    <div className="text-lg font-bold mt-1">
+      Rs.{' '}
+      {Number(value || 0).toLocaleString('en-GB', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      })}
+    </div>
+  </button>
 );
 
 const AlertCard = ({ title, count, color, onClick }) => (
@@ -42,16 +62,52 @@ const AlertCard = ({ title, count, color, onClick }) => (
 
 const RightPanel = () => {
   const canViewRightPanel = hasPermission('dashboard.right_panel');
-  const [summary, setSummary] = useState({});
+
+  const [summary, setSummary] = useState({
+    totalReceivable: 0,
+    totalPayable: 0,
+    receivableDetails: [],
+    payableDetails: [],
+  });
+
   const [alerts, setAlerts] = useState({
     lowStock: 0,
     overdueInvoices: 0,
     pendingPayments: 0,
   });
 
+  // ✅ receivable یا payable Modal
+  const [breakdownType, setBreakdownType] = useState(null);
+
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
+  // ✅ Modal کی Row سے متعلقہ Ledger کھولیں
+  const handleOpenLedger = useCallback(
+    (item) => {
+      if (!item?.entityId) {
+        return;
+      }
+
+      // Modal پہلے بند کریں
+      setBreakdownType(null);
+
+      if (item.entityType === 'customer') {
+        navigate(`/customer-ledger/${item.entityId}`);
+        return;
+      }
+
+      if (item.entityType === 'supplier') {
+        navigate(`/supplier-ledger/${item.entityId}`);
+        return;
+      }
+
+      if (item.entityType === 'party') {
+        navigate(`/party-ledger/${item.entityId}`);
+      }
+    },
+    [navigate]
+  );
   // ✅ stable fetch function (no warning)
   const fetchData = useCallback(async () => {
     if (!canViewRightPanel) {
@@ -105,11 +161,14 @@ const RightPanel = () => {
           label={t('receivables')}
           value={summary.totalReceivable}
           color="bg-yellow-50 text-yellow-700"
+          onClick={() => setBreakdownType('receivable')}
         />
+
         <StatCard
           label={t('payables')}
           value={summary.totalPayable}
           color="bg-red-50 text-red-600"
+          onClick={() => setBreakdownType('payable')}
         />
       </Section>
 
@@ -119,7 +178,7 @@ const RightPanel = () => {
           title={t('lowStock')}
           count={alerts.lowStock}
           color="bg-red-50 text-red-600"
-          onClick={() => navigate('/inventory')}
+          onClick={() => navigate('/inventory?lowstock=true')}
         />
 
         <AlertCard
@@ -136,6 +195,22 @@ const RightPanel = () => {
           onClick={() => navigate('/sales-invoices?filter=pending')}
         />
       </Section>
+
+      {/* ✅ RECEIVABLE / PAYABLE BREAKDOWN MODAL */}
+      <BalanceBreakdownModal
+        isOpen={Boolean(breakdownType)}
+        onClose={() => setBreakdownType(null)}
+        type={breakdownType || 'receivable'}
+        items={
+          breakdownType === 'payable'
+            ? summary.payableDetails || []
+            : summary.receivableDetails || []
+        }
+        total={
+          breakdownType === 'payable' ? summary.totalPayable || 0 : summary.totalReceivable || 0
+        }
+        onOpenLedger={handleOpenLedger}
+      />
     </div>
   );
 };

@@ -474,53 +474,161 @@ exports.getPurchaseReturnById = async (req, res) => {
 };
 
 /* =========================================================
-   ✅ GET ALL
+   ✅ GET ALL PURCHASE RETURNS - FAST PAGINATION
 ========================================================= */
 exports.getAllPurchaseReturns = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    /* =============================
-       GET ALL RETURNS
-    ============================== */
-    const returns = await PurchaseReturn.find({
+    // ✅ Pagination
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+
+    const requestedLimit = parseInt(req.query.limit || "10", 10);
+
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
+
+    const skip = (page - 1) * limit;
+
+    // ✅ Filters
+    const search = String(req.query.search || "").trim();
+    const supplier = String(req.query.supplier || "").trim();
+    const paymentType = String(req.query.paymentType || "").trim();
+
+    const fromDate = String(req.query.fromDate || "").trim();
+
+    const toDate = String(req.query.toDate || "").trim();
+
+    // ✅ Search کے special characters محفوظ کریں
+    const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // ✅ Main filter
+    const filter = {
       createdBy: userId,
       isDeleted: false,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+    };
 
-    const formatted = [];
-
-    for (const pr of returns) {
-      /* =============================
-         FIND PAYMENT LINE
-      ============================== */
-      let paymentLine = null;
-
-      const paymentJournal = await JournalEntry.findOne({
-        referenceId: pr._id,
-        sourceType: "purchase_return_payment",
-        createdBy: userId,
-        isDeleted: false,
-      }).populate("lines.account", "name");
-
-      paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
-
-      const attachments = formatPurchaseReturnAttachments(pr);
-
-      formatted.push({
-        ...pr,
-        attachments,
-        attachmentFullUrl: attachments[0]?.fullUrl || "",
-        paymentMode: paymentLine?.paymentType || pr.paymentType || "-",
-        accountName: paymentLine?.account?.name || "-",
-      });
+    // ✅ Supplier یا Party filter
+    if (supplier) {
+      filter.$or = [{ supplierId: supplier }, { partyId: supplier }];
     }
 
-    return res.json(formatted);
+    // ✅ Payment type filter
+    if (paymentType === "adjust") {
+      filter.paymentType = {
+        $in: ["", null],
+      };
+    } else if (paymentType) {
+      filter.paymentType = paymentType;
+    }
+
+    // ✅ Search filter
+    if (safeSearch) {
+      const searchConditions = [
+        {
+          billNo: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          supplierName: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          supplierPhone: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          notes: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+      ];
+
+      // اگر supplier filter پہلے سے موجود ہے
+      if (filter.$or) {
+        filter.$and = [
+          {
+            $or: filter.$or,
+          },
+          {
+            $or: searchConditions,
+          },
+        ];
+
+        delete filter.$or;
+      } else {
+        filter.$or = searchConditions;
+      }
+    }
+
+    // ✅ Date filter
+    if (fromDate || toDate) {
+      filter.returnDate = {};
+
+      if (fromDate) {
+        filter.returnDate.$gte = new Date(`${fromDate}T00:00:00.000Z`);
+      }
+
+      if (toDate) {
+        filter.returnDate.$lte = new Date(`${toDate}T23:59:59.999Z`);
+      }
+    }
+
+    // ✅ List اور total count ایک ساتھ
+    const [returns, totalReturns] = await Promise.all([
+      PurchaseReturn.find(filter)
+        // ✅ List کے لیے صرف ضروری fields
+        .select(
+          [
+            "billNo",
+            "returnDate",
+            "returnTime",
+            "supplierId",
+            "partyId",
+            "supplierName",
+            "supplierPhone",
+            "totalAmount",
+            "paidAmount",
+            "paymentType",
+            "notes",
+            "isOpening",
+            "createdAt",
+          ].join(" "),
+        )
+        .sort({
+          createdAt: -1,
+          _id: -1,
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      PurchaseReturn.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(Math.ceil(totalReturns / limit), 1);
+
+    return res.status(200).json({
+      returns,
+
+      pagination: {
+        page,
+        limit,
+        totalReturns,
+        totalPages,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+      },
+    });
   } catch (err) {
     console.error("❌ Get All Purchase Returns Error:", err);
+
     return res.status(500).json({
       error: "Server Error",
       detail: err.message,

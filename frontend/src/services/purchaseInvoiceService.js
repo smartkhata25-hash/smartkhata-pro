@@ -27,10 +27,20 @@ const addPurchaseInvoice = async (invoiceData) => {
   }
 };
 
-// ✅ Get All Invoices
-const getAllPurchaseInvoices = async () => {
+// ✅ Get Purchase Invoices with pagination, search and status filter
+const getAllPurchaseInvoices = async (params = {}) => {
   try {
-    const response = await axios.get(API_URL, getConfig());
+    const response = await axios.get(API_URL, {
+      ...getConfig(),
+
+      params: {
+        page: params.page || 1,
+        limit: params.limit || 50,
+        search: params.search || '',
+        status: params.status || '',
+      },
+    });
+
     return response.data;
   } catch (err) {
     console.error('❌ Error fetching invoices:', err.response?.data || err.message);
@@ -96,9 +106,17 @@ export const searchPurchaseInvoices = async (query) => {
 const getPurchaseInvoices = getAllPurchaseInvoices;
 
 // 📊 Get Item Purchase History
-const getItemPurchaseHistory = async (productId) => {
+const getItemPurchaseHistory = async (productId, filters = {}) => {
   try {
-    const response = await axios.get(`${API_URL}/item-history/${productId}`, getConfig());
+    const response = await axios.get(`${API_URL}/item-history/${productId}`, {
+      ...getConfig(),
+
+      params: {
+        supplierId: filters.supplierId || '',
+        partyId: filters.partyId || '',
+      },
+    });
+
     return response.data;
   } catch (err) {
     console.error('❌ Error fetching item purchase history:', err.response?.data || err.message);
@@ -108,8 +126,8 @@ const getItemPurchaseHistory = async (productId) => {
 
 const purchaseInvoiceService = {
   addPurchaseInvoice,
-  getPurchaseInvoices, // 👈 LIST کے لیے
-  getAllPurchaseInvoices, // (optional, رکھنا چاہیں)
+  getPurchaseInvoices,
+  getAllPurchaseInvoices,
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
   deletePurchaseInvoice,

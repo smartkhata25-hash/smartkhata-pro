@@ -179,7 +179,7 @@ const InvoiceTable = ({
                         quantity: qty,
                       };
 
-                      onProductChange && onProductChange(product._id);
+                      onProductChange && onProductChange(product._id, index);
 
                       const hasEmptyRow = updated.some(
                         (row) => !row.productId && !row.search && !row.quantity && !row.rate
@@ -314,8 +314,31 @@ const InvoiceTable = ({
                     </td>
 
                     {/* Amount */}
-                    <td className="border px-0 py-0 md:p-0 text-center font-semibold">
-                      {item.amount ? item.amount.toFixed(2) : '0.00'}
+                    <td className="border p-0">
+                      <input
+                        type="number"
+                        value={item.amount || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          const updated = [...items];
+
+                          const amount = Number(e.target.value) || 0;
+                          const qty = Number(updated[index].quantity) || 0;
+
+                          updated[index].amount = amount;
+
+                          if (qty > 0) {
+                            updated[index].rate = amount / qty;
+                          } else {
+                            updated[index].rate = 0;
+                          }
+
+                          setItems(updated);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
+                      />
                     </td>
                   </>
                 )}

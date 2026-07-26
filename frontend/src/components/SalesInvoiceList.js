@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { getInvoices, deleteInvoice } from '../services/salesService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
@@ -8,25 +8,70 @@ const SalesInvoiceList = () => {
   const [invoices, setInvoices] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50,
+    totalInvoices: 0,
+    totalPages: 1,
+    hasPreviousPage: false,
+    hasNextPage: false,
+  });
+
   const navigate = useNavigate();
+
   const canCreateSales = hasPermission('sales.create');
   const canEditSales = hasPermission('sales.edit');
   const canDeleteSales = hasPermission('sales.delete');
 
+  const fetchInvoices = useCallback(
+    async (requestedPage = page) => {
+      try {
+        setLoading(true);
+
+        const token = localStorage.getItem('token');
+
+        const data = await getInvoices(token, {
+          page: requestedPage,
+          limit: 50,
+          search,
+          status: statusFilter,
+        });
+
+        setInvoices(Array.isArray(data?.invoices) ? data.invoices : []);
+
+        setPagination(
+          data?.pagination || {
+            page: requestedPage,
+            limit: 50,
+            totalInvoices: 0,
+            totalPages: 1,
+            hasPreviousPage: requestedPage > 1,
+            hasNextPage: false,
+          }
+        );
+      } catch (err) {
+        console.error('Invoice fetch error:', err);
+
+        setInvoices([]);
+
+        alert(t('alerts.fetchInvoices') + ': ' + err.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [page, search, statusFilter]
+  );
+
   useEffect(() => {
-    fetchInvoices();
-  }, []);
+    const timer = setTimeout(() => {
+      fetchInvoices(page);
+    }, 400);
 
-  const fetchInvoices = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const data = await getInvoices(token);
-
-      setInvoices(Array.isArray(data) ? data : []);
-    } catch (err) {
-      alert(t('alerts.fetchInvoices') + ': ' + err.message);
-    }
-  };
+    return () => clearTimeout(timer);
+  }, [page, search, statusFilter, fetchInvoices]);
 
   const getPartyOrCustomerName = (inv) => {
     if (inv.partyId) {
@@ -56,28 +101,19 @@ const SalesInvoiceList = () => {
         return;
       }
 
-      setInvoices((prev) => prev.filter((inv) => inv._id !== id));
+      // اگر موجودہ صفحے پر صرف ایک Invoice تھی
+      // تو Delete کے بعد پچھلے صفحے پر چلے جائیں
+      if (invoices.length === 1 && page > 1) {
+        setPage((prev) => prev - 1);
+      } else {
+        // ورنہ موجودہ صفحہ دوبارہ Load کریں
+        await fetchInvoices(page);
+      }
     } catch (err) {
       console.error(err);
       alert('Error deleting invoice');
     }
   };
-
-  const filtered = invoices.filter((inv) => {
-    const q = search.toLowerCase();
-
-    const displayName = getPartyOrCustomerName(inv).toLowerCase();
-
-    const matchesSearch =
-      displayName.includes(q) ||
-      inv.customerName?.toLowerCase().includes(q) ||
-      inv.billNo?.toString().includes(q) ||
-      inv.sourceType?.toLowerCase().includes(q);
-
-    const matchesStatus = !statusFilter || inv.status?.toLowerCase() === statusFilter.toLowerCase();
-
-    return matchesSearch && matchesStatus;
-  });
 
   return (
     <div className="p-4 bg-white shadow rounded">
@@ -86,6 +122,7 @@ const SalesInvoiceList = () => {
 
         {canCreateSales && (
           <button
+            type="button"
             className="bg-blue-600 text-white px-4 py-2 rounded"
             onClick={() => navigate('/sales')}
           >
@@ -99,14 +136,20 @@ const SalesInvoiceList = () => {
           type="text"
           placeholder={t('sales.searchInvoice')}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="border p-2"
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          className="border p-2 rounded"
         />
 
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border p-2"
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
+          className="border p-2 rounded"
         >
           <option value="">{t('sales.allStatus')}</option>
           <option value="Paid">{t('sales.paid')}</option>
@@ -115,91 +158,111 @@ const SalesInvoiceList = () => {
         </select>
       </div>
 
+      <div className="text-sm text-gray-600 mb-3">
+        {t('totalInvoices')}: {pagination.totalInvoices}
+      </div>
+
       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
         <table className="w-full border text-xs md:text-sm">
           <thead>
             <tr className="bg-gray-100">
               <th className="border px-2 py-1 md:p-2">{t('billNo')}</th>
+
               <th className="border px-2 py-1 md:p-2">{t('date')}</th>
+
               <th className="border px-2 py-1 md:p-2">{t('customer')}</th>
+
               <th className="hidden md:table-cell border px-2 py-1 md:p-2">{t('total')}</th>
+
               <th className="hidden md:table-cell border px-2 py-1 md:p-2">{t('paid')}</th>
+
               <th className="border px-2 py-1 md:p-2">{t('balance')}</th>
+
               <th className="hidden md:table-cell border px-2 py-1 md:p-2">{t('status')}</th>
+
               <th className="border px-2 py-1 md:p-2">{t('common.actions')}</th>
             </tr>
           </thead>
 
           <tbody>
-            {filtered.map((inv) => {
-              const totalAmount = Number(inv.totalAmount || 0);
-              const paidAmount = Number(inv.paidAmount || 0);
-              const balance = totalAmount - paidAmount;
+            {!loading &&
+              invoices.map((inv) => {
+                const totalAmount = Number(inv.totalAmount || 0);
+                const paidAmount = Number(inv.paidAmount || 0);
+                const balance = totalAmount - paidAmount;
 
-              return (
-                <tr key={inv._id} className="text-center text-xs md:text-sm">
-                  <td className="border px-2 py-1 md:p-2">
-                    <div className="flex flex-col items-center">
-                      <span>{inv.billNo}</span>
+                return (
+                  <tr key={inv._id} className="text-center text-xs md:text-sm">
+                    <td className="border px-2 py-1 md:p-2">
+                      <div className="flex flex-col items-center">
+                        <span>{inv.billNo}</span>
 
-                      {(inv.sourceType === 'opening_sale_invoice' || inv.isOpening) && (
-                        <span className="text-[10px] md:text-xs bg-yellow-100 text-yellow-700 px-1 rounded mt-1">
-                          Opening
-                        </span>
-                      )}
-                    </div>
-                  </td>
+                        {inv.isOpening && (
+                          <span className="text-[10px] md:text-xs bg-yellow-100 text-yellow-700 px-1 rounded mt-1">
+                            Opening
+                          </span>
+                        )}
+                      </div>
+                    </td>
 
-                  <td className="border px-2 py-1 md:p-2">
-                    {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
-                  </td>
+                    <td className="border px-2 py-1 md:p-2">
+                      {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
+                    </td>
 
-                  <td className="border px-2 py-1 md:p-2">{getPartyOrCustomerName(inv)}</td>
+                    <td className="border px-2 py-1 md:p-2">{getPartyOrCustomerName(inv)}</td>
 
-                  <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
-                    Rs. {totalAmount.toFixed(2)}
-                  </td>
+                    <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
+                      Rs. {totalAmount.toFixed(2)}
+                    </td>
 
-                  <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
-                    Rs. {paidAmount.toFixed(2)}
-                  </td>
+                    <td className="hidden md:table-cell border px-2 py-1 md:p-2 text-center">
+                      Rs. {paidAmount.toFixed(2)}
+                    </td>
 
-                  <td className="border px-2 py-1 md:p-2 text-center">Rs. {balance.toFixed(2)}</td>
+                    <td className="border px-2 py-1 md:p-2 text-center">
+                      Rs. {balance.toFixed(2)}
+                    </td>
 
-                  <td className="hidden md:table-cell border px-2 py-1 md:p-2">
-                    {inv.isOpening || inv.sourceType === 'opening_sale_invoice'
-                      ? 'Opening'
-                      : inv.status || t('sales.unpaid')}
-                  </td>
+                    <td className="hidden md:table-cell border px-2 py-1 md:p-2">
+                      {inv.isOpening ? 'Opening' : inv.status || t('sales.unpaid')}
+                    </td>
 
-                  <td className="border px-2 py-1 md:p-2">
-                    <div className="flex gap-1 md:gap-2 justify-center">
-                      {canEditSales && (
-                        <button
-                          className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
-                          onClick={() => navigate(`/create-sale?invoiceId=${inv._id}`)}
-                        >
-                          {t('edit')}
-                        </button>
-                      )}
-
-                      {canDeleteSales &&
-                        !inv.isOpening &&
-                        inv.sourceType !== 'opening_sale_invoice' && (
+                    <td className="border px-2 py-1 md:p-2">
+                      <div className="flex gap-1 md:gap-2 justify-center">
+                        {canEditSales && (
                           <button
+                            type="button"
+                            className="bg-yellow-400 px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
+                            onClick={() => navigate(`/create-sale?invoiceId=${inv._id}`)}
+                          >
+                            {t('edit')}
+                          </button>
+                        )}
+
+                        {canDeleteSales && !inv.isOpening && (
+                          <button
+                            type="button"
                             className="bg-red-600 text-white px-1.5 py-0.5 md:px-2 md:py-1 rounded text-xs md:text-sm"
                             onClick={() => handleDelete(inv._id)}
                           >
                             {t('delete')}
                           </button>
                         )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
-            {filtered.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan="8" className="text-center p-4">
+                  Loading invoices...
+                </td>
+              </tr>
+            )}
+
+            {!loading && invoices.length === 0 && (
               <tr>
                 <td colSpan="8" className="text-center p-4">
                   {t('common.noRecords')}
@@ -208,6 +271,32 @@ const SalesInvoiceList = () => {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex flex-col md:flex-row justify-between items-center gap-3 mt-4">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!pagination.hasPreviousPage || loading}
+            onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+            className="border px-3 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {t('pagination.prev')}
+          </button>
+
+          <span className="text-sm">
+            {t('pagination.page')} {pagination.page} {t('pagination.of')} {pagination.totalPages}
+          </span>
+
+          <button
+            type="button"
+            disabled={!pagination.hasNextPage || loading}
+            onClick={() => setPage((prev) => prev + 1)}
+            className="border px-3 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {t('common.next')}
+          </button>
+        </div>
       </div>
     </div>
   );

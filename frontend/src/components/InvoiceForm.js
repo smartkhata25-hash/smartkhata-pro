@@ -88,6 +88,7 @@ const InvoiceForm = ({
   const [showHistoryPopup, setShowHistoryPopup] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [historyRowIndex, setHistoryRowIndex] = useState(null);
 
   const [historyAutoMode, setHistoryAutoMode] = useState(
     localStorage.getItem('mobileHistoryMode') === 'on'
@@ -687,6 +688,14 @@ const InvoiceForm = ({
     setShowCustomerForm(true);
   };
 
+  const handleInvoiceProductChange = (productId, rowIndex) => {
+    setHistoryRowIndex(rowIndex);
+
+    if (onProductChange) {
+      onProductChange(productId);
+    }
+  };
+
   const handleQtyRateChange = (index, field, value) => {
     const updated = [...items];
     updated[index][field] = Number(value);
@@ -697,6 +706,46 @@ const InvoiceForm = ({
   const clearOnFocus = (e) => {
     if (e.target.value === '0') e.target.select();
   };
+
+  useEffect(() => {
+    if (loadingHistory) return;
+
+    if (historyRowIndex === null) return;
+
+    if (!Array.isArray(salesHistory) || salesHistory.length === 0) {
+      return;
+    }
+
+    const sortedHistory = [...salesHistory].sort((a, b) => {
+      const dateA = new Date(a.invoiceDate || a.createdAt || 0).getTime();
+      const dateB = new Date(b.invoiceDate || b.createdAt || 0).getTime();
+
+      return dateB - dateA;
+    });
+
+    const latestHistory = sortedHistory[0];
+    const latestRate = Number(latestHistory?.rate || latestHistory?.price || 0);
+
+    if (latestRate <= 0) return;
+
+    setItems((previousItems) => {
+      const updatedItems = [...previousItems];
+      const selectedRow = updatedItems[historyRowIndex];
+
+      if (!selectedRow) return previousItems;
+
+      const quantity = Number(selectedRow.quantity) || 1;
+
+      updatedItems[historyRowIndex] = {
+        ...selectedRow,
+
+        rate: latestRate,
+        amount: quantity * latestRate,
+      };
+
+      return updatedItems;
+    });
+  }, [salesHistory, loadingHistory, historyRowIndex]);
 
   const toggleEditable = (e, setter) => {
     const current = e.target.innerText;
@@ -1306,7 +1355,7 @@ const InvoiceForm = ({
                 products={products}
                 handleQtyRateChange={handleQtyRateChange}
                 clearOnFocus={clearOnFocus}
-                onProductChange={onProductChange}
+                onProductChange={handleInvoiceProductChange}
                 historyAutoMode={historyAutoMode}
                 hideCost={!canViewCost || hideCost}
               />

@@ -10,14 +10,13 @@ const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const { getProfitSummary } = require("../services/accounting/profitService");
 
-// ✅ Dashboard Summary – Professional Version
+// ✅ Dashboard Summary + Receivable / Payable Breakdown
 const getDashboardSummary = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
     const { startDate, endDate, filterType } = req.query;
 
-    // ✅ Date filter
     let dateFilter = {};
 
     if (filterType === "today") {
@@ -42,10 +41,6 @@ const getDashboardSummary = async (req, res) => {
       };
     }
 
-    /* ======================================================
-   ✅ PROFIT SUMMARY SERVICE
-===================================================== */
-
     const profitData = await getProfitSummary({
       userId,
       startDate,
@@ -53,56 +48,44 @@ const getDashboardSummary = async (req, res) => {
       filterType,
     });
 
-    const {
-      totalSales,
-      netSales,
-      operatingExpenses,
-      netProfit,
-      grossProfit,
-      cogs,
-    } = profitData;
+    const { netSales, netProfit, grossProfit, cogs } = profitData;
 
-    /* ======================================================
-   ✅ OTHER DASHBOARD DATA
-===================================================== */
+    const [activeCustomers, activeSuppliers, activeParties] = await Promise.all(
+      [
+        Customer.find({
+          createdBy: userId,
+          isActive: true,
+        })
+          .select("_id name account")
+          .lean(),
 
-    let totalCash = 0;
-    let totalBank = 0;
-    let totalReceivable = 0;
-    let totalPayable = 0;
+        Supplier.find({
+          userId,
+          isDeleted: { $ne: true },
+        })
+          .select("_id name account")
+          .lean(),
 
-    let customerNet = 0;
-    let partyBalances = {};
-
-    // ✅ ONLY ACTIVE CUSTOMERS
-    const activeCustomers = await Customer.find({
-      createdBy: userId,
-      isActive: true,
-    }).select("account");
+        Party.find({
+          userId,
+          isActive: true,
+          isDeleted: false,
+        })
+          .select("_id name account")
+          .lean(),
+      ],
+    );
 
     const activeCustomerAccountIds = activeCustomers
-      .map((c) => c.account)
+      .map((customer) => customer.account)
       .filter(Boolean);
-
-    // ✅ ONLY ACTIVE SUPPLIERS
-    const activeSuppliers = await Supplier.find({
-      userId,
-      isDeleted: { $ne: true },
-    }).select("account");
 
     const activeSupplierAccountIds = activeSuppliers
-      .map((s) => s.account)
+      .map((supplier) => supplier.account)
       .filter(Boolean);
 
-    // ✅ ONLY ACTIVE PARTIES
-    const activeParties = await Party.find({
-      userId,
-      isActive: true,
-      isDeleted: false,
-    }).select("account");
-
     const activePartyAccountIds = activeParties
-      .map((p) => p.account)
+      .map((party) => party.account)
       .filter(Boolean);
 
     const combinedData = await JournalEntry.aggregate([
@@ -114,7 +97,9 @@ const getDashboardSummary = async (req, res) => {
         },
       },
 
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
 
       {
         $lookup: {
@@ -125,23 +110,35 @@ const getDashboardSummary = async (req, res) => {
         },
       },
 
-      { $unwind: "$accountInfo" },
+      {
+        $unwind: "$accountInfo",
+      },
 
       {
         $match: {
           $or: [
             {
               "accountInfo.category": {
-                $nin: ["customer", "party"],
+                $nin: ["customer", "supplier", "party"],
               },
             },
             {
               "accountInfo.category": "customer",
-              "lines.account": { $in: activeCustomerAccountIds },
+              "lines.account": {
+                $in: activeCustomerAccountIds,
+              },
+            },
+            {
+              "accountInfo.category": "supplier",
+              "lines.account": {
+                $in: activeSupplierAccountIds,
+              },
             },
             {
               "accountInfo.category": "party",
-              "lines.account": { $in: activePartyAccountIds },
+              "lines.account": {
+                $in: activePartyAccountIds,
+              },
             },
           ],
         },
@@ -157,71 +154,188 @@ const getDashboardSummary = async (req, res) => {
             accountCode: "$accountInfo.code",
           },
 
-          total: { $sum: "$lines.amount" },
+          total: {
+            $sum: "$lines.amount",
+          },
         },
       },
     ]);
 
+    let totalCash = 0;
+    let totalBank = 0;
+
+    const customerBalances = {};
+    const supplierBalances = {};
+    const partyBalances = {};
+
     combinedData.forEach((item) => {
-      const { type, category, lineType } = item._id;
-      const amount = item.total;
+      const { account, type, category, lineType } = item._id;
 
-      // Cash
+      const amount = Number(item.total || 0);
+      const accountId = account?.toString();
+
+      // ✅ Cash balance
       if (category === "cash") {
-        if (lineType === "debit") totalCash += amount;
-        else totalCash -= amount;
+        if (lineType === "debit") {
+          totalCash += amount;
+        } else {
+          totalCash -= amount;
+        }
       }
 
-      // Bank
-      if (type === "Asset" && ["bank", "online", "cheque"].includes(category)) {
-        if (lineType === "debit") totalBank += amount;
-        else totalBank -= amount;
+      // ✅ Bank / Online / Cheque balance
+      if (
+        type === "Asset" &&
+        ["bank", "online", "cheque", "wallet"].includes(category)
+      ) {
+        if (lineType === "debit") {
+          totalBank += amount;
+        } else {
+          totalBank -= amount;
+        }
       }
 
-      // Receivable
-      if (type === "Asset" && category === "customer") {
-        if (lineType === "debit") customerNet += amount;
-        else customerNet -= amount;
-      }
-
-      // Party Balance Account Wise
-      if (category === "party") {
-        const accId = item._id.account.toString();
-
-        if (!partyBalances[accId]) {
-          partyBalances[accId] = 0;
+      // ✅ Customer balance: Debit - Credit
+      if (category === "customer" && accountId) {
+        if (!customerBalances[accountId]) {
+          customerBalances[accountId] = 0;
         }
 
-        if (lineType === "debit") partyBalances[accId] += amount;
-        else partyBalances[accId] -= amount;
+        if (lineType === "debit") {
+          customerBalances[accountId] += amount;
+        } else {
+          customerBalances[accountId] -= amount;
+        }
       }
 
-      // Payable
-      if (
-        type === "Liability" &&
-        category === "supplier" &&
-        activeSupplierAccountIds.some(
-          (id) => id.toString() === item._id.account.toString(),
-        )
-      ) {
-        if (lineType === "credit") totalPayable += amount;
-        else totalPayable -= amount;
+      // ✅ Supplier balance: Credit - Debit
+      if (category === "supplier" && accountId) {
+        if (!supplierBalances[accountId]) {
+          supplierBalances[accountId] = 0;
+        }
+
+        if (lineType === "credit") {
+          supplierBalances[accountId] += amount;
+        } else {
+          supplierBalances[accountId] -= amount;
+        }
+      }
+
+      // ✅ Party balance: Debit - Credit
+      if (category === "party" && accountId) {
+        if (!partyBalances[accountId]) {
+          partyBalances[accountId] = 0;
+        }
+
+        if (lineType === "debit") {
+          partyBalances[accountId] += amount;
+        } else {
+          partyBalances[accountId] -= amount;
+        }
       }
     });
 
-    let partyReceivable = 0;
-    let partyPayable = 0;
+    const receivableDetails = [];
+    const payableDetails = [];
 
-    Object.values(partyBalances).forEach((balance) => {
+    // ✅ Customer balances
+    activeCustomers.forEach((customer) => {
+      const accountId = customer.account?.toString();
+
+      if (!accountId) {
+        return;
+      }
+
+      const balance = Number(customerBalances[accountId] || 0);
+
       if (balance > 0) {
-        partyReceivable += balance;
+        receivableDetails.push({
+          entityId: customer._id,
+          accountId: customer.account,
+          name: customer.name || "Unnamed Customer",
+          entityType: "customer",
+          amount: Number(balance.toFixed(2)),
+        });
       } else if (balance < 0) {
-        partyPayable += Math.abs(balance);
+        payableDetails.push({
+          entityId: customer._id,
+          accountId: customer.account,
+          name: customer.name || "Unnamed Customer",
+          entityType: "customer",
+          amount: Number(Math.abs(balance).toFixed(2)),
+        });
       }
     });
 
-    totalReceivable = customerNet + partyReceivable;
-    totalPayable += partyPayable;
+    activeSuppliers.forEach((supplier) => {
+      const accountId = supplier.account?.toString();
+
+      if (!accountId) {
+        return;
+      }
+
+      const balance = Number(supplierBalances[accountId] || 0);
+
+      if (balance > 0) {
+        payableDetails.push({
+          entityId: supplier._id,
+          accountId: supplier.account,
+          name: supplier.name || "Unnamed Supplier",
+          entityType: "supplier",
+          amount: Number(balance.toFixed(2)),
+        });
+      } else if (balance < 0) {
+        receivableDetails.push({
+          entityId: supplier._id,
+          accountId: supplier.account,
+          name: supplier.name || "Unnamed Supplier",
+          entityType: "supplier",
+          amount: Number(Math.abs(balance).toFixed(2)),
+        });
+      }
+    });
+
+    activeParties.forEach((party) => {
+      const accountId = party.account?.toString();
+
+      if (!accountId) {
+        return;
+      }
+
+      const balance = Number(partyBalances[accountId] || 0);
+
+      if (balance > 0) {
+        receivableDetails.push({
+          entityId: party._id,
+          accountId: party.account,
+          name: party.name || "Unnamed Party",
+          entityType: "party",
+          amount: Number(balance.toFixed(2)),
+        });
+      } else if (balance < 0) {
+        payableDetails.push({
+          entityId: party._id,
+          accountId: party.account,
+          name: party.name || "Unnamed Party",
+          entityType: "party",
+          amount: Number(Math.abs(balance).toFixed(2)),
+        });
+      }
+    });
+
+    receivableDetails.sort((first, second) => second.amount - first.amount);
+
+    payableDetails.sort((first, second) => second.amount - first.amount);
+
+    const totalReceivable = receivableDetails.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
+
+    const totalPayable = payableDetails.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
 
     const dashboardExpenses = combinedData
       .filter((item) => {
@@ -239,22 +353,25 @@ const getDashboardSummary = async (req, res) => {
       .reduce((sum, item) => sum + Number(item.total || 0), 0);
 
     res.json({
-      totalSales: Number(netSales.toFixed(2)),
+      totalSales: Number(Number(netSales || 0).toFixed(2)),
       totalExpenses: Number(dashboardExpenses.toFixed(2)),
-      netProfit: Number(netProfit.toFixed(2)),
-      grossProfit: Number(grossProfit.toFixed(2)),
-      cogs: Number(cogs.toFixed(2)),
+      netProfit: Number(Number(netProfit || 0).toFixed(2)),
+      grossProfit: Number(Number(grossProfit || 0).toFixed(2)),
+      cogs: Number(Number(cogs || 0).toFixed(2)),
       totalCash: Number(totalCash.toFixed(2)),
       totalBank: Number(totalBank.toFixed(2)),
       totalReceivable: Number(totalReceivable.toFixed(2)),
       totalPayable: Number(totalPayable.toFixed(2)),
+
+      receivableDetails,
+      payableDetails,
     });
   } catch (error) {
     console.error("Dashboard Summary Error:", error);
 
     res.status(500).json({
       message: "Server Error",
-      error,
+      error: error.message,
     });
   }
 };

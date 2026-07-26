@@ -206,7 +206,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   // 💾 Save invoice
-  const parsedInvoiceDate = new Date(invoiceDate);
+  const parsedInvoiceDate = new Date(`${invoiceDate}T12:00:00`);
 
   const invoice = await PurchaseInvoice.create({
     billNo,
@@ -501,7 +501,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  const parsedInvoiceDate = new Date(invoiceDate);
+  const parsedInvoiceDate = new Date(`${invoiceDate}T12:00:00`);
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
 
@@ -996,53 +996,139 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   });
 });
 
+// ✅ Get Purchase Invoices - Fast Pagination List
 const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
 
-  // ✅ ONLY ACTIVE SUPPLIERS
-  const activeSuppliers = await Supplier.find({
+  // ✅ Page number
+  const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+
+  // ✅ One page records
+  const requestedLimit = parseInt(req.query.limit || "50", 10);
+  const limit = Math.min(Math.max(requestedLimit, 1), 100);
+
+  const skip = (page - 1) * limit;
+
+  // ✅ Search and status
+  const search = (req.query.search || "").trim();
+  const status = (req.query.status || "").trim();
+
+  // ✅ Search special characters safe
+  const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // ✅ Active suppliers and parties together
+  const [activeSuppliers, activeParties] = await Promise.all([
+    Supplier.find({
+      userId,
+      isDeleted: false,
+    })
+      .select("_id")
+      .lean(),
+
+    Party.find({
+      userId,
+      isDeleted: false,
+      isActive: true,
+    })
+      .select("_id")
+      .lean(),
+  ]);
+
+  const activeSupplierIds = activeSuppliers.map((supplier) => supplier._id);
+  const activePartyIds = activeParties.map((party) => party._id);
+
+  // ✅ Main filter
+  const filter = {
     userId,
     isDeleted: false,
-  }).select("_id");
 
-  const activeSupplierIds = activeSuppliers.map((s) => s._id);
-
-  const activeParties = await Party.find({
-    userId,
-    isDeleted: false,
-    isActive: true,
-  }).select("_id");
-
-  const activePartyIds = activeParties.map((p) => p._id);
-
-  const invoices = await PurchaseInvoice.find({
-    userId,
-    isDeleted: false,
-
-    $or: [
-      { supplier: { $in: activeSupplierIds } },
-      { partyId: { $in: activePartyIds } },
+    $and: [
+      {
+        $or: [
+          { supplier: { $in: activeSupplierIds } },
+          { partyId: { $in: activePartyIds } },
+        ],
+      },
     ],
-  })
-    .populate("supplier", "name")
-    .sort({ createdAt: -1 })
-    .lean();
+  };
 
-  const formatted = invoices.map((inv) => {
-    let status = "Unpaid";
+  // ✅ Status filter
+  if (status) {
+    filter.status = status;
+  }
 
-    if (inv.paidAmount >= inv.grandTotal) status = "Paid";
-    else if (inv.paidAmount > 0) status = "Partial";
+  // ✅ Search by bill, supplier/party name or phone
+  if (safeSearch) {
+    filter.$and.push({
+      $or: [
+        {
+          billNo: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          supplierName: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          supplierPhone: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+      ],
+    });
+  }
 
-    return {
-      ...inv,
-      status,
-      attachments: formatPurchaseAttachments(inv),
-      attachmentFullUrl: formatPurchaseAttachments(inv)[0]?.fullUrl || "",
-    };
+  // ✅ List and total count together
+  const [invoices, totalInvoices] = await Promise.all([
+    PurchaseInvoice.find(filter)
+      // ✅ List page کے لیے صرف ضروری fields
+      .select(
+        [
+          "billNo",
+          "invoiceDate",
+          "supplier",
+          "partyId",
+          "supplierName",
+          "supplierPhone",
+          "totalAmount",
+          "grandTotal",
+          "paidAmount",
+          "status",
+          "paymentType",
+          "isOpening",
+          "createdAt",
+        ].join(" "),
+      )
+      .sort({
+        createdAt: -1,
+        _id: -1,
+      })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+
+    PurchaseInvoice.countDocuments(filter),
+  ]);
+
+  const totalPages = Math.max(Math.ceil(totalInvoices / limit), 1);
+
+  return res.status(200).json({
+    invoices,
+
+    pagination: {
+      page,
+      limit,
+      totalInvoices,
+      totalPages,
+      hasPreviousPage: page > 1,
+      hasNextPage: page < totalPages,
+    },
   });
-
-  res.status(200).json(formatted);
 });
 // ✅ SEARCH Purchase Invoices
 const searchPurchaseInvoices = asyncHandler(async (req, res) => {
@@ -1136,8 +1222,14 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
 });
 
 const getItemPurchaseHistory = asyncHandler(async (req, res) => {
+  const mongoose = require("mongoose");
+
   const userId = req.user?.id || req.userId;
   const { productId } = req.params;
+
+  // ✅ Optional filters
+  const supplierId = String(req.query.supplierId || "").trim();
+  const partyId = String(req.query.partyId || "").trim();
 
   if (!productId) {
     return res.status(400).json({
@@ -1145,44 +1237,96 @@ const getItemPurchaseHistory = asyncHandler(async (req, res) => {
     });
   }
 
-  const mongoose = require("mongoose");
+  // ✅ Invalid Product ID سے server error روکیں
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return res.status(400).json({
+      message: "Invalid Product ID",
+    });
+  }
+
+  // ✅ Invalid User ID سے server error روکیں
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({
+      message: "Invalid User ID",
+    });
+  }
+
+  // ✅ اگر Supplier ID بھیجی گئی ہو تو اسے validate کریں
+  if (supplierId && !mongoose.Types.ObjectId.isValid(supplierId)) {
+    return res.status(400).json({
+      message: "Invalid Supplier ID",
+    });
+  }
+
+  // ✅ اگر Party ID بھیجی گئی ہو تو اسے validate کریں
+  if (partyId && !mongoose.Types.ObjectId.isValid(partyId)) {
+    return res.status(400).json({
+      message: "Invalid Party ID",
+    });
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const productObjectId = new mongoose.Types.ObjectId(productId);
+
+  const invoiceMatch = {
+    userId: userObjectId,
+    isDeleted: false,
+    isOpening: { $ne: true },
+    "items.productId": productObjectId,
+  };
+
+  if (supplierId) {
+    invoiceMatch.supplier = new mongoose.Types.ObjectId(supplierId);
+  }
+
+  if (partyId) {
+    invoiceMatch.partyId = new mongoose.Types.ObjectId(partyId);
+  }
 
   const records = await PurchaseInvoice.aggregate([
     {
-      $match: {
-        userId: new mongoose.Types.ObjectId(userId),
-        isDeleted: false,
-        "items.productId": new mongoose.Types.ObjectId(productId),
-      },
+      $match: invoiceMatch,
     },
-    { $unwind: "$items" },
+
+    {
+      $unwind: "$items",
+    },
+
     {
       $match: {
-        "items.productId": new mongoose.Types.ObjectId(productId),
+        "items.productId": productObjectId,
       },
     },
+
     {
       $project: {
+        _id: 1,
         supplierName: 1,
         supplier: 1,
+        partyId: 1,
         billNo: 1,
         invoiceDate: 1,
+        invoiceTime: 1,
         price: "$items.price",
         quantity: "$items.quantity",
+        total: "$items.total",
       },
     },
+
     {
       $sort: {
-        price: 1,
         invoiceDate: -1,
+        _id: -1,
       },
     },
-    { $limit: 5 },
+
+    {
+      $limit: 5,
+    },
   ]);
 
-  res.status(200).json(records);
+  return res.status(200).json(records);
 });
-
 module.exports = {
   addPurchaseInvoice,
   getAllPurchaseInvoices,

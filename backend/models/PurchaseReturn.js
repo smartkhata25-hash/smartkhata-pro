@@ -162,4 +162,17 @@ PurchaseReturnSchema.index({
 PurchaseReturnSchema.index({ billNo: 1 });
 PurchaseReturnSchema.index({ createdBy: 1, isDeleted: 1 });
 
+// ✅ Purchase Return List Performance
+PurchaseReturnSchema.index({
+  createdBy: 1,
+  isDeleted: 1,
+  createdAt: -1,
+});
+
+// ✅ Purchase Return Date Filter
+PurchaseReturnSchema.index({
+  createdBy: 1,
+  isDeleted: 1,
+  returnDate: -1,
+});
 module.exports = mongoose.model("PurchaseReturn", PurchaseReturnSchema);

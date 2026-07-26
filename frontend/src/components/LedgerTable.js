@@ -237,10 +237,17 @@ const LedgerTable = ({
                   {ALL_COLUMNS.map((col) => {
                     if (!columns.includes(col)) return null;
 
-                    if (col === 'date')
-                      return (
-                        <td key={col}>{e.date ? new Date(e.date).toLocaleDateString() : '-'}</td>
-                      );
+                    if (col === 'date') {
+                      const rawDate = e.date ? String(e.date).slice(0, 10) : '';
+
+                      if (!rawDate) {
+                        return <td key={col}>-</td>;
+                      }
+
+                      const [year, month, day] = rawDate.split('-');
+
+                      return <td key={col}>{`${month}/${day}/${year}`}</td>;
+                    }
                     if (col === 'time')
                       return (
                         <td key={col} className="no-print">

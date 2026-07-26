@@ -974,81 +974,175 @@ exports.updateRefundInvoice = async (req, res) => {
   }
 };
 
-// ✅ Get All Refunds
+// ✅ Get All Refunds - Fast Pagination List
 exports.getAllRefunds = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    // ✅ Sirf active customers
-    const activeCustomers = await Customer.find({
+    // ✅ Pagination
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+
+    const requestedLimit = parseInt(req.query.limit || "10", 10);
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
+
+    const skip = (page - 1) * limit;
+
+    // ✅ Filters
+    const search = String(req.query.search || "").trim();
+    const customer = String(req.query.customer || "").trim();
+    const paymentType = String(req.query.paymentType || "").trim();
+    const fromDate = String(req.query.fromDate || "").trim();
+    const toDate = String(req.query.toDate || "").trim();
+
+    // ✅ Regex special characters safe
+    const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // ✅ Active customers and parties together
+    const [activeCustomers, activeParties] = await Promise.all([
+      Customer.find({
+        createdBy: userId,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+
+      Party.find({
+        userId,
+        isDeleted: false,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+    ]);
+
+    const activeCustomerIds = activeCustomers.map((item) => item._id);
+    const activePartyIds = activeParties.map((item) => item._id);
+
+    // ✅ Main filter
+    const filter = {
       createdBy: userId,
-      isActive: true,
-    }).select("_id");
-
-    const activeCustomerIds = activeCustomers.map((c) => c._id);
-
-    const activeParties = await Party.find({
-      userId,
       isDeleted: false,
-      isActive: true,
-    }).select("_id");
 
-    const activePartyIds = activeParties.map((p) => p._id);
-    const refunds = await RefundInvoice.find({
-      createdBy: userId,
-      isDeleted: { $ne: true },
-      $or: [
-        { customerId: { $in: activeCustomerIds } },
-        { partyId: { $in: activePartyIds } },
-      ],
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const formatted = [];
-
-    for (const r of refunds) {
-      const journal = await JournalEntry.findOne({
-        referenceId: r._id,
-        sourceType: {
-          $in: ["refund_invoice", "opening_refund_invoice"],
+      $and: [
+        {
+          $or: [
+            { customerId: { $in: activeCustomerIds } },
+            { partyId: { $in: activePartyIds } },
+          ],
         },
-      }).populate("lines.account", "name");
+      ],
+    };
 
-      const paymentLine = journal?.lines?.find(
-        (l) => l.paymentType && l.account,
-      );
-
-      formatted.push({
-        ...r,
-        attachments:
-          r.attachments?.length > 0
-            ? r.attachments.map((att) => ({
-                ...att,
-                fullUrl: getFileUrl(att.key),
-              }))
-            : r.attachmentUrl
-              ? [
-                  {
-                    key: r.attachmentUrl,
-                    type: r.attachmentType || "",
-                    size: 0,
-                    originalName: "",
-                    fullUrl: r.attachmentUrl.startsWith("users/")
-                      ? getFileUrl(r.attachmentUrl)
-                      : `/uploads/${r.attachmentUrl}`,
-                  },
-                ]
-              : [],
-        paymentMode: paymentLine?.paymentType || r.paymentType || "-",
-        accountName: paymentLine?.account?.name || "-",
+    // ✅ Selected customer or party filter
+    if (customer) {
+      filter.$and.push({
+        $or: [{ customerId: customer }, { partyId: customer }],
       });
     }
 
-    res.json(formatted);
+    // ✅ Payment type filter
+    if (paymentType) {
+      filter.paymentType = paymentType;
+    }
+
+    // ✅ Search filter
+    if (safeSearch) {
+      filter.$and.push({
+        $or: [
+          {
+            billNo: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            customerName: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            customerPhone: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            notes: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+        ],
+      });
+    }
+
+    // ✅ Date filters
+    if (fromDate || toDate) {
+      filter.invoiceDate = {};
+
+      if (fromDate) {
+        filter.invoiceDate.$gte = new Date(`${fromDate}T00:00:00.000Z`);
+      }
+
+      if (toDate) {
+        filter.invoiceDate.$lte = new Date(`${toDate}T23:59:59.999Z`);
+      }
+    }
+
+    // ✅ Refund list and total count together
+    const [refunds, totalRefunds] = await Promise.all([
+      RefundInvoice.find(filter)
+        // ✅ List کے لیے صرف ضروری fields
+        .select(
+          [
+            "billNo",
+            "invoiceDate",
+            "invoiceTime",
+            "customerId",
+            "partyId",
+            "customerName",
+            "customerPhone",
+            "totalAmount",
+            "paidAmount",
+            "paymentType",
+            "notes",
+            "isOpening",
+            "createdAt",
+          ].join(" "),
+        )
+        .sort({
+          createdAt: -1,
+          _id: -1,
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      RefundInvoice.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(Math.ceil(totalRefunds / limit), 1);
+
+    return res.status(200).json({
+      refunds,
+
+      pagination: {
+        page,
+        limit,
+        totalRefunds,
+        totalPages,
+        hasPreviousPage: page > 1,
+        hasNextPage: page < totalPages,
+      },
+    });
   } catch (err) {
     console.error("❌ Get All Refunds Error:", err);
-    res.status(500).json({ error: "Server Error" });
+
+    return res.status(500).json({
+      error: "Server Error",
+      detail: err.message,
+    });
   }
 };
 

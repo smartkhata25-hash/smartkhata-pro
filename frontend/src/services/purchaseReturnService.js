@@ -31,14 +31,28 @@ export const createPurchaseReturn = async (formData, token) => {
 };
 
 // =======================================
-// ✅ GET ALL PURCHASE RETURNS
+// ✅ GET PURCHASE RETURNS WITH PAGINATION & FILTERS
 // =======================================
-export const getAllPurchaseReturns = async (token) => {
+export const getAllPurchaseReturns = async (token, params = {}) => {
   try {
-    const res = await axios.get(PURCHASE_RETURN_API, getAuthHeaders(token));
+    const res = await axios.get(PURCHASE_RETURN_API, {
+      ...getAuthHeaders(token),
+
+      params: {
+        page: params.page || 1,
+        limit: params.limit || 10,
+        search: params.search || '',
+        supplier: params.supplier || '',
+        paymentType: params.paymentType || '',
+        fromDate: params.fromDate || '',
+        toDate: params.toDate || '',
+      },
+    });
+
     return res.data;
   } catch (err) {
     console.error('❌ Get All Purchase Returns Error:', err.response?.data || err.message);
+
     throw err;
   }
 };

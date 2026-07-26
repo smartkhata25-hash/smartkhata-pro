@@ -4,6 +4,7 @@ import {
   updatePurchaseReturn,
   getPurchaseReturnById,
 } from '../services/purchaseReturnService';
+import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { fetchSuppliers } from '../services/supplierService';
 import { fetchPurchaseParties } from '../services/partyService';
 import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
@@ -56,6 +57,12 @@ const PurchaseReturnForm = ({ token }) => {
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
   const [isOpeningReturn, setIsOpeningReturn] = useState(false);
   const [openingReturnAmount, setOpeningReturnAmount] = useState(0);
+
+  // 📊 Purchase History
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [itemHistory, setItemHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const blankRow = () => ({
     productId: '',
@@ -149,6 +156,60 @@ const PurchaseReturnForm = ({ token }) => {
       setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
     });
   }, [token]);
+
+  // 📊 منتخب Product اور Supplier کی Purchase History
+  useEffect(() => {
+    const loadPurchaseHistory = async () => {
+      if (!selectedProductId || !supplierId) {
+        setItemHistory([]);
+        return;
+      }
+
+      try {
+        setLoadingHistory(true);
+
+        const filters =
+          selectedSupplierType === 'party'
+            ? {
+                partyId: supplierId,
+              }
+            : {
+                supplierId,
+              };
+
+        const history = await purchaseInvoiceService.getItemPurchaseHistory(
+          selectedProductId,
+          filters
+        );
+
+        setItemHistory(Array.isArray(history) ? history : []);
+        if (Array.isArray(history) && history.length > 0) {
+          const latestRate = Number(history[0].price || 0);
+
+          setItems((prev) =>
+            prev.map((row) => {
+              if (row.productId !== selectedProductId) return row;
+
+              const qty = Number(row.quantity) || 1;
+
+              return {
+                ...row,
+                price: latestRate,
+                total: (qty * latestRate).toFixed(2),
+              };
+            })
+          );
+        }
+      } catch (err) {
+        console.error('❌ Purchase history load failed:', err);
+        setItemHistory([]);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+
+    loadPurchaseHistory();
+  }, [selectedProductId, supplierId, selectedSupplierType]);
 
   // 🔁 Auto select cash account when method changes
   useEffect(() => {
@@ -274,6 +335,10 @@ const PurchaseReturnForm = ({ token }) => {
       setAttachments([]);
       setModalAttachment(null);
 
+      setSelectedProductId('');
+      setItemHistory([]);
+      setShowHistory(false);
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -282,9 +347,12 @@ const PurchaseReturnForm = ({ token }) => {
       return;
     }
 
-    // 🔁 Edit mode → original return دوبارہ load
     const data = await getPurchaseReturnById(id, token);
     populateForm(data);
+
+    setSelectedProductId('');
+    setItemHistory([]);
+    setShowHistory(false);
   };
 
   const handleSubmit = async (action) => {
@@ -399,6 +467,11 @@ const PurchaseReturnForm = ({ token }) => {
       setAttachments([]);
       setModalAttachment(null);
 
+      // 📊 Save & New کے بعد History صاف کریں
+      setSelectedProductId('');
+      setItemHistory([]);
+      setShowHistory(false);
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -411,6 +484,11 @@ const PurchaseReturnForm = ({ token }) => {
 
     setSupplierId('');
     setSelectedSupplierType('supplier');
+
+    // پرانے Supplier کی History صاف کریں
+    setSelectedProductId('');
+    setItemHistory([]);
+    setShowHistory(false);
 
     if (!value.trim()) {
       setSupplierSuggestions([]);
@@ -500,9 +578,21 @@ const PurchaseReturnForm = ({ token }) => {
 
   return (
     <div className="p-4 bg-white rounded shadow-md">
-      <h2 className="text-xl font-semibold mb-4">
-        {id ? `✏️ ${t('purchase.editReturn')}` : `🔁 ${t('purchase.newReturn')}`}
-      </h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold">
+          {id ? `✏️ ${t('purchase.editReturn')}` : `🔁 ${t('purchase.newReturn')}`}
+        </h2>
+
+        {selectedProductId && (
+          <button
+            type="button"
+            onClick={() => setShowHistory((previousValue) => !previousValue)}
+            className="px-3 py-2 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700"
+          >
+            {showHistory ? '✕ Hide History' : '📊 Show Purchase History'}
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-4 gap-2 mb-4 relative">
         <div className="relative">
@@ -717,64 +807,146 @@ const PurchaseReturnForm = ({ token }) => {
 
       {!isOpeningReturn && (
         <div
-          ref={scrollRef}
-          className="border overflow-y-auto mb-4"
-          style={{ maxHeight: '50vh', minHeight: '300px' }}
+          className={
+            showHistory ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_170px] gap-4 mb-4' : 'mb-4'
+          }
         >
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-gray-100">
-              <tr>
-                <th className="p-2 border">{t('item')}</th>
-                <th className="p-2 border">{t('qty')}</th>
-                <th className="p-2 border">{t('rate')}</th>
-                <th className="p-2 border">{t('total')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, idx) => (
-                <tr key={idx} className="even:bg-gray-50">
-                  <td className="border p-1">
-                    <ProductDropdown
-                      productList={productList}
-                      value={item.name}
-                      onSelect={(product) => {
-                        const updated = [...items];
-                        const qty = parseFloat(updated[idx].quantity) || 1;
-                        updated[idx] = {
-                          ...updated[idx],
-                          name: product.name,
-                          productId: product._id,
-                          price: product.purchasePrice || product.costPrice || product.price || 0,
-                          quantity: qty,
-                          total: (
-                            (product.purchasePrice || product.costPrice || product.price || 0) * qty
-                          ).toFixed(2),
-                        };
-                        setItems(updated);
-                      }}
-                    />
-                  </td>
-                  <td className="border p-1">
-                    <input
-                      type="number"
-                      value={item.quantity || ''}
-                      onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                      className="w-full text-center"
-                    />
-                  </td>
-                  <td className="border p-1">
-                    <input
-                      type="number"
-                      value={item.price || ''}
-                      onChange={(e) => handleItemChange(idx, 'price', e.target.value)}
-                      className="w-full text-center"
-                    />
-                  </td>
-                  <td className="border p-1 text-center">{item.total || '0.00'}</td>
+          <div
+            ref={scrollRef}
+            className="border overflow-y-auto"
+            style={{ maxHeight: '50vh', minHeight: '300px' }}
+          >
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-gray-100">
+                <tr>
+                  <th className="p-2 border">{t('item')}</th>
+                  <th className="p-2 border">{t('qty')}</th>
+                  <th className="p-2 border">{t('rate')}</th>
+                  <th className="p-2 border">{t('total')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+
+              <tbody>
+                {items.map((item, idx) => (
+                  <tr key={idx} className="even:bg-gray-50">
+                    <td className="border p-1">
+                      <ProductDropdown
+                        productList={productList}
+                        value={item.name}
+                        onSelect={(product) => {
+                          const updated = [...items];
+                          const qty = parseFloat(updated[idx].quantity) || 1;
+                          const purchaseRate =
+                            product.purchasePrice || product.costPrice || product.price || 0;
+
+                          updated[idx] = {
+                            ...updated[idx],
+                            name: product.name,
+                            productId: product._id,
+                            price: purchaseRate,
+                            quantity: qty,
+                            total: (purchaseRate * qty).toFixed(2),
+                          };
+
+                          setItems(updated);
+
+                          // 📊 منتخب Item کی History کھولیں
+                          setSelectedProductId(product._id);
+                          setShowHistory(true);
+                        }}
+                      />
+                    </td>
+
+                    <td className="border p-1">
+                      <input
+                        type="number"
+                        value={item.quantity || ''}
+                        onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                        className="w-full text-center"
+                      />
+                    </td>
+
+                    <td className="border p-1">
+                      <input
+                        type="number"
+                        value={item.price || ''}
+                        onChange={(e) => handleItemChange(idx, 'price', e.target.value)}
+                        className="w-full text-center"
+                      />
+                    </td>
+
+                    <td className="border p-1 text-center">{item.total || '0.00'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {showHistory && (
+            <div className="border rounded-lg bg-gray-50 p-2 h-fit">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-bold text-sm text-gray-700">📊 Purchase History</h3>
+
+                <button
+                  type="button"
+                  onClick={() => setShowHistory(false)}
+                  className="text-red-500 font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="text-xs text-gray-600 mb-3">
+                <div>
+                  <strong>Supplier:</strong> {supplierName || '-'}
+                </div>
+              </div>
+
+              {!supplierId && (
+                <div className="text-center py-5 text-sm text-orange-600">
+                  پہلے Supplier منتخب کریں۔
+                </div>
+              )}
+
+              {supplierId && loadingHistory && (
+                <div className="text-center py-5 text-sm text-blue-600">History loading...</div>
+              )}
+
+              {supplierId && !loadingHistory && itemHistory.length === 0 && (
+                <div className="text-center py-5 text-sm text-gray-500">
+                  اس Supplier سے اس Item کی کوئی Purchase نہیں ملی۔
+                </div>
+              )}
+
+              {supplierId && !loadingHistory && itemHistory.length > 0 && (
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                  {itemHistory.map((history, index) => (
+                    <div
+                      key={history._id || `${history.billNo || 'history'}-${index}`}
+                      className="bg-white border rounded p-1.5 text-[11px] shadow-sm"
+                    >
+                      <div className="font-semibold text-blue-700 mb-1">
+                        Bill No: {history.billNo || '-'}
+                      </div>
+
+                      <div>
+                        📅 Date:{' '}
+                        {history.invoiceDate
+                          ? new Date(history.invoiceDate).toLocaleDateString()
+                          : '-'}
+                      </div>
+
+                      <div>📦 Qty: {history.quantity || 0}</div>
+
+                      <div className="font-bold text-green-700">
+                        💰 Rate: {Number(history.price || 0).toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

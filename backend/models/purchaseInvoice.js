@@ -161,6 +161,12 @@ purchaseInvoiceSchema.index({
   partyId: 1,
 });
 
+purchaseInvoiceSchema.index({
+  userId: 1,
+  isDeleted: 1,
+  createdAt: -1,
+});
+
 module.exports =
   mongoose.models.PurchaseInvoice ||
   mongoose.model("PurchaseInvoice", purchaseInvoiceSchema);

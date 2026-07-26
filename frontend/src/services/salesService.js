@@ -14,11 +14,21 @@ export const createInvoice = async (invoiceData, token) => {
   return res.data;
 };
 
-// ✅ Get all invoices
-export const getInvoices = async (token) => {
+// ✅ Get invoices with pagination, search and status filter
+export const getInvoices = async (token, params = {}) => {
   const res = await axios.get(API_URL, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+
+    params: {
+      page: params.page || 1,
+      limit: params.limit || 50,
+      search: params.search || '',
+      status: params.status || '',
+    },
   });
+
   return res.data;
 };
 

@@ -146,4 +146,10 @@ RefundInvoiceSchema.index({
   partyId: 1,
 });
 
+RefundInvoiceSchema.index({
+  createdBy: 1,
+  isDeleted: 1,
+  invoiceDate: -1,
+});
+
 module.exports = mongoose.model("RefundInvoice", RefundInvoiceSchema);

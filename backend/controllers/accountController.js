@@ -242,60 +242,112 @@ exports.getAccountTransactions = async (req, res) => {
     const { id: accountId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(accountId)) {
-      return res.status(400).json({ message: "Invalid or missing account ID" });
+      return res.status(400).json({
+        message: "Invalid or missing account ID",
+      });
     }
 
-    // 🧠 Get account to know its category
-    const account = await Account.findOne({ _id: accountId, userId });
+    // ✅ Account check
+    const account = await Account.findOne({
+      _id: accountId,
+      userId,
+    });
+
     if (!account) {
-      return res.status(404).json({ message: "Account not found" });
+      return res.status(404).json({
+        message: "Account not found",
+      });
     }
 
-    const accountCategory = account.category; // e.g., 'cash', 'bank', etc.
+    const accountObjectId = new mongoose.Types.ObjectId(accountId);
 
-    // ✅ Get related journal entries
+    // ✅ متعلقہ Journal Entries
     const transactions = await JournalEntry.find({
       createdBy: userId,
-      "lines.account": new mongoose.Types.ObjectId(accountId),
+      "lines.account": accountObjectId,
       isDeleted: false,
     })
-      .sort({ date: -1, time: -1 })
-      .limit(200);
+      .select(
+        [
+          "date",
+          "time",
+          "description",
+          "billNo",
+          "sourceType",
+          "originModule",
+          "invoiceId",
+          "invoiceModel",
+          "referenceId",
+          "customerId",
+          "supplierId",
+          "partyId",
+          "lines",
+          "createdAt",
+        ].join(" "),
+      )
+      .sort({
+        date: -1,
+        time: -1,
+        createdAt: -1,
+      })
+      .limit(200)
+      .lean();
 
-    // ✅ Prepare flat structure with adjusted debit/credit
+    // ✅ ہر Journal Entry کو Table کے لیے سادہ Row بنائیں
     const flatEntries = transactions.flatMap((entry) =>
-      entry.lines
-        .filter((line) => line.account?.toString() === accountId)
+      (entry.lines || [])
+        .filter((line) => line.account?.toString() === accountId.toString())
         .map((line) => {
-          const debit = line.type === "debit" ? line.amount : 0;
-          const credit = line.type === "credit" ? line.amount : 0;
+          const debit = line.type === "debit" ? Number(line.amount || 0) : 0;
+
+          const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
+
+          /*
+           * Invoice والی entries میں invoiceId استعمال ہوگی۔
+           * Receive Payment، Pay Bill، Expense وغیرہ میں referenceId استعمال ہوگی۔
+           */
+          const clickableReferenceId =
+            entry.referenceId || entry.invoiceId || null;
 
           return {
+            // Journal Entry کی اپنی ID
             _id: entry._id,
+
             date: entry.date,
             time: entry.time || "",
             description: entry.description || "",
+            billNo: entry.billNo || "",
+
             debit,
             credit,
 
-            // ✅ Source
-            sourceType: entry.sourceType || entry.source || "",
+            // ✅ Source کی مکمل معلومات
+            sourceType: entry.sourceType || "",
+            referenceType: entry.sourceType || "",
+            originModule: entry.originModule || "",
 
-            // ✅ Payment type (journal se)
-            paymentType: line.paymentType || entry.paymentType || "-",
+            // ✅ Clickable routing کے لیے اصل record ID
+            referenceId: clickableReferenceId,
 
-            // ✅ Account name (line se)
+            // ✅ اصل محفوظ fields بھی واپس دیں
+            invoiceId: entry.invoiceId || null,
+            invoiceModel: entry.invoiceModel || null,
+
+            customerId: entry.customerId || null,
+            supplierId: entry.supplierId || null,
+            partyId: entry.partyId || null,
+
+            paymentType: line.paymentType || "-",
             accountName: account.name || "",
-
-            billNo: entry.billNo || "",
           };
         }),
     );
 
-    res.json(flatEntries);
+    return res.status(200).json(flatEntries);
   } catch (err) {
     console.error("Account transactions error:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
       message: "Server error while fetching transactions",
       error: err.message,
     });

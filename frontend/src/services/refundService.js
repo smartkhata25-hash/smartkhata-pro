@@ -19,21 +19,31 @@ export const createRefund = async (formData, token) => {
   }
 };
 
-// ✅ Get All Refund Invoices
-export const getAllRefunds = async (token) => {
+// ✅ Get Refund Invoices with pagination and filters
+export const getAllRefunds = async (token, params = {}) => {
   try {
     const res = await axios.get(REFUND_API_URL, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+
+      params: {
+        page: params.page || 1,
+        limit: params.limit || 10,
+        search: params.search || '',
+        customer: params.customer || '',
+        paymentType: params.paymentType || '',
+        fromDate: params.fromDate || '',
+        toDate: params.toDate || '',
+      },
     });
+
     return res.data;
   } catch (err) {
     console.error('❌ Get All Refunds Error:', err.response?.data || err.message);
     throw err;
   }
 };
-
 // ✅ Get Refund Invoice by ID
 export const getRefundById = async (id, token) => {
   try {

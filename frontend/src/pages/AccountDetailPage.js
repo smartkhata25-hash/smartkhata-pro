@@ -132,19 +132,16 @@ const AccountDetailPage = () => {
             return;
           }
 
-          // ✅ Fake combined (UI only)
           const combined = {
             _id: 'ALL_BANKS',
             name: 'All Banks (Combined)',
             isCombined: true,
           };
 
-          // ✅ Combined transactions
           let allTxns = txnResults.flat().filter(Boolean);
 
           allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-          // ✅ Combined account WITH balance (single source of truth)
           const combinedWithBalance = {
             ...combined,
             balance: calculateBalanceFromTxns(allTxns),
@@ -201,34 +198,20 @@ const AccountDetailPage = () => {
   };
 
   return (
-    <div className="p-5">
-      <h2 className="text-xl font-bold mb-3">
-        {isCashView ? t('account.cashDetails') : t('account.bankDetails')}
-      </h2>
-
-      {accounts.length > 1 && (
-        <select
-          className="border p-2 mb-4"
-          value={selectedAccount?._id}
-          onChange={handleAccountChange}
-        >
-          {accounts.map((a) => (
-            <option key={a._id} value={a._id}>
-              {a.name} (Rs. {Number(a.balance || 0).toFixed(2)})
-            </option>
-          ))}
-        </select>
-      )}
-
-      {selectedAccount && (
-        <>
-          <h3 className="font-semibold mb-2">
-            {selectedAccount.name} – {t('account.balance')} Rs.{' '}
-            {Number(selectedAccount.balance || 0).toFixed(2)}
-          </h3>
-
-          <AccountTransactionTable transactions={transactions} />
-        </>
+    <div className="p-3 md:p-5">
+      {selectedAccount ? (
+        <AccountTransactionTable
+          transactions={transactions}
+          accounts={accounts}
+          selectedAccount={selectedAccount}
+          onAccountChange={handleAccountChange}
+          isCashView={isCashView}
+          isBankView={isBankView}
+        />
+      ) : (
+        <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">
+          Loading account details...
+        </div>
       )}
     </div>
   );

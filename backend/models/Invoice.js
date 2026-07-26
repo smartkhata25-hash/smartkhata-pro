@@ -228,4 +228,11 @@ invoiceSchema.index({
   customerId: 1,
 });
 
+// ✅ Sales Invoice List Performance Index
+invoiceSchema.index({
+  createdBy: 1,
+  isDeleted: 1,
+  createdAt: -1,
+});
+
 module.exports = mongoose.model("Invoice", invoiceSchema);

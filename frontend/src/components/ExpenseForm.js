@@ -81,14 +81,18 @@ const ExpenseForm = () => {
 
         setFormData({
           title: existing.title || '',
-          titleId: existing.titleId || null,
-          date: existing.date || '',
+          titleId: existing.titleId?._id || existing.titleId || null,
+          date: existing.date ? dayjs(existing.date).format('YYYY-MM-DD') : '',
           time: existing.time || '',
           description: existing.description || '',
           attachment: null,
           paymentType: existing.paymentType || 'Cash',
           category: fixedCategoryId,
         });
+
+        setSearch(existing.title || '');
+
+        setTitles([]);
 
         setCreditEntries(fixedCreditEntries);
       }

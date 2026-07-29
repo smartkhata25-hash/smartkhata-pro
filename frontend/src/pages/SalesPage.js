@@ -25,6 +25,7 @@ export default function SalesPage() {
     async (customerId, productId) => {
       if (!customerId || !productId) {
         setSalesHistory([]);
+        setLoadingHistory(false);
         return;
       }
 
@@ -64,6 +65,32 @@ export default function SalesPage() {
   const refreshHistory = async () => {
     await fetchSalesHistory(selectedCustomerId, selectedProductId);
   };
+
+  const handleCustomerChange = useCallback((customerId) => {
+    setSelectedCustomerId((previousCustomerId) => {
+      if (previousCustomerId === customerId) {
+        return previousCustomerId;
+      }
+
+      setSalesHistory([]);
+      setSelectedProductId(null);
+
+      return customerId;
+    });
+  }, []);
+
+  const handleProductChange = useCallback(
+    (productId) => {
+      setSalesHistory([]);
+
+      if (selectedCustomerId && productId) {
+        setLoadingHistory(true);
+      }
+
+      setSelectedProductId(productId);
+    },
+    [selectedCustomerId]
+  );
 
   // 🔁 Trigger fetch when customer or product changes
   useEffect(() => {
@@ -137,8 +164,8 @@ export default function SalesPage() {
           <InvoiceForm
             token={token}
             invoiceId={invoiceId}
-            onCustomerChange={setSelectedCustomerId}
-            onProductChange={setSelectedProductId}
+            onCustomerChange={handleCustomerChange}
+            onProductChange={handleProductChange}
             onSuccess={refreshHistory}
             salesHistory={salesHistory}
             loadingHistory={loadingHistory}

@@ -47,8 +47,8 @@ const ProfitDetailDrawer = ({
           <tr>
             <th className="p-3 border">{t('inventory.product')}</th>
             <th className="p-3 border">{t('reports.qtySold')}</th>
-            <th className="p-3 border">{t('sales')}</th>
             <th className="p-3 border">{t('cost')}</th>
+            <th className="p-3 border">{t('sales')}</th>
             <th className="p-3 border">{t('reports.profit')}</th>
             <th className="p-3 border">{t('reports.marginPercent')}</th>
           </tr>
@@ -111,11 +111,11 @@ const ProfitDetailDrawer = ({
           <tr key={index} className="text-center hover:bg-gray-50">
             <td className="p-3 border font-medium">{item.productName || '-'}</td>
             <td className="p-3 border">{Number(item.qtySold || 0).toFixed(0)}</td>
-            <td className="p-3 border text-blue-600">
-              {t('currency.rs')} {Number(item.sales || 0).toFixed(0)}
-            </td>
             <td className="p-3 border text-red-500">
               {t('currency.rs')} {Number(item.cost || 0).toFixed(0)}
+            </td>
+            <td className="p-3 border text-blue-600">
+              {t('currency.rs')} {Number(item.sales || 0).toFixed(0)}
             </td>
             <td
               className={`p-3 border font-bold ${

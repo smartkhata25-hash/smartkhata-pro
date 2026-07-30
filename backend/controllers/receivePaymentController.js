@@ -286,62 +286,272 @@ exports.getAllReceivePayments = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    const activeCustomers = await Customer.find({
+    if (!userId) {
+      return res.status(400).json({
+        error: "User ID is required",
+      });
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      customer = "",
+      paymentType = "",
+      fromDate = "",
+      toDate = "",
+    } = req.query;
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const skip = (currentPage - 1) * pageLimit;
+
+    const safeSearch = String(search || "")
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const activeCustomerQuery = {
       createdBy: userId,
       isActive: true,
-    }).select("_id");
+    };
 
-    const activeCustomerIds = activeCustomers.map((c) => c._id);
-
-    const activeParties = await Party.find({
+    const activePartyQuery = {
       userId,
       isDeleted: false,
       isActive: true,
-    }).select("_id");
+    };
 
-    const activePartyIds = activeParties.map((p) => p._id);
+    if (safeSearch) {
+      activeCustomerQuery.name = {
+        $regex: safeSearch,
+        $options: "i",
+      };
 
-    const payments = await ReceivePayment.find({
+      activePartyQuery.name = {
+        $regex: safeSearch,
+        $options: "i",
+      };
+    }
+
+    const [
+      allActiveCustomers,
+      allActiveParties,
+      matchedCustomers,
+      matchedParties,
+    ] = await Promise.all([
+      Customer.find({
+        createdBy: userId,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+
+      Party.find({
+        userId,
+        isDeleted: false,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+
+      safeSearch
+        ? Customer.find(activeCustomerQuery).select("_id").lean()
+        : Promise.resolve([]),
+
+      safeSearch
+        ? Party.find(activePartyQuery).select("_id").lean()
+        : Promise.resolve([]),
+    ]);
+
+    const activeCustomerIds = allActiveCustomers.map((item) => item._id);
+
+    const activePartyIds = allActiveParties.map((item) => item._id);
+
+    const matchedCustomerIds = matchedCustomers.map((item) => item._id);
+
+    const matchedPartyIds = matchedParties.map((item) => item._id);
+
+    const filter = {
       userId,
       isDeleted: { $ne: true },
-      $or: [
-        { customer: { $in: activeCustomerIds } },
-        { partyId: { $in: activePartyIds } },
+      $and: [
+        {
+          $or: [
+            {
+              customer: {
+                $in: activeCustomerIds,
+              },
+            },
+            {
+              partyId: {
+                $in: activePartyIds,
+              },
+            },
+          ],
+        },
       ],
-    })
-      .populate("customer", "name")
-      .sort({ createdAt: -1 });
+    };
 
-    const formatted = await Promise.all(
-      payments.map(async (p) => {
-        const journal = await JournalEntry.findOne({
-          referenceId: p._id,
-          sourceType: "receive_payment",
-        }).populate("lines.account", "name");
+    if (customer && mongoose.Types.ObjectId.isValid(customer)) {
+      filter.$and.push({
+        $or: [
+          {
+            customer: new mongoose.Types.ObjectId(customer),
+          },
+          {
+            partyId: new mongoose.Types.ObjectId(customer),
+          },
+        ],
+      });
+    }
 
-        const firstDebitLine = journal?.lines?.find(
-          (line) => line.type === "debit",
-        );
+    if (paymentType) {
+      filter.paymentType = String(paymentType).toLowerCase();
+    }
 
-        const attachments = formatAttachments(p);
+    if (fromDate || toDate) {
+      filter.date = {};
 
-        return {
-          ...p.toObject(),
-          attachments,
-          attachmentFullUrl: attachments[0]?.fullUrl || "",
-          paymentMode: firstDebitLine?.paymentType || p.paymentType || "-",
-          accountName: firstDebitLine?.account?.name || "-",
-        };
-      }),
-    );
+      if (fromDate) {
+        filter.date.$gte = fromDate;
+      }
 
-    res.json(formatted);
+      if (toDate) {
+        filter.date.$lte = toDate;
+      }
+    }
+
+    /*
+      Search Filter
+    */
+    if (safeSearch) {
+      filter.$and.push({
+        $or: [
+          {
+            billNo: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            description: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            paymentType: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            customer: {
+              $in: matchedCustomerIds,
+            },
+          },
+          {
+            partyId: {
+              $in: matchedPartyIds,
+            },
+          },
+        ],
+      });
+    }
+
+    const [totalPayments, payments] = await Promise.all([
+      ReceivePayment.countDocuments(filter),
+
+      ReceivePayment.find(filter)
+        .select(
+          "customer partyId date time amount discountAmount finalAmount paymentType billNo account description createdAt",
+        )
+        .populate("customer", "name")
+        .populate("partyId", "name")
+        .sort({
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(pageLimit)
+        .lean(),
+    ]);
+
+    const paymentIds = payments.map((payment) => payment._id);
+
+    const journals =
+      paymentIds.length > 0
+        ? await JournalEntry.find({
+            referenceId: {
+              $in: paymentIds,
+            },
+            sourceType: "receive_payment",
+            createdBy: userId,
+            isDeleted: false,
+          })
+            .select("referenceId lines")
+            .populate("lines.account", "name")
+            .lean()
+        : [];
+
+    const journalMap = new Map();
+
+    for (const journal of journals) {
+      const referenceKey = String(journal.referenceId);
+
+      if (!journalMap.has(referenceKey)) {
+        journalMap.set(referenceKey, []);
+      }
+
+      journalMap.get(referenceKey).push(journal);
+    }
+
+    const formattedPayments = payments.map((payment) => {
+      const paymentJournals = journalMap.get(String(payment._id)) || [];
+
+      let firstDebitLine = null;
+
+      for (const journal of paymentJournals) {
+        const debitLine = journal.lines?.find((line) => line.type === "debit");
+
+        if (debitLine) {
+          firstDebitLine = debitLine;
+          break;
+        }
+      }
+
+      return {
+        ...payment,
+
+        customerName: payment.customer?.name || payment.partyId?.name || "-",
+
+        paymentMode: firstDebitLine?.paymentType || payment.paymentType || "-",
+
+        accountName: firstDebitLine?.account?.name || "-",
+      };
+    });
+
+    const totalPages = Math.max(Math.ceil(totalPayments / pageLimit), 1);
+
+    return res.json({
+      payments: formattedPayments,
+
+      pagination: {
+        page: currentPage,
+        limit: pageLimit,
+        totalPayments,
+        totalPages,
+        hasPreviousPage: currentPage > 1,
+        hasNextPage: currentPage < totalPages,
+      },
+    });
   } catch (err) {
     console.error("❌ Get Receive Payments Error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message || "Internal server error",
+    });
   }
 };
-
 // GET SINGLE RECEIVE PAYMENT
 
 exports.getReceivePaymentById = async (req, res) => {

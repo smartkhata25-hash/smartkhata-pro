@@ -97,7 +97,7 @@ const SuppliersPage = () => {
       const data = await fetchSuppliers({
         search: '',
         type: '',
-        status: 'all',
+        status: activeTab === 'hidden' ? 'hidden' : 'active',
       });
 
       setSuppliers(Array.isArray(data) ? data : []);
@@ -105,7 +105,7 @@ const SuppliersPage = () => {
       console.error(t('alerts.loadSuppliersError'), error);
       setSuppliers([]);
     }
-  }, [canViewSuppliers]);
+  }, [canViewSuppliers, activeTab]);
 
   useEffect(() => {
     loadSuppliers();
@@ -193,6 +193,7 @@ const SuppliersPage = () => {
     }
 
     setEditingSupplier(null);
+    setShowSuggestions(false);
     setShowForm(true);
   };
 
@@ -205,6 +206,7 @@ const SuppliersPage = () => {
     }
 
     setEditingSupplier(supplier);
+    setShowSuggestions(false);
     setShowForm(true);
   };
 
@@ -217,6 +219,7 @@ const SuppliersPage = () => {
     }
 
     setDeleteId(id);
+    setShowSuggestions(false);
     setShowConfirm(true);
   };
   const confirmDelete = async () => {
@@ -228,9 +231,15 @@ const SuppliersPage = () => {
     try {
       if (deleteId) {
         await deleteSupplier(deleteId);
+
         setDeleteId(null);
         setShowConfirm(false);
-        loadSuppliers();
+
+        setSelectedSupplierId(null);
+        setSupplierName('');
+        setLedgerData(null);
+
+        setActiveTab('hidden');
       }
     } catch (err) {
       console.error(t('alerts.deleteSupplierError'), err);
@@ -253,13 +262,13 @@ const SuppliersPage = () => {
     try {
       await convertSupplierToParty(supplier._id);
 
-      await loadSuppliers();
-
       if (selectedSupplierId === supplier._id) {
         setSelectedSupplierId(null);
         setSupplierName('');
         setLedgerData(null);
       }
+
+      setActiveTab('hidden');
 
       alert('Supplier party میں convert ہو گیا');
     } catch (err) {
@@ -293,7 +302,7 @@ const SuppliersPage = () => {
         setLedgerData(null);
       }
 
-      await loadSuppliers();
+      setActiveTab('active');
 
       alert('Supplier restore ہو گیا');
     } catch (err) {
@@ -344,7 +353,7 @@ const SuppliersPage = () => {
 
       setShowForm(false);
       setEditingSupplier(null);
-      loadSuppliers();
+      await loadSuppliers();
     } catch (error) {
       console.error('Supplier form submission failed:', error);
       alert(error.response?.data?.message || t('alerts.saveSupplierFailed'));
@@ -592,6 +601,11 @@ const SuppliersPage = () => {
                 setBalanceFilter('all');
                 setNameSort('none');
                 setBalanceSort('none');
+                setSelectedSupplierId(null);
+                setSupplierName('');
+                setLedgerData(null);
+                setSelectedIndex(-1);
+                setSuppliers([]);
                 setActiveTab('active');
 
                 localStorage.removeItem('app_state_suppliers_page_state');
@@ -1193,7 +1207,7 @@ const SuppliersPage = () => {
                     setShowForm(false);
                     setEditingSupplier(null);
 
-                    loadSuppliers();
+                    await loadSuppliers();
 
                     alert(t('alerts.suppliersMerged'));
                   } catch (err) {

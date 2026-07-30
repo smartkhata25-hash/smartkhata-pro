@@ -27,20 +27,46 @@ export const getParties = fetchParties;
 
 // ✅ Get parties for sale side
 export const fetchSaleParties = async (token = null) => {
-  const parties = await fetchParties({}, token);
+  const [customers, bothParties] = await Promise.all([
+    fetchParties(
+      {
+        status: 'active',
+        role: 'customer',
+      },
+      token
+    ),
+    fetchParties(
+      {
+        status: 'active',
+        role: 'both',
+      },
+      token
+    ),
+  ]);
 
-  return parties.filter(
-    (p) => p.isActive !== false && (p.role === 'customer' || p.role === 'both')
-  );
+  return [...customers, ...bothParties];
 };
 
 // ✅ Get parties for purchase side
 export const fetchPurchaseParties = async (token = null) => {
-  const parties = await fetchParties({}, token);
+  const [suppliers, bothParties] = await Promise.all([
+    fetchParties(
+      {
+        status: 'active',
+        role: 'supplier',
+      },
+      token
+    ),
+    fetchParties(
+      {
+        status: 'active',
+        role: 'both',
+      },
+      token
+    ),
+  ]);
 
-  return parties.filter(
-    (p) => p.isActive !== false && (p.role === 'supplier' || p.role === 'both')
-  );
+  return [...suppliers, ...bothParties];
 };
 
 // ✅ Add new party

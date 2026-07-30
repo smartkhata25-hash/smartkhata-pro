@@ -28,13 +28,11 @@ const PayBillForm = () => {
 
   const [formData, setFormData] = useState({
     supplier: '',
+    partyId: '',
     date: dayjs().format('YYYY-MM-DD'),
     time: dayjs().format('HH:mm'),
-
     paymentType: 'Cash',
-
     discountAmount: '',
-
     description: '',
     attachment: '',
   });
@@ -69,7 +67,9 @@ const PayBillForm = () => {
   }, []);
 
   useEffect(() => {
-    async function fetchData() {
+    let isMounted = true;
+
+    const fetchData = async () => {
       if (id && (!canViewPayBills || !canEditPayBills)) {
         alert('You do not have permission to edit pay bills');
         navigate('/pay-bills');
@@ -82,90 +82,145 @@ const PayBillForm = () => {
         return;
       }
 
-      if (id) {
-        const [sData, pData, paymentAccounts] = await Promise.all([
-          getSuppliers(),
-          fetchPurchaseParties(),
-          getValidPaymentAccounts(),
-        ]);
+      try {
+        setLoading(true);
 
-        let existing = JSON.parse(localStorage.getItem(`paybill_${id}`) || 'null');
+        const requests = [getSuppliers(), fetchPurchaseParties(), getValidPaymentAccounts()];
 
-        if (!existing) {
-          existing = await getPayBillById(id);
-          localStorage.setItem(`paybill_${id}`, JSON.stringify(existing));
+        if (id) {
+          requests.push(getPayBillById(id));
         }
 
-        setSuppliers(sData);
-        setParties(pData);
-        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
+        const [supplierData, partyData, paymentAccountData, existing] = await Promise.all(requests);
+
+        if (!isMounted) return;
+
+        const safeSuppliers = Array.isArray(supplierData) ? supplierData : [];
+
+        const safeParties = Array.isArray(partyData) ? partyData : [];
+
+        const safeAccounts = Array.isArray(paymentAccountData) ? paymentAccountData : [];
+
+        setSuppliers(safeSuppliers);
+        setParties(safeParties);
+        setAccounts(safeAccounts);
+
+        if (id && existing) {
+          const existingSupplierId =
+            typeof existing.supplier === 'object'
+              ? existing.supplier?._id
+              : existing.supplier || '';
+
+          const existingPartyId =
+            typeof existing.partyId === 'object' ? existing.partyId?._id : existing.partyId || '';
+
+          const supplierType = existingPartyId ? 'party' : 'supplier';
+
+          setSelectedSupplierType(supplierType);
+
+          setFormData({
+            supplier: supplierType === 'supplier' ? existingSupplierId : '',
+            partyId: supplierType === 'party' ? existingPartyId : '',
+            date: existing.date?.slice(0, 10) || dayjs().format('YYYY-MM-DD'),
+            time: existing.time || dayjs().format('HH:mm'),
+            paymentType:
+              existing.paymentEntries?.[0]?.paymentType || existing.paymentType || 'Cash',
+            discountAmount: existing.discountAmount ?? '',
+            description: existing.description || '',
+            attachment: '',
+          });
+
+          setExistingAttachments(Array.isArray(existing.attachments) ? existing.attachments : []);
+
+          setAttachments([]);
+
+          const restoredPayments =
+            Array.isArray(existing.paymentEntries) && existing.paymentEntries.length > 0
+              ? existing.paymentEntries.map((payment) => {
+                  const rawPaymentType = payment.paymentType || existing.paymentType || 'cash';
+
+                  return {
+                    account:
+                      typeof payment.account === 'object'
+                        ? payment.account?._id || ''
+                        : payment.account || '',
+                    amount: payment.amount ?? '',
+                    paymentType:
+                      String(rawPaymentType).toLowerCase() === 'online'
+                        ? 'Online'
+                        : String(rawPaymentType).toLowerCase() === 'cheque'
+                          ? 'Cheque'
+                          : 'Cash',
+                  };
+                })
+              : [
+                  {
+                    account: '',
+                    amount: existing.amount || '',
+                    paymentType:
+                      existing.paymentType === 'online'
+                        ? 'Online'
+                        : existing.paymentType === 'cheque'
+                          ? 'Cheque'
+                          : 'Cash',
+                  },
+                ];
+
+          setPaymentEntries(restoredPayments);
+
+          await loadLedger(
+            supplierType === 'party' ? existingPartyId : existingSupplierId,
+            supplierType
+          );
+
+          return;
+        }
+
+        const handCash = safeAccounts.find(
+          (account) =>
+            account.name?.trim().toLowerCase() === 'hand cash' ||
+            account.category?.toLowerCase() === 'cash' ||
+            account.type?.toLowerCase() === 'cash'
+        );
+
+        setSelectedSupplierType('supplier');
 
         setFormData({
-          supplier: existing.supplier?._id || '',
-          date: existing.date?.slice(0, 10) || '',
-          time: existing.time || '',
-          paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
-          discountAmount: existing.discountAmount || '',
-          description: existing.description || '',
+          supplier: '',
+          partyId: '',
+          date: dayjs().format('YYYY-MM-DD'),
+          time: dayjs().format('HH:mm'),
+          paymentType: 'Cash',
+          discountAmount: '',
+          description: '',
           attachment: '',
         });
 
-        setExistingAttachments(existing.attachments || []);
-        setAttachments([]);
-
-        setPaymentEntries(
-          existing.paymentEntries && existing.paymentEntries.length > 0
-            ? existing.paymentEntries.map((p) => ({
-                account: typeof p.account === 'object' ? p.account._id : p.account || '',
-                amount: p.amount || '',
-                paymentType:
-                  (p.paymentType || existing.paymentType) === 'online'
-                    ? 'Online'
-                    : (p.paymentType || existing.paymentType) === 'cheque'
-                      ? 'Cheque'
-                      : 'Cash',
-              }))
-            : [
-                {
-                  account: '',
-                  amount: '',
-                  paymentType:
-                    existing.paymentType === 'online'
-                      ? 'Online'
-                      : existing.paymentType === 'cheque'
-                        ? 'Cheque'
-                        : 'Cash',
-                },
-              ]
-        );
-
-        loadLedger(existing.supplier?._id);
-      } else {
-        const [sData, pData, paymentAccounts] = await Promise.all([
-          getSuppliers(),
-          fetchPurchaseParties(),
-          getValidPaymentAccounts(),
+        setPaymentEntries([
+          {
+            account: handCash?._id || '',
+            amount: '',
+            paymentType: 'Cash',
+          },
         ]);
+      } catch (error) {
+        if (!isMounted) return;
 
-        setSuppliers(sData);
-        setParties(pData);
+        console.error('❌ Pay Bill form loading error:', error);
 
-        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
-
-        const handCash = paymentAccounts.find((acc) => acc.name?.toLowerCase() === 'hand cash');
-
-        if (handCash) {
-          setPaymentEntries([
-            {
-              account: handCash._id,
-              amount: '',
-              paymentType: 'Cash',
-            },
-          ]);
+        alert(error?.message || 'Pay Bill data could not be loaded');
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
-    }
+    };
+
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [id, loadLedger, canViewPayBills, canCreatePayBills, canEditPayBills, navigate]);
 
   const handleChange = (e) => {
@@ -208,6 +263,7 @@ const PayBillForm = () => {
   const resetForm = () => {
     setFormData({
       supplier: '',
+      partyId: '',
       date: dayjs().format('YYYY-MM-DD'),
       time: dayjs().format('HH:mm'),
       amount: '',
@@ -235,45 +291,83 @@ const PayBillForm = () => {
 
   const handleRevert = async () => {
     if (!id) {
-      // 🆕 New Bill → Clear form
       resetForm();
       return;
     }
 
     try {
+      setLoading(true);
+
       const existing = await getPayBillById(id);
 
+      const existingSupplierId =
+        typeof existing.supplier === 'object' ? existing.supplier?._id : existing.supplier || '';
+
+      const existingPartyId =
+        typeof existing.partyId === 'object' ? existing.partyId?._id : existing.partyId || '';
+
+      const supplierType = existingPartyId ? 'party' : 'supplier';
+
+      setSelectedSupplierType(supplierType);
+
       setFormData({
-        supplier: existing.supplier?._id || '',
-        date: existing.date?.slice(0, 10) || '',
-        time: existing.time || '',
-        paymentType: existing.paymentEntries?.[0]?.paymentType || 'Cash',
-        discountAmount: existing.discountAmount || '',
+        supplier: supplierType === 'supplier' ? existingSupplierId : '',
+        partyId: supplierType === 'party' ? existingPartyId : '',
+        date: existing.date?.slice(0, 10) || dayjs().format('YYYY-MM-DD'),
+        time: existing.time || dayjs().format('HH:mm'),
+        paymentType: existing.paymentEntries?.[0]?.paymentType || existing.paymentType || 'Cash',
+        discountAmount: existing.discountAmount ?? '',
         description: existing.description || '',
         attachment: '',
       });
 
-      setExistingAttachments(existing.attachments || []);
+      setExistingAttachments(Array.isArray(existing.attachments) ? existing.attachments : []);
+
       setAttachments([]);
 
       setPaymentEntries(
-        existing.paymentEntries && existing.paymentEntries.length > 0
-          ? existing.paymentEntries.map((p) => ({
-              account: typeof p.account === 'object' ? p.account._id : p.account || '',
-              amount: p.amount || '',
-              paymentType:
-                p.paymentType === 'online'
-                  ? 'Online'
-                  : p.paymentType === 'cheque'
-                    ? 'Cheque'
-                    : 'Cash',
-            }))
-          : [{ account: '', amount: '', paymentType: 'Cash' }]
+        Array.isArray(existing.paymentEntries) && existing.paymentEntries.length > 0
+          ? existing.paymentEntries.map((payment) => {
+              const rawPaymentType = payment.paymentType || existing.paymentType || 'cash';
+
+              return {
+                account:
+                  typeof payment.account === 'object'
+                    ? payment.account?._id || ''
+                    : payment.account || '',
+                amount: payment.amount ?? '',
+                paymentType:
+                  String(rawPaymentType).toLowerCase() === 'online'
+                    ? 'Online'
+                    : String(rawPaymentType).toLowerCase() === 'cheque'
+                      ? 'Cheque'
+                      : 'Cash',
+              };
+            })
+          : [
+              {
+                account: '',
+                amount: existing.amount || '',
+                paymentType:
+                  existing.paymentType === 'online'
+                    ? 'Online'
+                    : existing.paymentType === 'cheque'
+                      ? 'Cheque'
+                      : 'Cash',
+              },
+            ]
       );
 
-      loadLedger(existing.supplier?._id);
-    } catch (err) {
-      console.error('Revert error:', err);
+      await loadLedger(
+        supplierType === 'party' ? existingPartyId : existingSupplierId,
+        supplierType
+      );
+    } catch (error) {
+      console.error('❌ Pay Bill revert error:', error);
+
+      alert(error?.message || 'Pay Bill could not be restored');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -357,11 +451,9 @@ const PayBillForm = () => {
       if (id) {
         await updatePayBill(id, data);
         localStorage.removeItem('app_state_pay_bill_draft');
-        alert(t('alerts.paymentUpdated'));
       } else {
         await createPayBill(data);
         localStorage.removeItem('app_state_pay_bill_draft');
-        alert(t('alerts.paymentSaved'));
       }
 
       if (type === 'close') {
@@ -377,10 +469,8 @@ const PayBillForm = () => {
   };
 
   const handlePrint = () => {
-    // 🔹 STEP 1: payments table se total amount nikalo
     const totalAmount = paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-    // 🔹 STEP 2: print content
     const docContent = `
     <div>
       <h2 style="text-align:center;">${t('payment.invoiceTitle')}</h2>

@@ -119,4 +119,21 @@ receivePaymentSchema.index({
   partyId: 1,
 });
 
+receivePaymentSchema.index({
+  userId: 1,
+  isDeleted: 1,
+  createdAt: -1,
+});
+
+receivePaymentSchema.index({
+  userId: 1,
+  isDeleted: 1,
+  date: -1,
+});
+
+receivePaymentSchema.index({
+  userId: 1,
+  billNo: 1,
+});
+
 module.exports = mongoose.model("ReceivePayment", receivePaymentSchema);

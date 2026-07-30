@@ -136,6 +136,7 @@ const getReceivePaymentHtml = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { id } = req.params;
     const size = req.query.size || "standard";
+    const lang = req.query.lang || "en";
 
     const payment = await ReceivePayment.findOne({
       _id: id,
@@ -148,6 +149,8 @@ const getReceivePaymentHtml = async (req, res) => {
     }
 
     const built = await buildReceiptData(payment, size, userId);
+
+    built.lang = lang;
 
     const html = generateReceivePaymentHTML(built);
 
@@ -171,6 +174,7 @@ const generateReceivePaymentPdf = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { id } = req.params;
     const size = req.query.size || "standard";
+    const lang = req.query.lang || "en";
 
     const payment = await ReceivePayment.findOne({
       _id: id,
@@ -185,6 +189,8 @@ const generateReceivePaymentPdf = async (req, res) => {
     }
 
     const built = await buildReceiptData(payment, size, userId);
+
+    built.lang = lang;
 
     const html = generateReceivePaymentHTML({
       ...built,

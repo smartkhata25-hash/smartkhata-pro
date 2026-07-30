@@ -10,13 +10,7 @@ const getAuthHeaders = (token = null) => ({
   headers: { Authorization: `Bearer ${token || getToken()}` },
 });
 
-// ✅ Get All Customers (for dropdowns etc.)
-export const fetchCustomers = async (token) => {
-  const response = await axios.get(API_URL, getAuthHeaders(token));
-  return response.data;
-};
-
-// ✅ Get Customers (same as fetchCustomers, but separated for compatibility)
+// ✅ Get Customers
 export const getCustomers = async (token = null, params = {}) => {
   const response = await axios.get(API_URL, {
     ...getAuthHeaders(token),
@@ -24,6 +18,11 @@ export const getCustomers = async (token = null, params = {}) => {
   });
 
   return response.data;
+};
+
+// ✅ Get All Customers (for dropdowns etc.)
+export const fetchCustomers = async (token = null, params = {}) => {
+  return getCustomers(token, params);
 };
 
 // ✅ Add New Customer

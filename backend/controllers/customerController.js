@@ -18,125 +18,145 @@ const escapeRegex = (text = "") => {
 const getCustomers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({
+        message: "Invalid or missing user",
+      });
+    }
+
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
     const { search = "", status = "active" } = req.query;
+
+    // ✅ Safe status value
+    const safeStatus = ["active", "hidden", "all"].includes(status)
+      ? status
+      : "active";
 
     const query = {
       createdBy: objectUserId,
     };
 
     // ✅ Active / Hidden / All filter
-    if (status === "active") {
+    if (safeStatus === "active") {
       query.isActive = true;
-    } else if (status === "hidden") {
+    } else if (safeStatus === "hidden") {
       query.isActive = false;
     }
 
-    if (search) {
-      query.name = { $regex: search, $options: "i" };
+    // ✅ Safe search
+    const cleanSearch = String(search || "").trim();
+
+    if (cleanSearch) {
+      query.name = {
+        $regex: escapeRegex(cleanSearch),
+        $options: "i",
+      };
     }
 
-    let customers = await Customer.find(query).populate("account");
+    const customers = await Customer.find(query)
+      .select(
+        "name email phone address creditLimit type isActive hiddenReason openingBalance account createdBy createdAt updatedAt",
+      )
+      .populate("account", "_id name code type category normalBalance isActive")
+      .sort({ createdAt: -1 })
+      .lean();
 
-    // ✅ Old hidden records automatically identify
-    if (status === "hidden" || status === "all") {
-      const legacyHiddenCustomers = customers.filter(
-        (customer) => customer.isActive === false && !customer.hiddenReason,
-      );
-
-      for (const customer of legacyHiddenCustomers) {
-        const matchingParty = await Party.exists({
-          name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
-          userId,
-          isDeleted: false,
-          isActive: true,
-        });
-
-        const matchingActiveCustomer = await Customer.exists({
-          _id: { $ne: customer._id },
-          name: new RegExp(`^${escapeRegex(customer.name)}$`, "i"),
-          createdBy: userId,
-          isActive: true,
-        });
-
-        if (matchingParty) {
-          customer.hiddenReason = "converted";
-        } else if (matchingActiveCustomer) {
-          customer.hiddenReason = "merged";
-        } else {
-          customer.hiddenReason = "deleted";
-        }
-
-        await customer.save();
-      }
-
-      customers = await Customer.find(query).populate("account");
+    if (customers.length === 0) {
+      return res.json([]);
     }
 
-    // ⚡ Accounts collect
+    // ✅ Customer account IDs collect
     const accountIds = customers
-      .map((customer) => customer.account?._id)
-      .filter(Boolean);
+      .map((customer) => {
+        if (!customer.account) return null;
 
-    const balances =
-      accountIds.length > 0
-        ? await JournalEntry.aggregate([
-            {
-              $match: {
-                createdBy: objectUserId,
-                isDeleted: false,
-                "lines.account": { $in: accountIds },
+        return customer.account._id || customer.account;
+      })
+      .filter(Boolean)
+      .map((accountId) => new mongoose.Types.ObjectId(accountId));
+
+    let balances = [];
+
+    if (accountIds.length > 0) {
+      balances = await JournalEntry.aggregate([
+        {
+          $match: {
+            createdBy: objectUserId,
+            isDeleted: false,
+            "lines.account": {
+              $in: accountIds,
+            },
+          },
+        },
+        {
+          $unwind: "$lines",
+        },
+        {
+          $match: {
+            "lines.account": {
+              $in: accountIds,
+            },
+          },
+        },
+        {
+          $group: {
+            _id: "$lines.account",
+
+            debit: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: ["$lines.type", "debit"],
+                  },
+                  "$lines.amount",
+                  0,
+                ],
               },
             },
-            { $unwind: "$lines" },
-            {
-              $match: {
-                "lines.account": { $in: accountIds },
+
+            credit: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: ["$lines.type", "credit"],
+                  },
+                  "$lines.amount",
+                  0,
+                ],
               },
             },
-            {
-              $group: {
-                _id: {
-                  account: "$lines.account",
-                  type: "$lines.type",
-                },
-                total: { $sum: "$lines.amount" },
-              },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            balance: {
+              $subtract: ["$debit", "$credit"],
             },
-          ])
-        : [];
+          },
+        },
+      ]);
+    }
 
-    const balanceMap = {};
+    const balanceMap = new Map();
 
-    balances.forEach((item) => {
-      const id = item._id.account.toString();
-
-      if (!balanceMap[id]) {
-        balanceMap[id] = {
-          debit: 0,
-          credit: 0,
-        };
-      }
-
-      if (item._id.type === "debit") {
-        balanceMap[id].debit = item.total;
-      } else {
-        balanceMap[id].credit = item.total;
-      }
-    });
+    for (const item of balances) {
+      balanceMap.set(item._id.toString(), Number(item.balance) || 0);
+    }
 
     const result = customers.map((customer) => {
-      const accountId = customer.account?._id?.toString();
-
-      const data = balanceMap[accountId] || {
-        debit: 0,
-        credit: 0,
-      };
+      const accountId =
+        customer.account?._id?.toString() || customer.account?.toString() || "";
 
       return {
-        ...customer.toObject(),
-        balance: data.debit - data.credit,
+        ...customer,
+
+        hiddenReason:
+          customer.isActive === false ? customer.hiddenReason || null : null,
+
+        balance: balanceMap.get(accountId) || 0,
       };
     });
 

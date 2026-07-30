@@ -27,10 +27,6 @@ const {
 
 const authMiddleware = require("../middleware/authMiddleware");
 
-/* =========================================================
-   ✅ SALE INVOICE PRINT
-========================================================= */
-
 router.get("/sale/:id", authMiddleware, printController.getSaleInvoicePrint);
 
 router.get(
@@ -73,10 +69,6 @@ router.post(
   printController.generatePreviewSettingsHtml,
 );
 
-/* =========================================================
-   📘 SUPPLIER LEDGER PRINT
-========================================================= */
-
 router.get(
   "/supplier-ledger/:supplierId/html",
   authMiddleware,
@@ -88,10 +80,6 @@ router.get(
   authMiddleware,
   generateSupplierLedgerPdf,
 );
-
-/* =========================================================
-   📊 SUPPLIER DETAIL LEDGER PRINT
-========================================================= */
 
 router.get(
   "/supplier-detail-ledger/:supplierId/html",
@@ -105,26 +93,13 @@ router.get(
   generateSupplierDetailLedgerPdf,
 );
 
-/* =========================================================
-   📈 CUSTOMER AGING REPORT PRINT
-========================================================= */
-
 router.get("/aging-report/html", authMiddleware, getAgingReportHtml);
 
 router.get("/aging-report/pdf", authMiddleware, generateAgingReportPdf);
 
-/* =========================================================
-   💰 RECEIVE PAYMENT PREVIEW (NO AUTH)
-   ⚠️ IMPORTANT: preview routes always FIRST
-========================================================= */
-
 router.get("/receive-payment/preview/html", previewReceivePaymentHtml);
 
 router.get("/receive-payment/preview/pdf", previewReceivePaymentPdf);
-
-/* =========================================================
-   💰 RECEIVE PAYMENT RECEIPT PRINT (SAVED)
-========================================================= */
 
 router.get("/receive-payment/:id/html", authMiddleware, getReceivePaymentHtml);
 

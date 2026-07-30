@@ -33,9 +33,21 @@ export async function createReceivePayment(formData) {
 }
 
 // ✅ Get All Receive Payments
-export async function getAllReceivePayments() {
+export async function getAllReceivePayments(params = {}) {
   try {
-    const res = await axios.get(API_URL, getAuthHeaders());
+    const res = await axios.get(API_URL, {
+      ...getAuthHeaders(),
+      params: {
+        page: params.page || 1,
+        limit: params.limit || 10,
+        search: params.search || '',
+        customer: params.customer || '',
+        paymentType: params.paymentType || '',
+        fromDate: params.fromDate || '',
+        toDate: params.toDate || '',
+      },
+    });
+
     return res.data;
   } catch (err) {
     console.error('❌ Error fetching all receive payments:', err);

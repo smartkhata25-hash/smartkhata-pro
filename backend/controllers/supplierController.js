@@ -1,4 +1,5 @@
 // backend/controllers/supplierController.js
+const mongoose = require("mongoose");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const Invoice = require("../models/Invoice");
@@ -252,9 +253,7 @@ exports.getSuppliers = async (req, res) => {
       limit = 0,
     } = req.query;
 
-    const query = {
-      userId,
-    };
+    const query = { userId };
 
     // ✅ Active / Hidden / All
     if (status === "active") {
@@ -263,11 +262,16 @@ exports.getSuppliers = async (req, res) => {
       query.isDeleted = true;
     }
 
-    if (search) {
+    // ✅ Safe search
+    const cleanSearch = String(search || "").trim();
+
+    if (cleanSearch) {
+      const safeSearch = escapeRegex(cleanSearch);
+
       query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { phone: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
@@ -275,62 +279,77 @@ exports.getSuppliers = async (req, res) => {
       query.supplierType = type;
     }
 
-    let suppliers = await Supplier.find(query).sort({ [sort]: 1 });
+    // ✅ Only allowed sorting fields
+    const allowedSortFields = [
+      "createdAt",
+      "name",
+      "supplierType",
+      "openingBalance",
+    ];
 
-    // ✅ پرانے hidden records کی وجہ خود پہچاننا
-    if (status === "hidden" || status === "all") {
-      const oldHiddenSuppliers = suppliers.filter(
-        (supplier) => supplier.isDeleted === true && !supplier.hiddenReason,
-      );
+    const sortField = allowedSortFields.includes(sort) ? sort : "createdAt";
 
-      for (const supplier of oldHiddenSuppliers) {
-        const matchingParty = await Party.exists({
-          name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
-          userId,
-          isDeleted: false,
-          isActive: true,
-        });
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.max(Number(limit) || 0, 0);
 
-        const matchingActiveSupplier = await Supplier.exists({
-          _id: { $ne: supplier._id },
-          name: new RegExp(`^${escapeRegex(supplier.name)}$`, "i"),
-          userId,
-          isDeleted: false,
-        });
+    let supplierQuery = Supplier.find(query)
+      .select(
+        "name phone email address notes openingBalance supplierType account isDeleted hiddenReason createdAt",
+      )
+      .sort({ [sortField]: 1 })
+      .lean();
 
-        if (matchingParty) {
-          supplier.hiddenReason = "converted";
-        } else if (matchingActiveSupplier) {
-          supplier.hiddenReason = "merged";
-        } else {
-          supplier.hiddenReason = "deleted";
-        }
-
-        supplier.supplierType = "blocked";
-        await supplier.save();
-      }
-
-      suppliers = await Supplier.find(query).sort({ [sort]: 1 });
+    // ✅ Pagination MongoDB پر ہوگی، memory میں نہیں
+    if (limitNumber > 0) {
+      supplierQuery = supplierQuery
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber);
     }
 
-    if (Number(limit) > 0) {
-      const start = (Number(page) - 1) * Number(limit);
-      suppliers = suppliers.slice(start, start + Number(limit));
+    const suppliers = await supplierQuery;
+
+    if (suppliers.length === 0) {
+      return res.json([]);
     }
 
-    const suppliersWithBalance = await Promise.all(
-      suppliers.map(async (supplier) => {
-        const balance = await getSupplierBalanceFromJournal(
-          supplier._id,
-          userId,
-        );
+    const supplierIds = suppliers.map((supplier) => supplier._id);
 
-        return {
-          ...supplier.toObject(),
-          balance,
-        };
-      }),
+    // ✅ تمام balances صرف ایک aggregation query سے
+    const balanceRows = await JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: new mongoose.Types.ObjectId(userId),
+          supplierId: { $in: supplierIds },
+          isDeleted: false,
+        },
+      },
+      {
+        $unwind: "$lines",
+      },
+      {
+        $group: {
+          _id: "$supplierId",
+          balance: {
+            $sum: {
+              $cond: [
+                { $eq: ["$lines.type", "credit"] },
+                "$lines.amount",
+                { $multiply: ["$lines.amount", -1] },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const balanceMap = new Map(
+      balanceRows.map((row) => [row._id.toString(), Number(row.balance) || 0]),
     );
+
+    const suppliersWithBalance = suppliers.map((supplier) => ({
+      ...supplier,
+      balance: balanceMap.get(supplier._id.toString()) || 0,
+    }));
 
     return res.json(suppliersWithBalance);
   } catch (err) {

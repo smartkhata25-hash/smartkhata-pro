@@ -35,6 +35,7 @@ const ReceivePaymentForm = () => {
 
   const [formData, setFormData] = useState({
     customer: '',
+    partyId: '',
     date: dayjs().format('YYYY-MM-DD'),
     time: dayjs().format('HH:mm'),
     amount: '',
@@ -69,15 +70,15 @@ const ReceivePaymentForm = () => {
   useEffect(() => {
     async function fetchData() {
       try {
-        const cData = await fetchCustomers();
-        const pData = await fetchSaleParties();
-        const paymentAccounts = await getValidPaymentAccounts();
+        const [cData, pData, paymentAccounts] = await Promise.all([
+          fetchCustomers(),
+          fetchSaleParties(),
+          getValidPaymentAccounts(),
+        ]);
 
         setCustomers(cData);
         setParties(pData);
         setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
-
-        const loadedCustomers = cData;
 
         // ✅🔥 Default HANDCASH select
         const handCashAccount = paymentAccounts.find(
@@ -103,28 +104,69 @@ const ReceivePaymentForm = () => {
         if (id) {
           const existing = await getReceivePaymentById(id);
 
+          const customerId =
+            typeof existing.customer === 'object' ? existing.customer?._id : existing.customer;
+
+          const partyId =
+            typeof existing.partyId === 'object' ? existing.partyId?._id : existing.partyId;
+
+          const isPartyPayment = Boolean(partyId);
+
+          setSelectedCustomerType(isPartyPayment ? 'party' : 'customer');
+
           setFormData({
-            customer: existing.customer,
-            date: existing.date,
-            time: existing.time,
+            customer: isPartyPayment ? '' : customerId || '',
+            partyId: isPartyPayment ? partyId || '' : '',
+            date: existing.date || dayjs().format('YYYY-MM-DD'),
+            time: existing.time || dayjs().format('HH:mm'),
             paymentType: existing.paymentType || 'Cash',
             discountAmount: existing.discountAmount || '',
             description: existing.description || '',
             attachments: existing.attachments || [],
           });
 
-          // ✅ IMPORTANT: customer name set for search input
-          setCustomerName(cData.find((c) => c._id === existing.customer)?.name || '');
+          if (isPartyPayment) {
+            const selectedParty = pData.find((party) => String(party._id) === String(partyId));
+
+            setCustomerName(selectedParty?.name || existing.partyId?.name || '');
+
+            const ledgerResponse = await getPartyLedger(partyId);
+            setCustomerLedger(ledgerResponse?.ledger || []);
+          } else {
+            const selectedCustomer = cData.find(
+              (customer) => String(customer._id) === String(customerId)
+            );
+
+            setCustomerName(selectedCustomer?.name || existing.customer?.name || '');
+
+            const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+
+            if (accountId) {
+              const ledgerResponse = await getLedgerByCustomerAccount(accountId);
+
+              setCustomerLedger(ledgerResponse?.ledger || []);
+            } else {
+              setCustomerLedger([]);
+            }
+          }
 
           setPaymentEntries(
             existing.paymentEntries && existing.paymentEntries.length > 0
-              ? existing.paymentEntries.map((p) => ({
-                  account: p.account || '',
-                  amount: p.amount || '',
+              ? existing.paymentEntries.map((payment) => ({
+                  account:
+                    typeof payment.account === 'object'
+                      ? payment.account?._id
+                      : payment.account || '',
+
+                  amount: payment.amount || '',
+
                   paymentType:
-                    (p.paymentType || existing.paymentType) === 'online'
+                    String(payment.paymentType || existing.paymentType || 'cash').toLowerCase() ===
+                    'online'
                       ? 'Online'
-                      : (p.paymentType || existing.paymentType) === 'cheque'
+                      : String(
+                            payment.paymentType || existing.paymentType || 'cash'
+                          ).toLowerCase() === 'cheque'
                         ? 'Cheque'
                         : 'Cash',
                 }))
@@ -133,25 +175,14 @@ const ReceivePaymentForm = () => {
                     account: '',
                     amount: '',
                     paymentType:
-                      existing.paymentType === 'online'
+                      String(existing.paymentType || 'cash').toLowerCase() === 'online'
                         ? 'Online'
-                        : existing.paymentType === 'cheque'
+                        : String(existing.paymentType || 'cash').toLowerCase() === 'cheque'
                           ? 'Cheque'
                           : 'Cash',
                   },
                 ]
           );
-
-          const selectedCustomer = loadedCustomers.find(
-            (c) => String(c._id) === String(existing.customer)
-          );
-
-          const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
-
-          if (accountId) {
-            const res = await getLedgerByCustomerAccount(accountId);
-            setCustomerLedger(res.ledger || []);
-          }
         }
       } catch (err) {
         console.error('❌ Error fetching accounts/customers:', err.message);
@@ -285,17 +316,108 @@ const ReceivePaymentForm = () => {
               },
             ]
       );
-      loadLedger(existing.customer);
+      const customerId =
+        typeof existing.customer === 'object' ? existing.customer?._id : existing.customer;
+
+      const partyId =
+        typeof existing.partyId === 'object' ? existing.partyId?._id : existing.partyId;
+
+      if (partyId) {
+        setSelectedCustomerType('party');
+
+        setFormData((prev) => ({
+          ...prev,
+          customer: '',
+          partyId,
+        }));
+
+        const selectedParty = parties.find((party) => String(party._id) === String(partyId));
+
+        setCustomerName(selectedParty?.name || existing.partyId?.name || '');
+
+        await loadLedger(partyId, 'party');
+      } else {
+        setSelectedCustomerType('customer');
+
+        setFormData((prev) => ({
+          ...prev,
+          customer: customerId || '',
+          partyId: '',
+        }));
+
+        const selectedCustomer = customers.find(
+          (customer) => String(customer._id) === String(customerId)
+        );
+
+        setCustomerName(selectedCustomer?.name || existing.customer?.name || '');
+
+        await loadLedger(customerId, 'customer');
+      }
     } catch (err) {
       console.error('Revert error:', err);
     }
   };
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (id) {
-      window.open(
-        `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/html?size=${printSize}`,
-        '_blank'
-      );
+      const printWindow = window.open('', '_blank');
+
+      if (!printWindow) {
+        alert('Please allow popups to print the receipt');
+        return;
+      }
+
+      try {
+        printWindow.document.write(
+          '<p style="font-family:Arial;padding:20px;">Preparing print...</p>'
+        );
+
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+          printWindow.close();
+          alert('Login token not found. Please login again.');
+          return;
+        }
+
+        const response = await fetch(
+          `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/html?size=${printSize}&lang=${encodeURIComponent(
+            getCurrentLanguage()
+          )}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          let message = 'Failed to generate print';
+
+          try {
+            const errorData = await response.json();
+            message = errorData.message || errorData.error || message;
+          } catch {
+            const errorText = await response.text();
+            if (errorText) message = errorText;
+          }
+
+          throw new Error(message);
+        }
+
+        const html = await response.text();
+
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } catch (error) {
+        printWindow.close();
+
+        console.error('❌ Receive Payment Print Error:', error);
+
+        alert(error.message || 'Failed to generate print');
+      }
+
       return;
     }
 
@@ -342,10 +464,70 @@ const ReceivePaymentForm = () => {
       '_blank'
     );
   };
-
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (id) {
-      window.location.href = `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/pdf?size=${printSize}`;
+      try {
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+          alert('Login token not found. Please login again.');
+          return;
+        }
+
+        const response = await fetch(
+          `${process.env.REACT_APP_API_BASE_URL}/api/print/receive-payment/${id}/pdf?size=${printSize}&lang=${encodeURIComponent(
+            getCurrentLanguage()
+          )}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        if (!response.ok) {
+          let message = 'Failed to generate PDF';
+
+          try {
+            const errorData = await response.json();
+            message = errorData.message || errorData.error || message;
+          } catch {
+            const errorText = await response.text();
+            if (errorText) message = errorText;
+          }
+
+          throw new Error(message);
+        }
+
+        const pdfBlob = await response.blob();
+        const pdfUrl = window.URL.createObjectURL(pdfBlob);
+
+        const contentDisposition = response.headers.get('content-disposition');
+
+        let fileName = 'Receive-Payment-Receipt.pdf';
+
+        const fileNameMatch = contentDisposition?.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+
+        if (fileNameMatch?.[1]) {
+          fileName = fileNameMatch[1].replace(/['"]/g, '').trim();
+        }
+
+        const downloadLink = document.createElement('a');
+
+        downloadLink.href = pdfUrl;
+        downloadLink.download = fileName;
+
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+
+        window.URL.revokeObjectURL(pdfUrl);
+      } catch (error) {
+        console.error('❌ Receive Payment PDF Error:', error);
+
+        alert(error.message || 'Failed to generate PDF');
+      }
+
       return;
     }
 
@@ -369,9 +551,15 @@ const ReceivePaymentForm = () => {
 
       customer: formData.customer,
 
-      customerName: customers.find((c) => c._id === formData.customer)?.name || '',
+      customerName:
+        selectedCustomerType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.name || ''
+          : customers.find((c) => c._id === formData.customer)?.name || '',
 
-      customerPhone: customers.find((c) => c._id === formData.customer)?.phone || '',
+      customerPhone:
+        selectedCustomerType === 'party'
+          ? parties.find((p) => p._id === formData.partyId)?.phone || ''
+          : customers.find((c) => c._id === formData.customer)?.phone || '',
 
       paymentEntries: paymentEntries.map((p) => ({
         ...p,

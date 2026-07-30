@@ -23,9 +23,21 @@ export async function createPayBill(formData) {
 }
 
 // ✅ Get All Pay Bills
-export async function getAllPayBills() {
+export async function getAllPayBills(params = {}) {
   try {
-    const res = await axios.get(API_URL, getConfig(false));
+    const res = await axios.get(API_URL, {
+      ...getConfig(false),
+      params: {
+        page: params.page || 1,
+        limit: params.limit || 20,
+        search: params.search || '',
+        supplier: params.supplier || '',
+        paymentType: params.paymentType || '',
+        fromDate: params.fromDate || '',
+        toDate: params.toDate || '',
+      },
+    });
+
     return res.data;
   } catch (err) {
     handleError(err);

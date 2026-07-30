@@ -65,7 +65,7 @@ const PartiesPage = () => {
 
     try {
       const data = await fetchParties({
-        status: 'all',
+        status: activeTab === 'hidden' ? 'hidden' : 'active',
       });
 
       setParties(Array.isArray(data) ? data : []);
@@ -74,7 +74,7 @@ const PartiesPage = () => {
       setParties([]);
       alert(t('alerts.partyListLoadFailed'));
     }
-  }, [canViewParties]);
+  }, [canViewParties, activeTab]);
   useEffect(() => {
     loadParties();
   }, [loadParties]);
@@ -150,18 +150,20 @@ const PartiesPage = () => {
     try {
       if (!deleteId) return;
 
-      await deleteParty(deleteId);
+      const deletedPartyId = deleteId;
+
+      await deleteParty(deletedPartyId);
 
       setShowConfirm(false);
       setDeleteId(null);
 
-      if (selectedPartyId === deleteId) {
+      if (selectedPartyId === deletedPartyId) {
         setSelectedPartyId('');
         setSelectedPartyName('');
         setLedgerData(null);
       }
 
-      await loadParties();
+      setActiveTab('hidden');
     } catch (err) {
       console.error('Party delete failed:', err);
       alert(t('alerts.partyDeleteFailed'));
@@ -180,13 +182,14 @@ const PartiesPage = () => {
 
     try {
       await convertPartyToCustomer(party._id);
-      await loadParties();
 
       if (selectedPartyId === party._id) {
         setSelectedPartyId('');
         setSelectedPartyName('');
         setLedgerData(null);
       }
+
+      setActiveTab('hidden');
 
       alert('Party customer میں convert ہو گئی');
     } catch (err) {
@@ -206,13 +209,14 @@ const PartiesPage = () => {
 
     try {
       await convertPartyToSupplier(party._id);
-      await loadParties();
 
       if (selectedPartyId === party._id) {
         setSelectedPartyId('');
         setSelectedPartyName('');
         setLedgerData(null);
       }
+
+      setActiveTab('hidden');
 
       alert('Party supplier میں convert ہو گئی');
     } catch (err) {
@@ -246,7 +250,7 @@ const PartiesPage = () => {
         setLedgerData(null);
       }
 
-      await loadParties();
+      setActiveTab('active');
 
       alert('Party restore ہو گئی');
     } catch (err) {
@@ -298,9 +302,7 @@ const PartiesPage = () => {
 
       const roleOk = roleFilter === 'all' || p.role === roleFilter;
 
-      const activeOk = activeTab === 'active' ? p.isActive !== false : p.isActive === false;
-
-      return searchOk && roleOk && activeOk;
+      return searchOk && roleOk;
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
@@ -683,9 +685,7 @@ const PartiesPage = () => {
           {canViewPartyLedger && !ledgerLoading && ledgerData && (
             <>
               <PartyLedgerHeader
-                parties={parties.filter((party) =>
-                  activeTab === 'active' ? party.isActive !== false : party.isActive === false
-                )}
+                parties={parties}
                 partyId={selectedPartyId}
                 setPartyId={setSelectedPartyId}
                 start={ledgerStartDate}

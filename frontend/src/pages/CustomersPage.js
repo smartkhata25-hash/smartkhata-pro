@@ -79,7 +79,7 @@ const CustomersPage = () => {
 
     try {
       const data = await getCustomers(token, {
-        status: 'all',
+        status: activeTab === 'hidden' ? 'hidden' : 'active',
       });
 
       setCustomers(Array.isArray(data) ? data : []);
@@ -87,11 +87,11 @@ const CustomersPage = () => {
       console.error(t('alerts.customersLoadFailed'), error);
       setCustomers([]);
     }
-  }, [token, canViewCustomers]);
+  }, [token, canViewCustomers, activeTab]);
 
   useEffect(() => {
     loadCustomers();
-  }, [loadCustomers]);
+  }, [loadCustomers, activeTab]);
 
   useEffect(() => {
     const fetchBusinessInfo = async () => {
@@ -242,7 +242,8 @@ const CustomersPage = () => {
         await deleteCustomer(deleteId);
         setDeleteId(null);
         setShowConfirm(false);
-        loadCustomers();
+        await loadCustomers();
+        setActiveTab('hidden');
       }
     } catch (err) {
       console.error('Error deleting customer:', err);
@@ -263,7 +264,7 @@ const CustomersPage = () => {
     try {
       await convertCustomerToParty(customer._id);
       await loadCustomers();
-
+      setActiveTab('hidden');
       if (selectedCustomerId === customer._id) {
         setSelectedCustomerId('');
         setCustomerName('');
@@ -303,7 +304,7 @@ const CustomersPage = () => {
       }
 
       await loadCustomers();
-
+      setActiveTab('active');
       alert('Customer restore ہو گیا');
     } catch (err) {
       alert(err?.response?.data?.message || 'Customer restore failed');
@@ -350,7 +351,7 @@ const CustomersPage = () => {
         // ✅ normal update
         setShowForm(false);
         setEditingCustomer(null);
-        loadCustomers();
+        await loadCustomers();
         return;
       }
 
@@ -366,7 +367,7 @@ const CustomersPage = () => {
       // ✅ normal add
       setShowForm(false);
       setEditingCustomer(null);
-      loadCustomers();
+      await loadCustomers();
     } catch (error) {
       console.error('Customer form submission failed:', error);
       alert(error.response?.data?.message || t('alerts.customerSaveFailed'));
@@ -599,6 +600,7 @@ const CustomersPage = () => {
                 setNameSort('none');
                 setBalanceSort('none');
                 setActiveTab('active');
+                setCustomers([]);
 
                 localStorage.removeItem('app_state_customers_page_state');
               }}
@@ -1232,7 +1234,7 @@ const CustomersPage = () => {
                     setShowForm(false);
                     setEditingCustomer(null);
 
-                    loadCustomers();
+                    await loadCustomers();
                     alert(t('alerts.mergeFailed'));
                   } catch (err) {
                     console.error(err);

@@ -12,10 +12,6 @@ const Counter = require("../models/Counter");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { logActivity } = require("../utils/activityLogger");
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
@@ -476,10 +472,6 @@ const createSupplierOpeningEntryFromParty = async ({
   }
 };
 
-/* =========================================================
-   CREATE PARTY
-========================================================= */
-
 exports.createParty = async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -631,73 +623,99 @@ exports.getParties = async (req, res) => {
       query.isActive = false;
     }
 
+    // ✅ Role filter
     if (role && ["customer", "supplier", "both"].includes(role)) {
       query.role = role;
     }
 
-    if (search.trim()) {
-      const safe = escapeRegex(search.trim());
+    // ✅ Safe search
+    const cleanSearch = String(search || "").trim();
+
+    if (cleanSearch) {
+      const safeSearch = escapeRegex(cleanSearch);
 
       query.$or = [
-        { name: { $regex: safe, $options: "i" } },
-        { phone: { $regex: safe, $options: "i" } },
-        { email: { $regex: safe, $options: "i" } },
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
-    let parties = await Party.find(query)
-      .populate("account")
-      .sort({ createdAt: -1 });
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.max(Number(limit) || 0, 0);
 
-    // ✅ پرانے Hidden records کی وجہ پہچانیں
-    if (status === "hidden" || status === "inactive" || status === "all") {
-      const oldHiddenParties = parties.filter(
-        (party) => party.isActive === false && !party.hiddenReason,
-      );
+    let partyQuery = Party.find(query)
+      .select(
+        "name phone email address notes role openingBalance account isActive isDeleted hiddenReason createdAt",
+      )
+      .sort({ createdAt: -1 })
+      .lean();
 
-      for (const party of oldHiddenParties) {
-        const activeCustomer = await Customer.exists({
-          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
-          createdBy: userId,
-          isActive: true,
-        });
-
-        const activeSupplier = await Supplier.exists({
-          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
-          userId,
-          isDeleted: false,
-        });
-
-        if (activeCustomer || activeSupplier) {
-          party.hiddenReason = "converted";
-        } else {
-          party.hiddenReason = "deleted";
-        }
-
-        await party.save();
-      }
-
-      parties = await Party.find(query)
-        .populate("account")
-        .sort({ createdAt: -1 });
+    // ✅ Pagination database پر ہوگی
+    if (limitNumber > 0) {
+      partyQuery = partyQuery
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber);
     }
 
-    if (Number(limit) > 0) {
-      const start = (Number(page) - 1) * Number(limit);
-      parties = parties.slice(start, start + Number(limit));
+    const parties = await partyQuery;
+
+    if (parties.length === 0) {
+      return res.json([]);
     }
 
-    const result = await Promise.all(
-      parties.map(async (party) => {
-        const accountId = party.account?._id || party.account;
-        const balance = await getPartyBalance(accountId, userId);
+    const accountIds = parties
+      .map((party) => party.account)
+      .filter(Boolean)
+      .map((accountId) => new mongoose.Types.ObjectId(accountId));
 
-        return {
-          ...party.toObject(),
-          balance,
-        };
-      }),
+    let balanceRows = [];
+
+    if (accountIds.length > 0) {
+      // ✅ تمام Party balances صرف ایک query سے
+      balanceRows = await JournalEntry.aggregate([
+        {
+          $match: {
+            createdBy: new mongoose.Types.ObjectId(userId),
+            isDeleted: false,
+            "lines.account": { $in: accountIds },
+          },
+        },
+        {
+          $unwind: "$lines",
+        },
+        {
+          $match: {
+            "lines.account": { $in: accountIds },
+          },
+        },
+        {
+          $group: {
+            _id: "$lines.account",
+            balance: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$lines.type", "debit"] },
+                  "$lines.amount",
+                  { $multiply: ["$lines.amount", -1] },
+                ],
+              },
+            },
+          },
+        },
+      ]);
+    }
+
+    const balanceMap = new Map(
+      balanceRows.map((row) => [row._id.toString(), Number(row.balance) || 0]),
     );
+
+    const result = parties.map((party) => ({
+      ...party,
+      balance: party.account
+        ? balanceMap.get(party.account.toString()) || 0
+        : 0,
+    }));
 
     return res.json(result);
   } catch (err) {
@@ -709,10 +727,6 @@ exports.getParties = async (req, res) => {
     });
   }
 };
-
-/* =========================================================
-   GET SINGLE PARTY
-========================================================= */
 
 exports.getPartyById = async (req, res) => {
   try {
@@ -743,10 +757,6 @@ exports.getPartyById = async (req, res) => {
     });
   }
 };
-
-/* =========================================================
-   UPDATE PARTY
-========================================================= */
 
 exports.updateParty = async (req, res) => {
   try {
@@ -955,10 +965,6 @@ exports.updateParty = async (req, res) => {
     });
   }
 };
-
-/* =========================================================
-   DELETE / HIDE PARTY
-========================================================= */
 
 exports.deleteParty = async (req, res) => {
   try {
@@ -1315,9 +1321,6 @@ exports.convertPartyToSupplier = async (req, res) => {
 
     const partyClosingBalance = await getPartyBalance(party.account, userId);
 
-    // ✅ Party balance positive = receivable
-    // ✅ Supplier balance positive = payable
-    // اس لیے supplier میں sign reverse ہوگا
     const supplierOpeningBalance = partyClosingBalance * -1;
 
     const code = await generateAccountCode(userId);

@@ -292,12 +292,20 @@ exports.getAllPayBills = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
+    const {
+      page = 1,
+      limit = 20,
+      search = "",
+      supplier = "",
+      paymentType = "",
+      fromDate = "",
+      toDate = "",
+    } = req.query;
+
     const activeSuppliers = await Supplier.find({
       userId,
       isDeleted: false,
     }).select("_id");
-
-    const activeSupplierIds = activeSuppliers.map((s) => s._id);
 
     const activeParties = await Party.find({
       userId,
@@ -305,54 +313,97 @@ exports.getAllPayBills = async (req, res) => {
       isActive: true,
     }).select("_id");
 
-    const activePartyIds = activeParties.map((p) => p._id);
-
-    const bills = await PayBill.find({
+    const filter = {
       userId,
-      isDeleted: { $ne: true },
+      isDeleted: false,
       $or: [
-        { supplier: { $in: activeSupplierIds } },
-        { partyId: { $in: activePartyIds } },
+        { supplier: { $in: activeSuppliers.map((s) => s._id) } },
+        { partyId: { $in: activeParties.map((p) => p._id) } },
       ],
-    })
+    };
+
+    if (supplier) {
+      filter.$or = [{ supplier }, { partyId: supplier }];
+    }
+
+    if (paymentType) {
+      filter.paymentType = paymentType.toLowerCase();
+    }
+
+    if (fromDate || toDate) {
+      filter.date = {};
+
+      if (fromDate) filter.date.$gte = fromDate;
+      if (toDate) filter.date.$lte = toDate;
+    }
+
+    if (search) {
+      filter.billNo = {
+        $regex: search,
+        $options: "i",
+      };
+    }
+
+    const totalBills = await PayBill.countDocuments(filter);
+
+    const bills = await PayBill.find(filter)
       .populate("supplier", "name")
-      .sort({ createdAt: -1 });
+      .populate("partyId", "name")
+      .sort({ createdAt: -1 })
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .lean();
 
-    const result = [];
+    const billIds = bills.map((b) => b._id);
 
-    for (const bill of bills) {
-      const journal = await JournalEntry.findOne({
-        referenceId: bill._id,
-        sourceType: "pay_bill",
-        createdBy: userId,
-        isDeleted: false,
-      }).populate("lines.account", "name");
+    const journals = await JournalEntry.find({
+      referenceId: { $in: billIds },
+      sourceType: "pay_bill",
+      createdBy: userId,
+      isDeleted: false,
+    }).populate("lines.account", "name");
 
-      let paymentMode = "-";
-      let accountName = "-";
+    const journalMap = new Map();
 
-      if (journal?.lines?.length) {
-        const creditLine = journal.lines.find((line) => line.type === "credit");
-
-        paymentMode = creditLine?.paymentType || "-";
-        accountName = creditLine?.account?.name || "-";
+    journals.forEach((journal) => {
+      if (!journalMap.has(String(journal.referenceId))) {
+        journalMap.set(String(journal.referenceId), journal);
       }
+    });
+
+    const result = bills.map((bill) => {
+      const journal = journalMap.get(String(bill._id));
+
+      const creditLine = journal?.lines?.find((line) => line.type === "credit");
 
       const attachments = formatPayBillAttachments(bill);
 
-      result.push({
-        ...bill.toObject(),
+      return {
+        ...bill,
         attachments,
         attachmentFullUrl: attachments[0]?.fullUrl || "",
-        paymentMode,
-        accountName,
-      });
-    }
+        paymentMode: creditLine?.paymentType || "-",
+        accountName: creditLine?.account?.name || "-",
+        supplierName: bill.supplier?.name || bill.partyId?.name || "-",
+      };
+    });
 
-    res.json(result);
+    res.json({
+      bills: result,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        totalBills,
+        totalPages: Math.ceil(totalBills / Number(limit)),
+        hasPreviousPage: Number(page) > 1,
+        hasNextPage: Number(page) < Math.ceil(totalBills / Number(limit)),
+      },
+    });
   } catch (err) {
     console.error("❌ Get Pay Bills Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message,
+    });
   }
 };
 

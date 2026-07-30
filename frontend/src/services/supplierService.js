@@ -10,15 +10,17 @@ const getConfig = () => ({
 });
 
 // ✅ Supplier CRUD APIs
-export const fetchSuppliers = (params) =>
+export const fetchSuppliers = (params = {}) =>
   axios
-    .get(API, { ...getConfig(), params })
+    .get(API, {
+      ...getConfig(),
+      params,
+    })
     .then((r) => r.data)
     .catch((err) => {
       console.error('❌ Error fetching suppliers:', err.response?.data || err.message);
       throw err;
     });
-
 export const createSupplier = (data) =>
   axios
     .post(API, data, getConfig())
@@ -102,7 +104,11 @@ export const fetchSupplierLedger = (id, filters = {}) =>
   axios
     .get(`${BASE_URL}/api/supplier-ledger/${id}`, {
       ...getConfig(),
-      params: filters,
+      params: {
+        startDate: filters.startDate || filters.start || '',
+        endDate: filters.endDate || filters.end || '',
+        type: filters.type || '',
+      },
     })
     .then((r) => r.data)
     .catch((err) => {

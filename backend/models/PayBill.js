@@ -108,12 +108,33 @@ const payBillSchema = new mongoose.Schema(
 
 payBillSchema.index({
   userId: 1,
-  supplier: 1,
+  isDeleted: 1,
+  createdAt: -1,
 });
 
 payBillSchema.index({
   userId: 1,
+  isDeleted: 1,
+  date: -1,
+});
+
+payBillSchema.index({
+  userId: 1,
+  isDeleted: 1,
+  supplier: 1,
+  createdAt: -1,
+});
+
+payBillSchema.index({
+  userId: 1,
+  isDeleted: 1,
   partyId: 1,
+  createdAt: -1,
+});
+
+payBillSchema.index({
+  userId: 1,
+  billNo: 1,
 });
 
 module.exports = mongoose.model("PayBill", payBillSchema);

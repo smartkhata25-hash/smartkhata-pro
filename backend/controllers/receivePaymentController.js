@@ -562,10 +562,38 @@ exports.getReceivePaymentById = async (req, res) => {
       _id: req.params.id,
       userId,
       isDeleted: { $ne: true },
-    });
+    })
+      .select(
+        [
+          "customer",
+          "partyId",
+          "date",
+          "time",
+          "amount",
+          "discountAmount",
+          "finalAmount",
+          "paymentType",
+          "billNo",
+          "description",
+          "attachments",
+          "attachment",
+          "createdAt",
+        ].join(" "),
+      )
+      .populate({
+        path: "customer",
+        select: "name phone account",
+      })
+      .populate({
+        path: "partyId",
+        select: "name phone account",
+      })
+      .lean();
 
     if (!payment) {
-      return res.status(404).json({ error: "Record not found" });
+      return res.status(404).json({
+        error: "Record not found",
+      });
     }
 
     const journal = await JournalEntry.findOne({
@@ -573,34 +601,36 @@ exports.getReceivePaymentById = async (req, res) => {
       sourceType: "receive_payment",
       createdBy: userId,
       isDeleted: false,
-    });
+    })
+      .select("lines")
+      .lean();
 
-    let paymentEntries = [];
-
-    if (journal?.lines?.length) {
-      paymentEntries = journal.lines
-        .filter((line) => line.type === "debit")
-        .map((line) => ({
-          account: line.account,
-          amount: line.amount,
-          paymentType: line.paymentType || payment.paymentType || "cash",
-        }));
-    }
+    const paymentEntries = Array.isArray(journal?.lines)
+      ? journal.lines
+          .filter((line) => line.type === "debit")
+          .map((line) => ({
+            account: line.account,
+            amount: Number(line.amount || 0),
+            paymentType: line.paymentType || payment.paymentType || "cash",
+          }))
+      : [];
 
     const attachments = formatAttachments(payment);
 
-    res.json({
-      ...payment.toObject(),
+    return res.json({
+      ...payment,
       paymentEntries,
       attachments,
       attachmentFullUrl: attachments[0]?.fullUrl || "",
     });
   } catch (err) {
     console.error("❌ Get ReceivePayment Error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message || "Receive payment load failed",
+    });
   }
 };
-
 // UPDATE RECEIVE PAYMENT
 
 exports.updateReceivePayment = async (req, res) => {

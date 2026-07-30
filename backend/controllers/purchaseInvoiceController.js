@@ -422,7 +422,12 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
     _id: req.params.id,
     userId,
     isDeleted: false,
-  }).populate("items.productId");
+  })
+    .populate({
+      path: "items.productId",
+      select: "name description salePrice unitCost",
+    })
+    .lean();
 
   if (!invoice) {
     res.status(404);
@@ -431,8 +436,8 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
 
   const formattedAttachments = formatPurchaseAttachments(invoice);
 
-  res.status(200).json({
-    ...invoice.toObject(),
+  return res.status(200).json({
+    ...invoice,
     attachments: formattedAttachments,
     attachmentFullUrl: formattedAttachments[0]?.fullUrl || "",
   });

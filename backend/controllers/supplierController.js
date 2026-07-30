@@ -312,43 +312,84 @@ exports.getSuppliers = async (req, res) => {
       return res.json([]);
     }
 
-    const supplierIds = suppliers.map((supplier) => supplier._id);
+    const supplierAccountIds = suppliers
+      .map((supplier) => supplier.account)
+      .filter(Boolean)
+      .map((accountId) => new mongoose.Types.ObjectId(accountId));
 
-    // ✅ تمام balances صرف ایک aggregation query سے
-    const balanceRows = await JournalEntry.aggregate([
-      {
-        $match: {
-          createdBy: new mongoose.Types.ObjectId(userId),
-          supplierId: { $in: supplierIds },
-          isDeleted: false,
-        },
-      },
-      {
-        $unwind: "$lines",
-      },
-      {
-        $group: {
-          _id: "$supplierId",
-          balance: {
-            $sum: {
-              $cond: [
-                { $eq: ["$lines.type", "credit"] },
-                "$lines.amount",
-                { $multiply: ["$lines.amount", -1] },
-              ],
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const balanceRows =
+      supplierAccountIds.length > 0
+        ? await JournalEntry.aggregate([
+            {
+              $match: {
+                createdBy: userObjectId,
+                isDeleted: { $ne: true },
+                "lines.account": {
+                  $in: supplierAccountIds,
+                },
+              },
             },
-          },
-        },
-      },
-    ]);
+            {
+              $unwind: "$lines",
+            },
+            {
+              $match: {
+                "lines.account": {
+                  $in: supplierAccountIds,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: "$lines.account",
 
-    const balanceMap = new Map(
-      balanceRows.map((row) => [row._id.toString(), Number(row.balance) || 0]),
+                balance: {
+                  $sum: {
+                    $switch: {
+                      branches: [
+                        {
+                          case: {
+                            $eq: ["$lines.type", "credit"],
+                          },
+                          then: {
+                            $toDouble: "$lines.amount",
+                          },
+                        },
+                        {
+                          case: {
+                            $eq: ["$lines.type", "debit"],
+                          },
+                          then: {
+                            $multiply: [
+                              {
+                                $toDouble: "$lines.amount",
+                              },
+                              -1,
+                            ],
+                          },
+                        },
+                      ],
+                      default: 0,
+                    },
+                  },
+                },
+              },
+            },
+          ])
+        : [];
+
+    const accountBalanceMap = new Map(
+      balanceRows.map((row) => [String(row._id), Number(row.balance) || 0]),
     );
 
     const suppliersWithBalance = suppliers.map((supplier) => ({
       ...supplier,
-      balance: balanceMap.get(supplier._id.toString()) || 0,
+
+      balance: supplier.account
+        ? accountBalanceMap.get(String(supplier.account)) || 0
+        : 0,
     }));
 
     return res.json(suppliersWithBalance);

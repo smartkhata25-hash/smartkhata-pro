@@ -417,11 +417,37 @@ exports.getPayBillById = async (req, res) => {
       userId,
       isDeleted: { $ne: true },
     })
-      .populate("supplier", "name phone email")
-      .populate("partyId", "name phone email");
+      .select(
+        [
+          "supplier",
+          "partyId",
+          "date",
+          "time",
+          "billNo",
+          "amount",
+          "discountAmount",
+          "finalAmount",
+          "paymentType",
+          "description",
+          "attachments",
+          "attachment",
+          "createdAt",
+        ].join(" "),
+      )
+      .populate({
+        path: "supplier",
+        select: "name phone email account",
+      })
+      .populate({
+        path: "partyId",
+        select: "name phone email account",
+      })
+      .lean();
 
     if (!bill) {
-      return res.status(404).json({ error: "Record not found" });
+      return res.status(404).json({
+        error: "Record not found",
+      });
     }
 
     const journals = await JournalEntry.find({
@@ -429,35 +455,40 @@ exports.getPayBillById = async (req, res) => {
       sourceType: "pay_bill",
       createdBy: userId,
       isDeleted: false,
-    });
+    })
+      .select("lines")
+      .lean();
 
-    let paymentEntries = [];
+    const paymentEntries = [];
 
     for (const journal of journals) {
-      if (journal?.lines?.length) {
-        const entries = journal.lines
-          .filter((line) => line.type === "credit")
-          .map((line) => ({
-            account: line.account,
-            amount: line.amount,
-            paymentType: line.paymentType,
-          }));
+      if (!Array.isArray(journal?.lines)) continue;
 
-        paymentEntries.push(...entries);
-      }
+      const entries = journal.lines
+        .filter((line) => line.type === "credit")
+        .map((line) => ({
+          account: line.account,
+          amount: Number(line.amount || 0),
+          paymentType: line.paymentType || bill.paymentType || "cash",
+        }));
+
+      paymentEntries.push(...entries);
     }
 
     const attachments = formatPayBillAttachments(bill);
 
-    res.json({
-      ...bill.toObject(),
+    return res.json({
+      ...bill,
       attachments,
       attachmentFullUrl: attachments[0]?.fullUrl || "",
       paymentEntries,
     });
   } catch (err) {
     console.error("❌ Get Single Bill Error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message || "Pay Bill load failed",
+    });
   }
 };
 // ✅ Update Pay Bill (CENTRALIZED PAYMENT SERVICE)

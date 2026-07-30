@@ -81,6 +81,7 @@ const PurchaseInvoiceForm = () => {
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [accountError, setAccountError] = useState('');
   const [loading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   // 📊 Item History States
 
   const [itemHistory, setItemHistory] = useState([]);
@@ -107,20 +108,61 @@ const PurchaseInvoiceForm = () => {
 
   useEffect(() => {
     const now = new Date();
-    setInvoiceDate(now.toISOString().split('T')[0]);
-    setInvoiceTime(now.toTimeString().slice(0, 5));
+
+    if (!id) {
+      setInvoiceDate(now.toISOString().split('T')[0]);
+      setInvoiceTime(now.toTimeString().slice(0, 5));
+    }
 
     if (!token) return;
 
-    fetchSuppliers().then(setSuppliers);
+    let cancelled = false;
 
-    fetchPurchaseParties(token)
-      .then(setParties)
-      .catch((err) => console.error('Purchase parties load failed:', err));
+    const loadFormOptions = async () => {
+      const results = await Promise.allSettled([
+        fetchSuppliers({
+          status: 'active',
+        }),
+        fetchPurchaseParties(token),
+        fetchProductsWithToken(token),
+        getValidPaymentAccounts(),
+      ]);
 
-    fetchProductsWithToken(token).then(setProducts);
-    getValidPaymentAccounts().then(setAccounts);
-  }, [token]);
+      if (cancelled) return;
+
+      const [supplierResult, partyResult, productResult, accountResult] = results;
+
+      if (supplierResult.status === 'fulfilled') {
+        setSuppliers(Array.isArray(supplierResult.value) ? supplierResult.value : []);
+      } else {
+        console.error('Suppliers load failed:', supplierResult.reason);
+      }
+
+      if (partyResult.status === 'fulfilled') {
+        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
+      } else {
+        console.error('Purchase parties load failed:', partyResult.reason);
+      }
+
+      if (productResult.status === 'fulfilled') {
+        setProducts(Array.isArray(productResult.value) ? productResult.value : []);
+      } else {
+        console.error('Products load failed:', productResult.reason);
+      }
+
+      if (accountResult.status === 'fulfilled') {
+        setAccounts(Array.isArray(accountResult.value) ? accountResult.value : []);
+      } else {
+        console.error('Accounts load failed:', accountResult.reason);
+      }
+    };
+
+    loadFormOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, id]);
 
   useEffect(() => {
     if (paidAmount > 0 && paymentType === 'cash' && accounts.length > 0) {
@@ -139,7 +181,9 @@ const PurchaseInvoiceForm = () => {
   }, [paidAmount, paymentType, accounts]);
 
   useEffect(() => {
-    if (!id || products.length === 0) return;
+    if (!id) return;
+
+    let cancelled = false;
 
     const loadInvoice = async () => {
       if (!canViewPurchases || !canEditPurchases) {
@@ -148,76 +192,88 @@ const PurchaseInvoiceForm = () => {
         return;
       }
 
-      const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(id);
+      try {
+        setEditLoading(true);
 
-      setIsEdit(true);
-      setInvoiceId(invoice._id);
-      setBillNo(invoice.billNo);
-      setInvoiceDate(invoice.invoiceDate?.slice(0, 10));
-      setInvoiceTime(invoice.invoiceTime);
-      setSupplierName(invoice.supplierName);
-      setSupplierPhone(invoice.supplierPhone);
+        const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(id);
 
-      setDiscountPercent(invoice.discountPercent || 0);
-      setDiscountAmount(invoice.discountAmount || 0);
-      setPaidAmount(invoice.paidAmount || 0);
-      setPaymentType(invoice.paymentType || 'credit');
-      setSelectedAccountId(invoice.accountId || '');
-      setAttachments(invoice.attachments || []);
-      const openingMode =
-        invoice.isOpening === true ||
-        invoice.billNo === 'OPENING' ||
-        (invoice.items || []).length === 0;
+        if (cancelled) return;
 
-      setIsOpeningPurchase(openingMode);
-      setOpeningPurchaseAmount(
-        openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
-      );
+        setIsEdit(true);
+        setInvoiceId(invoice._id);
+        setBillNo(invoice.billNo || '');
+        setInvoiceDate(invoice.invoiceDate?.slice(0, 10) || '');
+        setInvoiceTime(invoice.invoiceTime || '');
+        setSupplierName(invoice.supplierName || '');
+        setSupplierPhone(invoice.supplierPhone || '');
 
-      if (invoice.partyId) {
-        setSelectedSupplierType('party');
-        setSelectedSupplierId(invoice.partyId?._id || invoice.partyId);
-      } else {
-        setSelectedSupplierType('supplier');
-        setSelectedSupplierId(invoice.supplier?._id || invoice.supplier || '');
+        setDiscountPercent(Number(invoice.discountPercent || 0));
+        setDiscountAmount(Number(invoice.discountAmount || 0));
+        setPaidAmount(Number(invoice.paidAmount || 0));
+        setPaymentType(invoice.paymentType || 'credit');
+        setSelectedAccountId(invoice.accountId?._id || invoice.accountId || '');
+        setAttachments(invoice.attachments || []);
+
+        const openingMode =
+          invoice.isOpening === true ||
+          invoice.billNo === 'OPENING' ||
+          (invoice.items || []).length === 0;
+
+        setIsOpeningPurchase(openingMode);
+
+        setOpeningPurchaseAmount(
+          openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
+        );
+
+        if (invoice.partyId) {
+          setSelectedSupplierType('party');
+          setSelectedSupplierId(invoice.partyId?._id || invoice.partyId);
+        } else {
+          setSelectedSupplierType('supplier');
+          setSelectedSupplierId(invoice.supplier?._id || invoice.supplier || '');
+        }
+
+        const loadedItems = (invoice.items || []).map((item, index) => {
+          const populatedProduct =
+            item.productId && typeof item.productId === 'object' ? item.productId : null;
+
+          return {
+            itemNo: index + 1,
+            productId: populatedProduct?._id || item.productId || '',
+            search: populatedProduct?.name || item.name || '',
+            name: populatedProduct?.name || item.name || '',
+            description: populatedProduct?.description || item.description || '',
+            cost: Number(
+              item.salePrice ?? populatedProduct?.salePrice ?? populatedProduct?.unitCost ?? 0
+            ),
+            rate: Number(item.price || 0),
+            quantity: Number(item.quantity || 1),
+            amount: Number(item.total || Number(item.quantity || 0) * Number(item.price || 0)),
+          };
+        });
+
+        const emptyRows = Array.from({ length: 10 }, (_, i) =>
+          generateEmptyRow(loadedItems.length + i)
+        );
+
+        setItems([...loadedItems, ...emptyRows]);
+      } catch (err) {
+        console.error('Purchase invoice edit load failed:', err?.response?.data || err.message);
+
+        alert(err?.response?.data?.message || 'Purchase invoice load failed');
+      } finally {
+        if (!cancelled) {
+          setEditLoading(false);
+        }
       }
-
-      const loadedItems = (invoice.items || []).map((item, index) => {
-        const product =
-          typeof item.productId === 'object'
-            ? item.productId
-            : products.find((p) => p._id === item.productId);
-
-        return {
-          itemNo: index + 1,
-          productId: product?._id || item.productId || '',
-          search: product?.name || '',
-          name: product?.name || '',
-          description: product?.description || '',
-          cost: Number(item.salePrice ?? product?.salePrice ?? 0),
-          rate: Number(item.price ?? 0),
-          quantity: Number(item.quantity ?? 1),
-          amount: Number(item.total ?? 0),
-        };
-      });
-
-      const emptyRows = Array.from({ length: 10 }, (_, i) => ({
-        itemNo: loadedItems.length + i + 1,
-        search: '',
-        productId: '',
-        name: '',
-        description: '',
-        cost: 0,
-        quantity: 1,
-        rate: 0,
-        amount: 0,
-      }));
-
-      setItems([...loadedItems, ...emptyRows]);
     };
 
     loadInvoice();
-  }, [id, products, canViewPurchases, canEditPurchases, navigate]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canViewPurchases, canEditPurchases, navigate]);
 
   const filterSuppliers = (value) => {
     const query = value.toLowerCase();
@@ -884,6 +940,13 @@ const PurchaseInvoiceForm = () => {
 
   return (
     <>
+      {editLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20">
+          <div className="rounded-lg bg-white px-6 py-4 shadow-xl font-semibold">
+            Purchase Invoice Loading...
+          </div>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="max-w-7xl mx-auto p-6 bg-white rounded shadow">
         <div className="grid grid-cols-12 gap-6">
           {/* 🧾 Main Invoice Section */}

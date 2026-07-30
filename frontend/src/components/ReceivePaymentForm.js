@@ -28,6 +28,8 @@ const ReceivePaymentForm = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [customerLedger, setCustomerLedger] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
   const [modalAttachment, setModalAttachment] = useState(null);
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const printRef = useRef();
@@ -68,153 +70,262 @@ const ReceivePaymentForm = () => {
   }, []);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [cData, pData, paymentAccounts] = await Promise.all([
-          fetchCustomers(),
-          fetchSaleParties(),
-          getValidPaymentAccounts(),
-        ]);
+    let cancelled = false;
 
-        setCustomers(cData);
-        setParties(pData);
-        setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
+    const normalizePaymentType = (value) => {
+      const type = String(value || 'cash').toLowerCase();
 
-        // ✅🔥 Default HANDCASH select
-        const handCashAccount = paymentAccounts.find(
-          (acc) => acc.name?.toLowerCase() === 'handcash'
-        );
+      if (type === 'online') return 'Online';
+      if (type === 'cheque') return 'Cheque';
 
-        if (!id && handCashAccount) {
-          setPaymentEntries([
-            {
-              account: handCashAccount._id,
-              amount: '',
-              paymentType: 'Cash',
-            },
-          ]);
-        }
+      return 'Cash';
+    };
 
-        if (id && (!canViewReceivePayments || !canEditReceivePayments)) {
-          alert('You do not have permission to edit receive payments');
-          navigate('/receive-payments');
-          return;
-        }
+    const loadEditPayment = async () => {
+      if (!id) return;
 
-        if (id) {
-          const existing = await getReceivePaymentById(id);
-
-          const customerId =
-            typeof existing.customer === 'object' ? existing.customer?._id : existing.customer;
-
-          const partyId =
-            typeof existing.partyId === 'object' ? existing.partyId?._id : existing.partyId;
-
-          const isPartyPayment = Boolean(partyId);
-
-          setSelectedCustomerType(isPartyPayment ? 'party' : 'customer');
-
-          setFormData({
-            customer: isPartyPayment ? '' : customerId || '',
-            partyId: isPartyPayment ? partyId || '' : '',
-            date: existing.date || dayjs().format('YYYY-MM-DD'),
-            time: existing.time || dayjs().format('HH:mm'),
-            paymentType: existing.paymentType || 'Cash',
-            discountAmount: existing.discountAmount || '',
-            description: existing.description || '',
-            attachments: existing.attachments || [],
-          });
-
-          if (isPartyPayment) {
-            const selectedParty = pData.find((party) => String(party._id) === String(partyId));
-
-            setCustomerName(selectedParty?.name || existing.partyId?.name || '');
-
-            const ledgerResponse = await getPartyLedger(partyId);
-            setCustomerLedger(ledgerResponse?.ledger || []);
-          } else {
-            const selectedCustomer = cData.find(
-              (customer) => String(customer._id) === String(customerId)
-            );
-
-            setCustomerName(selectedCustomer?.name || existing.customer?.name || '');
-
-            const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
-
-            if (accountId) {
-              const ledgerResponse = await getLedgerByCustomerAccount(accountId);
-
-              setCustomerLedger(ledgerResponse?.ledger || []);
-            } else {
-              setCustomerLedger([]);
-            }
-          }
-
-          setPaymentEntries(
-            existing.paymentEntries && existing.paymentEntries.length > 0
-              ? existing.paymentEntries.map((payment) => ({
-                  account:
-                    typeof payment.account === 'object'
-                      ? payment.account?._id
-                      : payment.account || '',
-
-                  amount: payment.amount || '',
-
-                  paymentType:
-                    String(payment.paymentType || existing.paymentType || 'cash').toLowerCase() ===
-                    'online'
-                      ? 'Online'
-                      : String(
-                            payment.paymentType || existing.paymentType || 'cash'
-                          ).toLowerCase() === 'cheque'
-                        ? 'Cheque'
-                        : 'Cash',
-                }))
-              : [
-                  {
-                    account: '',
-                    amount: '',
-                    paymentType:
-                      String(existing.paymentType || 'cash').toLowerCase() === 'online'
-                        ? 'Online'
-                        : String(existing.paymentType || 'cash').toLowerCase() === 'cheque'
-                          ? 'Cheque'
-                          : 'Cash',
-                  },
-                ]
-          );
-        }
-      } catch (err) {
-        console.error('❌ Error fetching accounts/customers:', err.message);
+      if (!canViewReceivePayments || !canEditReceivePayments) {
+        alert('You do not have permission to edit receive payments');
+        navigate('/receive-payments');
+        return;
       }
-    }
 
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      try {
+        setEditLoading(true);
+
+        const existing = await getReceivePaymentById(id);
+
+        if (cancelled) return;
+
+        const customerObject =
+          existing.customer && typeof existing.customer === 'object' ? existing.customer : null;
+
+        const partyObject =
+          existing.partyId && typeof existing.partyId === 'object' ? existing.partyId : null;
+
+        const customerId = customerObject?._id || existing.customer || '';
+
+        const partyId = partyObject?._id || existing.partyId || '';
+
+        const isPartyPayment = Boolean(partyId);
+
+        setSelectedCustomerType(isPartyPayment ? 'party' : 'customer');
+
+        setCustomerName(isPartyPayment ? partyObject?.name || '' : customerObject?.name || '');
+
+        setFormData({
+          customer: isPartyPayment ? '' : customerId,
+          partyId: isPartyPayment ? partyId : '',
+          date: existing.date || dayjs().format('YYYY-MM-DD'),
+          time: existing.time || dayjs().format('HH:mm'),
+          amount: existing.amount || '',
+          paymentType: normalizePaymentType(existing.paymentType),
+          discountAmount: existing.discountAmount || '',
+          account: '',
+          description: existing.description || '',
+          attachments: existing.attachments || [],
+        });
+
+        const entries =
+          Array.isArray(existing.paymentEntries) && existing.paymentEntries.length > 0
+            ? existing.paymentEntries.map((payment) => ({
+                account:
+                  typeof payment.account === 'object'
+                    ? payment.account?._id || ''
+                    : payment.account || '',
+
+                amount: payment.amount || '',
+
+                paymentType: normalizePaymentType(payment.paymentType || existing.paymentType),
+              }))
+            : [
+                {
+                  account: '',
+                  amount: '',
+                  paymentType: normalizePaymentType(existing.paymentType),
+                },
+              ];
+
+        setPaymentEntries(entries);
+      } catch (err) {
+        if (cancelled) return;
+
+        console.error('❌ Receive Payment edit load failed:', err?.response?.data || err.message);
+
+        alert(err?.response?.data?.error || 'Receive payment load failed');
+      } finally {
+        if (!cancelled) {
+          setEditLoading(false);
+        }
+      }
+    };
+
+    loadEditPayment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canViewReceivePayments, canEditReceivePayments, navigate]);
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFormOptions = async () => {
+      const results = await Promise.allSettled([
+        fetchCustomers(),
+        fetchSaleParties(),
+        getValidPaymentAccounts(),
+      ]);
+
+      if (cancelled) return;
+
+      const [customerResult, partyResult, accountResult] = results;
+
+      if (customerResult.status === 'fulfilled') {
+        const customerData = customerResult.value;
+
+        setCustomers(
+          Array.isArray(customerData)
+            ? customerData
+            : Array.isArray(customerData?.customers)
+              ? customerData.customers
+              : []
+        );
+      } else {
+        console.error('Customers load failed:', customerResult.reason);
+      }
+
+      if (partyResult.status === 'fulfilled') {
+        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
+      } else {
+        console.error('Sale parties load failed:', partyResult.reason);
+      }
+
+      if (accountResult.status === 'fulfilled') {
+        const paymentAccounts = Array.isArray(accountResult.value) ? accountResult.value : [];
+
+        setAccounts(paymentAccounts);
+
+        if (!id) {
+          const handCashAccount = paymentAccounts.find(
+            (account) => account.name?.toLowerCase() === 'handcash' || account.category === 'cash'
+          );
+
+          if (handCashAccount) {
+            setPaymentEntries([
+              {
+                account: handCashAccount._id,
+                amount: '',
+                paymentType: 'Cash',
+              },
+            ]);
+          }
+        }
+      } else {
+        console.error('Payment accounts load failed:', accountResult.reason);
+      }
+    };
+
+    loadFormOptions();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
-  const loadLedger = async (id, type = selectedCustomerType) => {
-    if (!id) {
+  useEffect(() => {
+    if (!id) return;
+
+    const selectedId = selectedCustomerType === 'party' ? formData.partyId : formData.customer;
+
+    if (!selectedId) {
       setCustomerLedger([]);
       return;
     }
 
-    if (type === 'party') {
-      const res = await getPartyLedger(id);
-      setCustomerLedger(res.ledger || []);
-      return;
+    let cancelled = false;
+
+    const loadEditLedger = async () => {
+      try {
+        setLedgerLoading(true);
+
+        let ledgerResponse;
+
+        if (selectedCustomerType === 'party') {
+          ledgerResponse = await getPartyLedger(selectedId);
+        } else {
+          const customerObject = customers.find(
+            (customer) => String(customer._id) === String(selectedId)
+          );
+
+          const accountId = customerObject?.account?._id || customerObject?.account;
+
+          if (!accountId) {
+            setCustomerLedger([]);
+            return;
+          }
+
+          ledgerResponse = await getLedgerByCustomerAccount(accountId);
+        }
+
+        if (cancelled) return;
+
+        setCustomerLedger(Array.isArray(ledgerResponse?.ledger) ? ledgerResponse.ledger : []);
+      } catch (err) {
+        if (cancelled) return;
+
+        console.error('Receive Payment ledger load failed:', err);
+
+        setCustomerLedger([]);
+      } finally {
+        if (!cancelled) {
+          setLedgerLoading(false);
+        }
+      }
+    };
+
+    if (selectedCustomerType === 'party' || customers.length > 0) {
+      loadEditLedger();
     }
 
-    const customer = customers.find((c) => String(c._id) === String(id));
-    const accountId = customer?.account?._id || customer?.account;
-
-    if (!accountId) {
+    return () => {
+      cancelled = true;
+    };
+  }, [id, selectedCustomerType, formData.customer, formData.partyId, customers]);
+  const loadLedger = async (recordId, type = selectedCustomerType) => {
+    if (!recordId) {
       setCustomerLedger([]);
       return;
     }
 
-    const res = await getLedgerByCustomerAccount(accountId);
-    setCustomerLedger(res.ledger || []);
+    try {
+      setLedgerLoading(true);
+
+      if (type === 'party') {
+        const res = await getPartyLedger(recordId);
+
+        setCustomerLedger(Array.isArray(res?.ledger) ? res.ledger : []);
+
+        return;
+      }
+
+      const customer = customers.find((item) => String(item._id) === String(recordId));
+
+      const accountId = customer?.account?._id || customer?.account;
+
+      if (!accountId) {
+        setCustomerLedger([]);
+        return;
+      }
+
+      const res = await getLedgerByCustomerAccount(accountId);
+
+      setCustomerLedger(Array.isArray(res?.ledger) ? res.ledger : []);
+    } catch (err) {
+      console.error('Customer ledger load failed:', err);
+      setCustomerLedger([]);
+    } finally {
+      setLedgerLoading(false);
+    }
   };
 
   const handleChange = (e) => {
@@ -279,6 +390,8 @@ const ReceivePaymentForm = () => {
     }
 
     try {
+      setEditLoading(true);
+
       const existing = await getReceivePaymentById(id);
 
       setFormData({
@@ -355,6 +468,9 @@ const ReceivePaymentForm = () => {
       }
     } catch (err) {
       console.error('Revert error:', err);
+      alert('Receive payment restore failed');
+    } finally {
+      setEditLoading(false);
     }
   };
   const handlePrint = async () => {
@@ -670,468 +786,488 @@ const ReceivePaymentForm = () => {
     customerLedger.length > 0 ? customerLedger[customerLedger.length - 1].runningBalance || 0 : 0;
 
   return (
-    <div className="p-3 md:p-6 bg-gray-50 h-full overflow-auto md:overflow-hidden">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* LEFT SIDE - FORM */}
-        <form
-          onSubmit={(e) => handleSubmit(e, 'close')}
-          className="lg:col-span-2 bg-gradient-to-br from-white via-gray-50 to-gray-100 shadow-xl rounded-xl md:rounded-2xl p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-3 border border-gray-200 content-start"
-        >
-          <h2 className="text-xl font-bold md:col-span-2 mb-2">
-            {id ? t('payment.edit') : t('payment.new')}
-          </h2>
+    <>
+      {editLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20">
+          <div className="rounded-lg bg-white px-6 py-4 shadow-xl font-semibold">
+            Receive Payment Loading...
+          </div>
+        </div>
+      )}
 
-          {/* CUSTOMER (SEARCH + SUGGESTIONS) */}
-          <div style={{ position: 'relative' }}>
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">
-              {t('customer')}
-            </label>
+      <div className="p-3 md:p-6 bg-gray-50 h-full overflow-auto md:overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* LEFT SIDE - FORM */}
+          <form
+            onSubmit={(e) => handleSubmit(e, 'close')}
+            className="lg:col-span-2 bg-gradient-to-br from-white via-gray-50 to-gray-100 shadow-xl rounded-xl md:rounded-2xl p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-3 border border-gray-200 content-start"
+          >
+            <h2 className="text-xl font-bold md:col-span-2 mb-2">
+              {id ? t('payment.edit') : t('payment.new')}
+            </h2>
 
-            <input
-              placeholder={t('customer.search')}
-              value={customerName}
-              onChange={(e) => {
-                setCustomerName(e.target.value);
-                setShowSuggestions(true);
-              }}
-              onFocus={() => setShowSuggestions(true)}
-              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            {/* CUSTOMER (SEARCH + SUGGESTIONS) */}
+            <div style={{ position: 'relative' }}>
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">
+                {t('customer')}
+              </label>
 
-            {showSuggestions && customerName && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 38,
-                  left: 0,
-                  right: 0,
-                  background: '#ffffff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 8,
-                  maxHeight: 180,
-                  overflowY: 'auto',
-                  zIndex: 50,
+              <input
+                placeholder={t('customer.search')}
+                value={customerName}
+                onChange={(e) => {
+                  setCustomerName(e.target.value);
+                  setShowSuggestions(true);
                 }}
-              >
-                {[
-                  ...customers
-                    .filter((c) =>
-                      (c.name || '').toLowerCase().includes(customerName.toLowerCase())
-                    )
-                    .map((c) => ({ ...c, selectType: 'customer', badge: 'Customer' })),
+                onFocus={() => setShowSuggestions(true)}
+                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+              />
 
-                  ...parties
-                    .filter((p) =>
-                      (p.name || '').toLowerCase().includes(customerName.toLowerCase())
-                    )
-                    .map((p) => ({ ...p, selectType: 'party', badge: 'Party' })),
-                ]
-                  .slice(0, 10)
-                  .map((c) => (
-                    <div
-                      key={c._id}
-                      onClick={() => {
-                        setCustomerName(c.name);
-                        setSelectedCustomerType(c.selectType);
+              {showSuggestions && customerName && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 38,
+                    left: 0,
+                    right: 0,
+                    background: '#ffffff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 8,
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                    zIndex: 50,
+                  }}
+                >
+                  {[
+                    ...customers
+                      .filter((c) =>
+                        (c.name || '').toLowerCase().includes(customerName.toLowerCase())
+                      )
+                      .map((c) => ({ ...c, selectType: 'customer', badge: 'Customer' })),
 
-                        setFormData((prev) => ({
-                          ...prev,
-                          customer: c.selectType === 'customer' ? c._id : '',
-                          partyId: c.selectType === 'party' ? c._id : '',
-                        }));
+                    ...parties
+                      .filter((p) =>
+                        (p.name || '').toLowerCase().includes(customerName.toLowerCase())
+                      )
+                      .map((p) => ({ ...p, selectType: 'party', badge: 'Party' })),
+                  ]
+                    .slice(0, 10)
+                    .map((c) => (
+                      <div
+                        key={c._id}
+                        onClick={() => {
+                          setCustomerName(c.name);
+                          setSelectedCustomerType(c.selectType);
 
-                        setShowSuggestions(false);
-                        loadLedger(c._id, c.selectType);
-                      }}
-                      style={{
-                        padding: '8px 10px',
-                        cursor: 'pointer',
-                        borderBottom: '1px solid #f1f5f9',
-                      }}
-                    >
-                      {c.name} {c.badge === 'Party' ? '🟣 Party' : ''}
-                    </div>
-                  ))}
+                          setFormData((prev) => ({
+                            ...prev,
+                            customer: c.selectType === 'customer' ? c._id : '',
+                            partyId: c.selectType === 'party' ? c._id : '',
+                          }));
+
+                          setShowSuggestions(false);
+                          loadLedger(c._id, c.selectType);
+                        }}
+                        style={{
+                          padding: '8px 10px',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid #f1f5f9',
+                        }}
+                      >
+                        {c.name} {c.badge === 'Party' ? '🟣 Party' : ''}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+            {/* DATE + TIME (MOBILE SAME ROW) */}
+            <div className="grid grid-cols-2 gap-2 md:contents">
+              {/* DATE */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 mb-1 block">
+                  {t('date')}
+                </label>
+                <input
+                  type="date"
+                  name="date"
+                  value={formData.date}
+                  onChange={handleChange}
+                  className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+                />
               </div>
-            )}
-          </div>
-          {/* DATE + TIME (MOBILE SAME ROW) */}
-          <div className="grid grid-cols-2 gap-2 md:contents">
-            {/* DATE */}
-            <div>
-              <label className="text-xs font-semibold text-gray-600 mb-1 block">{t('date')}</label>
-              <input
-                type="date"
-                name="date"
-                value={formData.date}
-                onChange={handleChange}
-                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+
+              {/* TIME */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 mb-1 block">
+                  {t('time')}
+                </label>
+                <input
+                  type="time"
+                  name="time"
+                  value={formData.time}
+                  onChange={handleChange}
+                  className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
             </div>
+            {/* ATTACHMENTS */}
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">
+                {t('attachment')} <span className="text-gray-400">(Max 3)</span>
+              </label>
 
-            {/* TIME */}
-            <div>
-              <label className="text-xs font-semibold text-gray-600 mb-1 block">{t('time')}</label>
               <input
-                type="time"
-                name="time"
-                value={formData.time}
-                onChange={handleChange}
-                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
+                onChange={handleFileChange}
               />
-            </div>
-          </div>
-          {/* ATTACHMENTS */}
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">
-              {t('attachment')} <span className="text-gray-400">(Max 3)</span>
-            </label>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              accept="image/jpeg,image/jpg,image/png,image/webp,application/pdf"
-              onChange={handleFileChange}
-            />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={(formData.attachments || []).length >= 3}
+                className={`px-3 py-2 rounded-lg text-sm shadow ${
+                  (formData.attachments || []).length >= 3
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                📎 Add Files ({(formData.attachments || []).length}/3)
+              </button>
 
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={(formData.attachments || []).length >= 3}
-              className={`px-3 py-2 rounded-lg text-sm shadow ${
-                (formData.attachments || []).length >= 3
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              📎 Add Files ({(formData.attachments || []).length}/3)
-            </button>
+              {formData.attachments?.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap mt-2">
+                  {formData.attachments.map((file, index) => {
+                    const isNewFile = file instanceof File;
+                    const fileUrl = isNewFile
+                      ? URL.createObjectURL(file)
+                      : file.fullUrl || file.url || '';
 
-            {formData.attachments?.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap mt-2">
-                {formData.attachments.map((file, index) => {
-                  const isNewFile = file instanceof File;
-                  const fileUrl = isNewFile
-                    ? URL.createObjectURL(file)
-                    : file.fullUrl || file.url || '';
+                    return (
+                      <div
+                        key={file.key || index}
+                        className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
+                      >
+                        <span className="text-blue-600">📎 File {index + 1}</span>
 
-                  return (
-                    <div
-                      key={file.key || index}
-                      className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-xl text-xs"
-                    >
-                      <span className="text-blue-600">📎 File {index + 1}</span>
+                        {fileUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setModalAttachment({
+                                url: fileUrl,
+                                type: file.type || '',
+                              })
+                            }
+                            className="text-green-600 underline"
+                          >
+                            👁 View
+                          </button>
+                        )}
 
-                      {fileUrl && (
                         <button
                           type="button"
-                          onClick={() =>
-                            setModalAttachment({
-                              url: fileUrl,
-                              type: file.type || '',
-                            })
-                          }
-                          className="text-green-600 underline"
-                        >
-                          👁 View
-                        </button>
-                      )}
+                          onClick={() => {
+                            if (window.confirm(t('alerts.removeAttachment'))) {
+                              setFormData((prev) => ({
+                                ...prev,
+                                attachments: prev.attachments.filter((_, i) => i !== index),
+                              }));
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(t('alerts.removeAttachment'))) {
-                            setFormData((prev) => ({
-                              ...prev,
-                              attachments: prev.attachments.filter((_, i) => i !== index),
-                            }));
-
-                            if (fileInputRef.current) {
-                              fileInputRef.current.value = '';
+                              if (fileInputRef.current) {
+                                fileInputRef.current.value = '';
+                              }
                             }
-                          }
-                        }}
-                        className="text-red-500"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-gray-600 mb-1 block">
-              {t('description')}
-            </label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
-              rows="2"
-            />
-          </div>
+                          }}
+                          className="text-red-500"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">
+                {t('description')}
+              </label>
+              <textarea
+                name="description"
+                value={formData.description}
+                onChange={handleChange}
+                className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
+                rows="2"
+              />
+            </div>
 
-          {/* PAYMENTS */}
-          <div className="md:col-span-2">
-            <label className="text-sm font-semibold mb-2 block">{t('payment.payments')}</label>
+            {/* PAYMENTS */}
+            <div className="md:col-span-2">
+              <label className="text-sm font-semibold mb-2 block">{t('payment.payments')}</label>
 
-            {paymentEntries.map((entry, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-12 gap-1 md:gap-2 items-center mb-1 md:mb-2"
+              {paymentEntries.map((entry, index) => (
+                <div
+                  key={index}
+                  className="grid grid-cols-12 gap-1 md:gap-2 items-center mb-1 md:mb-2"
+                >
+                  <select
+                    className="col-span-5 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500"
+                    value={entry.account}
+                    onChange={(e) =>
+                      setPaymentEntries((prev) =>
+                        prev.map((item, i) =>
+                          i === index ? { ...item, account: e.target.value } : item
+                        )
+                      )
+                    }
+                    required
+                  >
+                    <option value="">{t('expense.selectAccount')}</option>
+                    {accounts.map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm"
+                    value={entry.paymentType || formData.paymentType}
+                    onChange={(e) =>
+                      setPaymentEntries((prev) =>
+                        prev.map((item, i) =>
+                          i === index ? { ...item, paymentType: e.target.value } : item
+                        )
+                      )
+                    }
+                  >
+                    <option>{t('payment.cash')}</option>
+                    <option>{t('payment.online')}</option>
+                    <option>{t('payment.cheque')}</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={t('amount')}
+                    className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm no-spinner"
+                    value={entry.amount}
+                    onChange={(e) =>
+                      setPaymentEntries((prev) =>
+                        prev.map((item, i) =>
+                          i === index ? { ...item, amount: e.target.value } : item
+                        )
+                      )
+                    }
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentEntries((prev) => prev.filter((_, i) => i !== index))}
+                    className="col-span-1 text-red-500 text-sm md:text-lg"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setPaymentEntries((prev) => [
+                    ...prev,
+                    { account: '', amount: '', paymentType: formData.paymentType },
+                  ])
+                }
+                className="text-blue-600 text-sm mt-1 font-medium hover:text-blue-800"
               >
-                <select
-                  className="col-span-5 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500"
-                  value={entry.account}
-                  onChange={(e) =>
-                    setPaymentEntries((prev) =>
-                      prev.map((item, i) =>
-                        i === index ? { ...item, account: e.target.value } : item
-                      )
-                    )
-                  }
-                  required
-                >
-                  <option value="">{t('expense.selectAccount')}</option>
-                  {accounts.map((a) => (
-                    <option key={a._id} value={a._id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
+                + {t('payment.addAnother')}
+              </button>
 
-                <select
-                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm"
-                  value={entry.paymentType || formData.paymentType}
-                  onChange={(e) =>
-                    setPaymentEntries((prev) =>
-                      prev.map((item, i) =>
-                        i === index ? { ...item, paymentType: e.target.value } : item
-                      )
-                    )
-                  }
-                >
-                  <option>{t('payment.cash')}</option>
-                  <option>{t('payment.online')}</option>
-                  <option>{t('payment.cheque')}</option>
-                </select>
-
+              <div className="flex justify-end mt-2">
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder={t('amount')}
-                  className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm no-spinner"
-                  value={entry.amount}
-                  onChange={(e) =>
-                    setPaymentEntries((prev) =>
-                      prev.map((item, i) =>
-                        i === index ? { ...item, amount: e.target.value } : item
-                      )
-                    )
-                  }
-                  required
+                  placeholder="Discount"
+                  className="w-32 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 text-xs md:text-sm text-right shadow-sm no-spinner"
+                  name="discountAmount"
+                  value={formData.discountAmount || ''}
+                  onChange={handleChange}
                 />
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentEntries((prev) => prev.filter((_, i) => i !== index))}
-                  className="col-span-1 text-red-500 text-sm md:text-lg"
-                >
-                  ✕
-                </button>
               </div>
-            ))}
 
-            <button
-              type="button"
-              onClick={() =>
-                setPaymentEntries((prev) => [
-                  ...prev,
-                  { account: '', amount: '', paymentType: formData.paymentType },
-                ])
-              }
-              className="text-blue-600 text-sm mt-1 font-medium hover:text-blue-800"
-            >
-              + {t('payment.addAnother')}
-            </button>
-
-            <div className="flex justify-end mt-2">
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Discount"
-                className="w-32 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 text-xs md:text-sm text-right shadow-sm no-spinner"
-                name="discountAmount"
-                value={formData.discountAmount || ''}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div className="flex justify-end mt-4">
-              <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
-                <div className="flex justify-between font-semibold text-sm">
-                  <span>{t('total')}</span>
-                  <span>
-                    {(
-                      paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
-                      Number(formData.discountAmount || 0)
-                    ).toFixed(2)}
-                  </span>
+              <div className="flex justify-end mt-4">
+                <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
+                  <div className="flex justify-between font-semibold text-sm">
+                    <span>{t('total')}</span>
+                    <span>
+                      {(
+                        paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
+                        Number(formData.discountAmount || 0)
+                      ).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* ACTION BUTTONS */}
-          <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
-            {((id && canEditReceivePayments) || (!id && canCreateReceivePayments)) && (
-              <>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
-                    loading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  {id ? t('updateClose') : t('saveClose')}
-                </button>
+            {/* ACTION BUTTONS */}
+            <div className="md:col-span-2 flex flex-wrap justify-between md:justify-end items-center gap-2 md:gap-3 mt-3 md:mt-4">
+              {((id && canEditReceivePayments) || (!id && canCreateReceivePayments)) && (
+                <>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className={`bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                      loading ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {id ? t('updateClose') : t('saveClose')}
+                  </button>
 
+                  <button
+                    type="button"
+                    onClick={(e) => handleSubmit(e, 'new')}
+                    disabled={loading}
+                    className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
+                      loading ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {loading ? t('saving') : t('saveNew')}
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handleRevert}
+                className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-3 py-1.5 rounded-xl shadow"
+              >
+                {id ? t('common.revert') : t('clear')}
+              </button>
+
+              <select
+                value={printSize}
+                onChange={(e) => {
+                  setPrintSize(e.target.value);
+                  localStorage.setItem('receivePrintSize', e.target.value);
+                }}
+                className="border border-gray-200 rounded-xl px-2 py-1 text-sm"
+              >
+                <option value="standard">A4</option>
+                <option value="narrow">A5</option>
+                <option value="thermal">Thermal</option>
+              </select>
+              {canViewReceivePayments && (
                 <button
                   type="button"
-                  onClick={(e) => handleSubmit(e, 'new')}
-                  disabled={loading}
-                  className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl shadow ${
-                    loading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
+                  onClick={handlePrint}
+                  className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
                 >
-                  {loading ? t('saving') : t('saveNew')}
+                  🖨
                 </button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={handleRevert}
-              className="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-3 py-1.5 rounded-xl shadow"
+              )}
+              {canViewReceivePayments && (
+                <button
+                  type="button"
+                  disabled={pdfLoading}
+                  onClick={async () => {
+                    try {
+                      setPdfLoading(true);
+
+                      await handleExportPDF();
+                    } finally {
+                      setPdfLoading(false);
+                    }
+                  }}
+                  className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
+                  style={{
+                    cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                    opacity: pdfLoading ? 0.7 : 1,
+                    background: pdfLoading
+                      ? '#9ca3af'
+                      : 'linear-gradient(to right, #ef4444, #b91c1c)',
+                  }}
+                >
+                  {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* RIGHT SIDE - LEDGER */}
+          {!isMobile && (
+            <div
+              ref={printRef}
+              className="lg:col-span-2 bg-white shadow-xl rounded-2xl p-4 h-[calc(100vh-120px)] overflow-y-auto"
             >
-              {id ? t('common.revert') : t('clear')}
-            </button>
+              <h3 className="text-lg font-semibold mb-3">{t('customer.ledgerPreview')}</h3>
 
-            <select
-              value={printSize}
-              onChange={(e) => {
-                setPrintSize(e.target.value);
-                localStorage.setItem('receivePrintSize', e.target.value);
-              }}
-              className="border border-gray-200 rounded-xl px-2 py-1 text-sm"
-            >
-              <option value="standard">A4</option>
-              <option value="narrow">A5</option>
-              <option value="thermal">Thermal</option>
-            </select>
-            {canViewReceivePayments && (
-              <button
-                type="button"
-                onClick={handlePrint}
-                className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
-              >
-                🖨
-              </button>
-            )}
-            {canViewReceivePayments && (
-              <button
-                type="button"
-                disabled={pdfLoading}
-                onClick={async () => {
-                  try {
-                    setPdfLoading(true);
+              {ledgerLoading && (
+                <div className="text-center text-sm text-gray-500 py-3">Ledger Loading...</div>
+              )}
 
-                    await handleExportPDF();
-                  } finally {
-                    setPdfLoading(false);
-                  }
-                }}
-                className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
-                style={{
-                  cursor: pdfLoading ? 'not-allowed' : 'pointer',
-                  opacity: pdfLoading ? 0.7 : 1,
-                  background: pdfLoading
-                    ? '#9ca3af'
-                    : 'linear-gradient(to right, #ef4444, #b91c1c)',
-                }}
-              >
-                {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
-              </button>
-            )}
-          </div>
-        </form>
+              <table className="w-full text-xs border rounded-xl overflow-hidden">
+                <thead className="sticky top-0 bg-gray-100 z-10">
+                  <tr>
+                    <th className="p-2 border">{t('date')}</th>
+                    <th className="p-2 border">{t('billNo')}</th>
+                    <th className="p-2 border">{t('description')}</th>
+                    <th className="p-2 border">{t('debit')}</th>
+                    <th className="p-2 border">{t('credit')}</th>
+                    <th className="p-2 border">{t('balance')}</th>
+                  </tr>
+                </thead>
 
-        {/* RIGHT SIDE - LEDGER */}
-        {!isMobile && (
-          <div
-            ref={printRef}
-            className="lg:col-span-2 bg-white shadow-xl rounded-2xl p-4 h-[calc(100vh-120px)] overflow-y-auto"
-          >
-            <h3 className="text-lg font-semibold mb-3">{t('customer.ledgerPreview')}</h3>
-
-            <table className="w-full text-xs border rounded-xl overflow-hidden">
-              <thead className="sticky top-0 bg-gray-100 z-10">
-                <tr>
-                  <th className="p-2 border">{t('date')}</th>
-                  <th className="p-2 border">{t('billNo')}</th>
-                  <th className="p-2 border">{t('description')}</th>
-                  <th className="p-2 border">{t('debit')}</th>
-                  <th className="p-2 border">{t('credit')}</th>
-                  <th className="p-2 border">{t('balance')}</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {customerLedger.map((e, i) => (
-                  <tr key={i} className="hover:bg-blue-50 even:bg-gray-50 transition">
-                    <td className="p-2 border">{new Date(e.date).toLocaleDateString()}</td>
-                    <td className="p-2 border">{e.billNo || '-'}</td>
-                    <td className="p-2 border">{e.description || '-'}</td>
-                    <td className="p-2 border text-right font-medium text-green-700">
-                      {e.credit?.toFixed(2) || '0.00'}
+                <tbody>
+                  {customerLedger.map((e, i) => (
+                    <tr key={i} className="hover:bg-blue-50 even:bg-gray-50 transition">
+                      <td className="p-2 border">{new Date(e.date).toLocaleDateString()}</td>
+                      <td className="p-2 border">{e.billNo || '-'}</td>
+                      <td className="p-2 border">{e.description || '-'}</td>
+                      <td className="p-2 border text-right font-medium text-green-700">
+                        {e.credit?.toFixed(2) || '0.00'}
+                      </td>
+                      <td className="p-2 border text-right font-medium text-red-600">
+                        {e.debit?.toFixed(2) || '0.00'}
+                      </td>
+                      <td className="p-2 border text-right font-bold text-blue-700">
+                        {e.runningBalance?.toFixed(2) || '0.00'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-blue-50 font-semibold">
+                    <td className="p-2 border" colSpan="3">
+                      Total
                     </td>
-                    <td className="p-2 border text-right font-medium text-red-600">
-                      {e.debit?.toFixed(2) || '0.00'}
+
+                    <td className="p-2 border text-right text-green-700">
+                      {totalCredit.toFixed(2)}
                     </td>
-                    <td className="p-2 border text-right font-bold text-blue-700">
-                      {e.runningBalance?.toFixed(2) || '0.00'}
+
+                    <td className="p-2 border text-right text-red-600">{totalDebit.toFixed(2)}</td>
+
+                    <td className="p-2 border text-right text-blue-700 font-bold">
+                      {closingBalance.toFixed(2)}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-blue-50 font-semibold">
-                  <td className="p-2 border" colSpan="3">
-                    Total
-                  </td>
-
-                  <td className="p-2 border text-right text-green-700">{totalCredit.toFixed(2)}</td>
-
-                  <td className="p-2 border text-right text-red-600">{totalDebit.toFixed(2)}</td>
-
-                  <td className="p-2 border text-right text-blue-700 font-bold">
-                    {closingBalance.toFixed(2)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+        <AttachmentViewerModal
+          attachment={modalAttachment}
+          onClose={() => setModalAttachment(null)}
+        />
       </div>
-      <AttachmentViewerModal
-        attachment={modalAttachment}
-        onClose={() => setModalAttachment(null)}
-      />
-    </div>
+    </>
   );
 };
 

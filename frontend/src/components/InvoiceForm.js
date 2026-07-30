@@ -88,6 +88,7 @@ const InvoiceForm = ({
   const [showHistoryPopup, setShowHistoryPopup] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [historyRowIndex, setHistoryRowIndex] = useState(null);
 
   const [historyAutoMode, setHistoryAutoMode] = useState(
@@ -292,18 +293,28 @@ const InvoiceForm = ({
     const params = new URLSearchParams(location.search);
     const invoiceIdFromURL = params.get('invoiceId');
 
+    let cancelled = false;
+
     const loadInvoice = async () => {
       // 🆕 NEW INVOICE
       if (!invoiceIdFromURL) {
+        setEditLoading(false);
+        setEditingInvoiceFromAPI(null);
+
         setInvoiceDate(now.toISOString().split('T')[0]);
         setInvoiceTime(now.toTimeString().slice(0, 5));
 
         try {
           const lastBillNo = await getLastInvoiceNo(token);
-          const nextBill = parseInt(lastBillNo || 1000) + 1;
+
+          if (cancelled) return;
+
+          const nextBill = parseInt(lastBillNo || 1000, 10) + 1;
           setBillNo(nextBill.toString());
         } catch (err) {
-          console.error('❌ Failed to fetch last bill number');
+          if (cancelled) return;
+
+          console.error('❌ Failed to fetch last bill number:', err);
           setBillNo('Auto');
         }
 
@@ -318,15 +329,34 @@ const InvoiceForm = ({
       }
 
       try {
+        setEditLoading(true);
+        setEditingInvoiceFromAPI(null);
+
         const data = await getInvoiceById(invoiceIdFromURL, token);
+
+        if (cancelled) return;
+
         setEditingInvoiceFromAPI(data);
       } catch (err) {
-        console.error('❌ Error loading invoice for editing:', err);
-        alert(t('alerts.loadInvoiceFailed'));
+        if (cancelled) return;
+
+        console.error('❌ Error loading invoice for editing:', err?.response?.data || err.message);
+
+        alert(err?.response?.data?.message || t('alerts.loadInvoiceFailed'));
+      } finally {
+        if (!cancelled) {
+          setEditLoading(false);
+        }
       }
     };
 
-    if (token) loadInvoice();
+    if (token) {
+      loadInvoice();
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [location.search, token, canEditSales, navigate]);
 
   useEffect(() => {
@@ -425,59 +455,136 @@ const InvoiceForm = ({
       }
     }
 
-    const enrichedItems = editingInvoiceFromAPI.items.map((item, i) => {
-      const matchedProduct = products.find((p) => p._id === item.productId);
+    const invoiceItems = Array.isArray(editingInvoiceFromAPI.items)
+      ? editingInvoiceFromAPI.items
+      : [];
+
+    const enrichedItems = invoiceItems.map((item, i) => {
+      const populatedProduct =
+        item.productId && typeof item.productId === 'object' ? item.productId : null;
+
+      const productId = populatedProduct?._id || item.productId || '';
 
       return {
         itemNo: i + 1,
-        search: matchedProduct?.name || item.name || '',
-        productId: item.productId || '',
-        name: matchedProduct?.name || item.name || '',
-        description: matchedProduct?.description || '',
-        uom: matchedProduct?.uom || item.uom || '',
-        cost: matchedProduct?.unitCost || 0,
-        quantity: item.quantity,
-        rate: item.price,
-        amount: item.total,
+
+        productId,
+
+        search: populatedProduct?.name || item.name || '',
+
+        name: populatedProduct?.name || item.name || '',
+
+        description: populatedProduct?.description || item.description || '',
+
+        uom: populatedProduct?.uom || populatedProduct?.unit || item.uom || '',
+
+        cost: Number(item.costPrice ?? populatedProduct?.unitCost ?? 0),
+
+        quantity: Number(item.quantity || 1),
+        rate: Number(item.price || 0),
+
+        amount: Number(item.total || Number(item.quantity || 0) * Number(item.price || 0)),
       };
     });
 
     setItems([
       ...enrichedItems,
-      ...Array.from({ length: Math.max(0, 20 - enrichedItems.length) }, () => blankRow()),
+      ...Array.from(
+        {
+          length: Math.max(0, 20 - enrichedItems.length),
+        },
+        () => blankRow()
+      ),
     ]);
-  }, [editingInvoiceFromAPI, products]);
+  }, [editingInvoiceFromAPI]);
   useEffect(() => {
     if (!token) return;
 
-    fetch(`${API}/api/customers?limit=50`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((res) => res.json())
-      .then(setCustomers);
+    let cancelled = false;
 
-    fetchSaleParties(token)
-      .then(setParties)
-      .catch((err) => console.error('Sale parties load failed:', err));
-    const cachedProducts = localStorage.getItem('products');
+    // ✅ Cached products فوراً دکھائیں
+    try {
+      const cachedProducts = localStorage.getItem('products');
 
-    if (cachedProducts) {
-      setProducts(JSON.parse(cachedProducts));
+      if (cachedProducts) {
+        const parsedProducts = JSON.parse(cachedProducts);
+
+        if (Array.isArray(parsedProducts)) {
+          setProducts(parsedProducts);
+        }
+      }
+    } catch (err) {
+      console.error('Cached products read failed:', err);
     }
 
-    fetchProductsWithToken(token).then((data) => {
-      setProducts(data);
+    const loadFormOptions = async () => {
+      const results = await Promise.allSettled([
+        fetch(`${API}/api/customers?limit=50`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }).then(async (res) => {
+          if (!res.ok) {
+            throw new Error('Customers load failed');
+          }
 
-      localStorage.setItem('products', JSON.stringify(data));
-    });
+          return res.json();
+        }),
 
-    getValidPaymentAccounts().then((all) => {
-      setAccounts(Array.isArray(all) ? all : []);
-    });
-  }, [token, onProductChange]);
+        fetchSaleParties(token),
 
+        fetchProductsWithToken(token),
+
+        getValidPaymentAccounts(),
+      ]);
+
+      if (cancelled) return;
+
+      const [customerResult, partyResult, productResult, accountResult] = results;
+
+      if (customerResult.status === 'fulfilled') {
+        const customerData = customerResult.value;
+
+        setCustomers(
+          Array.isArray(customerData)
+            ? customerData
+            : Array.isArray(customerData?.customers)
+              ? customerData.customers
+              : []
+        );
+      } else {
+        console.error('Customers load failed:', customerResult.reason);
+      }
+
+      if (partyResult.status === 'fulfilled') {
+        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
+      } else {
+        console.error('Sale parties load failed:', partyResult.reason);
+      }
+
+      if (productResult.status === 'fulfilled') {
+        const productData = Array.isArray(productResult.value) ? productResult.value : [];
+
+        setProducts(productData);
+
+        localStorage.setItem('products', JSON.stringify(productData));
+      } else {
+        console.error('Products load failed:', productResult.reason);
+      }
+
+      if (accountResult.status === 'fulfilled') {
+        setAccounts(Array.isArray(accountResult.value) ? accountResult.value : []);
+      } else {
+        console.error('Accounts load failed:', accountResult.reason);
+      }
+    };
+
+    loadFormOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
   // 🔥 FIX: restore customerId after reload
   useEffect(() => {
     if (!customerName || customers.length === 0) return;
@@ -1139,6 +1246,14 @@ const InvoiceForm = ({
 
   return (
     <>
+      {editLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/20">
+          <div className="rounded-lg bg-white px-6 py-4 shadow-xl font-semibold">
+            Sale Invoice Loading...
+          </div>
+        </div>
+      )}
+
       <form
         onSubmit={(e) => handleSubmit(e)}
         className="max-w-6xl mx-auto p-2 md:p-3 bg-white rounded shadow space-y-2 text-xs md:text-sm"

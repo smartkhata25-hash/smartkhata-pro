@@ -672,22 +672,38 @@ exports.getInvoices = async (req, res) => {
 exports.getInvoiceById = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
     const invoice = await Invoice.findOne({
       _id: req.params.id,
       createdBy: userId,
-    }).lean();
+      isDeleted: { $ne: true },
+    })
+      .populate({
+        path: "items.productId",
+        select: "name description uom unit unitCost salePrice",
+      })
+      .lean();
 
-    if (!invoice)
+    if (!invoice) {
       return res.status(404).json({
         message: "Invoice not found",
       });
+    }
 
-    invoice.attachments = formatAttachments(invoice);
-    invoice.attachmentFullUrl = invoice.attachments[0]?.fullUrl || "";
+    const attachments = formatAttachments(invoice);
 
-    res.json(invoice);
+    return res.json({
+      ...invoice,
+      attachments,
+      attachmentFullUrl: attachments[0]?.fullUrl || "",
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching invoice", error });
+    console.error("Get Invoice By ID Error:", error);
+
+    return res.status(500).json({
+      message: "Error fetching invoice",
+      error: error.message,
+    });
   }
 };
 

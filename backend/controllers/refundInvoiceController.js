@@ -432,35 +432,71 @@ exports.getRefundById = async (req, res) => {
     const refund = await RefundInvoice.findOne({
       _id: req.params.id,
       createdBy: userId,
-    });
+      isDeleted: { $ne: true },
+    })
+      .select(
+        [
+          "billNo",
+          "invoiceDate",
+          "invoiceTime",
+          "customerId",
+          "partyId",
+          "customerName",
+          "customerPhone",
+          "totalAmount",
+          "paidAmount",
+          "paymentType",
+          "accountId",
+          "notes",
+          "originalInvoiceId",
+          "isOpening",
+          "items",
+          "attachments",
+          "attachmentUrl",
+          "attachmentType",
+          "createdAt",
+        ].join(" "),
+      )
+      .populate({
+        path: "customerId",
+        select: "name phone account",
+      })
+      .populate({
+        path: "partyId",
+        select: "name phone account",
+      })
+      .populate({
+        path: "items.productId",
+        select: "name description salePrice unitPrice price",
+      })
+      .lean();
 
     if (!refund) {
-      return res.status(404).json({ error: "Refund not found" });
+      return res.status(404).json({
+        error: "Refund not found",
+      });
     }
 
-    // 🔍 Journal Entry نکالیں
-    const journal = await JournalEntry.findOne({
+    const paymentJournal = await JournalEntry.findOne({
       referenceId: refund._id,
-      sourceType: {
-        $in: ["refund_invoice", "opening_refund_invoice"],
-      },
-    }).populate("lines.account", "name");
+      sourceType: "refund_payment",
+      createdBy: userId,
+      isDeleted: false,
+    })
+      .select("lines")
+      .populate("lines.account", "name")
+      .lean();
 
-    // 💡 Payment line (credit side)
-    const paymentLine = journal?.lines?.find(
-      (line) => line.type === "credit" && line.paymentType,
+    const paymentLine = paymentJournal?.lines?.find(
+      (line) => line.paymentType && line.account,
     );
 
     const formattedAttachments =
       refund.attachments?.length > 0
-        ? refund.attachments.map((att) => {
-            const plainAtt = att.toObject ? att.toObject() : att;
-
-            return {
-              ...plainAtt,
-              fullUrl: getFileUrl(plainAtt.key),
-            };
-          })
+        ? refund.attachments.map((att) => ({
+            ...att,
+            fullUrl: getFileUrl(att.key),
+          }))
         : refund.attachmentUrl
           ? [
               {
@@ -475,16 +511,24 @@ exports.getRefundById = async (req, res) => {
             ]
           : [];
 
-    res.json({
-      ...refund.toObject(),
+    return res.json({
+      ...refund,
+
       attachments: formattedAttachments,
-      paymentMode: paymentLine?.paymentType || refund.paymentType || "cash",
-      accountId: paymentLine?.account?._id || "",
+
+      paymentMode: paymentLine?.paymentType || refund.paymentType || "credit",
+
+      accountId: paymentLine?.account?._id || refund.accountId || "",
+
       accountName: paymentLine?.account?.name || "-",
     });
   } catch (err) {
     console.error("❌ Get Refund Error:", err);
-    res.status(500).json({ error: "Server Error" });
+
+    return res.status(500).json({
+      error: "Server Error",
+      detail: err.message,
+    });
   }
 };
 

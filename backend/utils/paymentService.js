@@ -251,6 +251,8 @@ const createReceivePaymentDiscountEntry = async ({
   originModule = "",
   customerId = null,
   partyId = null,
+  entryDate = new Date(),
+  entryTime = new Date().toTimeString().slice(0, 8),
 }) => {
   discountAmount = Number(discountAmount);
 
@@ -289,8 +291,8 @@ const createReceivePaymentDiscountEntry = async ({
   ];
 
   const journal = new JournalEntry({
-    date: new Date(),
-    time: new Date().toTimeString().slice(0, 8),
+    date: entryDate || new Date(),
+    time: entryTime || new Date().toTimeString().slice(0, 8),
     sourceType: "receive_payment_discount",
     originModule,
     referenceId,

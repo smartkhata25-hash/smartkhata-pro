@@ -238,15 +238,18 @@ const LedgerTable = ({
                     if (!columns.includes(col)) return null;
 
                     if (col === 'date') {
-                      const rawDate = e.date ? String(e.date).slice(0, 10) : '';
-
-                      if (!rawDate) {
+                      if (!e.date) {
                         return <td key={col}>-</td>;
                       }
 
-                      const [year, month, day] = rawDate.split('-');
+                      const formattedDate = new Date(e.date).toLocaleDateString('en-US', {
+                        timeZone: 'Asia/Karachi',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                      });
 
-                      return <td key={col}>{`${month}/${day}/${year}`}</td>;
+                      return <td key={col}>{formattedDate}</td>;
                     }
                     if (col === 'time')
                       return (

@@ -112,6 +112,54 @@ async function safeRecalculate(id) {
   }
 }
 
+async function calculateBalanceSnapshot({
+  accountId,
+  userId,
+  beforeCreatedAt = null,
+  excludeReferenceId = null,
+}) {
+  if (!accountId || !userId) return 0;
+
+  const filter = {
+    createdBy: userId,
+    isDeleted: false,
+    sourceType: { $ne: "reversal" },
+    "lines.account": accountId,
+  };
+
+  if (beforeCreatedAt) {
+    filter.createdAt = {
+      $lt: beforeCreatedAt,
+    };
+  }
+
+  if (excludeReferenceId) {
+    filter.referenceId = {
+      $ne: excludeReferenceId,
+    };
+  }
+
+  const journals = await JournalEntry.find(filter).select("lines").lean();
+
+  let debit = 0;
+  let credit = 0;
+
+  journals.forEach((journal) => {
+    journal.lines?.forEach((line) => {
+      if (String(line.account) === String(accountId)) {
+        if (line.type === "debit") {
+          debit += Number(line.amount || 0);
+        }
+
+        if (line.type === "credit") {
+          credit += Number(line.amount || 0);
+        }
+      }
+    });
+  });
+
+  return debit - credit;
+}
 // CREATE RECEIVE PAYMENT
 
 exports.createReceivePayment = async (req, res) => {
@@ -195,6 +243,11 @@ exports.createReceivePayment = async (req, res) => {
       counterPartyAccountId = customerData.account._id;
     }
 
+    const previousBalance = await calculateBalanceSnapshot({
+      accountId: counterPartyAccountId,
+      userId,
+    });
+
     const count = await ReceivePayment.countDocuments({ userId });
     const billNo = `RCV-${1001 + count}`;
 
@@ -206,6 +259,7 @@ exports.createReceivePayment = async (req, res) => {
       amount: totalAmount,
       discountAmount: parsedDiscount,
       finalAmount,
+      previousBalance,
       paymentType: cleanPaymentType,
       billNo,
       description,
@@ -228,6 +282,8 @@ exports.createReceivePayment = async (req, res) => {
         description: description || "Receive Payment",
         customerId: customerData?._id || null,
         partyId: partyData?._id || null,
+        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
+        entryTime: time || "00:00",
       });
     }
 
@@ -242,6 +298,10 @@ exports.createReceivePayment = async (req, res) => {
         originModule: "receive_payment_form",
         customerId: customerData?._id || null,
         partyId: partyData?._id || null,
+
+        // ✅ اصل Payment کی تاریخ اور وقت
+        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
+        entryTime: time || "00:00",
       });
     }
 
@@ -572,6 +632,7 @@ exports.getReceivePaymentById = async (req, res) => {
           "amount",
           "discountAmount",
           "finalAmount",
+          "previousBalance",
           "paymentType",
           "billNo",
           "description",
@@ -709,6 +770,28 @@ exports.updateReceivePayment = async (req, res) => {
         ),
       ),
     ];
+
+    if (
+      payment.previousBalance === null ||
+      payment.previousBalance === undefined
+    ) {
+      const oldReceiveJournal = oldJournals.find(
+        (entry) => entry.sourceType === "receive_payment",
+      );
+
+      const oldCustomerLine = oldReceiveJournal?.lines?.find(
+        (line) => line.type === "credit",
+      );
+
+      if (oldCustomerLine?.account && oldReceiveJournal?.createdAt) {
+        payment.previousBalance = await calculateBalanceSnapshot({
+          accountId: oldCustomerLine.account,
+          userId,
+          beforeCreatedAt: oldReceiveJournal.createdAt,
+          excludeReferenceId: payment._id,
+        });
+      }
+    }
 
     let currentAttachments = formatAttachments(payment).map((att) => ({
       key: att.key,
@@ -849,6 +932,10 @@ exports.updateReceivePayment = async (req, res) => {
         description: description || "Receive Payment",
         customerId: customerData?._id || null,
         partyId: partyData?._id || null,
+
+        // ✅ Edit کے دن کی بجائے Payment کی اصل منتخب تاریخ
+        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
+        entryTime: time || payment.time || "00:00",
       });
     }
 
@@ -863,6 +950,10 @@ exports.updateReceivePayment = async (req, res) => {
         originModule: "receive_payment_form",
         customerId: customerData?._id || null,
         partyId: partyData?._id || null,
+
+        // ✅ اصل Payment کی تاریخ اور وقت
+        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
+        entryTime: time || payment.time || "00:00",
       });
     }
 

@@ -543,6 +543,12 @@ const PayBillForm = () => {
         navigate('/dashboard');
       } else if (type === 'new') {
         resetForm();
+
+        if (id) {
+          navigate('/pay-bills/new', {
+            replace: true,
+          });
+        }
       }
     } catch (err) {
       alert(t('alerts.error') + ': ' + err.message);

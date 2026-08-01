@@ -772,6 +772,12 @@ const ReceivePaymentForm = () => {
         navigate('/dashboard');
       } else if (type === 'new') {
         resetForm();
+
+        if (id) {
+          navigate('/receive-payments/new', {
+            replace: true,
+          });
+        }
       }
     } catch (err) {
       alert(err.message);

@@ -59,37 +59,47 @@ const DashboardPage = () => {
 
         const year = selectedYear;
 
+        // ✅ Date کو YYYY-MM-DD Format میں بنائیں
+        const formatDate = (date) => {
+          const dateYear = date.getFullYear();
+          const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
+          const dateDay = String(date.getDate()).padStart(2, '0');
+
+          return `${dateYear}-${dateMonth}-${dateDay}`;
+        };
+
+        // ✅ Pakistan Time (+05:00) کے مطابق مکمل Date Range
+        if (filterType === 'today') {
+          const today = new Date();
+          const todayDate = formatDate(today);
+
+          startDate = `${todayDate}T00:00:00.000+05:00`;
+          endDate = `${todayDate}T23:59:59.999+05:00`;
+        }
+
         if (filterType === 'month') {
-          // ✅ Local date range (NO timezone issue)
-          const start = new Date(year, selectedMonth, 1);
-          const end = new Date(year, selectedMonth + 1, 0);
+          const firstDay = new Date(year, selectedMonth, 1);
+          const lastDay = new Date(year, selectedMonth + 1, 0);
 
-          // start of day
-          start.setHours(0, 0, 0, 0);
-
-          // end of day
-          end.setHours(23, 59, 59, 999);
-
-          startDate = start.toISOString();
-          endDate = end.toISOString();
+          startDate = `${formatDate(firstDay)}T00:00:00.000+05:00`;
+          endDate = `${formatDate(lastDay)}T23:59:59.999+05:00`;
         }
 
         if (filterType === 'year') {
-          startDate = new Date(year, 0, 1).toISOString();
-          endDate = new Date(year, 11, 31).toISOString();
-        }
-
-        if (filterType === 'all') {
-          startDate = '';
-          endDate = '';
+          startDate = `${year}-01-01T00:00:00.000+05:00`;
+          endDate = `${year}-12-31T23:59:59.999+05:00`;
         }
 
         let url = `${baseUrl}/api/dashboard-summary`;
 
-        if (filterType === 'today') {
-          url += `?filterType=today`;
-        } else if (startDate && endDate) {
-          url += `?filterType=${filterType}&startDate=${startDate}&endDate=${endDate}`;
+        if (filterType !== 'all' && startDate && endDate) {
+          const params = new URLSearchParams({
+            filterType,
+            startDate,
+            endDate,
+          });
+
+          url += `?${params.toString()}`;
         }
 
         const res = await axios.get(url, {

@@ -38,6 +38,10 @@ const receivePaymentSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    previousBalance: {
+      type: Number,
+      default: null,
+    },
     paymentType: {
       type: String,
       enum: ["cash", "cheque", "bank", "online", "other"],

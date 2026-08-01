@@ -11,90 +11,105 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
 
   const now = new Date();
 
+  // ✅ Pakistan Time (+05:00)
+
+  const pakistanNow = new Date(
+    now.toLocaleString("en-US", {
+      timeZone: "Asia/Karachi",
+    }),
+  );
+
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  };
+
   // TODAY
 
   if (filterType === "today") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
+    const today = formatDate(pakistanNow);
 
     dateFilter = {
       date: {
-        $gte: start,
-        $lte: end,
+        $gte: new Date(`${today}T00:00:00.000+05:00`),
+        $lte: new Date(`${today}T23:59:59.999+05:00`),
       },
     };
-  } else if (filterType === "this_month") {
-    // THIS MONTH
+  }
 
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  // THIS MONTH
+  else if (filterType === "this_month") {
+    const start = new Date(
+      pakistanNow.getFullYear(),
+      pakistanNow.getMonth(),
+      1,
+    );
 
     const end = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
+      pakistanNow.getFullYear(),
+      pakistanNow.getMonth() + 1,
       0,
-      23,
-      59,
-      59,
-      999,
     );
 
     dateFilter = {
       date: {
-        $gte: start,
-        $lte: end,
+        $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
+        $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
       },
     };
-  } else if (filterType === "last_month") {
-    // LAST MONTH
+  }
 
-    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  // LAST MONTH
+  else if (filterType === "last_month") {
+    const start = new Date(
+      pakistanNow.getFullYear(),
+      pakistanNow.getMonth() - 1,
+      1,
+    );
 
-    const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const end = new Date(pakistanNow.getFullYear(), pakistanNow.getMonth(), 0);
 
     dateFilter = {
       date: {
-        $gte: start,
-        $lte: end,
+        $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
+        $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
       },
     };
-  } else if (filterType === "this_year") {
-    // THIS YEAR
+  }
 
-    const start = new Date(now.getFullYear(), 0, 1);
+  // THIS YEAR
+  else if (filterType === "this_year") {
+    dateFilter = {
+      date: {
+        $gte: new Date(`${pakistanNow.getFullYear()}-01-01T00:00:00.000+05:00`),
+        $lte: new Date(`${pakistanNow.getFullYear()}-12-31T23:59:59.999+05:00`),
+      },
+    };
+  }
 
-    const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  // LAST YEAR
+  else if (filterType === "last_year") {
+    const lastYear = pakistanNow.getFullYear() - 1;
 
     dateFilter = {
       date: {
-        $gte: start,
-        $lte: end,
+        $gte: new Date(`${lastYear}-01-01T00:00:00.000+05:00`),
+        $lte: new Date(`${lastYear}-12-31T23:59:59.999+05:00`),
       },
     };
-  } else if (filterType === "last_year") {
-    // LAST YEAR
+  }
 
-    const start = new Date(now.getFullYear() - 1, 0, 1);
-
-    const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-
-    dateFilter = {
-      date: {
-        $gte: start,
-        $lte: end,
-      },
-    };
-  } else if (
+  // CUSTOM / MONTH / YEAR
+  else if (
     (filterType === "custom" ||
       filterType === "month" ||
       filterType === "year") &&
     startDate &&
     endDate
   ) {
-    // CUSTOM RANGE
-
     dateFilter = {
       date: {
         $gte: new Date(startDate),

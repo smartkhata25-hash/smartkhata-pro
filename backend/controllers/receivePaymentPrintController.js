@@ -14,13 +14,22 @@ const { generatePdfFromHtml } = require("../services/pdfService");
    HELPER: GET PAYMENT ENTRIES FROM JOURNAL
 ========================================================= */
 
-const getPaymentEntries = async (paymentId) => {
+const getPaymentEntries = async (paymentId, userId = null) => {
   if (!paymentId) return [];
 
-  const journal = await JournalEntry.findOne({
+  const filter = {
     referenceId: paymentId,
     sourceType: "receive_payment",
-  }).populate("lines.account", "name");
+    isDeleted: false,
+  };
+
+  if (userId) {
+    filter.createdBy = userId;
+  }
+
+  const journal = await JournalEntry.findOne(filter)
+    .sort({ createdAt: -1 })
+    .populate("lines.account", "name");
 
   if (!journal || !journal.lines?.length) return [];
 
@@ -38,23 +47,41 @@ const getPaymentEntries = async (paymentId) => {
 ========================================================= */
 
 const Customer = require("../models/Customer");
+const Party = require("../models/Party");
 
-const calculatePreviousBalance = async (
-  customerId,
-  paymentDate,
+const calculatePreviousBalance = async ({
+  customerId = null,
+  partyId = null,
+  paymentDate = null,
+  paymentCreatedAt = null,
+  paymentId = null,
   userId = null,
-) => {
-  if (!customerId) return 0;
+}) => {
+  if (!customerId && !partyId) return 0;
 
-  const customerData = await Customer.findById(customerId).populate("account");
+  let accountId = null;
 
-  if (!customerData?.account) return 0;
+  if (partyId) {
+    const partyData = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+    }).populate("account");
 
-  const customerAccountId = customerData.account._id;
+    accountId = partyData?.account?._id || null;
+  } else {
+    const customerData = await Customer.findOne({
+      _id: customerId,
+      createdBy: userId,
+    }).populate("account");
+
+    accountId = customerData?.account?._id || null;
+  }
+
+  if (!accountId) return 0;
 
   const filter = {
-    date: { $lt: paymentDate || new Date() },
-    "lines.account": customerAccountId,
+    "lines.account": accountId,
     isDeleted: false,
     sourceType: { $ne: "reversal" },
   };
@@ -63,16 +90,43 @@ const calculatePreviousBalance = async (
     filter.createdBy = new mongoose.Types.ObjectId(userId);
   }
 
-  const journals = await JournalEntry.find(filter);
+  // موجودہ Receive Payment کو Balance میں دوبارہ شامل نہ کریں
+  if (paymentId) {
+    filter.referenceId = {
+      $ne: new mongoose.Types.ObjectId(paymentId),
+    };
+  }
+
+  // Payment سے پہلے والی Entries ہی شامل ہوں
+  if (paymentDate) {
+    filter.$or = [
+      {
+        date: { $lt: paymentDate },
+      },
+      {
+        date: paymentDate,
+        createdAt: {
+          $lt: paymentCreatedAt || new Date(),
+        },
+      },
+    ];
+  }
+
+  const journals = await JournalEntry.find(filter).select("lines");
 
   let debit = 0;
   let credit = 0;
 
   journals.forEach((journal) => {
     journal.lines.forEach((line) => {
-      if (String(line.account) === String(customerAccountId)) {
-        if (line.type === "debit") debit += Number(line.amount || 0);
-        if (line.type === "credit") credit += Number(line.amount || 0);
+      if (String(line.account) === String(accountId)) {
+        if (line.type === "debit") {
+          debit += Number(line.amount || 0);
+        }
+
+        if (line.type === "credit") {
+          credit += Number(line.amount || 0);
+        }
       }
     });
   });
@@ -87,7 +141,6 @@ const calculatePreviousBalance = async (
 const buildReceiptData = async (payment, size = "standard", userId = null) => {
   let company = {};
 
-  // ✅ Load Sales Print Header
   if (userId) {
     const printSetting = await PrintSetting.findOne({ userId });
 
@@ -116,15 +169,41 @@ const buildReceiptData = async (payment, size = "standard", userId = null) => {
     });
   }
 
-  const paymentEntries = await getPaymentEntries(payment._id);
+  const paymentObject = payment.toObject ? payment.toObject() : payment;
 
-  const previousBalance = await calculatePreviousBalance(
-    payment.customer?._id,
-    payment.date,
-    userId,
-  );
+  const paymentEntries = await getPaymentEntries(paymentObject._id, userId);
 
-  return buildReceivePaymentPrint(payment, paymentEntries, {
+  const customerId =
+    paymentObject.customer?._id || paymentObject.customer || null;
+
+  const partyId = paymentObject.partyId?._id || paymentObject.partyId || null;
+
+  let previousBalance;
+
+  // نئی Payments میں محفوظ Snapshot استعمال ہوگا
+  if (
+    paymentObject.previousBalance !== null &&
+    paymentObject.previousBalance !== undefined
+  ) {
+    previousBalance = Number(paymentObject.previousBalance || 0);
+  } else {
+    // صرف پرانے records کے لیے fallback
+    previousBalance = await calculatePreviousBalance({
+      customerId,
+      partyId,
+      paymentDate: paymentObject.date,
+      paymentCreatedAt: paymentObject.createdAt,
+      paymentId: paymentObject._id,
+      userId,
+    });
+  }
+
+  const normalizedPayment = {
+    ...paymentObject,
+    customer: partyId ? paymentObject.partyId : paymentObject.customer,
+  };
+
+  return buildReceivePaymentPrint(normalizedPayment, paymentEntries, {
     company,
     pageWidth: size,
     previousBalance,
@@ -142,7 +221,9 @@ const getReceivePaymentHtml = async (req, res) => {
       _id: id,
       userId,
       isDeleted: false,
-    }).populate("customer", "name phone");
+    })
+      .populate("customer", "name phone account")
+      .populate("partyId", "name phone account");
 
     if (!payment) {
       return res.status(404).send("Receive payment not found");
@@ -161,10 +242,10 @@ const getReceivePaymentHtml = async (req, res) => {
     return res.send(html);
   } catch (error) {
     console.error("❌ Receive Payment HTML Error:", error);
+
     return res.status(500).send("Failed to generate receipt HTML");
   }
 };
-
 /* =========================================================
    GENERATE RECEIVE PAYMENT PDF
 ========================================================= */
@@ -180,7 +261,9 @@ const generateReceivePaymentPdf = async (req, res) => {
       _id: id,
       userId,
       isDeleted: false,
-    }).populate("customer", "name phone");
+    })
+      .populate("customer", "name phone account")
+      .populate("partyId", "name phone account");
 
     if (!payment) {
       return res.status(404).json({
@@ -256,7 +339,12 @@ const previewReceivePaymentHtml = async (req, res) => {
     const previousBalance =
       parsed.previousBalance !== undefined
         ? Number(parsed.previousBalance || 0)
-        : await calculatePreviousBalance(parsed.customer, parsed.date, userId);
+        : await calculatePreviousBalance({
+            customerId: parsed.customer || null,
+            partyId: parsed.partyId || null,
+            paymentDate: parsed.date,
+            userId,
+          });
 
     const printSetting = await PrintSetting.findOne({
       userId,
@@ -340,7 +428,12 @@ const previewReceivePaymentPdf = async (req, res) => {
     const previousBalance =
       parsed.previousBalance !== undefined
         ? Number(parsed.previousBalance || 0)
-        : await calculatePreviousBalance(parsed.customer, parsed.date, userId);
+        : await calculatePreviousBalance({
+            customerId: parsed.customer || null,
+            partyId: parsed.partyId || null,
+            paymentDate: parsed.date,
+            userId,
+          });
 
     const printSetting = await PrintSetting.findOne({
       userId,

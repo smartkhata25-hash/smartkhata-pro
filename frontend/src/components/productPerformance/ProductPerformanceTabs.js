@@ -133,8 +133,8 @@ const ProductPerformanceTabs = ({
       aria-label={t('productPerformance.tabs.navigationLabel')}
       className="rounded-2xl border border-gray-200 bg-white p-2 shadow-sm"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div role="tablist" className="flex flex-1 gap-2 overflow-x-auto pb-1">
+      <div className="flex items-center gap-2">
+        <div role="tablist" className="flex items-center gap-2 overflow-x-auto pb-1">
           {tabs.map((tab, index) => {
             const isActive = value === tab.value;
 
@@ -187,7 +187,7 @@ const ProductPerformanceTabs = ({
           disabled={disabled || refreshing}
           title={t('common.refresh')}
           className="
-            h-10 w-10 shrink-0
+              h-10 w-10 shrink-0 ml-0
             rounded-xl
             border border-gray-200
             bg-white

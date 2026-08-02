@@ -4,12 +4,6 @@ import { t } from '../../i18n/i18n';
 
 const SUMMARY_CARD_CONFIG = Object.freeze([
   {
-    key: 'totalProducts',
-    labelKey: 'productPerformance.summary.totalProducts',
-    type: 'number',
-    view: 'all',
-  },
-  {
     key: 'totalNetSales',
     labelKey: 'productPerformance.summary.totalNetSales',
     type: 'currency',
@@ -27,42 +21,19 @@ const SUMMARY_CARD_CONFIG = Object.freeze([
     type: 'number',
     view: 'best-selling',
   },
-  {
-    key: 'slowMovingProducts',
-    secondaryKey: 'verySlowProducts',
-    labelKey: 'productPerformance.summary.slowMovingProducts',
-    type: 'combinedNumber',
-    view: 'slow-moving',
-  },
-  {
-    key: 'deadProducts',
-    labelKey: 'productPerformance.summary.deadProducts',
-    type: 'number',
-    view: 'dead-stock',
-  },
+
   {
     key: 'deadStockValue',
     labelKey: 'productPerformance.summary.deadStockValue',
     type: 'currency',
     view: 'dead-stock',
   },
-  {
-    key: 'neverSoldProducts',
-    labelKey: 'productPerformance.summary.neverSoldProducts',
-    type: 'number',
-    view: 'never-sold',
-  },
+
   {
     key: 'neverSoldStockValue',
     labelKey: 'productPerformance.summary.neverSoldStockValue',
     type: 'currency',
     view: 'never-sold',
-  },
-  {
-    key: 'negativeStockProducts',
-    labelKey: 'productPerformance.summary.negativeStockProducts',
-    type: 'number',
-    view: 'negative-stock',
   },
 ]);
 

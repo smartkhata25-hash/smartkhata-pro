@@ -43,13 +43,15 @@ exports.createRefundInvoice = async (req, res) => {
       isOpening,
     } = req.body;
 
+    const openingRefund = isOpening === true || isOpening === "true";
+
     const items =
       typeof req.body.items === "string"
         ? JSON.parse(req.body.items || "[]")
         : req.body.items || [];
 
     // ✅ Normal refund needs items
-    if ((!isOpening || isOpening === "false") && items.length === 0) {
+    if ((!openingRefund || openingRefund === "false") && items.length === 0) {
       return res.status(400).json({
         error: "Refund items required",
       });
@@ -170,11 +172,11 @@ exports.createRefundInvoice = async (req, res) => {
       customerPhone,
       totalAmount,
       paidAmount,
-      paymentType: isOpening ? "credit" : paymentType,
+      paymentType: openingRefund ? "credit" : paymentType,
       accountId: Number(paidAmount || 0) > 0 ? accountId : null,
       notes,
       originalInvoiceId: originalInvoiceId || null,
-      isOpening: isOpening || false,
+      isOpening: openingRefund,
       items,
       createdBy: userId,
       attachments,
@@ -237,7 +239,7 @@ exports.createRefundInvoice = async (req, res) => {
     let totalRefundCost = 0;
     const refundCostMap = {};
 
-    if (!isOpening || isOpening === "false") {
+    if (!openingRefund || openingRefund === "false") {
       let originalInvoice = null;
 
       if (originalInvoiceId) {
@@ -272,7 +274,7 @@ exports.createRefundInvoice = async (req, res) => {
     }
 
     // ✅ JOURNAL LINES
-    const lines = isOpening
+    const lines = openingRefund
       ? [
           {
             account: (
@@ -323,7 +325,7 @@ exports.createRefundInvoice = async (req, res) => {
       time: invoiceTime || "",
       description: notes || "",
 
-      sourceType: isOpening ? "opening_refund_invoice" : "refund_invoice",
+      sourceType: openingRefund ? "opening_refund_invoice" : "refund_invoice",
       referenceId: refundInvoice._id,
       invoiceId: refundInvoice._id,
       billNo: refundBillNo,
@@ -341,7 +343,7 @@ exports.createRefundInvoice = async (req, res) => {
     await journal.save();
     await recalculateAccountBalance(counterPartyAccountId);
     if (
-      (!isOpening || isOpening === "false") &&
+      (!openingRefund || openingRefund === "false") &&
       Number(paidAmount || 0) > 0 &&
       paymentType &&
       accountId
@@ -364,7 +366,7 @@ exports.createRefundInvoice = async (req, res) => {
     }
 
     // ✅ Inventory transactions
-    if (!isOpening || isOpening === "false") {
+    if (!openingRefund || openingRefund === "false") {
       const originalInvoice = await Invoice.findById(originalInvoiceId);
 
       for (const item of items) {
@@ -582,6 +584,8 @@ exports.updateRefundInvoice = async (req, res) => {
       isOpening,
     } = req.body;
 
+    const openingRefund = isOpening === true || isOpening === "true";
+
     const items =
       typeof req.body.items === "string"
         ? JSON.parse(req.body.items || "[]")
@@ -653,7 +657,7 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ Normal refund needs items
-    if ((!isOpening || isOpening === "false") && items.length === 0) {
+    if (!openingRefund && items.length === 0) {
       return res.status(400).json({
         error: "Refund items required",
       });
@@ -732,11 +736,11 @@ exports.updateRefundInvoice = async (req, res) => {
     refund.customerPhone = customerPhone;
     refund.totalAmount = totalAmount;
     refund.paidAmount = paidAmount;
-    refund.paymentType = isOpening ? "credit" : paymentType;
+    refund.paymentType = openingRefund ? "credit" : paymentType;
     refund.accountId = paymentType === "cash" ? accountId : null;
     refund.notes = notes;
     refund.originalInvoiceId = originalInvoiceId || null;
-    refund.isOpening = isOpening || false;
+    refund.isOpening = openingRefund;
 
     refund.items = items;
 
@@ -828,7 +832,7 @@ exports.updateRefundInvoice = async (req, res) => {
     let totalRefundCost = 0;
     const refundCostMap = {};
 
-    if (!isOpening || isOpening === "false") {
+    if (!openingRefund) {
       let originalInvoice = null;
 
       if (originalInvoiceId) {
@@ -863,7 +867,7 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ JOURNAL LINES
-    const lines = isOpening
+    const lines = openingRefund
       ? [
           {
             account: (
@@ -913,11 +917,11 @@ exports.updateRefundInvoice = async (req, res) => {
       date: refundDateTime,
       time: invoiceTime || "",
       description: notes || "",
-      sourceType: isOpening ? "opening_refund_invoice" : "refund_invoice",
+      sourceType: openingRefund ? "opening_refund_invoice" : "refund_invoice",
       referenceId: refund._id,
       invoiceId: refund._id,
       billNo: refund.billNo,
-      paymentType: isOpening ? "credit" : paymentType,
+      paymentType: openingRefund ? "credit" : paymentType,
       createdBy: userId,
       customerId: customer?._id || null,
       partyId: party?._id || null,
@@ -931,7 +935,7 @@ exports.updateRefundInvoice = async (req, res) => {
     await journal.save();
     await recalculateAccountBalance(counterPartyAccountId);
     if (
-      (!isOpening || isOpening === "false") &&
+      !openingRefund &&
       Number(paidAmount || 0) > 0 &&
       paymentType &&
       accountId
@@ -954,7 +958,7 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ New inventory transactions
-    if (!isOpening || isOpening === "false") {
+    if (!openingRefund) {
       const originalInvoice = await Invoice.findById(originalInvoiceId);
 
       for (const item of items) {

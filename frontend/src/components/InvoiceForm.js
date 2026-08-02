@@ -529,6 +529,50 @@ const InvoiceForm = ({
 
     let cancelled = false;
 
+    // ✅ Load Customers from Cache
+    try {
+      const cachedCustomers = localStorage.getItem('customers');
+
+      if (cachedCustomers) {
+        const parsed = JSON.parse(cachedCustomers);
+
+        if (Array.isArray(parsed)) {
+          setCustomers(parsed);
+        }
+      }
+    } catch (err) {
+      console.error('Customers cache failed:', err);
+    }
+
+    // ✅ Load Parties from Cache
+    try {
+      const cachedParties = localStorage.getItem('saleParties');
+
+      if (cachedParties) {
+        const parsed = JSON.parse(cachedParties);
+
+        if (Array.isArray(parsed)) {
+          setParties(parsed);
+        }
+      }
+    } catch (err) {
+      console.error('Parties cache failed:', err);
+    }
+
+    // ✅ Load Accounts from Cache
+    try {
+      const cachedAccounts = localStorage.getItem('paymentAccounts');
+
+      if (cachedAccounts) {
+        const parsed = JSON.parse(cachedAccounts);
+
+        if (Array.isArray(parsed)) {
+          setAccounts(parsed);
+        }
+      }
+    } catch (err) {
+      console.error('Accounts cache failed:', err);
+    }
     // ✅ Cached products فوراً دکھائیں
     try {
       const cachedProducts = localStorage.getItem('products');
@@ -546,7 +590,7 @@ const InvoiceForm = ({
 
     const loadFormOptions = async () => {
       const results = await Promise.allSettled([
-        fetch(`${API}/api/customers?limit=50`, {
+        fetch(`${API}/api/customers?limit=500`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -572,19 +616,25 @@ const InvoiceForm = ({
       if (customerResult.status === 'fulfilled') {
         const customerData = customerResult.value;
 
-        setCustomers(
-          Array.isArray(customerData)
-            ? customerData
-            : Array.isArray(customerData?.customers)
-              ? customerData.customers
-              : []
-        );
+        const customerList = Array.isArray(customerData)
+          ? customerData
+          : Array.isArray(customerData?.customers)
+            ? customerData.customers
+            : [];
+
+        setCustomers(customerList);
+
+        localStorage.setItem('customers', JSON.stringify(customerList));
       } else {
         console.error('Customers load failed:', customerResult.reason);
       }
 
       if (partyResult.status === 'fulfilled') {
-        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
+        const partyList = Array.isArray(partyResult.value) ? partyResult.value : [];
+
+        setParties(partyList);
+
+        localStorage.setItem('saleParties', JSON.stringify(partyList));
       } else {
         console.error('Sale parties load failed:', partyResult.reason);
       }
@@ -600,7 +650,11 @@ const InvoiceForm = ({
       }
 
       if (accountResult.status === 'fulfilled') {
-        setAccounts(Array.isArray(accountResult.value) ? accountResult.value : []);
+        const accountList = Array.isArray(accountResult.value) ? accountResult.value : [];
+
+        setAccounts(accountList);
+
+        localStorage.setItem('paymentAccounts', JSON.stringify(accountList));
       } else {
         console.error('Accounts load failed:', accountResult.reason);
       }

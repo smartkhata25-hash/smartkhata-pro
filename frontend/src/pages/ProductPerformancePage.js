@@ -420,8 +420,8 @@ const ProductPerformancePage = () => {
   }, [normalizedFilters]);
 
   return (
-    <div className="min-h-full bg-gray-100 p-3 sm:p-4 lg:p-6">
-      <div className="mx-auto max-w-[1800px] space-y-4">
+    <div className="min-h-full bg-gray-100 p-0">
+      <div className="mx-auto max-w-[1800px] space-y-1">
         <ProductPerformanceTabs
           value={normalizedFilters.view}
           summary={report.summary}

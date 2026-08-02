@@ -87,7 +87,11 @@ const PrintInvoicePage = () => {
       const handleAfterPrint = () => {
         window.removeEventListener('afterprint', handleAfterPrint);
 
-        navigate('/create-sale');
+        navigate('/create-sale', {
+          replace: true,
+        });
+
+        window.location.reload();
       };
 
       window.addEventListener('afterprint', handleAfterPrint);

@@ -66,6 +66,14 @@ export default function SalesPage() {
     await fetchSalesHistory(selectedCustomerId, selectedProductId);
   };
 
+  const resetSalesHistory = useCallback(() => {
+    setSelectedCustomerId(null);
+    setSelectedProductId(null);
+
+    setSalesHistory([]);
+    setLoadingHistory(false);
+  }, []);
+
   const handleCustomerChange = useCallback((customerId) => {
     setSelectedCustomerId((previousCustomerId) => {
       if (previousCustomerId === customerId) {
@@ -167,6 +175,7 @@ export default function SalesPage() {
             onCustomerChange={handleCustomerChange}
             onProductChange={handleProductChange}
             onSuccess={refreshHistory}
+            onHistoryReset={resetSalesHistory}
             salesHistory={salesHistory}
             loadingHistory={loadingHistory}
           />

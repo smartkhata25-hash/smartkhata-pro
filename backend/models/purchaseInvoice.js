@@ -135,6 +135,11 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       default: null,
     },
 
+    isOpening: {
+      type: Boolean,
+      default: false,
+    },
+
     isDeleted: {
       type: Boolean,
       default: false,

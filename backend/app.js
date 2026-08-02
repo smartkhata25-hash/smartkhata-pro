@@ -47,6 +47,11 @@ app.use("/api", require("./routes/dashboardRoutes"));
 app.use("/api/profit", profitRoutes);
 app.use("/api", require("./routes/stockValueRoutes"));
 
+app.use(
+  "/api/product-performance",
+  require("./routes/productPerformanceRoutes"),
+);
+
 app.use("/api/pay-bill", require("./routes/payBillRoutes"));
 app.use("/api/receive-payments", require("./routes/receivePaymentRoutes"));
 app.use("/api/product-ledger", require("./routes/productLedgerRoutes"));

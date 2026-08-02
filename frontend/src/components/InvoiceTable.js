@@ -9,6 +9,7 @@ const InvoiceTable = ({
   handleQtyRateChange,
   clearOnFocus,
   onProductChange,
+  onEmptyRowExit,
   historyAutoMode,
   hideCost,
   mode = 'sale',
@@ -27,6 +28,16 @@ const InvoiceTable = ({
     rate: 0,
     amount: 0,
   });
+
+  const clearItemRow = (index) => {
+    const updated = [...items];
+
+    updated[index] = blankRow();
+
+    setItems(updated);
+
+    onProductChange && onProductChange('', index);
+  };
 
   // ✅ Keyboard Arrow Navigation
   const handleArrowNavigation = (e, rowIndex, field) => {
@@ -145,6 +156,7 @@ const InvoiceTable = ({
                     productList={products}
                     value={item.search}
                     rowIndex={index}
+                    onClear={() => clearItemRow(index)}
                     onSelect={(product) => {
                       console.log('📦 Product SELECTED:', product._id, product.name);
                       const updated = [...items];
@@ -206,6 +218,15 @@ const InvoiceTable = ({
                       const updated = [...items];
                       updated[index].description = e.target.value;
                       setItems(updated);
+                    }}
+                    onKeyDown={(e) => {
+                      const rowIsEmpty = !item.productId && !item.search;
+
+                      if (e.key === 'Tab' && !e.shiftKey && rowIsEmpty) {
+                        e.preventDefault();
+
+                        onEmptyRowExit && onEmptyRowExit();
+                      }
                     }}
                     className="w-full border-0 px-1 py-0.5 md:p-1"
                   />

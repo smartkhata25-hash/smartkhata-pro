@@ -1050,7 +1050,7 @@ const PurchaseInvoiceForm = () => {
              text-green-700 font-semibold 
              rounded-t-md transition-all duration-150"
                         >
-                          ➕ <span className="font-bold">{t('product.addNew')}</span> "
+                          ➕ <span className="font-bold">{t('supplier.addNew')}</span> "
                           {supplierName}"
                         </li>
 
@@ -1068,7 +1068,7 @@ const PurchaseInvoiceForm = () => {
              text-blue-700 font-medium 
              rounded-b-md transition-all duration-150"
                         >
-                          📝 <span className="font-semibold">{t('product.addNew')}</span>
+                          📝 <span className="font-semibold">{t('supplier.addDetails')}</span>
                         </li>
                       </ul>
                     )}

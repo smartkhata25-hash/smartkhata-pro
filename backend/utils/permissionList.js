@@ -132,6 +132,7 @@ const PERMISSIONS = {
     STOCK_VALUE: "reports.stock_value",
     AGING: "reports.aging",
     PROFIT: "reports.profit",
+    PRODUCT_PERFORMANCE: "reports.product_performance",
   },
 
   STAFF: {

@@ -8,6 +8,7 @@ const ProductDropdown = ({
   value = '',
   onSelect,
   onChange,
+  onClear,
   rowIndex,
   showAddOption = true,
   inputStyle = {},
@@ -26,6 +27,7 @@ const ProductDropdown = ({
 
   const inputRef = useRef();
   const wrapperRef = useRef();
+  const listRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -83,6 +85,23 @@ const ProductDropdown = ({
     }
   }, [showList, query]);
 
+  useEffect(() => {
+    if (!showList || highlightIndex < 0) return;
+
+    const listElement = listRef.current;
+
+    if (!listElement) return;
+
+    const highlightedItem = listElement.children[highlightIndex];
+
+    if (highlightedItem) {
+      highlightedItem.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+    }
+  }, [highlightIndex, showList]);
+
   // ⌨️ Keyboard Navigation
   const handleKeyDown = (e) => {
     if (!showList || filtered.length === 0) return;
@@ -133,9 +152,15 @@ const ProductDropdown = ({
           type="text"
           value={query}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const newValue = e.target.value;
 
-            onChange && onChange(e.target.value);
+            setQuery(newValue);
+
+            onChange && onChange(newValue);
+
+            if (newValue.trim() === '') {
+              onClear && onClear();
+            }
 
             setShowList(true);
             setHighlightIndex(-1);
@@ -160,7 +185,7 @@ const ProductDropdown = ({
 
       {showList &&
         createPortal(
-          <ul style={dropdownStyle} className="text-sm">
+          <ul ref={listRef} style={dropdownStyle} className="text-sm">
             {filtered.map((p, i) => (
               <li
                 key={p._id}

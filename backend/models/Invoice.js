@@ -235,4 +235,19 @@ invoiceSchema.index({
   createdAt: -1,
 });
 
+// ✅ Product Performance Report - Date Filter
+invoiceSchema.index({
+  createdBy: 1,
+  isDeleted: 1,
+  isOpening: 1,
+  invoiceDate: -1,
+});
+
+// ✅ Product-wise Sales Performance
+invoiceSchema.index({
+  createdBy: 1,
+  "items.productId": 1,
+  invoiceDate: -1,
+});
+
 module.exports = mongoose.model("Invoice", invoiceSchema);

@@ -63,6 +63,24 @@ const inventoryTransactionSchema = new mongoose.Schema(
   },
 );
 
+inventoryTransactionSchema.index({
+  userId: 1,
+  productId: 1,
+  date: -1,
+});
+
+inventoryTransactionSchema.index({
+  userId: 1,
+  invoiceModel: 1,
+  type: 1,
+  date: -1,
+});
+
+inventoryTransactionSchema.index({
+  userId: 1,
+  invoiceId: 1,
+});
+
 module.exports = mongoose.model(
   "InventoryTransaction",
   inventoryTransactionSchema,

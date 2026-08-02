@@ -170,6 +170,10 @@ const menuConfig = [
           { label: 'dashboard.monthlyCashFlow', path: '/cashflow' },
           { label: 'dashboard.monthlySales', path: '/monthly-sales' },
           { label: 'stockValueReport', path: '/stock-value-report' },
+          {
+            label: 'productPerformance.menuLabel',
+            path: '/product-performance',
+          },
         ],
       },
     ],

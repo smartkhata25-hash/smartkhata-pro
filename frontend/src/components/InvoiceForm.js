@@ -5,6 +5,7 @@ import { resetPrintSettings } from '../services/printSettingService';
 import {
   createInvoice,
   updateInvoice,
+  deleteInvoice,
   getInvoiceById,
   navigateInvoice,
   getLastInvoiceNo,
@@ -28,6 +29,7 @@ const API = process.env.REACT_APP_API_BASE_URL;
 const InvoiceForm = ({
   token,
   onSuccess,
+  onHistoryReset,
   editingInvoice = null,
   invoiceId,
   onCustomerChange,
@@ -38,6 +40,7 @@ const InvoiceForm = ({
   const printRef = useRef();
   const customerInputRef = useRef(null);
   const fileInputRef = useRef();
+  const discountPercentRef = useRef(null);
   const location = useLocation();
   const canViewSales = hasPermission('sales.view');
   const canCreateSales = hasPermission('sales.create');
@@ -143,6 +146,30 @@ const InvoiceForm = ({
       navigate(`/create-sale?invoiceId=${data._id}`);
     } catch (err) {
       console.log('No more invoices');
+    }
+  };
+
+  const handleDeleteInvoice = async () => {
+    if (!editingInvoiceFromAPI?._id) return;
+
+    const confirmed = window.confirm(`Are you sure you want to delete invoice #${billNo}?`);
+
+    if (!confirmed) return;
+
+    try {
+      await deleteInvoice(editingInvoiceFromAPI._id, token);
+
+      sessionStorage.removeItem(`sale_edit_preview_draft_${editingInvoiceFromAPI._id}`);
+
+      alert('Invoice deleted successfully');
+
+      onHistoryReset && onHistoryReset();
+
+      navigate('/sales-invoices');
+    } catch (err) {
+      console.error('Invoice delete failed:', err?.response?.data || err.message);
+
+      alert(err?.response?.data?.message || 'Failed to delete invoice');
     }
   };
 
@@ -658,6 +685,14 @@ const InvoiceForm = ({
         setCustomerSuggestions([]);
         setSelectedCustomerIndex(-1);
         setShowCustomerAddOptions(false);
+
+        setCustomerPhone('');
+        setSelectedCustomerId('');
+        setSelectedCustomerType('customer');
+        setCustomerLedger([]);
+        setCustomerBalance(0);
+
+        onCustomerChange && onCustomerChange('');
       } else {
         const filtered = filterCustomers(value);
 
@@ -814,6 +849,12 @@ const InvoiceForm = ({
     if (e.target.value === '0') e.target.select();
   };
 
+  const focusDiscountPercent = () => {
+    setTimeout(() => {
+      discountPercentRef.current?.focus();
+    }, 0);
+  };
+
   useEffect(() => {
     if (loadingHistory) return;
 
@@ -864,7 +905,9 @@ const InvoiceForm = ({
 
   const totalAmount = isOpeningInvoice
     ? Number(openingBalanceAmount || 0)
-    : items.reduce((sum, i) => sum + i.amount, 0);
+    : items
+        .filter((item) => item.productId)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
   const generateLivePreview = useCallback(async () => {
     try {
@@ -955,7 +998,14 @@ const InvoiceForm = ({
       setInvoiceDate(safeDate);
       setInvoiceTime(data.invoiceTime || '');
 
-      setItems(data.items?.length ? data.items : Array.from({ length: 20 }, () => blankRow()));
+      const restoredItems = Array.isArray(data.items)
+        ? data.items.map((item) => (item?.productId ? item : blankRow()))
+        : [];
+
+      setItems([
+        ...restoredItems.slice(0, 20),
+        ...Array.from({ length: Math.max(0, 20 - restoredItems.length) }, () => blankRow()),
+      ]);
 
       setDiscountPercent(data.discountPercent || 0);
       setDiscountAmount(data.discountAmount || 0);
@@ -1010,6 +1060,10 @@ const InvoiceForm = ({
     setCustomerPhone('');
     setSelectedCustomerId('');
     setSelectedCustomerType('customer');
+
+    setCustomerLedger([]);
+    setCustomerBalance(0);
+
     setItems(Array.from({ length: 20 }, () => blankRow()));
     setDiscountPercent(0);
     setDiscountAmount(0);
@@ -1061,12 +1115,12 @@ const InvoiceForm = ({
     }
 
     const mappedItems = items
-      .filter((i) => i.quantity > 0 && i.rate > 0)
-      .map((i) => ({
-        productId: i.productId || null,
-        quantity: i.quantity,
-        price: i.rate,
-        total: i.quantity * i.rate,
+      .filter((item) => item.productId && Number(item.quantity) > 0 && Number(item.rate) > 0)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Number(item.quantity),
+        price: Number(item.rate),
+        total: Number(item.quantity) * Number(item.rate),
       }));
 
     if (mappedItems.length === 0 && !isOpeningInvoice) {
@@ -1203,10 +1257,13 @@ const InvoiceForm = ({
         setCustomerPhone('');
         setSelectedCustomerId('');
         setSelectedCustomerType('customer');
+        setCustomerLedger([]);
+        setCustomerBalance(0);
+
+        setHistoryRowIndex(null);
+        onHistoryReset && onHistoryReset();
         setBy('');
-
         setItems(Array.from({ length: 20 }, () => blankRow()));
-
         setDiscountPercent(0);
         setDiscountAmount(0);
         setPaidAmount(0);
@@ -1282,6 +1339,17 @@ const InvoiceForm = ({
                     />
                     Hide Cost
                   </label>
+                )}
+
+                {editingInvoiceFromAPI?._id && canEditSales && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteInvoice}
+                    title="Delete Invoice"
+                    className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600"
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
 
@@ -1471,6 +1539,7 @@ const InvoiceForm = ({
                 handleQtyRateChange={handleQtyRateChange}
                 clearOnFocus={clearOnFocus}
                 onProductChange={handleInvoiceProductChange}
+                onEmptyRowExit={focusDiscountPercent}
                 historyAutoMode={historyAutoMode}
                 hideCost={!canViewCost || hideCost}
               />
@@ -1487,6 +1556,7 @@ const InvoiceForm = ({
                   <div className="flex gap-3 items-center flex-wrap">
                     {/* Discount % */}
                     <input
+                      ref={discountPercentRef}
                       type="text"
                       inputMode="decimal"
                       placeholder={t('discountPercent')}

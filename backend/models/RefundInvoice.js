@@ -22,6 +22,18 @@ const RefundItemSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+
+  // ✅ Original sale time historical cost
+  costPrice: {
+    type: Number,
+    default: 0,
+  },
+
+  // ✅ Profit reversed because of refund
+  profitReversed: {
+    type: Number,
+    default: 0,
+  },
 });
 
 const RefundInvoiceSchema = new mongoose.Schema(
@@ -138,18 +150,29 @@ RefundInvoiceSchema.index({ createdBy: 1, billNo: 1 }, { unique: true });
 
 RefundInvoiceSchema.index({
   createdBy: 1,
-  customerId: 1,
+  isDeleted: 1,
+  invoiceDate: -1,
 });
 
-RefundInvoiceSchema.index({
-  createdBy: 1,
-  partyId: 1,
-});
-
+// ✅ Product Performance Report
 RefundInvoiceSchema.index({
   createdBy: 1,
   isDeleted: 1,
+  isOpening: 1,
   invoiceDate: -1,
+});
+
+// ✅ Product-wise Refund Performance
+RefundInvoiceSchema.index({
+  createdBy: 1,
+  "items.productId": 1,
+  invoiceDate: -1,
+});
+
+// ✅ Original Sale Invoice lookup
+RefundInvoiceSchema.index({
+  createdBy: 1,
+  originalInvoiceId: 1,
 });
 
 module.exports = mongoose.model("RefundInvoice", RefundInvoiceSchema);

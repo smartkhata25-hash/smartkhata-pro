@@ -36,6 +36,7 @@ import AccountDetailPage from './pages/AccountDetailPage';
 import CashFlowPage from './pages/CashFlowPage';
 import MonthlySalesPage from './pages/MonthlySalesPage';
 import StockValueReportPage from './pages/StockValueReportPage';
+import ProductPerformancePage from './pages/ProductPerformancePage';
 import CategoryManagement from './pages/CategoryManagement';
 import InventoryAdjustPage from './pages/InventoryAdjustPage';
 import PurchaseInvoicePage from './pages/PurchaseInvoicePage';
@@ -564,6 +565,15 @@ function App() {
             element={
               <PermissionRoute permission="reports.stock_value">
                 <StockValueReportPage />
+              </PermissionRoute>
+            }
+          />
+
+          <Route
+            path="/product-performance"
+            element={
+              <PermissionRoute permission="reports.product_performance">
+                <ProductPerformancePage />
               </PermissionRoute>
             }
           />

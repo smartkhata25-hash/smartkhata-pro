@@ -135,6 +135,26 @@ const PERMISSIONS = {
     PRODUCT_PERFORMANCE: "reports.product_performance",
   },
 
+  BUSINESS_VALUE: {
+    VIEW: "business_value.view",
+  },
+
+  BUSINESS_ASSETS: {
+    VIEW: "business_assets.view",
+    CREATE: "business_assets.create",
+    EDIT: "business_assets.edit",
+    DELETE: "business_assets.delete",
+    MANAGE_CATEGORIES: "business_assets.manage_categories",
+  },
+
+  BUSINESS_LIABILITIES: {
+    VIEW: "business_liabilities.view",
+    CREATE: "business_liabilities.create",
+    EDIT: "business_liabilities.edit",
+    DELETE: "business_liabilities.delete",
+    PAY: "business_liabilities.pay",
+  },
+
   STAFF: {
     VIEW: "staff.view",
     CREATE: "staff.create",

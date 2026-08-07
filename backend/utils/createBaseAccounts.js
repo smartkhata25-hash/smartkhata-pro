@@ -85,6 +85,62 @@ const createBaseAccountsForUser = async (userId) => {
       isSystem: true,
     },
 
+    // 🔒 LIABILITY ACCOUNTS
+
+    {
+      name: "Business Loan",
+      type: "Liability",
+      category: "loan",
+      code: "BUSINESS_LOAN",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
+    {
+      name: "Bank Loan",
+      type: "Liability",
+      category: "loan",
+      code: "BANK_LOAN",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
+    {
+      name: "Supplier Payable",
+      type: "Liability",
+      category: "supplier",
+      code: "SUPPLIER_PAYABLE",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
+    {
+      name: "Credit Payable",
+      type: "Liability",
+      category: "credit",
+      code: "CREDIT_PAYABLE",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
+    {
+      name: "Tax Payable",
+      type: "Liability",
+      category: "tax",
+      code: "TAX_PAYABLE",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
+    {
+      name: "Other Liability",
+      type: "Liability",
+      category: "other",
+      code: "OTHER_LIABILITY",
+      normalBalance: "credit",
+      isSystem: true,
+    },
+
     // 🔓 USER ACCOUNTS
     {
       name: "Utility Expense",

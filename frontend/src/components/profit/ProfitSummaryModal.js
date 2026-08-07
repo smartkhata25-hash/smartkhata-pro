@@ -124,6 +124,10 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
       if (type === 'cogs') {
         response = await getCogsBreakdown({
           filterType: quickFilter,
+          startDate,
+          endDate,
+          productId: selectedProduct,
+          categoryId: selectedCategory,
         });
 
         setDrawerTitle(t('reports.cogsBreakdown'));

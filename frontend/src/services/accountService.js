@@ -19,8 +19,21 @@ export const getAccounts = async () => {
 };
 
 // ✅ filtered اکاؤنٹس لائیں جو صرف invoice payment کے لیے valid ہوں
-export const getValidPaymentAccounts = async () => {
+export const getValidPaymentAccounts = async (forceRefresh = false) => {
+  if (!forceRefresh) {
+    const cached = localStorage.getItem('paymentAccounts');
+
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (_) {}
+    }
+  }
+
   const res = await axios.get(`${API_URL}?filter=payment`, authHeaders());
+
+  localStorage.setItem('paymentAccounts', JSON.stringify(res.data));
+
   return res.data;
 };
 

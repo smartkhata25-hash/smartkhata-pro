@@ -15,10 +15,6 @@ const {
   failProgress,
 } = require("./backupProgressService");
 
-/* ======================================================
-COLLECTION CONFIG
-====================================================== */
-
 const COLLECTION_CONFIG = {
   customers: { field: "createdBy" },
   accounts: { field: "userId" },
@@ -29,13 +25,13 @@ const COLLECTION_CONFIG = {
   products: { field: "userId" },
   expenses: { field: "userId" },
   inventorytransactions: { field: "userId" },
+  businessassetcategories: { field: "userId" },
+  businessassets: { field: "userId" },
+  businessliabilities: { field: "userId" },
+  businessliabilitypayments: { field: "userId" },
 };
 
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
-
-/* ======================================================
-RESTORE ORDER
-====================================================== */
 
 const RESTORE_ORDER = [
   "accounts",
@@ -47,19 +43,27 @@ const RESTORE_ORDER = [
   "journalentries",
   "expenses",
   "inventorytransactions",
+  "businessassetcategories",
+  "businessassets",
+  "businessliabilities",
+  "businessliabilitypayments",
 ];
-
-/* ======================================================
-ACCOUNT ID MAP FACTORY
-====================================================== */
 
 function createAccountIdMap() {
   return {};
 }
 
-/* ======================================================
-ENSURE DIRECTORIES
-====================================================== */
+function createAssetCategoryIdMap() {
+  return {};
+}
+
+function createBusinessLiabilityIdMap() {
+  return {};
+}
+
+function createJournalIdMap() {
+  return {};
+}
 
 function ensureDirectories(tempDir) {
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -70,10 +74,6 @@ function ensureDirectories(tempDir) {
     fs.mkdirSync(tempDir, { recursive: true });
   }
 }
-
-/* ======================================================
-GET LATEST BACKUP
-====================================================== */
 
 function getLatestBackup(userId) {
   const files = fs
@@ -99,10 +99,6 @@ function getLatestBackup(userId) {
   return files[0].path;
 }
 
-/* ======================================================
-GET BACKUP BY NAME
-====================================================== */
-
 function getBackupByName(fileName) {
   const filePath = path.join(BACKUP_DIR, fileName);
 
@@ -113,20 +109,12 @@ function getBackupByName(fileName) {
   return filePath;
 }
 
-/* ======================================================
-EXTRACT ZIP
-====================================================== */
-
 async function extractBackup(zipFile, tempDir) {
   await fs
     .createReadStream(zipFile)
     .pipe(unzipper.Extract({ path: tempDir }))
     .promise();
 }
-
-/* ======================================================
-RESTORE ACCOUNTS
-====================================================== */
 
 async function restoreAccounts(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
@@ -152,10 +140,6 @@ async function restoreAccounts(userId, docs, accountIdMap) {
   }
 }
 
-/* ======================================================
-RESTORE CUSTOMERS
-====================================================== */
-
 async function restoreCustomers(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
 
@@ -179,10 +163,6 @@ async function restoreCustomers(userId, docs, accountIdMap) {
 
   await collection.insertMany(fixedDocs);
 }
-
-/* ======================================================
-RESTORE SUPPLIERS
-====================================================== */
 
 async function restoreSuppliers(userId, docs, accountIdMap) {
   const db = mongoose.connection.db;
@@ -208,18 +188,16 @@ async function restoreSuppliers(userId, docs, accountIdMap) {
   await collection.insertMany(fixedDocs);
 }
 
-/* ======================================================
-RESTORE JOURNALS
-====================================================== */
-
-async function restoreJournals(userId, docs, accountIdMap) {
+async function restoreJournals(userId, docs, accountIdMap, journalIdMap) {
   const db = mongoose.connection.db;
 
   const collection = db.collection("journalentries");
 
   await collection.deleteMany({ createdBy: userId });
 
-  const fixedDocs = docs.map((doc) => {
+  for (const doc of docs) {
+    const oldId = doc._id?.toString();
+
     const newDoc = { ...doc };
 
     delete newDoc._id;
@@ -230,23 +208,172 @@ async function restoreJournals(userId, docs, accountIdMap) {
       newDoc.lines = newDoc.lines.map((line) => {
         const newLine = { ...line };
 
-        if (accountIdMap[newLine.account]) {
-          newLine.account = accountIdMap[newLine.account];
+        const oldAccountId = newLine.account?.toString();
+
+        if (oldAccountId && accountIdMap[oldAccountId]) {
+          newLine.account = accountIdMap[oldAccountId];
         }
 
         return newLine;
       });
     }
 
+    if (Array.isArray(newDoc.accounts)) {
+      newDoc.accounts = newDoc.accounts.map((accountId) => {
+        const oldAccountId = accountId?.toString();
+
+        return accountIdMap[oldAccountId] || accountId;
+      });
+    }
+
+    const inserted = await collection.insertOne(newDoc);
+
+    if (oldId) {
+      journalIdMap[oldId] = inserted.insertedId;
+    }
+  }
+}
+
+async function restoreBusinessAssetCategories(
+  userId,
+  docs,
+  assetCategoryIdMap,
+) {
+  const collection = mongoose.connection.db.collection(
+    "businessassetcategories",
+  );
+
+  await collection.deleteMany({ userId });
+
+  for (const doc of docs) {
+    const oldId = doc._id?.toString();
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
+
+    const inserted = await collection.insertOne(newDoc);
+
+    if (oldId) {
+      assetCategoryIdMap[oldId] = inserted.insertedId;
+    }
+  }
+}
+
+async function restoreBusinessAssets(userId, docs, assetCategoryIdMap) {
+  const collection = mongoose.connection.db.collection("businessassets");
+
+  await collection.deleteMany({ userId });
+
+  const fixedDocs = docs.map((doc) => {
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
+
+    const oldCategoryId = newDoc.categoryId?.toString();
+
+    if (oldCategoryId && assetCategoryIdMap[oldCategoryId]) {
+      newDoc.categoryId = assetCategoryIdMap[oldCategoryId];
+    }
+
     return newDoc;
   });
 
-  await collection.insertMany(fixedDocs);
+  if (fixedDocs.length) {
+    await collection.insertMany(fixedDocs);
+  }
 }
 
-/* ======================================================
-GENERIC RESTORE
-====================================================== */
+async function restoreBusinessLiabilities(userId, docs, liabilityIdMap) {
+  const collection = mongoose.connection.db.collection("businessliabilities");
+
+  await collection.deleteMany({ userId });
+
+  for (const doc of docs) {
+    const oldId = doc._id?.toString();
+
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+
+    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
+
+    const inserted = await collection.insertOne(newDoc);
+
+    if (oldId) {
+      liabilityIdMap[oldId] = inserted.insertedId;
+    }
+  }
+}
+
+async function restoreBusinessLiabilityPayments(
+  userId,
+  docs,
+  liabilityIdMap,
+  accountIdMap,
+  journalIdMap,
+) {
+  const collection = mongoose.connection.db.collection(
+    "businessliabilitypayments",
+  );
+
+  await collection.deleteMany({ userId });
+
+  const fixedDocs = docs.map((doc) => {
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+
+    const oldLiabilityId = newDoc.liabilityId?.toString();
+
+    if (oldLiabilityId && liabilityIdMap[oldLiabilityId]) {
+      newDoc.liabilityId = liabilityIdMap[oldLiabilityId];
+    }
+
+    const oldAccountId = newDoc.accountId?.toString();
+
+    if (oldAccountId && accountIdMap[oldAccountId]) {
+      newDoc.accountId = accountIdMap[oldAccountId];
+    }
+
+    const oldJournalId = newDoc.journalEntryId?.toString();
+
+    if (oldJournalId && journalIdMap[oldJournalId]) {
+      newDoc.journalEntryId = journalIdMap[oldJournalId];
+    } else {
+      newDoc.journalEntryId = null;
+    }
+
+    const oldReversalJournalId = newDoc.reversalJournalEntryId?.toString();
+
+    if (oldReversalJournalId && journalIdMap[oldReversalJournalId]) {
+      newDoc.reversalJournalEntryId = journalIdMap[oldReversalJournalId];
+    } else {
+      newDoc.reversalJournalEntryId = null;
+    }
+
+    return newDoc;
+  });
+
+  if (fixedDocs.length) {
+    await collection.insertMany(fixedDocs);
+  }
+}
 
 async function restoreGeneric(collectionName, userId, docs) {
   const db = mongoose.connection.db;
@@ -278,12 +405,14 @@ async function restoreGeneric(collectionName, userId, docs) {
   await collection.insertMany(fixedDocs);
 }
 
-/* ======================================================
-RESTORE COLLECTIONS
-====================================================== */
-
 async function restoreCollections(userId, tempDir) {
   const accountIdMap = createAccountIdMap();
+
+  const assetCategoryIdMap = createAssetCategoryIdMap();
+
+  const liabilityIdMap = createBusinessLiabilityIdMap();
+
+  const journalIdMap = createJournalIdMap();
 
   for (const collectionName of RESTORE_ORDER) {
     const filePath = path.join(tempDir, `${collectionName}.json`);
@@ -314,17 +443,39 @@ async function restoreCollections(userId, tempDir) {
     }
 
     if (collectionName === "journalentries") {
-      await restoreJournals(userId, docs, accountIdMap);
+      await restoreJournals(userId, docs, accountIdMap, journalIdMap);
+      continue;
+    }
+
+    if (collectionName === "businessassetcategories") {
+      await restoreBusinessAssetCategories(userId, docs, assetCategoryIdMap);
+      continue;
+    }
+
+    if (collectionName === "businessassets") {
+      await restoreBusinessAssets(userId, docs, assetCategoryIdMap);
+      continue;
+    }
+
+    if (collectionName === "businessliabilities") {
+      await restoreBusinessLiabilities(userId, docs, liabilityIdMap);
+      continue;
+    }
+
+    if (collectionName === "businessliabilitypayments") {
+      await restoreBusinessLiabilityPayments(
+        userId,
+        docs,
+        liabilityIdMap,
+        accountIdMap,
+        journalIdMap,
+      );
       continue;
     }
 
     await restoreGeneric(collectionName, userId, docs);
   }
 }
-
-/* ======================================================
-RESTORE UPLOADS
-====================================================== */
 
 function copyRecursive(src, dest) {
   const stats = fs.lstatSync(src);
@@ -379,19 +530,11 @@ function restoreUploads(tempDir) {
   });
 }
 
-/* ======================================================
-CLEAN TEMP
-====================================================== */
-
 function cleanTemp(tempDir) {
   if (!fs.existsSync(tempDir)) return;
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
-
-/* ======================================================
-MAIN RESTORE
-====================================================== */
 
 async function restoreBackup(userId, fileName = null) {
   let safetyBackupPath = null;

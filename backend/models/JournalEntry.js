@@ -157,10 +157,6 @@ const journalEntrySchema = new mongoose.Schema(
   },
 );
 
-/* =========================================================
-   DATA SAFETY VALIDATIONS
-========================================================= */
-
 // Ensure journal has at least 2 lines
 journalEntrySchema.pre("validate", function (next) {
   if (!this.lines || this.lines.length < 2) {
@@ -192,7 +188,6 @@ journalEntrySchema.pre("save", function (next) {
 
 // Auto trim safety
 journalEntrySchema.pre("save", function (next) {
-  // collect accounts for faster ledger queries
   const accountIds = this.lines.map((l) => l.account);
   this.accounts = [...new Set(accountIds)];
 
@@ -225,10 +220,6 @@ journalEntrySchema.index({
   isDeleted: 1,
 });
 journalEntrySchema.index({ sourceType: 1 });
-
-/* =========================================================
-   INDEXES (Ledger Performance Optimization)
-========================================================= */
 
 // Customer Ledger queries
 journalEntrySchema.index({

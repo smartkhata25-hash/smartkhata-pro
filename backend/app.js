@@ -48,6 +48,20 @@ app.use("/api/profit", profitRoutes);
 app.use("/api", require("./routes/stockValueRoutes"));
 
 app.use(
+  "/api/business-asset-categories",
+  require("./routes/businessAssetCategoryRoutes"),
+);
+
+app.use("/api/business-assets", require("./routes/businessAssetRoutes"));
+
+app.use(
+  "/api/business-liabilities",
+  require("./routes/businessLiabilityRoutes"),
+);
+
+app.use("/api/business-value", require("./routes/businessValueRoutes"));
+
+app.use(
   "/api/product-performance",
   require("./routes/productPerformanceRoutes"),
 );

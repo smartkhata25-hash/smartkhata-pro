@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const JournalEntry = require("../../models/JournalEntry");
 
-const Invoice = require("../../models/Invoice");
+const { calculateProfitMetrics } = require("./profitCalculationService");
 
 // DATE FILTER HELPER
 
@@ -12,7 +12,6 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
   const now = new Date();
 
   // ✅ Pakistan Time (+05:00)
-
   const pakistanNow = new Date(
     now.toLocaleString("en-US", {
       timeZone: "Asia/Karachi",
@@ -21,20 +20,22 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
 
   const formatDate = (date) => {
     const year = date.getFullYear();
+
     const month = String(date.getMonth() + 1).padStart(2, "0");
+
     const day = String(date.getDate()).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
   };
 
   // TODAY
-
   if (filterType === "today") {
     const today = formatDate(pakistanNow);
 
     dateFilter = {
       date: {
         $gte: new Date(`${today}T00:00:00.000+05:00`),
+
         $lte: new Date(`${today}T23:59:59.999+05:00`),
       },
     };
@@ -44,19 +45,24 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
   else if (filterType === "this_month") {
     const start = new Date(
       pakistanNow.getFullYear(),
+
       pakistanNow.getMonth(),
+
       1,
     );
 
     const end = new Date(
       pakistanNow.getFullYear(),
+
       pakistanNow.getMonth() + 1,
+
       0,
     );
 
     dateFilter = {
       date: {
         $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
+
         $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
       },
     };
@@ -66,15 +72,24 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
   else if (filterType === "last_month") {
     const start = new Date(
       pakistanNow.getFullYear(),
+
       pakistanNow.getMonth() - 1,
+
       1,
     );
 
-    const end = new Date(pakistanNow.getFullYear(), pakistanNow.getMonth(), 0);
+    const end = new Date(
+      pakistanNow.getFullYear(),
+
+      pakistanNow.getMonth(),
+
+      0,
+    );
 
     dateFilter = {
       date: {
         $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
+
         $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
       },
     };
@@ -82,10 +97,13 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
 
   // THIS YEAR
   else if (filterType === "this_year") {
+    const currentYear = pakistanNow.getFullYear();
+
     dateFilter = {
       date: {
-        $gte: new Date(`${pakistanNow.getFullYear()}-01-01T00:00:00.000+05:00`),
-        $lte: new Date(`${pakistanNow.getFullYear()}-12-31T23:59:59.999+05:00`),
+        $gte: new Date(`${currentYear}-01-01T00:00:00.000+05:00`),
+
+        $lte: new Date(`${currentYear}-12-31T23:59:59.999+05:00`),
       },
     };
   }
@@ -97,6 +115,7 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
     dateFilter = {
       date: {
         $gte: new Date(`${lastYear}-01-01T00:00:00.000+05:00`),
+
         $lte: new Date(`${lastYear}-12-31T23:59:59.999+05:00`),
       },
     };
@@ -110,10 +129,21 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
     startDate &&
     endDate
   ) {
+    const startHasTime = String(startDate).includes("T");
+    const endHasTime = String(endDate).includes("T");
+
+    const parsedStartDate = startHasTime
+      ? new Date(startDate)
+      : new Date(`${startDate}T00:00:00.000+05:00`);
+
+    const parsedEndDate = endHasTime
+      ? new Date(endDate)
+      : new Date(`${endDate}T23:59:59.999+05:00`);
+
     dateFilter = {
       date: {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
+        $gte: parsedStartDate,
+        $lte: parsedEndDate,
       },
     };
   }
@@ -121,191 +151,94 @@ const buildDateFilter = ({ filterType, startDate, endDate }) => {
   return dateFilter;
 };
 
-// PROFIT SUMMARY
+// HELPER: INVOICE DATE FILTER
 
-const getProfitSummary = async ({
-  userId,
-  startDate,
-  endDate,
-  filterType,
-  productId,
-  categoryId,
-}) => {
-  const objectUserId = new mongoose.Types.ObjectId(userId);
-
-  // DATE FILTER
-
-  const dateFilter = buildDateFilter({
+const buildInvoiceDateFilter = ({ filterType, startDate, endDate }) => {
+  const rawDateFilter = buildDateFilter({
     filterType,
+
     startDate,
+
     endDate,
   });
 
-  // PRODUCT FILTERS
-
-  const invoiceFilters = {};
-
-  // ✅ Detect product/category mode
-
-  const isProductMode =
-    (productId && mongoose.Types.ObjectId.isValid(productId)) ||
-    (categoryId && mongoose.Types.ObjectId.isValid(categoryId));
-
-  // ✅ Product filter
-
-  if (productId && mongoose.Types.ObjectId.isValid(productId)) {
-    invoiceFilters["items.productId"] = new mongoose.Types.ObjectId(productId);
+  if (!rawDateFilter.date) {
+    return {};
   }
 
-  // PRODUCT / CATEGORY MODE
+  return {
+    invoiceDate: rawDateFilter.date,
+  };
+};
 
-  if (isProductMode) {
-    const rawDateFilter = buildDateFilter({
-      filterType,
-      startDate,
-      endDate,
-    });
+// OPERATING EXPENSES
 
-    const invoiceDateFilter = {};
+const getOperatingExpenses = async ({
+  objectUserId,
 
-    if (rawDateFilter.date) {
-      invoiceDateFilter.invoiceDate = rawDateFilter.date;
-    }
+  journalDateFilter,
 
-    const products = await Invoice.aggregate([
-      {
-        $match: {
-          createdBy: objectUserId,
-          isDeleted: false,
-          isOpening: false,
-
-          ...invoiceDateFilter,
-
-          ...invoiceFilters,
-        },
-      },
-
-      { $unwind: "$items" },
-
-      // ✅ Product filter after unwind
-
-      ...(productId && mongoose.Types.ObjectId.isValid(productId)
-        ? [
-            {
-              $match: {
-                "items.productId": new mongoose.Types.ObjectId(productId),
-              },
-            },
-          ]
-        : []),
-
-      {
-        $lookup: {
-          from: "products",
-          localField: "items.productId",
-          foreignField: "_id",
-          as: "productInfo",
-        },
-      },
-
-      {
-        $unwind: {
-          path: "$productInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      // ✅ Category filter
-
-      ...(categoryId && mongoose.Types.ObjectId.isValid(categoryId)
-        ? [
-            {
-              $match: {
-                "productInfo.categoryId": new mongoose.Types.ObjectId(
-                  categoryId,
-                ),
-              },
-            },
-          ]
-        : []),
-
-      {
-        $group: {
-          _id: null,
-
-          totalSales: {
-            $sum: "$items.total",
-          },
-
-          cogs: {
-            $sum: {
-              $multiply: ["$items.costPrice", "$items.quantity"],
-            },
-          },
-
-          grossProfit: {
-            $sum: "$items.profit",
-          },
-        },
-      },
-    ]);
-
-    const summary = products[0] || {};
-
+  includeExpenses,
+}) => {
+  if (!includeExpenses) {
     return {
-      totalSales: Number((summary.totalSales || 0).toFixed(2)),
-
-      salesReturn: 0,
-
-      netSales: Number((summary.totalSales || 0).toFixed(2)),
-
-      cogs: Number((summary.cogs || 0).toFixed(2)),
-
-      grossProfit: Number((summary.grossProfit || 0).toFixed(2)),
-
       operatingExpenses: 0,
 
-      netProfit: Number((summary.grossProfit || 0).toFixed(2)),
-
       expenseBreakdown: [],
-
-      cogsBreakdown: [],
     };
   }
 
-  // NORMAL BUSINESS MODE
-
-  const data = await JournalEntry.aggregate([
+  const expenseData = await JournalEntry.aggregate([
     {
       $match: {
         createdBy: objectUserId,
+
         isDeleted: false,
-        ...dateFilter,
+
+        ...journalDateFilter,
       },
     },
 
-    { $unwind: "$lines" },
+    {
+      $unwind: "$lines",
+    },
 
     {
       $lookup: {
         from: "accounts",
+
         localField: "lines.account",
+
         foreignField: "_id",
+
         as: "accountInfo",
       },
     },
 
-    { $unwind: "$accountInfo" },
+    {
+      $unwind: "$accountInfo",
+    },
+
+    {
+      $match: {
+        "accountInfo.type": "Expense",
+
+        "accountInfo.code": {
+          $ne: "COGS",
+        },
+
+        "lines.type": "debit",
+      },
+    },
 
     {
       $group: {
         _id: {
           accountId: "$lines.account",
+
           accountName: "$accountInfo.name",
-          accountType: "$accountInfo.type",
+
           accountCode: "$accountInfo.code",
-          accountCategory: "$accountInfo.category",
-          lineType: "$lines.type",
         },
 
         total: {
@@ -313,103 +246,139 @@ const getProfitSummary = async ({
         },
       },
     },
+
+    {
+      $sort: {
+        total: -1,
+      },
+    },
   ]);
 
-  // CALCULATIONS
+  const expenseBreakdown = expenseData.map((item) => ({
+    accountId: item._id?.accountId || null,
 
-  let totalSales = 0;
+    accountName: item._id?.accountName || "Unknown",
 
-  let salesReturn = 0;
+    accountCode: item._id?.accountCode || "",
 
-  let cogs = 0;
+    amount: Number(Number(item.total || 0).toFixed(2)),
+  }));
 
-  let operatingExpenses = 0;
+  const operatingExpenses = expenseBreakdown.reduce(
+    (total, item) => total + Number(item.amount || 0),
 
-  const expenseBreakdown = [];
+    0,
+  );
 
-  const cogsBreakdown = [];
+  return {
+    operatingExpenses: Number(operatingExpenses.toFixed(2)),
 
-  data.forEach((item) => {
-    const account = item._id;
-    const amount = Number(item.total || 0);
+    expenseBreakdown,
+  };
+};
 
-    const accountCode = String(account.accountCode || "").toUpperCase();
-    const accountName = String(account.accountName || "").toLowerCase();
+// PROFIT SUMMARY
 
-    //SALES
+const getProfitSummary = async ({
+  userId,
 
-    if (
-      account.accountType === "Income" &&
-      account.lineType === "credit" &&
-      accountCode !== "SALES_RETURN" &&
-      accountCode !== "PURCHASE_RETURN" &&
-      accountCode !== "PURCHASE_DISCOUNT" &&
-      !accountName.includes("return") &&
-      !accountName.includes("discount")
-    ) {
-      totalSales += amount;
-    }
+  startDate,
 
-    if (
-      account.accountType === "Income" &&
-      account.lineType === "debit" &&
-      (accountCode === "SALES_RETURN" || accountName.includes("sales return"))
-    ) {
-      salesReturn += amount;
-    }
+  endDate,
 
-    // COGS
+  filterType,
 
-    if (account.accountType === "Expense" && accountCode === "COGS") {
-      if (account.lineType === "debit") {
-        cogs += amount;
+  productId,
 
-        cogsBreakdown.push({
-          accountName: account.accountName,
-          amount,
-        });
-      }
+  categoryId,
+}) => {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Valid userId is required");
+  }
 
-      if (account.lineType === "credit") {
-        cogs -= amount;
+  const objectUserId = new mongoose.Types.ObjectId(userId);
 
-        cogsBreakdown.push({
-          accountName: account.accountName,
-          amount: -amount,
-        });
-      }
-    }
+  const journalDateFilter = buildDateFilter({
+    filterType,
 
-    // OPERATING EXPENSES
+    startDate,
 
-    if (
-      account.accountType === "Expense" &&
-      account.lineType === "debit" &&
-      accountCode !== "COGS"
-    ) {
-      operatingExpenses += amount;
-
-      expenseBreakdown.push({
-        accountName: account.accountName,
-        amount,
-      });
-    }
+    endDate,
   });
 
-  const netSales = totalSales - salesReturn;
+  const invoiceDateFilter = buildInvoiceDateFilter({
+    filterType,
 
-  const grossProfit = netSales - cogs;
+    startDate,
+
+    endDate,
+  });
+
+  const isProductMode =
+    (productId && mongoose.Types.ObjectId.isValid(productId)) ||
+    (categoryId && mongoose.Types.ObjectId.isValid(categoryId));
+
+  // ✅ Sales, Refund, COGS اور Profit ایک ہی Central Service سے
+  const profitMetrics = await calculateProfitMetrics({
+    userId,
+
+    invoiceDateFilter,
+
+    productId,
+
+    categoryId,
+  });
+
+  const { products, totals } = profitMetrics;
+
+  // ✅ Product یا Category Filter میں Business Expenses شامل نہیں ہوں گے
+  const { operatingExpenses, expenseBreakdown } = await getOperatingExpenses({
+    objectUserId,
+
+    journalDateFilter,
+
+    includeExpenses: !isProductMode,
+  });
+
+  const grossProfit = Number(totals.grossProfit || 0);
 
   const netProfit = grossProfit - operatingExpenses;
 
+  const cogsBreakdown = products.map((product) => ({
+    productId: product.productId,
+
+    productName: product.productName,
+
+    soldQty: product.soldQty,
+
+    refundQty: product.refundQty,
+
+    netQty: product.netQty,
+
+    saleCost: product.saleCost,
+
+    refundCost: product.refundCost,
+
+    netCogs: product.netCogs,
+
+    amount: product.netCogs,
+  }));
+
   return {
-    totalSales: Number(totalSales.toFixed(2)),
+    // ✅ UI میں Total Sales سے مراد Net Sales ہوگی
+    totalSales: Number(Number(totals.netSales || 0).toFixed(2)),
 
-    salesReturn: Number(salesReturn.toFixed(2)),
+    grossSales: Number(Number(totals.grossSales || 0).toFixed(2)),
 
-    netSales: Number(netSales.toFixed(2)),
+    salesReturn: Number(Number(totals.refundAmount || 0).toFixed(2)),
 
-    cogs: Number(cogs.toFixed(2)),
+    netSales: Number(Number(totals.netSales || 0).toFixed(2)),
+
+    cogs: Number(Number(totals.netCogs || 0).toFixed(2)),
+
+    saleCost: Number(Number(totals.saleCost || 0).toFixed(2)),
+
+    refundCost: Number(Number(totals.refundCost || 0).toFixed(2)),
 
     grossProfit: Number(grossProfit.toFixed(2)),
 
@@ -417,13 +386,26 @@ const getProfitSummary = async ({
 
     netProfit: Number(netProfit.toFixed(2)),
 
+    margin: Number(Number(totals.margin || 0).toFixed(2)),
+
+    soldQty: Number(Number(totals.soldQty || 0).toFixed(2)),
+
+    refundQty: Number(Number(totals.refundQty || 0).toFixed(2)),
+
+    netQty: Number(Number(totals.netQty || 0).toFixed(2)),
+
     expenseBreakdown,
 
     cogsBreakdown,
+
+    productBreakdown: products,
   };
 };
 
 module.exports = {
   getProfitSummary,
+
   buildDateFilter,
+
+  buildInvoiceDateFilter,
 };

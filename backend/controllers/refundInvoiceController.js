@@ -227,7 +227,7 @@ exports.createRefundInvoice = async (req, res) => {
       }
     }
 
-    await refundInvoice.save();
+    // Refund بعد میں Save ہوگی
 
     // ✅ Date handling
     let refundDateTime = new Date(`${invoiceDate}T${invoiceTime}`);
@@ -266,13 +266,22 @@ exports.createRefundInvoice = async (req, res) => {
           Number(originalItem?.costPrice || 0) > 0
             ? Number(originalItem.costPrice)
             : Number(product?.unitCost || 0);
-
         refundCostMap[productId] = costRate;
+
+        item.costPrice = costRate;
+
+        item.profitReversed =
+          Number(item.total || 0) - costRate * Number(item.quantity || 0);
 
         totalRefundCost += costRate * Number(item.quantity || 0);
       }
     }
 
+    refundInvoice.items = items;
+
+    refundInvoice.markModified("items");
+
+    await refundInvoice.save();
     // ✅ JOURNAL LINES
     const lines = openingRefund
       ? [
@@ -796,7 +805,7 @@ exports.updateRefundInvoice = async (req, res) => {
       }
     }
 
-    await refund.save();
+    // Refund بعد میں Save ہوگی
 
     // ✅ Delete old journal
     await JournalEntry.updateMany(
@@ -862,9 +871,20 @@ exports.updateRefundInvoice = async (req, res) => {
 
         refundCostMap[productId] = costRate;
 
+        item.costPrice = costRate;
+
+        item.profitReversed =
+          Number(item.total || 0) - costRate * Number(item.quantity || 0);
+
         totalRefundCost += costRate * Number(item.quantity || 0);
       }
     }
+
+    refund.items = items;
+
+    refund.markModified("items");
+
+    await refund.save();
 
     // ✅ JOURNAL LINES
     const lines = openingRefund

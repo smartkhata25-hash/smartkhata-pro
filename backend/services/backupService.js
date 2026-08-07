@@ -16,10 +16,6 @@ const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 
 const SOFTWARE_VERSION = "2.0";
 
-/* =========================================================
-   Collections configuration (USER BASED)
-========================================================= */
-
 const COLLECTION_CONFIG = {
   customers: { field: "createdBy" },
   accounts: { field: "userId" },
@@ -30,11 +26,11 @@ const COLLECTION_CONFIG = {
   products: { field: "userId" },
   expenses: { field: "userId" },
   inventorytransactions: { field: "userId" },
+  businessassetcategories: { field: "userId" },
+  businessassets: { field: "userId" },
+  businessliabilities: { field: "userId" },
+  businessliabilitypayments: { field: "userId" },
 };
-
-/* =========================================================
-   Ensure directories
-========================================================= */
 
 function ensureDirectories(tempDir) {
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -45,10 +41,6 @@ function ensureDirectories(tempDir) {
     fs.mkdirSync(tempDir, { recursive: true });
   }
 }
-
-/* =========================================================
-   Export USER DATA only
-========================================================= */
 
 async function exportUserDatabase(userId, tempDir) {
   if (mongoose.connection.readyState !== 1) {
@@ -76,10 +68,6 @@ async function exportUserDatabase(userId, tempDir) {
   return dump;
 }
 
-/* =========================================================
-   Create meta.json
-========================================================= */
-
 function createMeta(userId, tempDir) {
   const meta = {
     software: "SmartKhata",
@@ -93,10 +81,6 @@ function createMeta(userId, tempDir) {
 
   fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
 }
-
-/* =========================================================
-   Create ZIP
-========================================================= */
 
 function createZip(userId, tempDir) {
   const backupFile = path.join(
@@ -137,18 +121,11 @@ function createZip(userId, tempDir) {
   });
 }
 
-/* =========================================================
-   Clean temp
-========================================================= */
 function cleanTemp(tempDir) {
   if (!fs.existsSync(tempDir)) return;
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
-
-/* =========================================================
-   DELETE OLD BACKUPS (KEEP LAST 5)
-========================================================= */
 
 function deleteOldBackups(userId, limit = 5) {
   if (!fs.existsSync(BACKUP_DIR)) return;
@@ -176,9 +153,6 @@ function deleteOldBackups(userId, limit = 5) {
     fs.unlinkSync(file.path);
   });
 }
-/* =========================================================
-   Create Backup (MAIN)
-========================================================= */
 
 async function createBackup(userId, options = {}) {
   try {
@@ -233,10 +207,6 @@ async function createBackup(userId, options = {}) {
     };
   }
 }
-
-/* =========================================================
-   Backup Status
-========================================================= */
 
 function getBackupStatus() {
   if (!fs.existsSync(BACKUP_DIR)) {

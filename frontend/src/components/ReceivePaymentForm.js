@@ -1,6 +1,6 @@
 // src/components/ReceivePaymentForm.js
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   createReceivePayment,
   updateReceivePayment,
@@ -71,6 +71,51 @@ const ReceivePaymentForm = () => {
 
   useEffect(() => {
     let cancelled = false;
+
+    // ✅ Customers Cache
+    try {
+      const cachedCustomers = localStorage.getItem('customers');
+
+      if (cachedCustomers) {
+        const parsed = JSON.parse(cachedCustomers);
+
+        if (Array.isArray(parsed)) {
+          setCustomers(parsed);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    // ✅ Parties Cache
+    try {
+      const cachedParties = localStorage.getItem('saleParties');
+
+      if (cachedParties) {
+        const parsed = JSON.parse(cachedParties);
+
+        if (Array.isArray(parsed)) {
+          setParties(parsed);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    // ✅ Accounts Cache
+    try {
+      const cachedAccounts = localStorage.getItem('paymentAccounts');
+
+      if (cachedAccounts) {
+        const parsed = JSON.parse(cachedAccounts);
+
+        if (Array.isArray(parsed)) {
+          setAccounts(parsed);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
 
     const normalizePaymentType = (value) => {
       const type = String(value || 'cash').toLowerCase();
@@ -171,9 +216,9 @@ const ReceivePaymentForm = () => {
 
     const loadFormOptions = async () => {
       const results = await Promise.allSettled([
-        fetchCustomers(),
-        fetchSaleParties(),
-        getValidPaymentAccounts(),
+        fetchCustomers(null, {}, true),
+        fetchSaleParties(null, true),
+        getValidPaymentAccounts(true),
       ]);
 
       if (cancelled) return;
@@ -183,19 +228,25 @@ const ReceivePaymentForm = () => {
       if (customerResult.status === 'fulfilled') {
         const customerData = customerResult.value;
 
-        setCustomers(
-          Array.isArray(customerData)
-            ? customerData
-            : Array.isArray(customerData?.customers)
-              ? customerData.customers
-              : []
-        );
+        const customerList = Array.isArray(customerData)
+          ? customerData
+          : Array.isArray(customerData?.customers)
+            ? customerData.customers
+            : [];
+
+        setCustomers(customerList);
+
+        localStorage.setItem('customers', JSON.stringify(customerList));
       } else {
         console.error('Customers load failed:', customerResult.reason);
       }
 
       if (partyResult.status === 'fulfilled') {
-        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
+        const partyList = Array.isArray(partyResult.value) ? partyResult.value : [];
+
+        setParties(partyList);
+
+        localStorage.setItem('saleParties', JSON.stringify(partyList));
       } else {
         console.error('Sale parties load failed:', partyResult.reason);
       }
@@ -204,6 +255,8 @@ const ReceivePaymentForm = () => {
         const paymentAccounts = Array.isArray(accountResult.value) ? accountResult.value : [];
 
         setAccounts(paymentAccounts);
+
+        localStorage.setItem('paymentAccounts', JSON.stringify(paymentAccounts));
 
         if (!id) {
           const handCashAccount = paymentAccounts.find(
@@ -696,6 +749,30 @@ const ReceivePaymentForm = () => {
 
   const { clear } = useFormPersist('receive_payment_draft', formState, () => {});
 
+  const filteredSuggestions = useMemo(() => {
+    const search = customerName.trim().toLowerCase();
+
+    if (!search) return [];
+
+    return [
+      ...customers
+        .filter((c) => (c.name || '').toLowerCase().includes(search))
+        .map((c) => ({
+          ...c,
+          selectType: 'customer',
+          badge: 'Customer',
+        })),
+
+      ...parties
+        .filter((p) => (p.name || '').toLowerCase().includes(search))
+        .map((p) => ({
+          ...p,
+          selectType: 'party',
+          badge: 'Party',
+        })),
+    ].slice(0, 10);
+  }, [customerName, customers, parties]);
+
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
 
@@ -813,7 +890,12 @@ const ReceivePaymentForm = () => {
             </h2>
 
             {/* CUSTOMER (SEARCH + SUGGESTIONS) */}
-            <div style={{ position: 'relative' }}>
+            <div
+              style={{
+                position: 'relative',
+                overflow: 'visible',
+              }}
+            >
               <label className="text-xs font-semibold text-gray-600 mb-1 block">
                 {t('customer')}
               </label>
@@ -833,7 +915,7 @@ const ReceivePaymentForm = () => {
                 <div
                   style={{
                     position: 'absolute',
-                    top: 38,
+                    top: 'calc(100% + 4px)',
                     left: 0,
                     right: 0,
                     background: '#ffffff',
@@ -844,45 +926,31 @@ const ReceivePaymentForm = () => {
                     zIndex: 50,
                   }}
                 >
-                  {[
-                    ...customers
-                      .filter((c) =>
-                        (c.name || '').toLowerCase().includes(customerName.toLowerCase())
-                      )
-                      .map((c) => ({ ...c, selectType: 'customer', badge: 'Customer' })),
+                  {filteredSuggestions.map((c) => (
+                    <div
+                      key={c._id}
+                      onClick={() => {
+                        setCustomerName(c.name);
+                        setSelectedCustomerType(c.selectType);
 
-                    ...parties
-                      .filter((p) =>
-                        (p.name || '').toLowerCase().includes(customerName.toLowerCase())
-                      )
-                      .map((p) => ({ ...p, selectType: 'party', badge: 'Party' })),
-                  ]
-                    .slice(0, 10)
-                    .map((c) => (
-                      <div
-                        key={c._id}
-                        onClick={() => {
-                          setCustomerName(c.name);
-                          setSelectedCustomerType(c.selectType);
+                        setFormData((prev) => ({
+                          ...prev,
+                          customer: c.selectType === 'customer' ? c._id : '',
+                          partyId: c.selectType === 'party' ? c._id : '',
+                        }));
 
-                          setFormData((prev) => ({
-                            ...prev,
-                            customer: c.selectType === 'customer' ? c._id : '',
-                            partyId: c.selectType === 'party' ? c._id : '',
-                          }));
-
-                          setShowSuggestions(false);
-                          loadLedger(c._id, c.selectType);
-                        }}
-                        style={{
-                          padding: '8px 10px',
-                          cursor: 'pointer',
-                          borderBottom: '1px solid #f1f5f9',
-                        }}
-                      >
-                        {c.name} {c.badge === 'Party' ? '🟣 Party' : ''}
-                      </div>
-                    ))}
+                        setShowSuggestions(false);
+                        loadLedger(c._id, c.selectType);
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #f1f5f9',
+                      }}
+                    >
+                      {c.name} {c.badge === 'Party' ? '🟣 Party' : ''}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

@@ -2,10 +2,6 @@ import axios from 'axios';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
-/* =========================================================
-   🔐 AUTH HEADER
-========================================================= */
-
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
 
@@ -15,10 +11,6 @@ const getAuthHeader = () => {
     },
   };
 };
-
-/* =========================================================
-   📦 STOCK VALUE REPORT
-========================================================= */
 
 export const fetchStockValueReport = async (filters = {}) => {
   try {

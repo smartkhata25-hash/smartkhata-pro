@@ -123,10 +123,6 @@ exports.getBackupStatusController = (req, res) => {
   }
 };
 
-/* ======================================================
-   DOWNLOAD LATEST BACKUP
-====================================================== */
-
 exports.downloadBackupController = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -174,10 +170,6 @@ exports.downloadBackupController = async (req, res) => {
     });
   }
 };
-
-/* ======================================================
-   RESTORE FROM LOCAL FILE
-====================================================== */
 
 exports.restoreLocalBackupController = async (req, res) => {
   try {
@@ -271,10 +263,6 @@ exports.getCloudBackupListController = async (req, res) => {
     });
   }
 };
-
-/* ======================================================
-   GET BACKUP/RESTORE PROGRESS
-====================================================== */
 
 exports.getBackupProgressController = (req, res) => {
   try {

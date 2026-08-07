@@ -7,10 +7,6 @@ const unzipper = require("unzipper");
 
 const { BACKUP_DIR } = require("../../config/backupPaths");
 
-/* =====================================================
-   RESTORE FROM LOCAL FILE
-===================================================== */
-
 async function restoreFromLocalBackup(userId, filePath) {
   try {
     if (!fs.existsSync(filePath)) {
@@ -19,10 +15,6 @@ async function restoreFromLocalBackup(userId, filePath) {
         message: "Backup file not found",
       };
     }
-
-    /* =====================================================
-       ZIP VALIDATION
-    ===================================================== */
 
     let isValidBackup = false;
 
@@ -45,19 +37,11 @@ async function restoreFromLocalBackup(userId, filePath) {
       };
     }
 
-    /* =====================================================
-       COPY TO BACKUP DIRECTORY
-    ===================================================== */
-
     const uniqueName = `smartkhata-backup-${userId}-${Date.now()}.zip`;
 
     const tempPath = path.join(BACKUP_DIR, uniqueName);
 
     fs.copyFileSync(filePath, tempPath);
-
-    /* =====================================================
-       RESTORE CALL
-    ===================================================== */
 
     const result = await restoreBackup(userId);
 

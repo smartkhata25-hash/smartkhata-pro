@@ -1,14 +1,6 @@
 import axios from 'axios';
 
-/* ======================================================
-   ✅ BASE URL
-====================================================== */
-
 const API_URL = `${process.env.REACT_APP_API_BASE_URL}/api/profit`;
-
-/* ======================================================
-   ✅ AUTH CONFIG
-====================================================== */
 
 const getConfig = () => ({
   headers: {
@@ -16,9 +8,7 @@ const getConfig = () => ({
   },
 });
 
-/* ======================================================
-   ✅ GET PROFIT SUMMARY
-====================================================== */
+//  ✅ GET PROFIT SUMMARY
 
 export const getProfitSummary = async (params = {}) => {
   const response = await axios.get(`${API_URL}/summary`, {
@@ -29,10 +19,6 @@ export const getProfitSummary = async (params = {}) => {
   return response.data;
 };
 
-/* ======================================================
-   ✅ GET SALES BREAKDOWN
-====================================================== */
-
 export const getSalesBreakdown = async (params = {}) => {
   const response = await axios.get(`${API_URL}/sales-breakdown`, {
     ...getConfig(),
@@ -41,10 +27,6 @@ export const getSalesBreakdown = async (params = {}) => {
 
   return response.data;
 };
-
-/* ======================================================
-   ✅ GET EXPENSE BREAKDOWN
-====================================================== */
 
 export const getExpenseBreakdown = async (params = {}) => {
   const response = await axios.get(`${API_URL}/expense-breakdown`, {
@@ -55,10 +37,6 @@ export const getExpenseBreakdown = async (params = {}) => {
   return response.data;
 };
 
-/* ======================================================
-   ✅ GET COGS BREAKDOWN
-====================================================== */
-
 export const getCogsBreakdown = async (params = {}) => {
   const response = await axios.get(`${API_URL}/cogs-breakdown`, {
     ...getConfig(),
@@ -67,10 +45,6 @@ export const getCogsBreakdown = async (params = {}) => {
 
   return response.data;
 };
-
-/* ======================================================
-   ✅ GET PRODUCT PROFITABILITY
-====================================================== */
 
 export const getProductProfitability = async (params = {}) => {
   const response = await axios.get(`${API_URL}/product-profitability`, {

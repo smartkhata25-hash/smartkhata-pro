@@ -26,7 +26,17 @@ export const fetchParties = async (params = {}, token = null) => {
 export const getParties = fetchParties;
 
 // ✅ Get parties for sale side
-export const fetchSaleParties = async (token = null) => {
+export const fetchSaleParties = async (token = null, forceRefresh = false) => {
+  if (!forceRefresh) {
+    const cached = localStorage.getItem('saleParties');
+
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (_) {}
+    }
+  }
+
   const [customers, bothParties] = await Promise.all([
     fetchParties(
       {
@@ -44,11 +54,25 @@ export const fetchSaleParties = async (token = null) => {
     ),
   ]);
 
-  return [...customers, ...bothParties];
+  const data = [...customers, ...bothParties];
+
+  localStorage.setItem('saleParties', JSON.stringify(data));
+
+  return data;
 };
 
 // ✅ Get parties for purchase side
-export const fetchPurchaseParties = async (token = null) => {
+export const fetchPurchaseParties = async (token = null, forceRefresh = false) => {
+  if (!forceRefresh) {
+    const cached = localStorage.getItem('purchaseParties');
+
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (_) {}
+    }
+  }
+
   const [suppliers, bothParties] = await Promise.all([
     fetchParties(
       {
@@ -66,7 +90,11 @@ export const fetchPurchaseParties = async (token = null) => {
     ),
   ]);
 
-  return [...suppliers, ...bothParties];
+  const data = [...suppliers, ...bothParties];
+
+  localStorage.setItem('purchaseParties', JSON.stringify(data));
+
+  return data;
 };
 
 // ✅ Add new party

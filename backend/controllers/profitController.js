@@ -4,14 +4,17 @@ const JournalEntry = require("../models/JournalEntry");
 
 const Invoice = require("../models/Invoice");
 
+const RefundInvoice = require("../models/RefundInvoice");
+
 const {
   getProfitSummary,
   buildDateFilter,
+  buildInvoiceDateFilter,
 } = require("../services/accounting/profitService");
 
-/* ======================================================
-   ✅ PROFIT SUMMARY
-====================================================== */
+const {
+  calculateProfitMetrics,
+} = require("../services/accounting/profitCalculationService");
 
 const getProfitSummaryController = async (req, res) => {
   try {
@@ -42,10 +45,6 @@ const getProfitSummaryController = async (req, res) => {
     });
   }
 };
-
-/* ======================================================
-   ✅ EXPENSE BREAKDOWN
-====================================================== */
 
 const getExpenseBreakdown = async (req, res) => {
   try {
@@ -116,55 +115,42 @@ const getExpenseBreakdown = async (req, res) => {
   }
 };
 
-/* ======================================================
-   ✅ COGS BREAKDOWN
-====================================================== */
-
 const getCogsBreakdown = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const { filterType, startDate, endDate, productId, categoryId } = req.query;
 
-    const cogs = await JournalEntry.aggregate([
-      {
-        $match: {
-          createdBy: userId,
-          isDeleted: false,
-        },
+    const invoiceDateFilter = buildInvoiceDateFilter({
+      filterType,
+      startDate,
+      endDate,
+    });
+
+    const { products } = await calculateProfitMetrics({
+      userId: req.user.id,
+      invoiceDateFilter,
+      productId,
+      categoryId,
+    });
+
+    const cogs = products.map((product) => ({
+      productId: product.productId,
+      productName: product.productName,
+
+      soldQty: product.soldQty,
+      refundQty: product.refundQty,
+      netQty: product.netQty,
+
+      saleCost: product.saleCost,
+      refundCost: product.refundCost,
+      netCogs: product.netCogs,
+
+      // پرانے Frontend کے ساتھ Compatibility
+      total: product.netCogs,
+
+      _id: {
+        accountName: product.productName,
       },
-
-      { $unwind: "$lines" },
-
-      {
-        $lookup: {
-          from: "accounts",
-          localField: "lines.account",
-          foreignField: "_id",
-          as: "accountInfo",
-        },
-      },
-
-      { $unwind: "$accountInfo" },
-
-      {
-        $match: {
-          "accountInfo.code": "COGS",
-          "accountInfo.type": "Expense",
-          "lines.type": "debit",
-        },
-      },
-
-      {
-        $group: {
-          _id: {
-            accountName: "$accountInfo.name",
-          },
-
-          total: {
-            $sum: "$lines.amount",
-          },
-        },
-      },
-    ]);
+    }));
 
     res.status(200).json({
       success: true,
@@ -181,18 +167,11 @@ const getCogsBreakdown = async (req, res) => {
     });
   }
 };
-
-/* ======================================================
-   ✅ SALES BREAKDOWN
-====================================================== */
-
 const getSalesBreakdown = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
     const { filterType, startDate, endDate, productId, categoryId } = req.query;
-
-    // ✅ Invoice date filter
 
     const rawDateFilter = buildDateFilter({
       filterType,
@@ -206,21 +185,17 @@ const getSalesBreakdown = async (req, res) => {
       dateFilter.invoiceDate = rawDateFilter.date;
     }
 
-    const sales = await Invoice.aggregate([
+    const buildPipeline = (isRefund = false) => [
       {
         $match: {
           createdBy: userId,
           isDeleted: false,
-
           isOpening: false,
-
           ...dateFilter,
         },
       },
 
       { $unwind: "$items" },
-
-      // ✅ Product filter
 
       ...(productId && mongoose.Types.ObjectId.isValid(productId)
         ? [
@@ -247,8 +222,6 @@ const getSalesBreakdown = async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
-
-      // ✅ Category filter
 
       ...(categoryId && mongoose.Types.ObjectId.isValid(categoryId)
         ? [
@@ -274,23 +247,38 @@ const getSalesBreakdown = async (req, res) => {
 
           productName: "$productInfo.name",
 
-          qty: "$items.quantity",
+          qty: isRefund
+            ? {
+                $multiply: ["$items.quantity", -1],
+              }
+            : "$items.quantity",
 
-          amount: "$items.total",
+          amount: isRefund
+            ? {
+                $multiply: ["$items.total", -1],
+              }
+            : "$items.total",
+
+          transactionType: {
+            $literal: isRefund ? "refund" : "sale",
+          },
         },
       },
+    ];
 
-      {
-        $sort: {
-          invoiceDate: -1,
-        },
-      },
+    const [sales, refunds] = await Promise.all([
+      Invoice.aggregate(buildPipeline(false)),
+      RefundInvoice.aggregate(buildPipeline(true)),
     ]);
+
+    const combinedData = [...sales, ...refunds].sort(
+      (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
+    );
 
     res.status(200).json({
       success: true,
-      count: sales.length,
-      data: sales,
+      count: combinedData.length,
+      data: combinedData,
     });
   } catch (error) {
     console.error("Sales Breakdown Error:", error);
@@ -303,168 +291,54 @@ const getSalesBreakdown = async (req, res) => {
   }
 };
 
-/* ======================================================
-   ✅ PRODUCT PROFITABILITY
-====================================================== */
-
 const getProductProfitability = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
-
     const { filterType, startDate, endDate, productId, categoryId } = req.query;
 
-    // ✅ Invoice date filter
-    const rawDateFilter = buildDateFilter({
+    const invoiceDateFilter = buildInvoiceDateFilter({
       filterType,
       startDate,
       endDate,
     });
 
-    // ✅ Convert date -> invoiceDate
-    const dateFilter = {};
+    const { products } = await calculateProfitMetrics({
+      userId: req.user.id,
+      invoiceDateFilter,
+      productId,
+      categoryId,
+    });
 
-    if (rawDateFilter.date) {
-      dateFilter.invoiceDate = rawDateFilter.date;
-    }
+    const data = products.map((product) => ({
+      productId: product.productId,
+      productName: product.productName,
 
-    const products = await Invoice.aggregate([
-      {
-        $match: {
-          createdBy: userId,
-          isDeleted: false,
+      qtySold: product.soldQty,
+      soldQty: product.soldQty,
 
-          isOpening: false,
+      refundQty: product.refundQty,
+      netQty: product.netQty,
 
-          ...dateFilter,
-        },
-      },
+      sales: product.grossSales,
+      grossSales: product.grossSales,
 
-      { $unwind: "$items" },
-      // 🎯 Single product filter after unwind
-      ...(productId && mongoose.Types.ObjectId.isValid(productId)
-        ? [
-            {
-              $match: {
-                "items.productId": new mongoose.Types.ObjectId(productId),
-              },
-            },
-          ]
-        : []),
+      refundAmount: product.refundAmount,
+      netSales: product.netSales,
 
-      {
-        $lookup: {
-          from: "products",
-          localField: "items.productId",
-          foreignField: "_id",
-          as: "productInfo",
-        },
-      },
+      saleCost: product.saleCost,
+      refundCost: product.refundCost,
+      cost: product.netCogs,
+      netCogs: product.netCogs,
 
-      {
-        $unwind: {
-          path: "$productInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
+      profit: product.grossProfit,
+      grossProfit: product.grossProfit,
 
-      // ✅ Category filter
-      ...(categoryId && mongoose.Types.ObjectId.isValid(categoryId)
-        ? [
-            {
-              $match: {
-                "productInfo.categoryId": new mongoose.Types.ObjectId(
-                  categoryId,
-                ),
-              },
-            },
-          ]
-        : []),
-
-      {
-        $group: {
-          _id: "$items.productId",
-
-          productName: {
-            $first: "$productInfo.name",
-          },
-
-          totalQty: {
-            $sum: "$items.quantity",
-          },
-
-          totalSales: {
-            $sum: "$items.total",
-          },
-
-          totalCost: {
-            $sum: {
-              $multiply: ["$items.costPrice", "$items.quantity"],
-            },
-          },
-
-          totalProfit: {
-            $sum: "$items.profit",
-          },
-        },
-      },
-
-      {
-        $project: {
-          _id: 0,
-
-          productId: "$_id",
-
-          productName: 1,
-
-          qtySold: {
-            $round: ["$totalQty", 2],
-          },
-
-          sales: {
-            $round: ["$totalSales", 2],
-          },
-
-          cost: {
-            $round: ["$totalCost", 2],
-          },
-
-          profit: {
-            $round: ["$totalProfit", 2],
-          },
-
-          margin: {
-            $cond: [
-              { $gt: ["$totalSales", 0] },
-              {
-                $round: [
-                  {
-                    $multiply: [
-                      {
-                        $divide: ["$totalProfit", "$totalSales"],
-                      },
-                      100,
-                    ],
-                  },
-                  2,
-                ],
-              },
-              0,
-            ],
-          },
-        },
-      },
-
-      {
-        $sort: {
-          profit: -1,
-        },
-      },
-    ]);
+      margin: product.margin,
+    }));
 
     res.status(200).json({
       success: true,
-      count: products.length,
-      data: products,
+      count: data.length,
+      data,
     });
   } catch (error) {
     console.error("Product Profitability Error:", error);

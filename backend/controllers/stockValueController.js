@@ -3,9 +3,7 @@ const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const InventoryTransaction = require("../models/InventoryTransaction");
 
-/* =========================================================
-   📦 STOCK VALUE REPORT
-========================================================= */
+// 📦 STOCK VALUE REPORT
 
 exports.getStockValueReport = async (req, res) => {
   try {
@@ -20,9 +18,7 @@ exports.getStockValueReport = async (req, res) => {
       negativeOnly = "false",
     } = req.query;
 
-    /* =========================================================
-       📅 DATE FILTER
-    ========================================================= */
+    //  📅 DATE FILTER
 
     let transactionDateFilter = {};
 
@@ -38,9 +34,7 @@ exports.getStockValueReport = async (req, res) => {
       }
     }
 
-    /* =========================================================
-       📦 PRODUCT FILTER
-    ========================================================= */
+    //📦 PRODUCT FILTER
 
     const productFilter = {
       userId,
@@ -57,9 +51,7 @@ exports.getStockValueReport = async (req, res) => {
       productFilter.categoryId = new mongoose.Types.ObjectId(categoryId);
     }
 
-    /* =========================================================
-       📦 GET PRODUCTS
-    ========================================================= */
+    //📦 GET PRODUCTS
 
     const products = await Product.find(productFilter)
       .populate("categoryId", "name")
@@ -67,9 +59,7 @@ exports.getStockValueReport = async (req, res) => {
 
     const productIds = products.map((p) => p._id);
 
-    /* =========================================================
-       📊 STOCK AGGREGATION
-    ========================================================= */
+    // 📊 STOCK AGGREGATION
 
     const stockData = await InventoryTransaction.aggregate([
       {
@@ -113,19 +103,11 @@ exports.getStockValueReport = async (req, res) => {
       },
     ]);
 
-    /* =========================================================
-       🗂 STOCK MAP
-    ========================================================= */
-
     const stockMap = {};
 
     stockData.forEach((item) => {
       stockMap[item._id.toString()] = item.stock || 0;
     });
-
-    /* =========================================================
-       📋 FINAL ROWS
-    ========================================================= */
 
     let rows = products.map((product) => {
       const stockQty = stockMap[product._id.toString()] || 0;
@@ -159,10 +141,6 @@ exports.getStockValueReport = async (req, res) => {
       };
     });
 
-    /* =========================================================
-       🔎 FILTERS
-    ========================================================= */
-
     if (hideZero === "true") {
       rows = rows.filter((row) => row.stockQty !== 0);
     }
@@ -171,9 +149,7 @@ exports.getStockValueReport = async (req, res) => {
       rows = rows.filter((row) => row.stockQty < 0);
     }
 
-    /* =========================================================
-       📊 SUMMARY
-    ========================================================= */
+    // 📊 SUMMARY
 
     const summary = rows.reduce(
       (acc, row) => {
@@ -200,10 +176,6 @@ exports.getStockValueReport = async (req, res) => {
         negativeStockValue: 0,
       },
     );
-
-    /* =========================================================
-       📤 RESPONSE
-    ========================================================= */
 
     res.json({
       success: true,

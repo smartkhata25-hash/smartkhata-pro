@@ -174,6 +174,10 @@ const menuConfig = [
             label: 'productPerformance.menuLabel',
             path: '/product-performance',
           },
+          {
+            label: 'businessValue.menuLabel',
+            path: '/business-value',
+          },
         ],
       },
     ],

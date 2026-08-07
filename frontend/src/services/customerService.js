@@ -21,8 +21,24 @@ export const getCustomers = async (token = null, params = {}) => {
 };
 
 // ✅ Get All Customers (for dropdowns etc.)
-export const fetchCustomers = async (token = null, params = {}) => {
-  return getCustomers(token, params);
+export const fetchCustomers = async (token = null, params = {}, forceRefresh = false) => {
+  if (!forceRefresh && Object.keys(params).length === 0) {
+    const cached = localStorage.getItem('customers');
+
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (_) {}
+    }
+  }
+
+  const data = await getCustomers(token, params);
+
+  if (Object.keys(params).length === 0) {
+    localStorage.setItem('customers', JSON.stringify(data));
+  }
+
+  return data;
 };
 
 // ✅ Add New Customer

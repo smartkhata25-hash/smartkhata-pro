@@ -141,7 +141,7 @@ const InvoiceForm = ({
 
       const data = await navigateInvoice(billNo, direction, token);
 
-      setEditingInvoiceFromAPI(data);
+      if (!data?._id) return;
 
       navigate(`/create-sale?invoiceId=${data._id}`);
     } catch (err) {

@@ -20,20 +20,29 @@ export default function useAutoPersist(key, state, setState) {
     }, 500);
   };
 
-  // 🔹 LOAD (پہلی بار)
   useEffect(() => {
+    if (!key) {
+      isLoaded.current = false;
+      return;
+    }
+
+    isLoaded.current = false;
+
     const saved = loadState(key, null);
 
     if (saved && typeof saved === 'object') {
       setState((prev) => deepMerge(prev || {}, saved));
     }
 
-    isLoaded.current = true;
+    const timer = setTimeout(() => {
+      isLoaded.current = true;
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, [key, setState]);
 
-  // 🔹 SAVE (ہر change پر)
   useEffect(() => {
-    if (!isLoaded.current) return;
+    if (!key || !isLoaded.current) return;
 
     const hasCustomer =
       state?.customerName?.trim() || state?.supplierName?.trim() || state?.formData?.supplier;
@@ -47,7 +56,7 @@ export default function useAutoPersist(key, state, setState) {
     }
 
     debouncedSave.current(state);
-  }, [state]);
+  }, [key, state]);
 
   // ✅ cleanup pending save
   useEffect(() => {
@@ -59,6 +68,8 @@ export default function useAutoPersist(key, state, setState) {
   // 🔹 clear function
   const clear = () => {
     clearTimeout(debounceTimer.current);
+
+    if (!key) return;
 
     localStorage.removeItem(`app_state_${key}`);
   };

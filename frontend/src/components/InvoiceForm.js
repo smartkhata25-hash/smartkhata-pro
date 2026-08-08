@@ -1026,8 +1026,10 @@ const InvoiceForm = ({
     by,
   };
 
+  const isEditMode = new URLSearchParams(location.search).has('invoiceId');
+
   useEffect(() => {
-    if (editingInvoiceFromAPI) return;
+    if (isEditMode) return;
 
     const saved = localStorage.getItem('app_state_sale_invoice_draft');
 
@@ -1074,13 +1076,9 @@ const InvoiceForm = ({
     } catch (err) {
       console.error(err);
     }
-  }, [editingInvoiceFromAPI]);
+  }, [isEditMode]);
 
-  const { clear } = useFormPersist(
-    !editingInvoiceFromAPI ? 'sale_invoice_draft' : null,
-    formState,
-    () => {}
-  );
+  const { clear } = useFormPersist(isEditMode ? null : 'sale_invoice_draft', formState, () => {});
 
   const handleClear = async () => {
     if (editingInvoiceFromAPI?._id) {

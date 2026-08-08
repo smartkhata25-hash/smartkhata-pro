@@ -29,6 +29,8 @@ const COLLECTION_CONFIG = {
   businessassets: { field: "userId" },
   businessliabilities: { field: "userId" },
   businessliabilitypayments: { field: "userId" },
+  businessreceivableloans: { field: "userId" },
+  businessreceivableloanpayments: { field: "userId" },
 };
 
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
@@ -40,13 +42,15 @@ const RESTORE_ORDER = [
   "products",
   "invoices",
   "purchaseinvoices",
-  "journalentries",
   "expenses",
   "inventorytransactions",
   "businessassetcategories",
   "businessassets",
   "businessliabilities",
+  "businessreceivableloans",
+  "journalentries",
   "businessliabilitypayments",
+  "businessreceivableloanpayments",
 ];
 
 function createAccountIdMap() {
@@ -58,6 +62,10 @@ function createAssetCategoryIdMap() {
 }
 
 function createBusinessLiabilityIdMap() {
+  return {};
+}
+
+function createBusinessReceivableLoanIdMap() {
   return {};
 }
 
@@ -188,7 +196,14 @@ async function restoreSuppliers(userId, docs, accountIdMap) {
   await collection.insertMany(fixedDocs);
 }
 
-async function restoreJournals(userId, docs, accountIdMap, journalIdMap) {
+async function restoreJournals(
+  userId,
+  docs,
+  accountIdMap,
+  journalIdMap,
+  liabilityIdMap,
+  receivableLoanIdMap,
+) {
   const db = mongoose.connection.db;
 
   const collection = db.collection("journalentries");
@@ -224,6 +239,26 @@ async function restoreJournals(userId, docs, accountIdMap, journalIdMap) {
 
         return accountIdMap[oldAccountId] || accountId;
       });
+    }
+
+    const oldReferenceId = newDoc.referenceId?.toString();
+
+    if (
+      oldReferenceId &&
+      newDoc.originModule === "business_liability_payment" &&
+      liabilityIdMap[oldReferenceId]
+    ) {
+      newDoc.referenceId = liabilityIdMap[oldReferenceId];
+    }
+
+    if (
+      oldReferenceId &&
+      ["business_receivable_loan", "business_receivable_loan_payment"].includes(
+        newDoc.originModule,
+      ) &&
+      receivableLoanIdMap[oldReferenceId]
+    ) {
+      newDoc.referenceId = receivableLoanIdMap[oldReferenceId];
     }
 
     const inserted = await collection.insertOne(newDoc);
@@ -375,6 +410,93 @@ async function restoreBusinessLiabilityPayments(
   }
 }
 
+async function restoreBusinessReceivableLoans(
+  userId,
+  docs,
+  receivableLoanIdMap,
+) {
+  const collection = mongoose.connection.db.collection(
+    "businessreceivableloans",
+  );
+
+  await collection.deleteMany({ userId });
+
+  for (const doc of docs) {
+    const oldId = doc._id?.toString();
+
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
+
+    const inserted = await collection.insertOne(newDoc);
+
+    if (oldId) {
+      receivableLoanIdMap[oldId] = inserted.insertedId;
+    }
+  }
+}
+
+async function restoreBusinessReceivableLoanPayments(
+  userId,
+  docs,
+  receivableLoanIdMap,
+  accountIdMap,
+  journalIdMap,
+) {
+  const collection = mongoose.connection.db.collection(
+    "businessreceivableloanpayments",
+  );
+
+  await collection.deleteMany({ userId });
+
+  const fixedDocs = docs.map((doc) => {
+    const newDoc = { ...doc };
+
+    delete newDoc._id;
+
+    newDoc.userId = new mongoose.Types.ObjectId(userId);
+    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
+
+    const oldLoanId = newDoc.loanId?.toString();
+
+    if (oldLoanId && receivableLoanIdMap[oldLoanId]) {
+      newDoc.loanId = receivableLoanIdMap[oldLoanId];
+    }
+
+    const oldAccountId = newDoc.accountId?.toString();
+
+    if (oldAccountId && accountIdMap[oldAccountId]) {
+      newDoc.accountId = accountIdMap[oldAccountId];
+    }
+
+    const oldJournalId = newDoc.journalEntryId?.toString();
+
+    if (oldJournalId && journalIdMap[oldJournalId]) {
+      newDoc.journalEntryId = journalIdMap[oldJournalId];
+    } else {
+      newDoc.journalEntryId = null;
+    }
+
+    const oldReversalJournalId = newDoc.reversalJournalEntryId?.toString();
+
+    if (oldReversalJournalId && journalIdMap[oldReversalJournalId]) {
+      newDoc.reversalJournalEntryId = journalIdMap[oldReversalJournalId];
+    } else {
+      newDoc.reversalJournalEntryId = null;
+    }
+
+    return newDoc;
+  });
+
+  if (fixedDocs.length) {
+    await collection.insertMany(fixedDocs);
+  }
+}
+
 async function restoreGeneric(collectionName, userId, docs) {
   const db = mongoose.connection.db;
 
@@ -412,6 +534,8 @@ async function restoreCollections(userId, tempDir) {
 
   const liabilityIdMap = createBusinessLiabilityIdMap();
 
+  const receivableLoanIdMap = createBusinessReceivableLoanIdMap();
+
   const journalIdMap = createJournalIdMap();
 
   for (const collectionName of RESTORE_ORDER) {
@@ -443,7 +567,15 @@ async function restoreCollections(userId, tempDir) {
     }
 
     if (collectionName === "journalentries") {
-      await restoreJournals(userId, docs, accountIdMap, journalIdMap);
+      await restoreJournals(
+        userId,
+        docs,
+        accountIdMap,
+        journalIdMap,
+        liabilityIdMap,
+        receivableLoanIdMap,
+      );
+
       continue;
     }
 
@@ -462,6 +594,12 @@ async function restoreCollections(userId, tempDir) {
       continue;
     }
 
+    if (collectionName === "businessreceivableloans") {
+      await restoreBusinessReceivableLoans(userId, docs, receivableLoanIdMap);
+
+      continue;
+    }
+
     if (collectionName === "businessliabilitypayments") {
       await restoreBusinessLiabilityPayments(
         userId,
@@ -470,6 +608,17 @@ async function restoreCollections(userId, tempDir) {
         accountIdMap,
         journalIdMap,
       );
+      continue;
+    }
+    if (collectionName === "businessreceivableloanpayments") {
+      await restoreBusinessReceivableLoanPayments(
+        userId,
+        docs,
+        receivableLoanIdMap,
+        accountIdMap,
+        journalIdMap,
+      );
+
       continue;
     }
 

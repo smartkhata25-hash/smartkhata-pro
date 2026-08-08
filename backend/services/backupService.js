@@ -30,8 +30,10 @@ const COLLECTION_CONFIG = {
   businessassets: { field: "userId" },
   businessliabilities: { field: "userId" },
   businessliabilitypayments: { field: "userId" },
-};
 
+  businessreceivableloans: { field: "userId" },
+  businessreceivableloanpayments: { field: "userId" },
+};
 function ensureDirectories(tempDir) {
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR);

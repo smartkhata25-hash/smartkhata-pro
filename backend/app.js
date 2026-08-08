@@ -59,6 +59,11 @@ app.use(
   require("./routes/businessLiabilityRoutes"),
 );
 
+app.use(
+  "/api/business-receivable-loans",
+  require("./routes/businessReceivableLoanRoutes"),
+);
+
 app.use("/api/business-value", require("./routes/businessValueRoutes"));
 
 app.use(

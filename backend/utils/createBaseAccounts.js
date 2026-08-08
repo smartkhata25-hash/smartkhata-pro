@@ -141,6 +141,15 @@ const createBaseAccountsForUser = async (userId) => {
       isSystem: true,
     },
 
+    {
+      name: "Loan Receivable",
+      type: "Asset",
+      category: "receivable",
+      code: "LOAN_RECEIVABLE",
+      normalBalance: "debit",
+      isSystem: true,
+    },
+
     // 🔓 USER ACCOUNTS
     {
       name: "Utility Expense",
@@ -234,19 +243,29 @@ const createBaseAccountsForUser = async (userId) => {
 
   for (const acc of baseAccounts) {
     await Account.findOneAndUpdate(
-      { userId: userId, code: acc.code },
       {
         userId: userId,
-        name: acc.name,
-        type: acc.type,
-        category: acc.category,
         code: acc.code,
-        normalBalance: acc.normalBalance,
-        balance: 0,
-        openingBalance: 0,
-        isSystem: acc.isSystem,
       },
-      { upsert: true, new: true },
+      {
+        $setOnInsert: {
+          userId: userId,
+          name: acc.name,
+          type: acc.type,
+          category: acc.category,
+          code: acc.code,
+          normalBalance: acc.normalBalance,
+          balance: 0,
+          openingBalance: 0,
+          isSystem: acc.isSystem,
+          isActive: true,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
     );
   }
 };

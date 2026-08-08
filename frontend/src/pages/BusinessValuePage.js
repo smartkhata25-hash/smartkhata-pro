@@ -11,6 +11,10 @@ import BusinessLiabilityPaymentForm from '../components/businessValue/BusinessLi
 import BusinessLiabilityPaymentHistory from '../components/businessValue/BusinessLiabilityPaymentHistory';
 import BusinessLiabilityList from '../components/businessValue/BusinessLiabilityList';
 import AssetCategoryManager from '../components/businessValue/AssetCategoryManager';
+import BusinessReceivableLoanForm from '../components/businessValue/BusinessReceivableLoanForm';
+import BusinessReceivableLoanList from '../components/businessValue/BusinessReceivableLoanList';
+import BusinessReceivableLoanPaymentForm from '../components/businessValue/BusinessReceivableLoanPaymentForm';
+import BusinessReceivableLoanPaymentHistory from '../components/businessValue/BusinessReceivableLoanPaymentHistory';
 
 import {
   BUSINESS_VALUE_PRESETS,
@@ -32,11 +36,14 @@ import {
   fetchLiabilityTitles,
 } from '../services/businessLiabilityService';
 
+import { fetchBusinessReceivableLoans } from '../services/businessReceivableLoanService';
+
 import { hasPermission } from '../utils/permissionHelper';
 
 const TABS = {
   OVERVIEW: 'overview',
   ASSETS: 'assets',
+  RECEIVABLE_LOANS: 'receivable-loans',
   LIABILITIES: 'liabilities',
 };
 
@@ -44,6 +51,8 @@ const BusinessValuePage = () => {
   const canViewBusinessValue = hasPermission('business_value.view');
   const canViewAssets = hasPermission('business_assets.view');
   const canViewLiabilities = hasPermission('business_liabilities.view');
+
+  const canViewReceivableLoans = hasPermission('business_receivable_loans.view');
 
   const [activeTab, setActiveTab] = useState(TABS.OVERVIEW);
 
@@ -63,10 +72,12 @@ const BusinessValuePage = () => {
 
   const [liabilities, setLiabilities] = useState([]);
   const [liabilityTitles, setLiabilityTitles] = useState([]);
+  const [receivableLoans, setReceivableLoans] = useState([]);
 
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [liabilitiesLoading, setLiabilitiesLoading] = useState(false);
+  const [receivableLoansLoading, setReceivableLoansLoading] = useState(false);
 
   const [pageError, setPageError] = useState('');
 
@@ -80,6 +91,14 @@ const BusinessValuePage = () => {
   const [paymentFormOpen, setPaymentFormOpen] = useState(false);
 
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
+
+  const [receivableLoanFormOpen, setReceivableLoanFormOpen] = useState(false);
+
+  const [selectedReceivableLoan, setSelectedReceivableLoan] = useState(null);
+
+  const [receivableLoanPaymentOpen, setReceivableLoanPaymentOpen] = useState(false);
+
+  const [receivableLoanPaymentHistoryOpen, setReceivableLoanPaymentHistoryOpen] = useState(false);
 
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
 
@@ -100,6 +119,14 @@ const BusinessValuePage = () => {
       });
     }
 
+    if (canViewReceivableLoans) {
+      tabs.push({
+        key: TABS.RECEIVABLE_LOANS,
+        label: t('businessValue.receivableLoans'),
+        icon: '🤝',
+      });
+    }
+
     if (canViewLiabilities) {
       tabs.push({
         key: TABS.LIABILITIES,
@@ -109,7 +136,7 @@ const BusinessValuePage = () => {
     }
 
     return tabs;
-  }, [canViewAssets, canViewLiabilities]);
+  }, [canViewAssets, canViewLiabilities, canViewReceivableLoans]);
 
   const loadBusinessValue = useCallback(
     async ({
@@ -196,6 +223,33 @@ const BusinessValuePage = () => {
     }
   }, [canViewAssets]);
 
+  const loadReceivableLoans = useCallback(
+    async ({ showLoader = true } = {}) => {
+      if (!canViewReceivableLoans) return;
+
+      try {
+        if (showLoader) {
+          setReceivableLoansLoading(true);
+        }
+
+        const result = await fetchBusinessReceivableLoans({
+          includeClosed: true,
+          page: 1,
+          limit: 500,
+        });
+
+        setReceivableLoans(result.loans || []);
+      } catch (error) {
+        setPageError(error.message || t('businessValue.receivableLoansLoadFailed'));
+      } finally {
+        if (showLoader) {
+          setReceivableLoansLoading(false);
+        }
+      }
+    },
+    [canViewReceivableLoans]
+  );
+
   const loadLiabilities = useCallback(
     async ({ showLoader = true } = {}) => {
       if (!canViewLiabilities) return;
@@ -255,6 +309,10 @@ const BusinessValuePage = () => {
       tasks.push(loadAssetTitles());
     }
 
+    if (canViewReceivableLoans) {
+      tasks.push(loadReceivableLoans());
+    }
+
     if (canViewLiabilities) {
       tasks.push(loadLiabilities());
       tasks.push(loadLiabilityTitles());
@@ -265,6 +323,8 @@ const BusinessValuePage = () => {
     canViewAssets,
     canViewBusinessValue,
     canViewLiabilities,
+    canViewReceivableLoans,
+    loadReceivableLoans,
     loadAssetTitles,
     loadAssets,
     loadBusinessValue,
@@ -370,6 +430,50 @@ const BusinessValuePage = () => {
     });
   };
 
+  const openNewReceivableLoanForm = () => {
+    setSelectedReceivableLoan(null);
+    setReceivableLoanFormOpen(true);
+  };
+
+  const openEditReceivableLoanForm = (loan) => {
+    setSelectedReceivableLoan(loan);
+    setReceivableLoanFormOpen(true);
+  };
+
+  const openReceivableLoanPayment = (loan) => {
+    setSelectedReceivableLoan(loan);
+    setReceivableLoanPaymentOpen(true);
+  };
+
+  const openReceivableLoanPaymentHistory = (loan) => {
+    setSelectedReceivableLoan(loan);
+    setReceivableLoanPaymentHistoryOpen(true);
+  };
+
+  const handleReceivableLoanChanged = async () => {
+    await Promise.all([
+      loadReceivableLoans({
+        showLoader: false,
+      }),
+      loadBusinessValue({
+        showLoader: false,
+      }),
+    ]);
+
+    setReceivableLoanFormOpen(false);
+    setReceivableLoanPaymentOpen(false);
+    setReceivableLoanPaymentHistoryOpen(false);
+    setSelectedReceivableLoan(null);
+  };
+
+  const handleReceivableLoanDeleted = async (loanId) => {
+    setReceivableLoans((current) => current.filter((loan) => loan._id !== loanId));
+
+    await loadBusinessValue({
+      showLoader: false,
+    });
+  };
+
   const openPaymentForm = (liability) => {
     setSelectedLiability(liability);
     setPaymentFormOpen(true);
@@ -389,7 +493,7 @@ const BusinessValuePage = () => {
     [categories]
   );
 
-  if (!canViewBusinessValue && !canViewAssets && !canViewLiabilities) {
+  if (!canViewBusinessValue && !canViewAssets && !canViewLiabilities && !canViewReceivableLoans) {
     return <AccessDenied />;
   }
 
@@ -411,7 +515,7 @@ const BusinessValuePage = () => {
         )}
 
         <div className="sticky top-0 z-20 rounded-2xl border border-gray-200 bg-white/95 p-1.5 shadow-sm backdrop-blur-md">
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
             {visibleTabs.map((tab) => (
               <button
                 key={tab.key}
@@ -466,11 +570,14 @@ const BusinessValuePage = () => {
             <QuickManagement
               canViewAssets={canViewAssets}
               canViewLiabilities={canViewLiabilities}
+              canViewReceivableLoans={canViewReceivableLoans}
               assetsCount={assets.length}
               liabilitiesCount={liabilities.length}
+              receivableLoansCount={receivableLoans.length}
               categoriesCount={categories.length}
               onAssets={() => setActiveTab(TABS.ASSETS)}
               onLiabilities={() => setActiveTab(TABS.LIABILITIES)}
+              onReceivableLoans={() => setActiveTab(TABS.RECEIVABLE_LOANS)}
               onCategories={() => setCategoryManagerOpen(true)}
             />
           </div>
@@ -483,6 +590,18 @@ const BusinessValuePage = () => {
             onAdd={openNewAssetForm}
             onEdit={openEditAssetForm}
             onDeleted={handleAssetDeleted}
+          />
+        )}
+
+        {activeTab === TABS.RECEIVABLE_LOANS && canViewReceivableLoans && (
+          <BusinessReceivableLoanList
+            loans={receivableLoans}
+            loading={receivableLoansLoading}
+            onAdd={openNewReceivableLoanForm}
+            onEdit={openEditReceivableLoanForm}
+            onReceive={openReceivableLoanPayment}
+            onHistory={openReceivableLoanPaymentHistory}
+            onDeleted={handleReceivableLoanDeleted}
           />
         )}
 
@@ -546,6 +665,36 @@ const BusinessValuePage = () => {
         onChanged={handleLiabilitySaved}
       />
 
+      <BusinessReceivableLoanForm
+        isOpen={receivableLoanFormOpen}
+        loan={selectedReceivableLoan}
+        onClose={() => {
+          setReceivableLoanFormOpen(false);
+          setSelectedReceivableLoan(null);
+        }}
+        onSaved={handleReceivableLoanChanged}
+      />
+
+      <BusinessReceivableLoanPaymentForm
+        isOpen={receivableLoanPaymentOpen}
+        loan={selectedReceivableLoan}
+        onClose={() => {
+          setReceivableLoanPaymentOpen(false);
+          setSelectedReceivableLoan(null);
+        }}
+        onReceived={handleReceivableLoanChanged}
+      />
+
+      <BusinessReceivableLoanPaymentHistory
+        isOpen={receivableLoanPaymentHistoryOpen}
+        loan={selectedReceivableLoan}
+        onClose={() => {
+          setReceivableLoanPaymentHistoryOpen(false);
+          setSelectedReceivableLoan(null);
+        }}
+        onChanged={handleReceivableLoanChanged}
+      />
+
       <AssetCategoryManager
         isOpen={categoryManagerOpen}
         onClose={() => setCategoryManagerOpen(false)}
@@ -558,19 +707,22 @@ const BusinessValuePage = () => {
 const QuickManagement = ({
   canViewAssets,
   canViewLiabilities,
+  canViewReceivableLoans,
   assetsCount,
   liabilitiesCount,
+  receivableLoansCount,
   categoriesCount,
   onAssets,
   onLiabilities,
+  onReceivableLoans,
   onCategories,
 }) => {
-  if (!canViewAssets && !canViewLiabilities) {
+  if (!canViewAssets && !canViewLiabilities && !canViewReceivableLoans) {
     return null;
   }
 
   return (
-    <section className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {canViewAssets && (
         <ManagementCard
           title={t('businessValue.manageAssets')}
@@ -579,6 +731,17 @@ const QuickManagement = ({
           icon="🏢"
           gradient="from-indigo-600 to-blue-600"
           onClick={onAssets}
+        />
+      )}
+
+      {canViewReceivableLoans && (
+        <ManagementCard
+          title={t('businessValue.manageReceivableLoans')}
+          description={t('businessValue.manageReceivableLoansDescription')}
+          value={receivableLoansCount}
+          icon="🤝"
+          gradient="from-emerald-600 to-cyan-600"
+          onClick={onReceivableLoans}
         />
       )}
 

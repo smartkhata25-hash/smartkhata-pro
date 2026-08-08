@@ -155,6 +155,14 @@ const PERMISSIONS = {
     PAY: "business_liabilities.pay",
   },
 
+  BUSINESS_RECEIVABLE_LOANS: {
+    VIEW: "business_receivable_loans.view",
+    CREATE: "business_receivable_loans.create",
+    EDIT: "business_receivable_loans.edit",
+    DELETE: "business_receivable_loans.delete",
+    RECEIVE: "business_receivable_loans.receive",
+  },
+
   STAFF: {
     VIEW: "staff.view",
     CREATE: "staff.create",

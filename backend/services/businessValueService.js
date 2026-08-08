@@ -12,12 +12,15 @@ const Party = require("../models/Party");
 const BusinessAsset = require("../models/BusinessAsset");
 const BusinessLiability = require("../models/BusinessLiability");
 
+const BusinessReceivableLoan = require("../models/BusinessReceivableLoan");
+
 const AVAILABLE_COMPONENTS = [
   "inventory",
   "assets",
   "cash",
   "bank",
   "receivables",
+  "loan_receivables",
   "payables",
   "liabilities",
 ];
@@ -31,6 +34,7 @@ const PRESETS = {
     "cash",
     "bank",
     "receivables",
+    "loan_receivables",
     "payables",
   ],
 
@@ -40,6 +44,7 @@ const PRESETS = {
     "cash",
     "bank",
     "receivables",
+    "loan_receivables",
     "payables",
     "liabilities",
   ],
@@ -400,6 +405,47 @@ const getReceivablePayableValues = async (userId, accountBalances) => {
   };
 };
 
+const getLoanReceivablesValue = async (userId) => {
+  const result = await BusinessReceivableLoan.aggregate([
+    {
+      $match: {
+        userId,
+        isDeleted: false,
+        status: "active",
+        remainingAmount: {
+          $gt: 0,
+        },
+      },
+    },
+
+    {
+      $group: {
+        _id: null,
+
+        value: {
+          $sum: "$remainingAmount",
+        },
+
+        originalValue: {
+          $sum: "$originalAmount",
+        },
+
+        totalLoans: {
+          $sum: 1,
+        },
+      },
+    },
+  ]);
+
+  const data = result[0] || {};
+
+  return {
+    value: roundAmount(data.value),
+    originalValue: roundAmount(data.originalValue),
+    totalLoans: Number(data.totalLoans || 0),
+  };
+};
+
 const getManualLiabilitiesValue = async (userId) => {
   const result = await BusinessLiability.aggregate([
     {
@@ -488,17 +534,27 @@ const getBusinessValueSummary = async ({
       ? getAccountBalances(objectUserId)
       : Promise.resolve(null);
 
+  const loanReceivablesPromise = shouldInclude("loan_receivables")
+    ? getLoanReceivablesValue(objectUserId)
+    : Promise.resolve(null);
+
   const liabilitiesPromise = shouldInclude("liabilities")
     ? getManualLiabilitiesValue(objectUserId)
     : Promise.resolve(null);
 
-  const [inventoryData, assetsData, accountBalances, liabilitiesData] =
-    await Promise.all([
-      inventoryPromise,
-      assetsPromise,
-      accountBalancesPromise,
-      liabilitiesPromise,
-    ]);
+  const [
+    inventoryData,
+    assetsData,
+    accountBalances,
+    loanReceivablesData,
+    liabilitiesData,
+  ] = await Promise.all([
+    inventoryPromise,
+    assetsPromise,
+    accountBalancesPromise,
+    loanReceivablesPromise,
+    liabilitiesPromise,
+  ]);
 
   let receivablePayableData = null;
 
@@ -555,6 +611,16 @@ const getBusinessValueSummary = async ({
       effect: "positive",
       details: {
         totalAccounts: receivablePayableData?.receivableCount || 0,
+      },
+    }),
+
+    loan_receivables: createComponent({
+      included: shouldInclude("loan_receivables"),
+      value: loanReceivablesData?.value,
+      effect: "positive",
+      details: {
+        originalValue: loanReceivablesData?.originalValue || 0,
+        totalLoans: loanReceivablesData?.totalLoans || 0,
       },
     }),
 

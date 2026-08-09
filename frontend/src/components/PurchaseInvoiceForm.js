@@ -1,6 +1,6 @@
 // src/components/PurchaseInvoiceForm.js
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchSuppliers } from '../services/supplierService';
 import { fetchPurchaseParties } from '../services/partyService';
@@ -462,7 +462,9 @@ const PurchaseInvoiceForm = () => {
     }
   }, [isEdit]);
 
-  useFormPersist(!isEdit ? 'purchase_invoice_draft' : null, formState, () => {});
+  const stableDraftSetter = useCallback(() => {}, []);
+
+  useFormPersist(!isEdit ? 'purchase_invoice_draft' : null, formState, stableDraftSetter);
 
   const handleProductHistory = (productId) => {
     if (!productId) return;

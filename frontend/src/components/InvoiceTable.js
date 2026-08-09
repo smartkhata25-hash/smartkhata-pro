@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import ProductDropdown from './ProductDropdown';
 import { t } from '../i18n/i18n';
 
@@ -17,6 +17,62 @@ const InvoiceTable = ({
   const qtyRefs = useRef([]);
   const rateRefs = useRef([]);
   const itemRefs = useRef([]);
+
+  useEffect(() => {
+    const createdProductId = localStorage.getItem('lastCreatedProductId');
+    const createdProductRow = localStorage.getItem('lastCreatedProductRow');
+
+    if (!createdProductId || createdProductRow === null) return;
+    if (!products || products.length === 0) return;
+
+    const rowIndex = Number(createdProductRow);
+
+    if (Number.isNaN(rowIndex)) return;
+    if (!items[rowIndex]) return;
+
+    const product = products.find((p) => p._id === createdProductId);
+
+    if (!product) return;
+
+    const updated = [...items];
+
+    const qty = Number(updated[rowIndex].quantity) || 1;
+
+    updated[rowIndex] = {
+      ...updated[rowIndex],
+
+      search: product.name,
+      name: product.name,
+      productId: product._id,
+      description: product.description || '',
+
+      ...(mode !== 'purchase' && {
+        cost: product.unitCost || 0,
+        rate: product.salePrice || 0,
+        amount: qty * (product.salePrice || 0),
+      }),
+
+      ...(mode === 'purchase' && {
+        cost: product.salePrice || 0,
+        rate: product.unitCost || 0,
+        amount: qty * (product.unitCost || 0),
+      }),
+
+      quantity: qty,
+    };
+
+    setItems(updated);
+
+    onProductChange && onProductChange(product._id, rowIndex);
+
+    localStorage.removeItem('lastCreatedProductId');
+    localStorage.removeItem('lastCreatedProductRow');
+    localStorage.removeItem('lastCreatedProductQuery');
+
+    setTimeout(() => {
+      qtyRefs.current[rowIndex]?.focus();
+    }, 100);
+  }, [products, items, mode, setItems, onProductChange]);
 
   const blankRow = () => ({
     search: '',

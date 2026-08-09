@@ -19,7 +19,6 @@ const ACTION_LABELS = {
   export: 'Export',
   print: 'Print',
   adjust: 'Adjust',
-
   receive_payment: 'Receive Payment',
   pay_bill: 'Pay Bill',
   view_cost: 'View Cost',

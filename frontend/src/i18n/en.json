@@ -1454,5 +1454,22 @@
   "businessValue.noReceivableLoanPaymentHistoryDescription": "No repayment has been recorded for this loan yet.",
   "businessValue.receivableLoansLoadFailed": "Loans and advances could not be loaded.",
   "businessValue.manageReceivableLoans": "Loans & Advances Given",
-  "businessValue.manageReceivableLoansDescription": "Manage money given by the business and track repayments."
+  "businessValue.manageReceivableLoansDescription": "Manage money given by the business and track repayments.",
+
+  "auth.sendingCode": "Sending code...",
+  "auth.continue": "Continue",
+  "auth.resetSessionExpired": "Your password reset session has expired. Please start again.",
+  "auth.enterNewPassword": "Please enter and confirm your new password",
+  "auth.passwordMinLength": "Password must be at least 6 characters",
+  "auth.passwordsDoNotMatch": "Passwords do not match",
+  "auth.newPassword": "New Password",
+  "auth.enterNewPasswordPlaceholder": "Enter new password",
+  "auth.confirmPassword": "Confirm Password",
+  "auth.confirmPasswordPlaceholder": "Enter password again",
+  "auth.resettingPassword": "Resetting password...",
+  "auth.verificationCode": "Verification Code",
+  "auth.invalidOtpFormat": "Verification code must be 6 digits",
+  "auth.verifyOtp": "Verify Code",
+  "auth.verifyingOtp": "Verifying code...",
+  "auth.otpVerified": "Verification code confirmed successfully"
 }

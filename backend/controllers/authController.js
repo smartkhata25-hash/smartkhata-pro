@@ -2,6 +2,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 
 const UserDevice = require("../models/UserDevice");
 const Installation = require("../models/Installation");
@@ -477,8 +478,12 @@ const forgotPassword = async (req, res) => {
     }
 
     const user = await User.findOne({
-      email: cleanEmail,
-    });
+      email: {
+        $regex: `^${escapeRegex(cleanEmail)}$`,
+        $options: "i",
+      },
+      $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+    }).select("_id email staffStatus accountRole");
 
     if (!user) {
       return res.status(404).json({
@@ -486,7 +491,13 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    if (user.accountRole === "staff" && user.staffStatus === "blocked") {
+      return res.status(403).json({
+        msg: "Your account has been blocked",
+      });
+    }
+
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
     await PasswordReset.deleteMany({
       email: cleanEmail,
@@ -495,12 +506,28 @@ const forgotPassword = async (req, res) => {
     await PasswordReset.create({
       email: cleanEmail,
       otp,
+      isVerified: false,
+      resetToken: null,
+      resetTokenExpiresAt: null,
+      attempts: 0,
     });
 
-    await sendEmail(cleanEmail, otp);
+    try {
+      await sendEmail(cleanEmail, otp);
+    } catch (emailError) {
+      await PasswordReset.deleteMany({
+        email: cleanEmail,
+      });
+
+      console.error("Password Reset Email Error:", emailError.message);
+
+      return res.status(500).json({
+        msg: "Unable to send verification code. Please try again.",
+      });
+    }
 
     return res.json({
-      msg: "OTP sent to email",
+      msg: "Verification code sent to your email",
     });
   } catch (err) {
     console.error("Forgot Password Error:", err);
@@ -520,23 +547,67 @@ const verifyOtp = async (req, res) => {
 
     if (!cleanEmail || !otp) {
       return res.status(400).json({
-        msg: "Email and OTP are required",
+        msg: "Email and verification code are required",
+      });
+    }
+
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({
+        msg: "Verification code must be 6 digits",
       });
     }
 
     const record = await PasswordReset.findOne({
       email: cleanEmail,
-      otp,
     });
 
     if (!record) {
       return res.status(400).json({
-        msg: "Invalid or expired OTP",
+        msg: "Verification code has expired. Please request a new code.",
       });
     }
 
+    if (record.isVerified) {
+      return res.status(400).json({
+        msg: "Verification code has already been used",
+      });
+    }
+
+    if (record.attempts >= 5) {
+      await PasswordReset.deleteOne({
+        _id: record._id,
+      });
+
+      return res.status(429).json({
+        msg: "Too many incorrect attempts. Please request a new code.",
+      });
+    }
+
+    if (record.otp !== otp) {
+      record.attempts += 1;
+      await record.save();
+
+      const attemptsLeft = Math.max(0, 5 - record.attempts);
+
+      return res.status(400).json({
+        msg:
+          attemptsLeft > 0
+            ? `Invalid verification code. ${attemptsLeft} attempts remaining.`
+            : "Too many incorrect attempts. Please request a new code.",
+      });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+
+    record.isVerified = true;
+    record.resetToken = resetToken;
+    record.resetTokenExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await record.save();
+
     return res.json({
-      msg: "OTP verified",
+      msg: "Verification successful",
+      resetToken,
     });
   } catch (err) {
     console.error("Verify OTP Error:", err);
@@ -552,25 +623,33 @@ const verifyOtp = async (req, res) => {
 const resetPassword = async (req, res) => {
   try {
     const cleanEmail = normalizeEmail(req.body.email);
-    const newPassword = req.body.newPassword;
+    const newPassword = String(req.body.newPassword || "");
+    const resetToken = String(req.body.resetToken || "").trim();
 
-    const allowedEmail = "muzammilarain85@gmail.com";
-
-    if (!cleanEmail || !newPassword) {
+    if (!cleanEmail || !newPassword || !resetToken) {
       return res.status(400).json({
-        msg: "Email and new password are required",
+        msg: "Email, new password and reset authorization are required",
       });
     }
 
-    if (cleanEmail !== allowedEmail) {
-      return res.status(403).json({
-        msg: "Password reset is not allowed for this email",
-      });
-    }
-
-    if (String(newPassword).length < 6) {
+    if (newPassword.length < 6) {
       return res.status(400).json({
         msg: "Password must be at least 6 characters",
+      });
+    }
+
+    const resetRecord = await PasswordReset.findOne({
+      email: cleanEmail,
+      isVerified: true,
+      resetToken,
+      resetTokenExpiresAt: {
+        $gt: new Date(),
+      },
+    });
+
+    if (!resetRecord) {
+      return res.status(401).json({
+        msg: "Password reset session is invalid or expired. Please start again.",
       });
     }
 
@@ -579,11 +658,22 @@ const resetPassword = async (req, res) => {
         $regex: `^${escapeRegex(cleanEmail)}$`,
         $options: "i",
       },
+      $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
     });
 
     if (!user) {
+      await PasswordReset.deleteMany({
+        email: cleanEmail,
+      });
+
       return res.status(404).json({
         msg: "User not found",
+      });
+    }
+
+    if (user.accountRole === "staff" && user.staffStatus === "blocked") {
+      return res.status(403).json({
+        msg: "Your account has been blocked",
       });
     }
 
@@ -594,7 +684,6 @@ const resetPassword = async (req, res) => {
 
     await user.save();
 
-    // Offline login password بھی Update ہوگا
     await LocalSession.updateMany(
       {
         userId: user._id,
@@ -605,6 +694,10 @@ const resetPassword = async (req, res) => {
         },
       },
     );
+
+    await PasswordReset.deleteMany({
+      email: cleanEmail,
+    });
 
     return res.json({
       msg: "Password reset successful",

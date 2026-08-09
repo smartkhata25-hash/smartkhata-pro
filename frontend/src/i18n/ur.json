@@ -1455,5 +1455,22 @@
   "businessValue.noReceivableLoanPaymentHistoryDescription": "اس قرض کے لیے ابھی کوئی رقم واپس وصول نہیں کی گئی۔",
   "businessValue.receivableLoansLoadFailed": "دیے گئے قرض اور ایڈوانس لوڈ نہیں ہو سکے۔",
   "businessValue.manageReceivableLoans": "دیے گئے قرض اور ایڈوانس",
-  "businessValue.manageReceivableLoansDescription": "کاروبار کی طرف سے دی گئی رقم اور اس کی واپسی کا ریکارڈ سنبھالیں۔"
+  "businessValue.manageReceivableLoansDescription": "کاروبار کی طرف سے دی گئی رقم اور اس کی واپسی کا ریکارڈ سنبھالیں۔",
+  "auth.sendingCode": "کوڈ بھیجا جا رہا ہے...",
+  "auth.continue": "آگے جائیں",
+  "auth.resetSessionExpired": "آپ کا پاس ورڈ ری سیٹ سیشن ختم ہو گیا ہے۔ دوبارہ شروع کریں۔",
+  "auth.enterNewPassword": "نیا پاس ورڈ اور اس کی تصدیق درج کریں",
+  "auth.passwordMinLength": "پاس ورڈ کم از کم 6 حروف کا ہونا چاہیے",
+  "auth.passwordsDoNotMatch": "دونوں پاس ورڈ ایک جیسے نہیں ہیں",
+  "auth.newPassword": "نیا پاس ورڈ",
+  "auth.enterNewPasswordPlaceholder": "نیا پاس ورڈ درج کریں",
+  "auth.confirmPassword": "پاس ورڈ کی تصدیق",
+  "auth.confirmPasswordPlaceholder": "پاس ورڈ دوبارہ درج کریں",
+  "auth.resettingPassword": "پاس ورڈ تبدیل ہو رہا ہے...",
+  "auth.verificationCode": "تصدیقی کوڈ",
+
+  "auth.invalidOtpFormat": "تصدیقی کوڈ 6 ہندسوں کا ہونا چاہیے",
+  "auth.verifyOtp": "کوڈ کی تصدیق کریں",
+  "auth.verifyingOtp": "کوڈ کی تصدیق ہو رہی ہے...",
+  "auth.otpVerified": "تصدیقی کوڈ کامیابی سے درست ثابت ہو گیا"
 }

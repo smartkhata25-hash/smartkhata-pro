@@ -2,25 +2,43 @@ const { t } = require("../i18n/i18n");
 
 // 📁 templates/partyLedgerTemplate.js
 
-const formatMoney = (value) => {
-  const num = Number(value || 0);
+const escapeHtml = (value, fallback = "") => {
+  const text = String(value ?? "").trim() || fallback;
 
-  if (num < 0) {
-    return `(${Math.abs(num).toFixed(2)})`;
-  }
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
+
+const safeNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const formatMoney = (value) => {
+  const num = safeNumber(value);
 
   return num.toFixed(2);
 };
 
 const getRoleLabel = (role, lang) => {
-  if (role === "customer") return t("customer", lang);
-  if (role === "supplier") return t("supplier", lang);
+  if (role === "customer") {
+    return t("customer", lang);
+  }
+
+  if (role === "supplier") {
+    return t("supplier", lang);
+  }
 
   return lang === "ur" ? "کسٹمر + سپلائر" : "Customer + Supplier";
 };
 
 const generatePartyLedgerHTML = (data, pageSize = "A5") => {
   const lang = data?.lang || "ur";
+  const dir = lang === "ur" ? "rtl" : "ltr";
 
   const {
     documentTitle = "Party Ledger",
@@ -30,18 +48,23 @@ const generatePartyLedgerHTML = (data, pageSize = "A5") => {
     rows = [],
   } = data || {};
 
-  const isA5 = pageSize === "A5";
+  const safePageSize = pageSize === "A4" ? "A4" : "A5";
+
+  const isA5 = safePageSize === "A5";
+
+  const title = lang === "ur" ? "پارٹی حساب" : documentTitle || "Party Ledger";
 
   return `
 <!DOCTYPE html>
-<html>
+<html lang="${escapeHtml(lang)}" dir="${dir}">
 <head>
 <meta charset="UTF-8" />
-<title>${documentTitle}</title>
+
+<title>${escapeHtml(title)}</title>
 
 <style>
 @page {
-  size: ${pageSize};
+  size: ${safePageSize};
   margin: 5mm;
 }
 
@@ -55,14 +78,13 @@ body {
   margin: 0;
   color: #000;
   background: #fff;
+  direction: ${dir};
 }
 
 .container {
   width: 100%;
   margin: 0;
 }
-
-/* ===== HEADER ===== */
 
 .header {
   text-align: center;
@@ -83,8 +105,6 @@ body {
   line-height: 1.5;
 }
 
-/* ===== SUMMARY ===== */
-
 .summary {
   margin-top: ${isA5 ? "6px" : "10px"};
   margin-bottom: ${isA5 ? "6px" : "12px"};
@@ -94,8 +114,6 @@ body {
   border: 2px solid #000;
   line-height: 1.6;
 }
-
-/* ===== TABLE ===== */
 
 table {
   width: 100%;
@@ -138,16 +156,14 @@ td {
 }
 
 td.right {
-  text-align: right;
+  text-align: ${lang === "ur" ? "left" : "right"};
   padding-right: ${isA5 ? "6px" : "10px"};
 }
 
 td.left {
-  text-align: left;
+  text-align: ${lang === "ur" ? "right" : "left"};
   padding-left: ${isA5 ? "6px" : "8px"};
 }
-
-/* ===== ROW TYPES ===== */
 
 .opening-row td {
   font-weight: 900;
@@ -160,8 +176,6 @@ td.left {
   background: #f5f5f5;
 }
 
-/* ===== FOOTER ===== */
-
 .footer {
   margin-top: ${isA5 ? "8px" : "14px"};
   text-align: center;
@@ -170,8 +184,6 @@ td.left {
   padding-top: 6px;
   font-weight: 700;
 }
-
-/* ===== PRINT ===== */
 
 @media print {
   body {
@@ -186,74 +198,183 @@ td.left {
 <div class="container">
 
   <div class="header">
-    <h2>${lang === "ur" ? "پارٹی حساب" : "Party Ledger"}</h2>
+
+    <h2>${escapeHtml(title)}</h2>
 
     <div class="sub-info">
-      ${t("common.party", lang)}: ${party.name || "-"}
-      ${party.phone ? `&nbsp;&nbsp; | &nbsp;&nbsp; ${t("phone", lang)}: ${party.phone}` : ""}
+
+      ${escapeHtml(t("common.party", lang))}:
+      ${escapeHtml(party.name, "-")}
+
+      ${
+        party.phone
+          ? `
+            &nbsp;&nbsp; | &nbsp;&nbsp;
+            ${escapeHtml(t("phone", lang))}:
+            ${escapeHtml(party.phone)}
+          `
+          : ""
+      }
+
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("common.type", lang)}: ${getRoleLabel(party.role, lang)}
+
+      ${escapeHtml(t("common.type", lang))}:
+      ${escapeHtml(getRoleLabel(party.role, lang))}
+
       <br/>
-      ${t("common.from", lang)}: ${period.from || t("ledger.allDates", lang)}
+
+      ${escapeHtml(t("common.from", lang))}:
+      ${escapeHtml(period.from || t("ledger.allDates", lang))}
+
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("date.to", lang)}: ${period.to || t("ledger.allDates", lang)}
+
+      ${escapeHtml(t("date.to", lang))}:
+      ${escapeHtml(period.to || t("ledger.allDates", lang))}
+
     </div>
   </div>
 
   <div class="summary">
-    ${t("ledger.opening", lang)}: ${formatMoney(summary.opening)} |
-    ${t("debit", lang)}: ${formatMoney(summary.totalDebit)} |
-    ${t("credit", lang)}: ${formatMoney(summary.totalCredit)} |
-    ${t("ledger.closing", lang)}: ${formatMoney(summary.closingBalance)}
+
+    ${escapeHtml(t("ledger.opening", lang))}:
+    ${formatMoney(summary.opening)}
+
+    |
+
+    ${escapeHtml(t("debit", lang))}:
+    ${formatMoney(summary.totalDebit)}
+
+    |
+
+    ${escapeHtml(t("credit", lang))}:
+    ${formatMoney(summary.totalCredit)}
+
+    |
+
+    ${escapeHtml(t("ledger.closing", lang))}:
+    ${formatMoney(summary.closingBalance)}
+
   </div>
 
   <table>
+
     <thead>
       <tr>
-        <th style="width:15%">${t("date", lang)}</th>
-        <th style="width:15%">${t("billNo", lang)}</th>
-        <th style="width:25%">${t("source", lang)}</th>
-        <th style="width:15%">${t("debit", lang)}</th>
-        <th style="width:15%">${t("credit", lang)}</th>
-        <th style="width:15%">${t("balance", lang)}</th>
+        <th style="width:15%">
+          ${escapeHtml(t("date", lang))}
+        </th>
+
+        <th style="width:15%">
+          ${escapeHtml(t("billNo", lang))}
+        </th>
+
+        <th style="width:25%">
+          ${escapeHtml(t("source", lang))}
+        </th>
+
+        <th style="width:15%">
+          ${escapeHtml(t("debit", lang))}
+        </th>
+
+        <th style="width:15%">
+          ${escapeHtml(t("credit", lang))}
+        </th>
+
+        <th style="width:15%">
+          ${escapeHtml(t("balance", lang))}
+        </th>
       </tr>
     </thead>
 
     <tbody>
+
       ${
-        rows?.length
+        Array.isArray(rows) && rows.length > 0
           ? rows
-              .map(
-                (row) => `
-        <tr class="${row.type === "opening" ? "opening-row" : ""}">
-          <td>${row.date || "-"}</td>
-          <td>${row.billNo || "-"}</td>
-          <td class="left">${row.source || "-"}</td>
-          <td>${row.debit !== null && row.debit !== undefined ? formatMoney(row.debit) : "-"}</td>
-          <td>${row.credit !== null && row.credit !== undefined ? formatMoney(row.credit) : "-"}</td>
-          <td>${formatMoney(row.balance)}</td>
-        </tr>
-      `,
-              )
+              .map((row) => {
+                const isOpening = [
+                  "opening_sale_invoice",
+                  "opening_refund_invoice",
+                  "opening_purchase_invoice",
+                  "opening_purchase_return",
+                  "opening_balance",
+                ].includes(row.sourceType);
+
+                return `
+                  <tr class="${isOpening ? "opening-row" : ""}">
+
+                    <td>
+                      ${escapeHtml(row.date || "-")}
+                    </td>
+
+                    <td>
+                      ${escapeHtml(row.billNo || "-")}
+                    </td>
+
+                    <td class="left">
+                      ${escapeHtml(row.source || "-")}
+                    </td>
+
+                    <td>
+                      ${
+                        row.debit !== null && row.debit !== undefined
+                          ? formatMoney(row.debit)
+                          : "-"
+                      }
+                    </td>
+
+                    <td>
+                      ${
+                        row.credit !== null && row.credit !== undefined
+                          ? formatMoney(row.credit)
+                          : "-"
+                      }
+                    </td>
+
+                    <td>
+                      ${formatMoney(row.balance)}
+                    </td>
+
+                  </tr>
+                `;
+              })
               .join("")
           : `
-        <tr>
-          <td colspan="6">${t("ledger.noTransactions", lang)}</td>
-        </tr>
-      `
+            <tr>
+              <td colspan="6">
+                ${escapeHtml(t("ledger.noTransactions", lang))}
+              </td>
+            </tr>
+          `
       }
 
       <tr class="totals-row">
-        <td colspan="3" class="right">${t("totals", lang)}:</td>
-        <td>${formatMoney(summary.totalDebit)}</td>
-        <td>${formatMoney(summary.totalCredit)}</td>
-        <td>${formatMoney(summary.closingBalance)}</td>
+
+        <td colspan="3" class="right">
+          ${escapeHtml(t("totals", lang))}:
+        </td>
+
+        <td>
+          ${formatMoney(summary.totalDebit)}
+        </td>
+
+        <td>
+          ${formatMoney(summary.totalCredit)}
+        </td>
+
+        <td>
+          ${formatMoney(summary.closingBalance)}
+        </td>
+
       </tr>
+
     </tbody>
   </table>
 
   <div class="footer">
-    ${t("app.name", lang)} • ${new Date().toLocaleDateString("en-GB")}
+    ${escapeHtml(t("app.name", lang))}
+    •
+    ${escapeHtml(new Date().toLocaleDateString("en-GB"))}
   </div>
 
 </div>

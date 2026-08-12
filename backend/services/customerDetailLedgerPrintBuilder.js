@@ -2,21 +2,27 @@
 
 const formatDate = (date) => {
   if (!date) return "-";
+
   const d = new Date(date);
-  if (isNaN(d)) return "-";
+
+  if (isNaN(d.getTime())) return "-";
+
   return d.toLocaleDateString("en-GB");
 };
 
 const safeNumber = (value) => {
   const num = Number(value);
-  return isNaN(num) ? 0 : num;
+
+  return Number.isFinite(num) ? num : 0;
 };
 
-// Source Label Resolver
 const resolveSourceLabel = (type) => {
   switch (type) {
     case "opening_sale_invoice":
-      return "Opening Sale Invoice";
+      return "Opening Balance";
+
+    case "opening_refund_invoice":
+      return "Opening Balance";
 
     case "sale_invoice":
       return "Sale Invoice";
@@ -27,6 +33,9 @@ const resolveSourceLabel = (type) => {
     case "receive_payment":
       return "Receive Payment";
 
+    case "receive_payment_discount":
+      return "Receive Payment Discount";
+
     case "opening_balance":
       return "Opening Balance";
 
@@ -34,8 +43,6 @@ const resolveSourceLabel = (type) => {
       return "-";
   }
 };
-
-// Normalize Items
 
 const normalizeItems = (items = []) => {
   if (!Array.isArray(items)) return [];
@@ -48,29 +55,20 @@ const normalizeItems = (items = []) => {
   }));
 };
 
-/* ================================
-   Main Builder
-================================ */
-
 const buildCustomerDetailLedgerPrint = ({
   customerName,
   startDate,
   endDate,
   openingBalance = 0,
-  customerOpeningBalance = 0,
   ledger = [],
 }) => {
-  const opening = safeNumber(customerOpeningBalance || openingBalance);
+  const opening = safeNumber(openingBalance);
 
-  let runningBalance = 0;
+  let runningBalance = opening;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const blocks = [];
-
-  /* ================================
-     Ledger Blocks
-  ================================ */
 
   if (Array.isArray(ledger)) {
     for (const entry of ledger) {
@@ -82,10 +80,13 @@ const buildCustomerDetailLedgerPrint = ({
 
       runningBalance += debit - credit;
 
-      const block = {
+      blocks.push({
         type: "entry",
 
-        key: entry.referenceId || entry._id || Math.random().toString(),
+        key:
+          entry.referenceId ||
+          entry._id ||
+          `${entry.date || ""}-${entry.billNo || ""}-${blocks.length}`,
 
         billNo: entry.billNo || "-",
 
@@ -93,7 +94,7 @@ const buildCustomerDetailLedgerPrint = ({
 
         sourceType: entry.sourceType || "",
 
-        sourceLabel: entry.sourceLabel || "",
+        sourceLabel: entry.sourceLabel || resolveSourceLabel(entry.sourceType),
 
         items: normalizeItems(entry.items),
 
@@ -101,23 +102,13 @@ const buildCustomerDetailLedgerPrint = ({
 
         credit: credit > 0 ? credit : null,
 
-        balance: runningBalance,
-      };
-
-      blocks.push(block);
+        balance: Number(runningBalance.toFixed(2)),
+      });
     }
   }
 
-  /* ================================
-     Closing Balance
-  ================================ */
-
   const closingBalance =
-    blocks.length > 1 ? blocks[blocks.length - 1].balance : opening;
-
-  /* ================================
-     Final Print Object
-  ================================ */
+    blocks.length > 0 ? blocks[blocks.length - 1].balance : opening;
 
   return {
     documentTitle: "Customer Detailed Ledger",
@@ -132,10 +123,10 @@ const buildCustomerDetailLedgerPrint = ({
     },
 
     summary: {
-      opening,
-      totalDebit,
-      totalCredit,
-      closingBalance,
+      opening: Number(opening.toFixed(2)),
+      totalDebit: Number(totalDebit.toFixed(2)),
+      totalCredit: Number(totalCredit.toFixed(2)),
+      closingBalance: Number(closingBalance.toFixed(2)),
     },
 
     blocks,

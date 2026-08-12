@@ -10,9 +10,57 @@ const generateCustomerDetailLedgerHTML = require("../templates/customerDetailLed
 
 const { generatePdfFromHtml } = require("../services/pdfService");
 
-/* =========================================================
-   INTERNAL: Fetch Customer Detailed Ledger Data
-========================================================= */
+const getStartOfDay = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) return null;
+
+  date.setHours(0, 0, 0, 0);
+
+  return date;
+};
+
+const getEndOfDay = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) return null;
+
+  date.setHours(23, 59, 59, 999);
+
+  return date;
+};
+
+const resolveSourceLabel = (sourceType) => {
+  switch (sourceType) {
+    case "opening_sale_invoice":
+      return "Opening Balance";
+
+    case "opening_refund_invoice":
+      return "Opening Balance";
+
+    case "sale_invoice":
+      return "Sale Invoice";
+
+    case "refund_invoice":
+      return "Refund Invoice";
+
+    case "receive_payment":
+      return "Receive Payment";
+
+    case "receive_payment_discount":
+      return "Receive Payment Discount";
+
+    case "opening_balance":
+      return "Opening Balance";
+
+    default:
+      return "-";
+  }
+};
 
 const fetchCustomerDetailedLedgerData = async ({
   customerId,
@@ -20,37 +68,60 @@ const fetchCustomerDetailedLedgerData = async ({
   startDate,
   endDate,
 }) => {
+  if (!mongoose.Types.ObjectId.isValid(customerId)) {
+    throw new Error("Invalid customer ID");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid user ID");
+  }
+
+  const customerObjectId = new mongoose.Types.ObjectId(customerId);
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+
   const customer = await Customer.findOne({
-    _id: customerId,
-    createdBy: userId,
-  }).populate("account");
+    _id: customerObjectId,
+    createdBy: userObjectId,
+  })
+    .populate("account")
+    .lean();
 
   if (!customer || !customer.account) {
     throw new Error("Customer not found");
   }
 
-  const accountId = customer.account._id.toString();
+  const accountObjectId =
+    customer.account?._id instanceof mongoose.Types.ObjectId
+      ? customer.account._id
+      : new mongoose.Types.ObjectId(customer.account);
 
-  /* ================================
-     Opening Balance
-  ================================ */
+  const accountId = accountObjectId.toString();
+
+  const start = getStartOfDay(startDate);
+  const end = getEndOfDay(endDate);
 
   let openingBalance = 0;
 
-  if (startDate) {
+  if (start) {
     const result = await JournalEntry.aggregate([
       {
         $match: {
-          createdBy: new mongoose.Types.ObjectId(userId),
-          customerId: customer._id,
+          createdBy: userObjectId,
+          customerId: customerObjectId,
           isDeleted: false,
-          date: { $lt: new Date(startDate) },
+          sourceType: { $ne: "reversal" },
+          "lines.account": accountObjectId,
+          date: {
+            $lt: start,
+          },
         },
       },
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
       {
         $match: {
-          "lines.account": new mongoose.Types.ObjectId(accountId),
+          "lines.account": accountObjectId,
         },
       },
       {
@@ -59,9 +130,13 @@ const fetchCustomerDetailedLedgerData = async ({
           balance: {
             $sum: {
               $cond: [
-                { $eq: ["$lines.type", "debit"] },
+                {
+                  $eq: ["$lines.type", "debit"],
+                },
                 "$lines.amount",
-                { $multiply: ["$lines.amount", -1] },
+                {
+                  $multiply: ["$lines.amount", -1],
+                },
               ],
             },
           },
@@ -69,168 +144,224 @@ const fetchCustomerDetailedLedgerData = async ({
       },
     ]);
 
-    openingBalance = result[0]?.balance || 0;
+    openingBalance = Number(result[0]?.balance || 0);
   }
 
-  /* ================================
-     Ledger Entries
-  ================================ */
-
   const matchFilter = {
-    createdBy: userId,
-    customerId: customer._id,
+    createdBy: userObjectId,
+    customerId: customerObjectId,
     isDeleted: false,
+    sourceType: { $ne: "reversal" },
+    "lines.account": accountObjectId,
   };
 
-  if (startDate && endDate) {
-    const s = new Date(startDate);
-    s.setHours(0, 0, 0, 0);
+  if (start || end) {
+    matchFilter.date = {};
 
-    const e = new Date(endDate);
-    e.setHours(23, 59, 59, 999);
+    if (start) {
+      matchFilter.date.$gte = start;
+    }
 
-    matchFilter.date = { $gte: s, $lte: e };
+    if (end) {
+      matchFilter.date.$lte = end;
+    }
   }
 
   const journals = await JournalEntry.find(matchFilter)
-    .sort({ date: 1, time: 1 })
+    .select(
+      [
+        "date",
+        "time",
+        "billNo",
+        "description",
+        "sourceType",
+        "lines.account",
+        "lines.type",
+        "lines.amount",
+        "invoiceId",
+        "referenceId",
+      ].join(" "),
+    )
+    .sort({
+      date: 1,
+      time: 1,
+      _id: 1,
+    })
     .lean();
-
-  let balance = openingBalance;
-  let customerOpeningBalance = 0;
 
   const ledger = [];
 
-  /* ================================
-     Collect Invoice IDs
-  ================================ */
-
-  const saleInvoiceIds = [];
-  const refundInvoiceIds = [];
+  const saleInvoiceIds = new Set();
+  const refundInvoiceIds = new Set();
 
   for (const entry of journals) {
+    if (!Array.isArray(entry.lines)) {
+      continue;
+    }
+
     const customerLines = entry.lines.filter(
-      (l) => l.account?.toString() === accountId,
+      (line) => line.account?.toString() === accountId,
     );
 
-    if (customerLines.length === 0) continue;
+    if (customerLines.length === 0) {
+      continue;
+    }
 
     let debit = 0;
     let credit = 0;
 
     for (const line of customerLines) {
-      if (line.type === "debit") debit += line.amount;
-      if (line.type === "credit") credit += line.amount;
-    }
+      const amount = Number(line.amount || 0);
 
-    balance += debit - credit;
-    if (
-      ["opening_sale_invoice", "opening_refund_invoice"].includes(
-        entry.sourceType,
-      )
-    ) {
-      customerOpeningBalance += debit - credit;
+      if (line.type === "debit") {
+        debit += amount;
+      }
+
+      if (line.type === "credit") {
+        credit += amount;
+      }
     }
 
     const row = {
       _id: entry._id,
+
       referenceId: entry.referenceId || entry._id,
-      invoiceId: entry.invoiceId,
+
+      invoiceId: entry.invoiceId || null,
+
       date: entry.date,
+
+      time: entry.time || "",
+
       billNo: entry.billNo || "",
-      sourceType: entry.sourceType,
+
+      description: entry.description || "",
+
+      sourceType: entry.sourceType || "",
+
+      sourceLabel: resolveSourceLabel(entry.sourceType),
+
       debit,
+
       credit,
-      balance,
+
       items: [],
     };
 
-    if (entry.sourceType === "sale_invoice" && entry.invoiceId) {
-      saleInvoiceIds.push(entry.invoiceId.toString());
+    if (
+      ["sale_invoice", "opening_sale_invoice"].includes(entry.sourceType) &&
+      entry.invoiceId
+    ) {
+      saleInvoiceIds.add(entry.invoiceId.toString());
     }
 
-    if (entry.sourceType === "refund_invoice" && entry.invoiceId) {
-      refundInvoiceIds.push(entry.invoiceId.toString());
+    if (
+      ["refund_invoice", "opening_refund_invoice"].includes(entry.sourceType) &&
+      entry.invoiceId
+    ) {
+      refundInvoiceIds.add(entry.invoiceId.toString());
     }
 
     ledger.push(row);
   }
 
-  /* ================================
-     Batch Fetch Invoices
-  ================================ */
+  const saleIds = Array.from(saleInvoiceIds);
+  const refundIds = Array.from(refundInvoiceIds);
 
-  const invoices = await Invoice.find({
-    _id: { $in: saleInvoiceIds },
-  })
-    .populate("items.productId", "name")
-    .lean();
+  const [invoices, refunds] = await Promise.all([
+    saleIds.length
+      ? Invoice.find({
+          _id: {
+            $in: saleIds,
+          },
+          createdBy: userObjectId,
+          isDeleted: { $ne: true },
+        })
+          .select("items totalAmount")
+          .populate("items.productId", "name")
+          .lean()
+      : [],
 
-  const refunds = await RefundInvoice.find({
-    _id: { $in: refundInvoiceIds },
-  })
-    .populate("items.productId", "name")
-    .lean();
+    refundIds.length
+      ? RefundInvoice.find({
+          _id: {
+            $in: refundIds,
+          },
+          createdBy: userObjectId,
+          isDeleted: { $ne: true },
+        })
+          .select("items totalAmount")
+          .populate("items.productId", "name")
+          .lean()
+      : [],
+  ]);
 
   const invoiceMap = new Map();
   const refundMap = new Map();
 
-  for (const inv of invoices) {
-    invoiceMap.set(inv._id.toString(), inv);
+  for (const invoice of invoices) {
+    invoiceMap.set(invoice._id.toString(), invoice);
   }
 
-  for (const ref of refunds) {
-    refundMap.set(ref._id.toString(), ref);
+  for (const refund of refunds) {
+    refundMap.set(refund._id.toString(), refund);
   }
-
-  /* ================================
-     Attach Items to Ledger Rows
-  ================================ */
 
   for (const row of ledger) {
-    if (row.sourceType === "sale_invoice" && row.invoiceId) {
-      const inv = invoiceMap.get(row.invoiceId.toString());
+    if (
+      ["sale_invoice", "opening_sale_invoice"].includes(row.sourceType) &&
+      row.invoiceId
+    ) {
+      const invoice = invoiceMap.get(row.invoiceId.toString());
 
-      if (inv && Array.isArray(inv.items)) {
-        row.items = inv.items.map((it) => ({
-          productName: it.productId?.name || "Product",
-          quantity: it.quantity,
-          rate: it.price,
-          total: it.total,
-        }));
+      if (invoice) {
+        row.invoiceTotal = Number(invoice.totalAmount || 0);
+
+        if (Array.isArray(invoice.items)) {
+          row.items = invoice.items.map((item) => ({
+            productName: item.productId?.name || "Product",
+            quantity: Number(item.quantity || 0),
+            rate: Number(item.price || 0),
+            total: Number(item.total || 0),
+          }));
+        }
       }
     }
 
-    if (row.sourceType === "refund_invoice" && row.invoiceId) {
-      const ref = refundMap.get(row.invoiceId.toString());
+    if (
+      ["refund_invoice", "opening_refund_invoice"].includes(row.sourceType) &&
+      row.invoiceId
+    ) {
+      const refund = refundMap.get(row.invoiceId.toString());
 
-      if (ref && Array.isArray(ref.items)) {
-        row.items = ref.items.map((it) => ({
-          productName: it.productId?.name || "Product",
-          quantity: it.quantity,
-          rate: it.price,
-          total: it.total,
-        }));
+      if (refund) {
+        row.invoiceTotal = Number(refund.totalAmount || 0);
+
+        if (Array.isArray(refund.items)) {
+          row.items = refund.items.map((item) => ({
+            productName: item.productId?.name || "Product",
+            quantity: Number(item.quantity || 0),
+            rate: Number(item.price || 0),
+            total: Number(item.total || 0),
+          }));
+        }
       }
     }
   }
 
   return {
-    customerName: customer.name,
+    customerName: customer.name || "-",
     openingBalance,
-    customerOpeningBalance,
     ledger,
   };
 };
 
-/* =========================================================
-   GET HTML PREVIEW
-========================================================= */
-
 const getCustomerDetailLedgerHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
     const { customerId } = req.params;
+
     const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
@@ -245,12 +376,16 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
-      customerOpeningBalance: rawData.customerOpeningBalance,
       ledger: rawData.ledger,
     });
+
     built.lang = lang || "ur";
+
     const html = generateCustomerDetailLedgerHTML(built, size || "A4");
-    res.set({ "Content-Type": "text/html" });
+
+    res.set({
+      "Content-Type": "text/html; charset=utf-8",
+    });
 
     return res.send(html);
   } catch (error) {
@@ -260,14 +395,12 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
   }
 };
 
-/* =========================================================
-   GENERATE PDF
-========================================================= */
-
 const generateCustomerDetailLedgerPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+
     const { customerId } = req.params;
+
     const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
@@ -282,27 +415,31 @@ const generateCustomerDetailLedgerPdf = async (req, res) => {
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
-      customerOpeningBalance: rawData.customerOpeningBalance,
       ledger: rawData.ledger,
     });
 
     built.lang = lang || "ur";
+
     const html = generateCustomerDetailLedgerHTML(built, size || "A4");
 
     const pdfBuffer = await generatePdfFromHtml(html);
 
     res.set({
       "Content-Type": "application/pdf",
+
       "Content-Disposition":
         "attachment; filename=Customer-Detailed-Ledger.pdf",
+
       "Content-Length": pdfBuffer.length,
     });
 
     return res.send(pdfBuffer);
   } catch (error) {
-    return res
-      .status(500)
-      .json({ message: "Detailed ledger PDF generation failed" });
+    console.error("❌ Detail Ledger PDF Error:", error.message);
+
+    return res.status(500).json({
+      message: "Detailed ledger PDF generation failed",
+    });
   }
 };
 

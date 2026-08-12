@@ -15,28 +15,30 @@ const generatePartyDetailLedgerHTML = require("../templates/partyDetailLedgerTem
 
 const { generatePdfFromHtml } = require("../services/pdfService");
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
-const getDateRange = (startDate, endDate) => {
-  const range = {};
+const getStartOfDay = (value) => {
+  if (!value) return null;
 
-  if (startDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    range.$gte = start;
-  }
+  const date = new Date(value);
 
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    range.$lte = end;
-  }
+  if (isNaN(date.getTime())) return null;
 
-  return Object.keys(range).length ? range : null;
+  date.setHours(0, 0, 0, 0);
+
+  return date;
+};
+
+const getEndOfDay = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) return null;
+
+  date.setHours(23, 59, 59, 999);
+
+  return date;
 };
 
 const getSourceLabel = (type = "") => {
@@ -60,8 +62,9 @@ const getSourceLabel = (type = "") => {
 
     pay_bill: "Pay Bill",
     purchase_payment: "Purchase Payment",
-    refund_payment: "Refund Payment",
     purchase_return_payment: "Purchase Return Payment",
+
+    refund_payment: "Refund Payment",
 
     sale_discount: "Sale Discount",
     purchase_discount: "Purchase Discount",
@@ -77,20 +80,31 @@ const getSourceLabel = (type = "") => {
 const normalizeItems = (items = []) => {
   if (!Array.isArray(items)) return [];
 
-  return items.map((it, index) => ({
-    sr: index + 1,
-    productName: it.productId?.name || it.productName || "Product",
-    unit: it.productId?.unit || it.unit || "PCS",
-    ctn: it.ctn || it.carton || 1,
-    quantity: Number(it.quantity || 0),
-    rate: Number(it.price || it.rate || 0),
-    amount: Number(it.total || it.amount || 0),
-  }));
+  return items.map((item, index) => {
+    const quantity = Number(item.quantity || 0);
+    const rate = Number(item.price ?? item.rate ?? 0);
+
+    const amount =
+      item.total !== undefined && item.total !== null
+        ? Number(item.total || 0)
+        : item.amount !== undefined && item.amount !== null
+          ? Number(item.amount || 0)
+          : quantity * rate;
+
+    return {
+      sr: index + 1,
+      productName:
+        item.productId?.name || item.productName || item.name || "Product",
+      unit: item.productId?.unit || item.unit || item.uom || "PCS",
+      ctn: Number(item.ctn ?? item.carton ?? 1),
+      quantity,
+      rate,
+      amount,
+    };
+  });
 };
 
-/* =========================================================
-   INTERNAL: FETCH PARTY DETAILED LEDGER DATA
-========================================================= */
+const uniqueIds = (ids = []) => [...new Set(ids.filter(Boolean))];
 
 const fetchPartyDetailedLedgerData = async ({
   partyId,
@@ -102,33 +116,43 @@ const fetchPartyDetailedLedgerData = async ({
     throw new Error("Invalid party ID");
   }
 
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid user ID");
+  }
+
+  const partyObjectId = toObjectId(partyId);
   const userObjectId = toObjectId(userId);
 
   const party = await Party.findOne({
-    _id: partyId,
+    _id: partyObjectId,
     userId: userObjectId,
     isDeleted: false,
-  }).populate("account");
+  })
+    .populate("account")
+    .lean();
 
   if (!party || !party.account) {
     throw new Error("Party not found");
   }
 
-  const accountId = party.account._id || party.account;
-  const accountObjectId = toObjectId(accountId);
+  const account =
+    typeof party.account === "object" && party.account?._id
+      ? party.account._id
+      : party.account;
 
-  const dateRange = getDateRange(startDate, endDate);
+  if (!account || !mongoose.Types.ObjectId.isValid(account)) {
+    throw new Error("Invalid party account");
+  }
 
-  /* =========================================================
-     OPENING BALANCE BEFORE START DATE
-  ========================================================= */
+  const accountObjectId = toObjectId(account);
+  const accountId = accountObjectId.toString();
+
+  const start = getStartOfDay(startDate);
+  const end = getEndOfDay(endDate);
 
   let openingBalance = 0;
 
-  if (startDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-
+  if (start) {
     const openingResult = await JournalEntry.aggregate([
       {
         $match: {
@@ -139,7 +163,9 @@ const fetchPartyDetailedLedgerData = async ({
           date: { $lt: start },
         },
       },
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
       {
         $match: {
           "lines.account": accountObjectId,
@@ -164,9 +190,50 @@ const fetchPartyDetailedLedgerData = async ({
     openingBalance = Number(openingResult[0]?.balance || 0);
   }
 
-  /* =========================================================
-     JOURNAL ENTRIES
-  ========================================================= */
+  const openingSourceTypes = [
+    "opening_balance",
+    "opening_sale_invoice",
+    "opening_refund_invoice",
+    "opening_purchase_invoice",
+    "opening_purchase_return",
+  ];
+
+  const partyOpeningResult = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: userObjectId,
+        isDeleted: false,
+        sourceType: { $in: openingSourceTypes },
+        "lines.account": accountObjectId,
+      },
+    },
+    {
+      $unwind: "$lines",
+    },
+    {
+      $match: {
+        "lines.account": accountObjectId,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        balance: {
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "debit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  const partyOpeningBalance = Number(
+    Number(partyOpeningResult[0]?.balance || 0).toFixed(2),
+  );
 
   const matchFilter = {
     createdBy: userObjectId,
@@ -175,21 +242,52 @@ const fetchPartyDetailedLedgerData = async ({
     "lines.account": accountObjectId,
   };
 
-  if (dateRange) {
-    matchFilter.date = dateRange;
+  if (start || end) {
+    matchFilter.date = {};
+
+    if (start) {
+      matchFilter.date.$gte = start;
+    }
+
+    if (end) {
+      matchFilter.date.$lte = end;
+    }
   }
 
   const journals = await JournalEntry.find(matchFilter)
     .select(
-      "date time billNo description sourceType originModule lines paymentType invoiceId invoiceModel referenceId partyId attachmentUrl attachmentType createdAt",
+      [
+        "date",
+        "time",
+        "billNo",
+        "description",
+        "sourceType",
+        "originModule",
+        "paymentType",
+        "invoiceId",
+        "invoiceModel",
+        "referenceId",
+        "partyId",
+        "attachmentUrl",
+        "attachmentType",
+        "createdAt",
+        "lines.account",
+        "lines.type",
+        "lines.amount",
+        "lines.paymentType",
+      ].join(" "),
     )
-    .sort({ date: 1, time: 1, createdAt: 1 })
+    .sort({
+      date: 1,
+      time: 1,
+      createdAt: 1,
+      _id: 1,
+    })
     .lean();
 
   let runningBalance = openingBalance;
-  let partyOpeningBalance = 0;
-  let businessDebit = 0;
-  let businessCredit = 0;
+  let totalDebit = 0;
+  let totalCredit = 0;
 
   const ledger = [];
 
@@ -199,84 +297,105 @@ const fetchPartyDetailedLedgerData = async ({
   const purchaseReturnIds = [];
 
   for (const entry of journals) {
-    const partyLines = (entry.lines || []).filter(
-      (line) => line.account?.toString() === accountId.toString(),
+    if (!Array.isArray(entry.lines)) {
+      continue;
+    }
+
+    const partyLines = entry.lines.filter(
+      (line) => line.account?.toString() === accountId,
     );
 
-    if (partyLines.length === 0) continue;
+    if (partyLines.length === 0) {
+      continue;
+    }
 
     let debit = 0;
     let credit = 0;
 
     for (const line of partyLines) {
-      if (line.type === "debit") debit += Number(line.amount || 0);
-      if (line.type === "credit") credit += Number(line.amount || 0);
+      const amount = Number(line.amount || 0);
+
+      if (line.type === "debit") {
+        debit += amount;
+      }
+
+      if (line.type === "credit") {
+        credit += amount;
+      }
     }
 
-    runningBalance += debit - credit;
+    debit = Number(debit.toFixed(2));
+    credit = Number(credit.toFixed(2));
+
+    runningBalance = Number((runningBalance + debit - credit).toFixed(2));
+
+    totalDebit += debit;
+    totalCredit += credit;
 
     const sourceType = entry.sourceType || "";
-    if (
-      ["opening_sale_invoice", "opening_refund_invoice"].includes(sourceType)
-    ) {
-      partyOpeningBalance += debit - credit;
-    } else {
-      businessDebit += debit;
-      businessCredit += credit;
-    }
+
     const invoiceId = entry.invoiceId || entry.referenceId || null;
 
     if (
       ["sale_invoice", "opening_sale_invoice"].includes(sourceType) &&
-      invoiceId
+      invoiceId &&
+      mongoose.Types.ObjectId.isValid(invoiceId)
     ) {
       saleInvoiceIds.push(invoiceId.toString());
     }
 
     if (
       ["purchase_invoice", "opening_purchase_invoice"].includes(sourceType) &&
-      invoiceId
+      invoiceId &&
+      mongoose.Types.ObjectId.isValid(invoiceId)
     ) {
       purchaseInvoiceIds.push(invoiceId.toString());
     }
 
     if (
       ["refund_invoice", "opening_refund_invoice"].includes(sourceType) &&
-      invoiceId
+      invoiceId &&
+      mongoose.Types.ObjectId.isValid(invoiceId)
     ) {
       refundInvoiceIds.push(invoiceId.toString());
     }
 
     if (
       ["purchase_return", "opening_purchase_return"].includes(sourceType) &&
-      invoiceId
+      invoiceId &&
+      mongoose.Types.ObjectId.isValid(invoiceId)
     ) {
       purchaseReturnIds.push(invoiceId.toString());
     }
 
     ledger.push({
       _id: entry._id,
+
       key: `${entry._id}-${ledger.length}`,
 
       date: entry.date,
       time: entry.time || "",
+
       billNo: entry.billNo || "",
       description: entry.description || "",
 
       sourceType,
       sourceLabel: getSourceLabel(sourceType),
+
       originModule: entry.originModule || "",
 
       invoiceId,
       invoiceModel: entry.invoiceModel || "",
+
       referenceId: entry.referenceId || entry._id,
 
-      debit: Number(debit.toFixed(2)),
-      credit: Number(credit.toFixed(2)),
-      balance: Number(runningBalance.toFixed(2)),
+      debit,
+      credit,
+
+      balance: runningBalance,
 
       paymentType:
-        partyLines.find((l) => l.paymentType)?.paymentType ||
+        partyLines.find((line) => line.paymentType)?.paymentType ||
         entry.paymentType ||
         "",
 
@@ -287,14 +406,10 @@ const fetchPartyDetailedLedgerData = async ({
     });
   }
 
-  /* =========================================================
-     FETCH ALL DOCUMENTS IN BATCH
-  ========================================================= */
-
   const [saleInvoices, purchaseInvoices, refundInvoices, purchaseReturns] =
     await Promise.all([
       Invoice.find({
-        _id: { $in: saleInvoiceIds },
+        _id: { $in: uniqueIds(saleInvoiceIds) },
         createdBy: userObjectId,
         isDeleted: { $ne: true },
       })
@@ -302,7 +417,7 @@ const fetchPartyDetailedLedgerData = async ({
         .lean(),
 
       PurchaseInvoice.find({
-        _id: { $in: purchaseInvoiceIds },
+        _id: { $in: uniqueIds(purchaseInvoiceIds) },
         userId: userObjectId,
         isDeleted: false,
       })
@@ -310,7 +425,7 @@ const fetchPartyDetailedLedgerData = async ({
         .lean(),
 
       RefundInvoice.find({
-        _id: { $in: refundInvoiceIds },
+        _id: { $in: uniqueIds(refundInvoiceIds) },
         createdBy: userObjectId,
         isDeleted: { $ne: true },
       })
@@ -318,7 +433,7 @@ const fetchPartyDetailedLedgerData = async ({
         .lean(),
 
       PurchaseReturn.find({
-        _id: { $in: purchaseReturnIds },
+        _id: { $in: uniqueIds(purchaseReturnIds) },
         createdBy: userObjectId,
         isDeleted: false,
       })
@@ -326,86 +441,102 @@ const fetchPartyDetailedLedgerData = async ({
         .lean(),
     ]);
 
-  const saleMap = new Map();
-  const purchaseMap = new Map();
-  const refundMap = new Map();
-  const purchaseReturnMap = new Map();
+  const saleMap = new Map(saleInvoices.map((doc) => [doc._id.toString(), doc]));
 
-  saleInvoices.forEach((doc) => saleMap.set(doc._id.toString(), doc));
-  purchaseInvoices.forEach((doc) => purchaseMap.set(doc._id.toString(), doc));
-  refundInvoices.forEach((doc) => refundMap.set(doc._id.toString(), doc));
-  purchaseReturns.forEach((doc) =>
-    purchaseReturnMap.set(doc._id.toString(), doc),
+  const purchaseMap = new Map(
+    purchaseInvoices.map((doc) => [doc._id.toString(), doc]),
   );
 
-  /* =========================================================
-     ATTACH ITEMS TO LEDGER ROWS
-  ========================================================= */
+  const refundMap = new Map(
+    refundInvoices.map((doc) => [doc._id.toString(), doc]),
+  );
+
+  const purchaseReturnMap = new Map(
+    purchaseReturns.map((doc) => [doc._id.toString(), doc]),
+  );
 
   for (const row of ledger) {
     const id = row.invoiceId?.toString?.();
-    if (!id) continue;
+
+    if (!id) {
+      continue;
+    }
 
     if (["sale_invoice", "opening_sale_invoice"].includes(row.sourceType)) {
-      const inv = saleMap.get(id);
+      const invoice = saleMap.get(id);
 
-      if (inv) {
-        row.items = normalizeItems(inv.items);
-        row.documentTotal = Number(inv.totalAmount || inv.subTotal || 0);
-        row.partyText = inv.customerName || party.name;
+      if (invoice) {
+        row.items = normalizeItems(invoice.items);
+
+        row.documentTotal = Number(
+          invoice.grandTotal ?? invoice.totalAmount ?? invoice.subTotal ?? 0,
+        );
+
+        row.partyText = invoice.customerName || party.name;
       }
     }
 
     if (
       ["purchase_invoice", "opening_purchase_invoice"].includes(row.sourceType)
     ) {
-      const inv = purchaseMap.get(id);
+      const invoice = purchaseMap.get(id);
 
-      if (inv) {
-        row.items = normalizeItems(inv.items);
-        row.documentTotal = Number(inv.grandTotal || inv.totalAmount || 0);
-        row.partyText = inv.supplierName || party.name;
+      if (invoice) {
+        row.items = normalizeItems(invoice.items);
+
+        row.documentTotal = Number(
+          invoice.grandTotal ?? invoice.totalAmount ?? invoice.subTotal ?? 0,
+        );
+
+        row.partyText = invoice.supplierName || party.name;
       }
     }
 
     if (["refund_invoice", "opening_refund_invoice"].includes(row.sourceType)) {
-      const ref = refundMap.get(id);
+      const refund = refundMap.get(id);
 
-      if (ref) {
-        row.items = normalizeItems(ref.items);
-        row.documentTotal = Number(ref.totalAmount || 0);
-        row.partyText = ref.customerName || party.name;
+      if (refund) {
+        row.items = normalizeItems(refund.items);
+
+        row.documentTotal = Number(
+          refund.grandTotal ?? refund.totalAmount ?? refund.subTotal ?? 0,
+        );
+
+        row.partyText = refund.customerName || party.name;
       }
     }
 
     if (
       ["purchase_return", "opening_purchase_return"].includes(row.sourceType)
     ) {
-      const pr = purchaseReturnMap.get(id);
+      const purchaseReturn = purchaseReturnMap.get(id);
 
-      if (pr) {
-        row.items = normalizeItems(pr.items);
-        row.documentTotal = Number(pr.totalAmount || 0);
-        row.partyText = pr.supplierName || party.name;
+      if (purchaseReturn) {
+        row.items = normalizeItems(purchaseReturn.items);
+
+        row.documentTotal = Number(
+          purchaseReturn.grandTotal ??
+            purchaseReturn.totalAmount ??
+            purchaseReturn.subTotal ??
+            0,
+        );
+
+        row.partyText = purchaseReturn.supplierName || party.name;
       }
     }
   }
 
-  const totalDebit = ledger.reduce(
-    (sum, row) => sum + Number(row.debit || 0),
-    0,
-  );
-  const totalCredit = ledger.reduce(
-    (sum, row) => sum + Number(row.credit || 0),
-    0,
-  );
+  const finalTotalDebit = Number(totalDebit.toFixed(2));
+  const finalTotalCredit = Number(totalCredit.toFixed(2));
 
-  const closingBalance =
-    ledger.length > 0 ? ledger[ledger.length - 1].balance : openingBalance;
+  const closingBalance = Number(
+    (openingBalance + finalTotalDebit - finalTotalCredit).toFixed(2),
+  );
 
   return {
     partyId: party._id,
-    partyName: party.name,
+
+    partyName: party.name || "-",
     partyPhone: party.phone || "",
     role: party.role || "both",
 
@@ -413,26 +544,23 @@ const fetchPartyDetailedLedgerData = async ({
     endDate,
 
     openingBalance: Number(openingBalance.toFixed(2)),
-    partyOpeningBalance: Number(partyOpeningBalance.toFixed(2)),
-    totalDebit: Number(totalDebit.toFixed(2)),
-    totalCredit: Number(totalCredit.toFixed(2)),
-    businessDebit: Number(businessDebit.toFixed(2)),
-    businessCredit: Number(businessCredit.toFixed(2)),
-    closingBalance: Number(closingBalance.toFixed(2)),
+    partyOpeningBalance,
+
+    totalDebit: finalTotalDebit,
+    totalCredit: finalTotalCredit,
+
+    closingBalance,
 
     ledger,
   };
 };
 
-/* =========================================================
-   HTML PREVIEW
-========================================================= */
-
 const getPartyDetailLedgerHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { partyId } = req.params;
-    const { startDate, endDate, size } = req.query;
+
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchPartyDetailedLedgerData({
       partyId,
@@ -442,31 +570,29 @@ const getPartyDetailLedgerHtml = async (req, res) => {
     });
 
     const built = buildPartyDetailLedgerPrint(rawData);
-    built.lang = req.query.lang || "en";
+
+    built.lang = lang || "ur";
 
     const html = generatePartyDetailLedgerHTML(built, size || "A4");
 
     res.set({
-      "Content-Type": "text/html",
+      "Content-Type": "text/html; charset=utf-8",
     });
 
     return res.send(html);
   } catch (error) {
-    console.error("❌ Party Detail Ledger HTML Error:", error);
+    console.error("❌ Party Detail Ledger HTML Error:", error.message);
 
     return res.status(500).send("Failed to generate party detail ledger HTML");
   }
 };
 
-/* =========================================================
-   PDF DOWNLOAD
-========================================================= */
-
 const generatePartyDetailLedgerPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { partyId } = req.params;
-    const { startDate, endDate, size } = req.query;
+
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchPartyDetailedLedgerData({
       partyId,
@@ -476,15 +602,18 @@ const generatePartyDetailLedgerPdf = async (req, res) => {
     });
 
     const built = buildPartyDetailLedgerPrint(rawData);
-    built.lang = req.query.lang || "en";
+
+    built.lang = lang || "ur";
 
     const html = generatePartyDetailLedgerHTML(built, size || "A4");
 
     const pdfBuffer = await generatePdfFromHtml(html);
 
-    const safePartyName = String(rawData.partyName || "Party")
-      .replace(/[^\w\s-]/g, "")
-      .replace(/\s+/g, "-");
+    const safePartyName =
+      String(rawData.partyName || "Party")
+        .replace(/[^\w\s-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-") || "Party";
 
     res.set({
       "Content-Type": "application/pdf",
@@ -494,23 +623,19 @@ const generatePartyDetailLedgerPdf = async (req, res) => {
 
     return res.send(pdfBuffer);
   } catch (error) {
-    console.error("❌ Party Detail Ledger PDF Error:", error);
+    console.error("❌ Party Detail Ledger PDF Error:", error.message);
 
     return res.status(500).json({
       message: "Party detail ledger PDF generation failed",
-      error: error.message,
     });
   }
 };
-
-/* =========================================================
-   JSON API FOR FRONTEND PAGE
-========================================================= */
 
 const getPartyDetailedLedgerJson = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { partyId } = req.params;
+
     const { startDate, endDate } = req.query;
 
     const data = await fetchPartyDetailedLedgerData({
@@ -522,11 +647,10 @@ const getPartyDetailedLedgerJson = async (req, res) => {
 
     return res.json(data);
   } catch (error) {
-    console.error("❌ Party Detail Ledger JSON Error:", error);
+    console.error("❌ Party Detail Ledger JSON Error:", error.message);
 
     return res.status(500).json({
       message: "Party detail ledger fetch failed",
-      error: error.message,
     });
   }
 };

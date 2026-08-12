@@ -1,149 +1,210 @@
 import axios from 'axios';
 
-/*
-  Base API URL
-*/
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API = `${BASE_URL}/api/backup`;
 
-/*
-  Helper: Auth Header
-*/
-const getAuthHeader = () => {
-  const token = localStorage.getItem('token');
+const getToken = () => localStorage.getItem('token');
 
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
+const getAuthHeaders = () => ({
+  Authorization: `Bearer ${getToken()}`,
+});
+
+const getApiErrorMessage = (error, fallback) => {
+  return error?.response?.data?.message || error?.message || fallback;
 };
-
-/* =====================================================
-   CREATE BACKUP
-===================================================== */
 
 export const createBackup = async () => {
   try {
-    const res = await axios.post(`${API}/create`, {}, getAuthHeader());
+    const res = await axios.post(
+      `${API}/create`,
+      {},
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     return res.data;
   } catch (error) {
     console.error('Create Backup Error:', error);
 
-    throw new Error(error?.response?.data?.message || 'Failed to create backup');
+    throw new Error(getApiErrorMessage(error, 'Failed to create backup'));
   }
 };
 
-/* =====================================================
-   RESTORE BACKUP
-===================================================== */
-
-export const restoreBackup = async (fileName = null) => {
+export const restoreBackup = async (fileName) => {
   try {
-    const res = await axios.post(`${API}/restore`, { fileName }, getAuthHeader());
+    if (!fileName) {
+      throw new Error('Please select a backup to restore');
+    }
+
+    const res = await axios.post(
+      `${API}/restore`,
+      { fileName },
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     return res.data;
   } catch (error) {
     console.error('Restore Backup Error:', error);
 
-    throw new Error(error?.response?.data?.message || 'Failed to restore backup');
+    const apiData = error?.response?.data;
+
+    const restoreError = new Error(getApiErrorMessage(error, 'Failed to restore backup'));
+
+    if (apiData) {
+      restoreError.rollbackAttempted = Boolean(apiData.rollbackAttempted);
+
+      restoreError.rollbackSucceeded = Boolean(apiData.rollbackSucceeded);
+
+      restoreError.critical = Boolean(apiData.critical);
+    }
+
+    throw restoreError;
   }
 };
-
-/* =====================================================
-   GET BACKUP STATUS
-===================================================== */
 
 export const getBackupStatus = async () => {
   try {
-    const res = await axios.get(`${API}/status`, getAuthHeader());
+    const res = await axios.get(`${API}/status`, {
+      headers: getAuthHeaders(),
+    });
 
-    return res.data?.data;
+    return res.data?.data || null;
   } catch (error) {
     console.error('Backup Status Error:', error);
 
-    throw new Error(error?.response?.data?.message || 'Failed to load backup status');
+    throw new Error(getApiErrorMessage(error, 'Failed to load backup status'));
   }
 };
 
-/* =====================================================
-   DOWNLOAD BACKUP
-===================================================== */
-
-export const downloadBackup = async () => {
+export const downloadBackup = async (fileName = null) => {
   try {
     const response = await axios.get(`${API}/download`, {
+      headers: getAuthHeaders(),
       responseType: 'blob',
-      ...getAuthHeader(),
+      params: fileName ? { fileName } : undefined,
     });
 
-    const blob = new Blob([response.data]);
+    const contentType = response.headers['content-type'] || 'application/zip';
+
+    const blob = new Blob([response.data], {
+      type: contentType,
+    });
 
     const url = window.URL.createObjectURL(blob);
 
     const link = document.createElement('a');
 
+    const disposition = response.headers['content-disposition'];
+
+    let downloadFileName = fileName || 'smartkhata-backup.zip';
+
+    if (disposition) {
+      const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+
+      const normalMatch = disposition.match(/filename="?([^"]+)"?/i);
+
+      if (utf8Match?.[1]) {
+        downloadFileName = decodeURIComponent(utf8Match[1]);
+      } else if (normalMatch?.[1]) {
+        downloadFileName = normalMatch[1].replace(/"/g, '').trim();
+      }
+    }
+
     link.href = url;
-
-    // backend generated filename
-    const fileName =
-      response.headers['content-disposition']?.split('filename=')[1] || 'smartkhata-backup.zip';
-
-    link.setAttribute('download', fileName.replace(/"/g, ''));
+    link.download = downloadFileName;
 
     document.body.appendChild(link);
-
     link.click();
-
     link.remove();
 
     window.URL.revokeObjectURL(url);
+
+    return {
+      success: true,
+      fileName: downloadFileName,
+    };
   } catch (error) {
     console.error('Download Backup Error:', error);
 
-    throw new Error(error?.response?.data?.message || 'Failed to download backup');
+    let message = 'Failed to download backup';
+
+    if (error?.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+
+        const parsed = JSON.parse(text);
+
+        message = parsed?.message || message;
+      } catch (_) {}
+    } else {
+      message = getApiErrorMessage(error, message);
+    }
+
+    throw new Error(message);
   }
 };
 
-/* =====================================================
-   LOCAL RESTORE
-===================================================== */
-
 export const restoreLocalBackup = async (file) => {
   try {
+    if (!file) {
+      throw new Error('Please select a backup ZIP file');
+    }
+
     const formData = new FormData();
 
     formData.append('backup', file);
 
     const res = await axios.post(`${API}/local/restore`, formData, {
-      ...getAuthHeader(),
-      headers: {
-        ...getAuthHeader().headers,
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: getAuthHeaders(),
     });
 
     return res.data;
   } catch (error) {
     console.error('Local Restore Error:', error);
 
-    throw new Error(error?.response?.data?.message || 'Failed to restore local backup');
+    const apiData = error?.response?.data;
+
+    const restoreError = new Error(getApiErrorMessage(error, 'Failed to restore local backup'));
+
+    if (apiData) {
+      restoreError.rollbackAttempted = Boolean(apiData.rollbackAttempted);
+
+      restoreError.rollbackSucceeded = Boolean(apiData.rollbackSucceeded);
+
+      restoreError.critical = Boolean(apiData.critical);
+    }
+
+    throw restoreError;
   }
 };
 
 export const getCloudBackupList = async () => {
   try {
-    const res = await axios.get(`${API}/cloud-list`, getAuthHeader());
-    return res.data.files;
+    const res = await axios.get(`${API}/cloud-list`, {
+      headers: getAuthHeaders(),
+    });
+
+    return Array.isArray(res.data?.files) ? res.data.files : [];
   } catch (error) {
     console.error('Cloud List Error:', error);
-    throw new Error('Failed to fetch cloud backups');
+
+    throw new Error(getApiErrorMessage(error, 'Failed to fetch cloud backups'));
   }
 };
 
 export const getBackupProgress = async () => {
-  const res = await axios.get(`${API}/progress`, getAuthHeader());
+  try {
+    const res = await axios.get(`${API}/progress`, {
+      headers: getAuthHeaders(),
+    });
 
-  return res.data;
+    return res.data;
+  } catch (error) {
+    console.error('Backup Progress Error:', error);
+
+    throw new Error(getApiErrorMessage(error, 'Failed to load backup progress'));
+  }
 };

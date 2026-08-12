@@ -9,10 +9,6 @@ const buildPartyLedgerPrint = require("../services/partyLedgerPrintBuilder");
 const generatePartyLedgerHTML = require("../templates/partyLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
 
-/* =========================================================
-   SOURCE LABEL HELPER
-========================================================= */
-
 const getPartySourceLabel = (entry) => {
   const type = entry.sourceType || "";
 
@@ -31,11 +27,15 @@ const getPartySourceLabel = (entry) => {
   if (type === "opening_purchase_return") return "Opening Balance";
 
   if (type === "receive_payment") return "Receive Payment";
-  if (type === "receive_payment_discount") return "Receive Payment Discount";
+  if (type === "receive_payment_discount") {
+    return "Receive Payment Discount";
+  }
 
   if (type === "pay_bill") return "Pay Bill";
   if (type === "purchase_payment") return "Purchase Payment";
-  if (type === "purchase_return_payment") return "Purchase Return Payment";
+  if (type === "purchase_return_payment") {
+    return "Purchase Return Payment";
+  }
 
   if (type === "refund_payment") return "Refund Payment";
   if (type === "sale_discount") return "Sale Discount";
@@ -48,9 +48,29 @@ const getPartySourceLabel = (entry) => {
   return type || "-";
 };
 
-/* =========================================================
-   INTERNAL: FETCH PARTY LEDGER DATA
-========================================================= */
+const getStartOfDay = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) return null;
+
+  date.setHours(0, 0, 0, 0);
+
+  return date;
+};
+
+const getEndOfDay = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) return null;
+
+  date.setHours(23, 59, 59, 999);
+
+  return date;
+};
 
 const fetchPartyLedgerData = async ({
   partyId,
@@ -62,13 +82,20 @@ const fetchPartyLedgerData = async ({
     throw new Error("Invalid party ID");
   }
 
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid user ID");
+  }
+
+  const partyObjectId = new mongoose.Types.ObjectId(partyId);
   const userObjectId = new mongoose.Types.ObjectId(userId);
 
   const party = await Party.findOne({
-    _id: partyId,
+    _id: partyObjectId,
     userId: userObjectId,
     isDeleted: false,
-  }).populate("account");
+  })
+    .populate("account")
+    .lean();
 
   if (!party || !party.account) {
     throw new Error("Party not found");
@@ -79,20 +106,14 @@ const fetchPartyLedgerData = async ({
       ? party.account._id
       : party.account;
 
+  if (!account || !mongoose.Types.ObjectId.isValid(account)) {
+    throw new Error("Invalid party account");
+  }
+
   const accountObjectId = new mongoose.Types.ObjectId(account);
 
-  let start = null;
-  let end = null;
-
-  if (startDate) {
-    start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-  }
-
-  if (endDate) {
-    end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-  }
+  const start = getStartOfDay(startDate);
+  const end = getEndOfDay(endDate);
 
   const matchFilter = {
     createdBy: userObjectId,
@@ -101,17 +122,17 @@ const fetchPartyLedgerData = async ({
     "lines.account": accountObjectId,
   };
 
-  if (start && end) {
-    matchFilter.date = { $gte: start, $lte: end };
-  } else if (start) {
-    matchFilter.date = { $gte: start };
-  } else if (end) {
-    matchFilter.date = { $lte: end };
-  }
+  if (start || end) {
+    matchFilter.date = {};
 
-  /* ================================
-     Opening Balance before startDate
-  ================================ */
+    if (start) {
+      matchFilter.date.$gte = start;
+    }
+
+    if (end) {
+      matchFilter.date.$lte = end;
+    }
+  }
 
   let openingBalance = 0;
 
@@ -123,10 +144,14 @@ const fetchPartyLedgerData = async ({
           isDeleted: false,
           sourceType: { $ne: "reversal" },
           "lines.account": accountObjectId,
-          date: { $lt: start },
+          date: {
+            $lt: start,
+          },
         },
       },
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
       {
         $match: {
           "lines.account": accountObjectId,
@@ -138,9 +163,13 @@ const fetchPartyLedgerData = async ({
           balance: {
             $sum: {
               $cond: [
-                { $eq: ["$lines.type", "debit"] },
+                {
+                  $eq: ["$lines.type", "debit"],
+                },
                 "$lines.amount",
-                { $multiply: ["$lines.amount", -1] },
+                {
+                  $multiply: ["$lines.amount", -1],
+                },
               ],
             },
           },
@@ -151,25 +180,48 @@ const fetchPartyLedgerData = async ({
     openingBalance = Number(result[0]?.balance || 0);
   }
 
-  /* ================================
-     Ledger Entries
-  ================================ */
-
   const entries = await JournalEntry.find(matchFilter)
     .select(
-      "date time billNo description sourceType originModule lines paymentType createdAt",
+      [
+        "date",
+        "time",
+        "billNo",
+        "description",
+        "sourceType",
+        "originModule",
+        "paymentType",
+        "createdAt",
+        "lines.account",
+        "lines.type",
+        "lines.amount",
+        "lines.paymentType",
+      ].join(" "),
     )
-    .sort({ date: 1, time: 1, createdAt: 1 })
+    .sort({
+      date: 1,
+      time: 1,
+      createdAt: 1,
+      _id: 1,
+    })
     .lean();
 
   const ledger = [];
 
   for (const entry of entries) {
-    for (const line of entry.lines || []) {
-      if (line.account?.toString() !== account.toString()) continue;
+    if (!Array.isArray(entry.lines)) {
+      continue;
+    }
 
-      const debit = line.type === "debit" ? Number(line.amount || 0) : 0;
-      const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
+    for (const line of entry.lines) {
+      if (line.account?.toString() !== accountObjectId.toString()) {
+        continue;
+      }
+
+      const amount = Number(line.amount || 0);
+
+      const debit = line.type === "debit" ? amount : 0;
+
+      const credit = line.type === "credit" ? amount : 0;
 
       ledger.push({
         date: entry.date,
@@ -187,23 +239,20 @@ const fetchPartyLedgerData = async ({
   }
 
   return {
-    partyName: party.name,
+    partyName: party.name || "-",
     partyPhone: party.phone || "",
     role: party.role || "both",
-    openingBalance,
+    openingBalance: Number(openingBalance.toFixed(2)),
     ledger,
   };
 };
-
-/* =========================================================
-   GET PARTY LEDGER HTML
-========================================================= */
 
 const getPartyLedgerHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { partyId } = req.params;
-    const { startDate, endDate, size } = req.query;
+
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchPartyLedgerData({
       partyId,
@@ -222,12 +271,12 @@ const getPartyLedgerHtml = async (req, res) => {
       ledger: rawData.ledger,
     });
 
-    built.lang = req.query.lang || "ur";
+    built.lang = lang || "ur";
 
     const html = generatePartyLedgerHTML(built, size || "A5");
 
     res.set({
-      "Content-Type": "text/html",
+      "Content-Type": "text/html; charset=utf-8",
     });
 
     return res.send(html);
@@ -238,15 +287,12 @@ const getPartyLedgerHtml = async (req, res) => {
   }
 };
 
-/* =========================================================
-   GENERATE PARTY LEDGER PDF
-========================================================= */
-
 const generatePartyLedgerPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { partyId } = req.params;
-    const { startDate, endDate, size } = req.query;
+
+    const { startDate, endDate, size, lang } = req.query;
 
     const rawData = await fetchPartyLedgerData({
       partyId,
@@ -265,15 +311,17 @@ const generatePartyLedgerPdf = async (req, res) => {
       ledger: rawData.ledger,
     });
 
-    built.lang = req.query.lang || "ur";
+    built.lang = lang || "ur";
 
     const html = generatePartyLedgerHTML(built, size || "A5");
 
     const pdfBuffer = await generatePdfFromHtml(html);
 
-    const safePartyName = String(rawData.partyName || "Party")
-      .replace(/[^\w\s-]/g, "")
-      .replace(/\s+/g, "-");
+    const safePartyName =
+      String(rawData.partyName || "Party")
+        .replace(/[^\w\s-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-") || "Party";
 
     res.set({
       "Content-Type": "application/pdf",

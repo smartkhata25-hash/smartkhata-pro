@@ -1,209 +1,220 @@
 const { t } = require("../i18n/i18n");
 // 📁 templates/customerLedgerTemplate.js
+
+const escapeHtml = (value) => {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
+
+const safeNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
 const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
   const lang = data?.lang || "ur";
-  const { documentTitle, customer, period, summary, rows } = data;
+
+  const {
+    documentTitle,
+    customer = {},
+    period = {},
+    summary = {},
+    rows = [],
+  } = data || {};
+
+  const safePageSize = pageSize === "A4" ? "A4" : "A5";
+
+  const customerName = escapeHtml(customer.name || "-");
+  const periodFrom = escapeHtml(period.from || "All");
+  const periodTo = escapeHtml(period.to || "All");
+
+  const totalDebit = safeNumber(summary.totalDebit);
+  const totalCredit = safeNumber(summary.totalCredit);
+  const closingBalance = safeNumber(summary.closingBalance);
+  const opening = safeNumber(summary.opening);
 
   return `
 <!DOCTYPE html>
-<html>
+<html lang="${escapeHtml(lang)}">
 <head>
-<meta charset="UTF-8" />
-<title>${documentTitle}</title>
+  <meta charset="UTF-8" />
 
-<style>
-@page {
-  size: ${pageSize};
-  margin: 5mm 5mm 5mm 5mm;
-}
+  <title>${escapeHtml(documentTitle || "Customer Ledger")}</title>
 
-/* ===== DYNAMIC SIZE SETTINGS ===== */
+  <style>
+    @page {
+      size: ${safePageSize};
+      margin: 10mm;
+    }
 
-body {
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: ${pageSize === "A5" ? "11px" : "13px"};
-  margin: 0;
-  color: #000;
-}
+    * {
+      box-sizing: border-box;
+    }
 
-.container {
-  width: 100%;
-  margin: 0;
-}
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, "Noto Nastaliq Urdu", sans-serif;
+      color: #111827;
+      background: #ffffff;
+      font-size: 12px;
+    }
 
-/* ===== HEADER ===== */
+    .page {
+      width: 100%;
+    }
 
-.header {
-  text-align: center;
-  margin-bottom: ${pageSize === "A5" ? "6px" : "12px"};
-}
+    .title {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
 
-.header h2 {
-  margin: 0;
-  font-size: ${pageSize === "A5" ? "16px" : "20px"};
-  font-weight: 800;
-}
+    .sub-info {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
 
-.sub-info {
-  margin-top: 4px;
-  font-size: ${pageSize === "A5" ? "11px" : "13px"};
-  font-weight: 600;
-}
+    .opening-info {
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
 
-/* ===== SUMMARY ===== */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
 
-.summary {
-  margin-top: ${pageSize === "A5" ? "6px" : "10px"};
-  margin-bottom: ${pageSize === "A5" ? "6px" : "12px"};
-  padding: ${pageSize === "A5" ? "4px" : "8px"};
-  font-weight: 900;
-  font-size: ${pageSize === "A5" ? "12px" : "15px"};
-}
+    th,
+    td {
+      border: 1px solid #d1d5db;
+      padding: 5px 6px;
+      vertical-align: middle;
+    }
 
-/* ===== TABLE ===== */
+    th {
+      background: #f3f4f6;
+      font-weight: 700;
+      text-align: center;
+    }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  border: 2px solid #000;
-}
+    td {
+      text-align: right;
+    }
 
-th {
-  border: 2px solid #000;
-  padding: ${pageSize === "A5" ? "6px 4px" : "12px 8px"};
-  text-align: center;
-  vertical-align: middle;
-  font-size: ${pageSize === "A5" ? "12px" : "15px"};
-  font-weight: 800;
-}
+    td:nth-child(1),
+    td:nth-child(2),
+    td:nth-child(3) {
+      text-align: left;
+    }
 
-td {
-  border: 2px solid #000;
-  padding: ${pageSize === "A5" ? "6px 4px" : "10px 8px"};
-  text-align: center;
-  vertical-align: middle;
-  font-size: ${pageSize === "A5" ? "12px" : "16px"};
-  font-weight: 600;
-  word-wrap: break-word;
-}
+    .right {
+      text-align: right !important;
+    }
 
-td.right {
-  text-align: right;
-  padding-right: ${pageSize === "A5" ? "6px" : "10px"};
-  font-size: ${pageSize === "A5" ? "12px" : "17px"};
-  font-weight: 700;
-}
+    .totals-row {
+      font-weight: 700;
+      background: #f9fafb;
+    }
 
-td.left {
-  text-align: left;
-  padding-left: ${pageSize === "A5" ? "6px" : "8px"};
-  font-weight: 600;
-}
-
-/* ===== TOTAL ROW ===== */
-
-.totals-row {
-  font-weight: 800;
-  border-top: 3px solid #000;
-}
-
-/* ===== FOOTER ===== */
-
-.footer {
-  margin-top: ${pageSize === "A5" ? "8px" : "14px"};
-  text-align: center;
-  font-size: ${pageSize === "A5" ? "9px" : "11px"};
-  border-top: 1px solid #ccc;
-  padding-top: 6px;
-}
-
-</style>
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
 </head>
 
 <body>
-<div class="container">
+  <div class="page">
 
-  <!-- ===== HEADER ===== -->
-  <div class="header">
-   <h2>${t("ledger.customerLedger", lang)}</h2>
+    <div class="title">
+      ${escapeHtml(t("ledger.customerLedger", lang) || documentTitle || "Customer Ledger")}
+    </div>
 
     <div class="sub-info">
-      ${t("customer", lang)}: ${customer.name}
+      ${escapeHtml(t("customer", lang))}: ${customerName}
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("common.from", lang)}: ${period.from}
+      ${escapeHtml(t("common.from", lang))}: ${periodFrom}
       &nbsp;&nbsp; | &nbsp;&nbsp;
-      ${t("common.to", lang)}: ${period.to}
+      ${escapeHtml(t("common.to", lang))}: ${periodTo}
     </div>
-  </div>
 
-  <!-- ===== SUMMARY ===== -->
-  <div class="summary">
-    ${t("ledger.opening", lang)}: ${summary.opening.toFixed(2)} |
-    ${t("ledger.totalDebit", lang)}: ${summary.totalDebit.toFixed(2)} |
-    ${t("ledger.totalCredit", lang)}: ${summary.totalCredit.toFixed(2)} |
-    ${t("ledger.closing", lang)}: ${
-      summary.closingBalance < 0
-        ? `(${Math.abs(summary.closingBalance).toFixed(2)})`
-        : summary.closingBalance.toFixed(2)
-    }
-  </div>
+    <div class="opening-info">
+      ${escapeHtml(t("ledger.opening", lang))}: ${opening.toFixed(2)}
+    </div>
 
-  <!-- ===== TABLE ===== -->
-  <table>
-    <thead>
-      <tr>
-        <th style="width:15%">${t("date", lang)}</th>
-        <th style="width:15%">${t("billNo", lang)}</th>
-        <th style="width:25%">${t("source", lang)}</th>
-        <th style="width:15%">${t("debit", lang)}</th>
-        <th style="width:15%">${t("credit", lang)}</th>
-        <th style="width:15%">${t("balance", lang)}</th>
-      </tr>
-    </thead>
-
-    <tbody>
-
-      ${
-        rows?.length
-          ? rows
-              .map(
-                (row) => `
+    <table>
+      <thead>
         <tr>
-          <td>${row.date || "-"}</td>
-          <td>${row.billNo || "-"}</td>
-          <td>${row.source || "-"}</td>
-          <td>${row.debit !== null ? row.debit.toFixed(2) : "-"}</td>
-          <td>${row.credit !== null ? row.credit.toFixed(2) : "-"}</td>
-          <td>${row.balance.toFixed(2)}</td>
+          <th>${escapeHtml(t("date", lang))}</th>
+          <th>${escapeHtml(t("billNo", lang))}</th>
+          <th>${escapeHtml(t("source", lang))}</th>
+          <th>${escapeHtml(t("debit", lang))}</th>
+          <th>${escapeHtml(t("credit", lang))}</th>
+          <th>${escapeHtml(t("balance", lang))}</th>
         </tr>
-      `,
-              )
-              .join("")
-          : `
-        <tr>
-          <td colspan="6">${t("ledger.noTransactions", lang)}</td>
+      </thead>
+
+      <tbody>
+        ${
+          Array.isArray(rows) && rows.length > 0
+            ? rows
+                .map((row) => {
+                  const debit =
+                    row.debit !== null && row.debit !== undefined
+                      ? safeNumber(row.debit).toFixed(2)
+                      : "-";
+
+                  const credit =
+                    row.credit !== null && row.credit !== undefined
+                      ? safeNumber(row.credit).toFixed(2)
+                      : "-";
+
+                  const balance = safeNumber(row.balance).toFixed(2);
+
+                  return `
+                    <tr>
+                      <td>${escapeHtml(row.date || "-")}</td>
+                      <td>${escapeHtml(row.billNo || "-")}</td>
+                      <td>${escapeHtml(row.source || "-")}</td>
+                      <td>${debit}</td>
+                      <td>${credit}</td>
+                      <td>${balance}</td>
+                    </tr>
+                  `;
+                })
+                .join("")
+            : `
+              <tr>
+                <td colspan="6" style="text-align:center;">
+                  ${escapeHtml(t("ledger.noTransactions", lang))}
+                </td>
+              </tr>
+            `
+        }
+
+        <tr class="totals-row">
+          <td colspan="3" class="right">
+            ${escapeHtml(t("totals", lang))}:
+          </td>
+
+          <td>${totalDebit.toFixed(2)}</td>
+          <td>${totalCredit.toFixed(2)}</td>
+          <td>${closingBalance.toFixed(2)}</td>
         </tr>
-      `
-      }
+      </tbody>
+    </table>
 
-      <!-- ===== TOTALS ===== -->
-      <tr class="totals-row">
-        <td colspan="3" class="right">${t("totals", lang)}:</td>
-        <td>${summary.totalDebit.toFixed(2)}</td>
-        <td>${summary.totalCredit.toFixed(2)}</td>
-        <td>${summary.closingBalance.toFixed(2)}</td>
-      </tr>
-
-    </tbody>
-  </table>
-
-  <!-- ===== FOOTER ===== -->
-  <div class="footer">
-    ${t("app.name", lang)} • ${new Date().toLocaleDateString("en-GB")}
   </div>
-
-</div>
 </body>
 </html>
 `;

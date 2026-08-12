@@ -18,9 +18,6 @@ const formatPaymentType = (type) => {
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
-/* =========================================================
-   COMMON BUILDER FUNCTION
-========================================================= */
 const buildInvoice = (data, docConfig, title) => {
   const setting = docConfig.settings;
   const headerSetting = docConfig.header;
@@ -158,9 +155,6 @@ const buildInvoice = (data, docConfig, title) => {
   };
 };
 
-/* =========================================================
-   SALE INVOICE PRINT BUILDER
-========================================================= */
 const buildSaleInvoicePrint = (invoice, printSetting) => {
   if (!printSetting || !printSetting.sales) {
     throw new Error("Sales print settings missing");
@@ -170,9 +164,7 @@ const buildSaleInvoicePrint = (invoice, printSetting) => {
 
   return buildInvoice(invoice, doc, "Sale Invoice");
 };
-/* =========================================================
-   SALE RETURN PRINT BUILDER
-========================================================= */
+
 const buildSaleReturnPrint = (refund, printSetting) => {
   if (!printSetting || !printSetting.saleReturn) {
     throw new Error("Sale return print settings missing");

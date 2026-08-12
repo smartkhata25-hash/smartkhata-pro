@@ -1,21 +1,11 @@
 // 📁 services/partyLedgerPrintBuilder.js
 
-/**
- * Party Ledger Print Builder
- * --------------------------------
- * Purpose:
- *  - Format party ledger for print
- *  - Calculate running balance
- *  - Support customer + supplier transactions
- *  - Keep structure same as Customer/Supplier Ledger
- */
-
 const formatDate = (date) => {
   if (!date) return "-";
 
   const d = new Date(date);
 
-  if (isNaN(d)) return "-";
+  if (isNaN(d.getTime())) return "-";
 
   return d.toLocaleDateString("en-GB");
 };
@@ -23,7 +13,7 @@ const formatDate = (date) => {
 const safeNumber = (value) => {
   const num = Number(value);
 
-  return isNaN(num) ? 0 : num;
+  return Number.isFinite(num) ? num : 0;
 };
 
 const buildPartyLedgerPrint = ({
@@ -35,46 +25,22 @@ const buildPartyLedgerPrint = ({
   openingBalance = 0,
   ledger = [],
 }) => {
-  const openingInvoiceBalance = Array.isArray(ledger)
-    ? ledger
-        .filter((entry) =>
-          [
-            "opening_sale_invoice",
-            "opening_refund_invoice",
-            "opening_purchase_invoice",
-            "opening_purchase_return",
-          ].includes(entry.sourceType),
-        )
-        .reduce(
-          (sum, entry) =>
-            sum + safeNumber(entry.debit) - safeNumber(entry.credit),
-          0,
-        )
-    : 0;
+  const opening = safeNumber(openingBalance);
 
-  const opening = openingInvoiceBalance || safeNumber(openingBalance);
-
-  let runningBalance = 0;
-
+  let runningBalance = opening;
   let totalDebit = 0;
   let totalCredit = 0;
 
   const formattedRows = [];
 
-  /* ==============================
-     Ledger Rows
-  ============================== */
-
   if (Array.isArray(ledger)) {
     for (const entry of ledger) {
       const debit = safeNumber(entry.debit);
-
       const credit = safeNumber(entry.credit);
 
       runningBalance += debit - credit;
 
       totalDebit += debit;
-
       totalCredit += credit;
 
       formattedRows.push({
@@ -94,49 +60,35 @@ const buildPartyLedgerPrint = ({
 
         credit: credit > 0 ? credit : null,
 
-        balance: runningBalance,
+        balance: Number(runningBalance.toFixed(2)),
       });
     }
   }
 
-  /* ==============================
-     Closing Balance
-  ============================== */
-
   const closingBalance =
-    formattedRows.length > 1
+    formattedRows.length > 0
       ? formattedRows[formattedRows.length - 1].balance
       : opening;
-
-  /* ==============================
-     Final Print Object
-  ============================== */
 
   return {
     documentTitle: "Party Ledger",
 
     party: {
       name: partyName || "-",
-
       phone: partyPhone || "",
-
       role: role || "both",
     },
 
     period: {
       from: startDate ? formatDate(startDate) : "All",
-
       to: endDate ? formatDate(endDate) : "All",
     },
 
     summary: {
-      opening,
-
-      totalDebit,
-
-      totalCredit,
-
-      closingBalance,
+      opening: Number(opening.toFixed(2)),
+      totalDebit: Number(totalDebit.toFixed(2)),
+      totalCredit: Number(totalCredit.toFixed(2)),
+      closingBalance: Number(closingBalance.toFixed(2)),
     },
 
     rows: formattedRows,

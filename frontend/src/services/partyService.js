@@ -12,28 +12,64 @@ const getAuthHeaders = (token = null) => ({
   },
 });
 
-// ✅ Get all parties
+const PARTY_CACHE_KEYS = ['saleParties', 'purchaseParties', 'purchase_parties'];
+
+export const clearPartyCaches = () => {
+  PARTY_CACHE_KEYS.forEach((key) => {
+    localStorage.removeItem(key);
+  });
+};
+
+const getCachedParties = (key) => {
+  const cached = localStorage.getItem(key);
+
+  if (!cached) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(cached);
+
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    localStorage.removeItem(key);
+
+    return null;
+  } catch (error) {
+    localStorage.removeItem(key);
+
+    return null;
+  }
+};
+
+const saveCachedParties = (key, data) => {
+  if (!Array.isArray(data)) {
+    return;
+  }
+
+  localStorage.setItem(key, JSON.stringify(data));
+};
+
 export const fetchParties = async (params = {}, token = null) => {
   const res = await axios.get(API_URL, {
     ...getAuthHeaders(token),
     params,
   });
 
-  return res.data;
+  return Array.isArray(res.data) ? res.data : res.data;
 };
 
 // ✅ Alias
 export const getParties = fetchParties;
 
-// ✅ Get parties for sale side
 export const fetchSaleParties = async (token = null, forceRefresh = false) => {
   if (!forceRefresh) {
-    const cached = localStorage.getItem('saleParties');
+    const cached = getCachedParties('saleParties');
 
     if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (_) {}
+      return cached;
     }
   }
 
@@ -45,6 +81,7 @@ export const fetchSaleParties = async (token = null, forceRefresh = false) => {
       },
       token
     ),
+
     fetchParties(
       {
         status: 'active',
@@ -54,22 +91,32 @@ export const fetchSaleParties = async (token = null, forceRefresh = false) => {
     ),
   ]);
 
-  const data = [...customers, ...bothParties];
+  const safeCustomers = Array.isArray(customers) ? customers : [];
+  const safeBothParties = Array.isArray(bothParties) ? bothParties : [];
 
-  localStorage.setItem('saleParties', JSON.stringify(data));
+  const merged = [...safeCustomers, ...safeBothParties];
+
+  const uniqueMap = new Map();
+
+  merged.forEach((party) => {
+    if (!party?._id) return;
+
+    uniqueMap.set(String(party._id), party);
+  });
+
+  const data = Array.from(uniqueMap.values());
+
+  saveCachedParties('saleParties', data);
 
   return data;
 };
 
-// ✅ Get parties for purchase side
 export const fetchPurchaseParties = async (token = null, forceRefresh = false) => {
   if (!forceRefresh) {
-    const cached = localStorage.getItem('purchaseParties');
+    const cached = getCachedParties('purchaseParties');
 
     if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (_) {}
+      return cached;
     }
   }
 
@@ -81,6 +128,7 @@ export const fetchPurchaseParties = async (token = null, forceRefresh = false) =
       },
       token
     ),
+
     fetchParties(
       {
         status: 'active',
@@ -90,76 +138,112 @@ export const fetchPurchaseParties = async (token = null, forceRefresh = false) =
     ),
   ]);
 
-  const data = [...suppliers, ...bothParties];
+  const safeSuppliers = Array.isArray(suppliers) ? suppliers : [];
+  const safeBothParties = Array.isArray(bothParties) ? bothParties : [];
 
-  localStorage.setItem('purchaseParties', JSON.stringify(data));
+  const merged = [...safeSuppliers, ...safeBothParties];
+
+  const uniqueMap = new Map();
+
+  merged.forEach((party) => {
+    if (!party?._id) return;
+
+    uniqueMap.set(String(party._id), party);
+  });
+
+  const data = Array.from(uniqueMap.values());
+
+  saveCachedParties('purchaseParties', data);
 
   return data;
 };
 
-// ✅ Add new party
 export const addParty = async (partyData, token = null) => {
   const res = await axios.post(API_URL, partyData, getAuthHeaders(token));
+
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Update party
 export const updateParty = async (id, partyData, token = null) => {
   const res = await axios.put(`${API_URL}/${id}`, partyData, getAuthHeaders(token));
+
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Delete / inactive party
 export const deleteParty = async (id, token = null) => {
   const res = await axios.delete(`${API_URL}/${id}`, getAuthHeaders(token));
+
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Restore Hidden Party
 export const restoreParty = async (id, token = null) => {
   const res = await axios.post(`${API_URL}/${id}/restore`, {}, getAuthHeaders(token));
 
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Convert Party → Customer
 export const convertPartyToCustomer = async (id, token = null) => {
   const res = await axios.post(`${API_URL}/${id}/convert-to-customer`, {}, getAuthHeaders(token));
 
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Convert Party → Supplier
 export const convertPartyToSupplier = async (id, token = null) => {
   const res = await axios.post(`${API_URL}/${id}/convert-to-supplier`, {}, getAuthHeaders(token));
 
+  clearPartyCaches();
+
   return res.data;
 };
 
-// ✅ Search helper for dropdowns
 export const searchPartiesLocal = (parties = [], search = '', allowedRoles = []) => {
   const q = String(search || '')
     .toLowerCase()
     .trim();
 
-  return parties.filter((p) => {
-    const roleOk = allowedRoles.length === 0 || allowedRoles.includes(p.role) || p.role === 'both';
+  return parties.filter((party) => {
+    if (!party) {
+      return false;
+    }
 
-    const textOk =
-      !q ||
-      p.name?.toLowerCase().includes(q) ||
-      p.phone?.includes(q) ||
-      p.email?.toLowerCase().includes(q);
+    if (party.isActive === false || party.isDeleted === true) {
+      return false;
+    }
 
-    return p.isActive !== false && roleOk && textOk;
+    const roleOk =
+      allowedRoles.length === 0 || allowedRoles.includes(party.role) || party.role === 'both';
+
+    if (!roleOk) {
+      return false;
+    }
+
+    const name = String(party.name || '').toLowerCase();
+    const phone = String(party.phone || '');
+    const email = String(party.email || '').toLowerCase();
+
+    const textOk = !q || name.includes(q) || phone.includes(q) || email.includes(q);
+
+    return textOk;
   });
 };
 
 const partyService = {
   fetchParties,
   getParties,
+
   fetchSaleParties,
   fetchPurchaseParties,
+
   addParty,
   updateParty,
   deleteParty,
@@ -168,6 +252,7 @@ const partyService = {
   convertPartyToCustomer,
   convertPartyToSupplier,
 
+  clearPartyCaches,
   searchPartiesLocal,
 };
 

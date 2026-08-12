@@ -18,71 +18,89 @@ const PartyLedgerPage = () => {
   const [selectedPartyId, setSelectedPartyId] = useState(partyId || '');
   const [partyName, setPartyName] = useState('');
   const [ledger, setLedger] = useState([]);
-  const [opening, setOpening] = useState(0);
+
+  const [summary, setSummary] = useState({
+    opening: 0,
+    debit: 0,
+    credit: 0,
+    closing: 0,
+  });
 
   const currentYear = new Date().getFullYear();
 
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
+
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
     fetchParties()
-      .then((data) => setParties(Array.isArray(data) ? data : []))
+      .then((data) => {
+        setParties(Array.isArray(data) ? data : []);
+      })
       .catch((err) => {
         console.error('Party load failed:', err);
         alert(t('alerts.partyListLoadFailed'));
       });
   }, []);
 
-  const loadLedger = useCallback(
-    async (id = selectedPartyId, start = startDate, end = endDate) => {
-      if (!id) return;
+  const loadLedger = useCallback(async (id, start, end) => {
+    if (!id) return;
 
-      setLoading(true);
+    setLoading(true);
 
-      try {
-        const data = await getPartyLedger(id, start, end);
-        setLedger(Array.isArray(data.ledger) ? data.ledger : []);
-        setOpening(Number(data.openingBalance || 0));
-        setPartyName(data.partyName || '');
-        setSelectedPartyId(data.partyId || id);
-      } catch (err) {
-        console.error('Party ledger load failed:', err);
-        setLedger([]);
-        setOpening(0);
-        alert(t('alerts.partyLedgerLoadFailed'));
-      }
+    try {
+      const data = await getPartyLedger(id, start, end);
 
+      setLedger(Array.isArray(data.ledger) ? data.ledger : []);
+
+      setSummary({
+        opening: Number(data.openingBalance || 0),
+        debit: Number(data.totalDebit || 0),
+        credit: Number(data.totalCredit || 0),
+        closing: Number(data.closingBalance || 0),
+      });
+
+      setPartyName(data.partyName || '');
+      setSelectedPartyId(data.partyId || id);
+    } catch (err) {
+      console.error('Party ledger load failed:', err);
+
+      setLedger([]);
+
+      setSummary({
+        opening: 0,
+        debit: 0,
+        credit: 0,
+        closing: 0,
+      });
+
+      alert(t('alerts.partyLedgerLoadFailed'));
+    } finally {
       setLoading(false);
-    },
-    [selectedPartyId, startDate, endDate]
-  );
+    }
+  }, []);
 
   useEffect(() => {
     if (!partyId) return;
     if (parties.length === 0) return;
 
-    const selected = parties.find((p) => p._id === partyId);
+    const selected = parties.find((party) => String(party._id) === String(partyId));
 
-    if (selected) {
-      setSelectedPartyId(selected._id);
-      setPartyName(selected.name);
-      loadLedger(selected._id, startDate, endDate);
-    }
-  }, [partyId, parties, loadLedger, startDate, endDate]);
+    if (!selected) return;
 
-  const dateFilteredLedger = ledger;
+    setSelectedPartyId(selected._id);
+    setPartyName(selected.name || '');
 
-  const totalDebit = dateFilteredLedger.reduce((sum, e) => sum + Number(e.debit || 0), 0);
-  const totalCredit = dateFilteredLedger.reduce((sum, e) => sum + Number(e.credit || 0), 0);
+    loadLedger(selected._id, startDate, endDate);
+  }, [partyId, parties, startDate, endDate, loadLedger]);
 
-  const closingBalance =
-    dateFilteredLedger.length > 0
-      ? Number(dateFilteredLedger[dateFilteredLedger.length - 1].runningBalance || 0)
-      : opening;
+  const totalDebit = summary.debit;
+  const totalCredit = summary.credit;
+  const closingBalance = summary.closing;
+  const opening = summary.opening;
 
   const balanceStatus =
     closingBalance > 0
@@ -94,35 +112,43 @@ const PartyLedgerPage = () => {
   const balanceColor = closingBalance > 0 ? '#16a34a' : closingBalance < 0 ? '#dc2626' : '#6b7280';
 
   const handleRowEdit = (entry) => {
+    if (!entry) return;
+
     const type = entry.sourceType?.toLowerCase();
 
-    if (type === 'sale_invoice' && entry.invoiceId) {
+    if (['sale_invoice', 'opening_sale_invoice'].includes(type) && entry.invoiceId) {
       navigate(`/create-sale?invoiceId=${entry.invoiceId}`);
+
       return;
     }
 
-    if (type === 'purchase_invoice' && entry.invoiceId) {
+    if (['purchase_invoice', 'opening_purchase_invoice'].includes(type) && entry.invoiceId) {
       navigate(`/purchase-invoice/${entry.invoiceId}`);
+
       return;
     }
 
     if (type === 'receive_payment' && entry.referenceId) {
       navigate(`/receive-payments/edit/${entry.referenceId}`);
+
       return;
     }
 
     if (type === 'pay_bill' && entry.referenceId) {
       navigate(`/pay-bills/edit/${entry.referenceId}`);
+
       return;
     }
 
-    if (type === 'refund_invoice' && entry.invoiceId) {
+    if (['refund_invoice', 'opening_refund_invoice'].includes(type) && entry.invoiceId) {
       navigate(`/refunds/edit/${entry.invoiceId}`);
+
       return;
     }
 
-    if (type === 'purchase_return' && entry.invoiceId) {
+    if (['purchase_return', 'opening_purchase_return'].includes(type) && entry.invoiceId) {
       navigate(`/purchase-returns/edit/${entry.invoiceId}`);
+
       return;
     }
 
@@ -140,7 +166,9 @@ const PartyLedgerPage = () => {
           end={endDate}
           setStart={setStartDate}
           setEnd={setEndDate}
-          load={loadLedger}
+          load={(id, start, end) =>
+            loadLedger(id || selectedPartyId, start ?? startDate, end ?? endDate)
+          }
           setSearch={setSearch}
           navigate={navigate}
           totalDebit={totalDebit}
@@ -167,24 +195,51 @@ const PartyLedgerPage = () => {
           overflow: 'hidden',
         }}
       >
-        {loading && <div style={{ padding: 20, textAlign: 'center' }}>{t('common.loading')}</div>}
+        {loading && (
+          <div
+            style={{
+              padding: 20,
+              textAlign: 'center',
+            }}
+          >
+            {t('common.loading')}
+          </div>
+        )}
 
         {!loading && !selectedPartyId && (
-          <div style={{ padding: 30, textAlign: 'center', color: '#6b7280' }}>
+          <div
+            style={{
+              padding: 30,
+              textAlign: 'center',
+              color: '#6b7280',
+            }}
+          >
             {t('party.selectToViewLedger')}
           </div>
         )}
 
         {!loading && selectedPartyId && ledger.length === 0 && (
-          <div style={{ padding: 30, textAlign: 'center', color: '#6b7280' }}>
+          <div
+            style={{
+              padding: 30,
+              textAlign: 'center',
+              color: '#6b7280',
+            }}
+          >
             {t('ledger.noEntries')}
           </div>
         )}
 
         {!loading && selectedPartyId && ledger.length > 0 && (
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+            }}
+          >
             <LedgerTable
-              ledgerData={dateFilteredLedger}
+              ledgerData={ledger}
               search={search}
               openingBalance={opening}
               onDelete={null}

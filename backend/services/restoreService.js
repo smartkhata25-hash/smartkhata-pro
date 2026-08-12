@@ -1,9 +1,12 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+
 const mongoose = require("mongoose");
 const unzipper = require("unzipper");
 
-const { createBackup } = require("./backupService");
+const { createBackup, COLLECTION_CONFIG } = require("./backupService");
+
 const { downloadBackupFromCloud } = require("./cloudListService");
 
 const { BACKUP_DIR, getTempDir } = require("../config/backupPaths");
@@ -15,78 +18,95 @@ const {
   failProgress,
 } = require("./backupProgressService");
 
-const COLLECTION_CONFIG = {
-  customers: { field: "createdBy" },
-  accounts: { field: "userId" },
-  journalentries: { field: "createdBy" },
-  invoices: { field: "createdBy" },
-  purchaseinvoices: { field: "userId" },
-  suppliers: { field: "userId" },
-  products: { field: "userId" },
-  expenses: { field: "userId" },
-  inventorytransactions: { field: "userId" },
-  businessassetcategories: { field: "userId" },
-  businessassets: { field: "userId" },
-  businessliabilities: { field: "userId" },
-  businessliabilitypayments: { field: "userId" },
-  businessreceivableloans: { field: "userId" },
-  businessreceivableloanpayments: { field: "userId" },
-};
-
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 
-const RESTORE_ORDER = [
-  "accounts",
-  "customers",
-  "suppliers",
-  "products",
-  "invoices",
-  "purchaseinvoices",
-  "expenses",
-  "inventorytransactions",
-  "businessassetcategories",
-  "businessassets",
-  "businessliabilities",
-  "businessreceivableloans",
-  "journalentries",
-  "businessliabilitypayments",
-  "businessreceivableloanpayments",
-];
+const MIN_BACKUP_SCHEMA_VERSION = 2;
 
-function createAccountIdMap() {
-  return {};
+/* Models used for safe MongoDB type casting */
+const MODEL_LOADERS = {
+  accounts: () => require("../models/Account"),
+  customers: () => require("../models/Customer"),
+  suppliers: () => require("../models/Supplier"),
+  parties: () => require("../models/Party"),
+
+  categories: () => require("../models/Category"),
+  products: () => require("../models/Product"),
+  inventorytransactions: () => require("../models/InventoryTransaction"),
+
+  invoices: () => require("../models/Invoice"),
+  purchaseinvoices: () => require("../models/PurchaseInvoice"),
+  refundinvoices: () => require("../models/RefundInvoice"),
+  purchasereturns: () => require("../models/PurchaseReturn"),
+
+  receivepayments: () => require("../models/ReceivePayment"),
+  paybills: () => require("../models/PayBill"),
+
+  expenses: () => require("../models/Expense"),
+  expensetitles: () => require("../models/ExpenseTitle"),
+
+  journalentries: () => require("../models/JournalEntry"),
+
+  counters: () => require("../models/Counter"),
+  periodlocks: () => require("../models/PeriodLock"),
+
+  businessassetcategories: () => require("../models/BusinessAssetCategory"),
+
+  businessassets: () => require("../models/BusinessAsset"),
+
+  businessliabilities: () => require("../models/BusinessLiability"),
+
+  businessliabilitypayments: () =>
+    require("../models/BusinessLiabilityPayment"),
+
+  businessreceivableloans: () => require("../models/BusinessReceivableLoan"),
+
+  businessreceivableloanpayments: () =>
+    require("../models/BusinessReceivableLoanPayment"),
+};
+
+const RESTORE_ORDER = Object.keys(COLLECTION_CONFIG);
+
+function ensureDirectories() {
+  fs.mkdirSync(BACKUP_DIR, {
+    recursive: true,
+  });
+
+  fs.mkdirSync(UPLOADS_DIR, {
+    recursive: true,
+  });
 }
 
-function createAssetCategoryIdMap() {
-  return {};
-}
-
-function createBusinessLiabilityIdMap() {
-  return {};
-}
-
-function createBusinessReceivableLoanIdMap() {
-  return {};
-}
-
-function createJournalIdMap() {
-  return {};
-}
-
-function ensureDirectories(tempDir) {
-  if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR);
+function cleanTemp(tempDir) {
+  if (!tempDir || !fs.existsSync(tempDir)) {
+    return;
   }
 
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
+  fs.rmSync(tempDir, {
+    recursive: true,
+    force: true,
+  });
+}
+
+function calculateBufferHash(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function getRegularBackupRegex(userId) {
+  const safeUserId = String(userId).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  return new RegExp(`^smartkhata-backup-${safeUserId}-\\d+\\.zip$`);
 }
 
 function getLatestBackup(userId) {
+  if (!fs.existsSync(BACKUP_DIR)) {
+    throw new Error("No local backups found");
+  }
+
+  const regex = getRegularBackupRegex(userId);
+
   const files = fs
     .readdirSync(BACKUP_DIR)
-    .filter((f) => f.includes(`smartkhata-backup-${userId}`))
+    .filter((file) => regex.test(file))
     .map((file) => {
       const filePath = path.join(BACKUP_DIR, file);
 
@@ -98,736 +118,649 @@ function getLatestBackup(userId) {
         created: stats.mtime,
       };
     })
-    .sort((a, b) => new Date(b.created) - new Date(a.created));
+    .sort(
+      (a, b) => new Date(b.created).getTime() - new Date(a.created).getTime(),
+    );
 
   if (files.length === 0) {
-    throw new Error("No backup files found");
+    throw new Error("No verified local backup found");
   }
 
   return files[0].path;
 }
 
-function getBackupByName(fileName) {
-  const filePath = path.join(BACKUP_DIR, fileName);
-
-  if (!fs.existsSync(filePath)) {
-    throw new Error("Backup file not found");
+function isSafeArchivePath(entryPath) {
+  if (!entryPath || typeof entryPath !== "string") {
+    return false;
   }
 
-  return filePath;
-}
-
-async function extractBackup(zipFile, tempDir) {
-  await fs
-    .createReadStream(zipFile)
-    .pipe(unzipper.Extract({ path: tempDir }))
-    .promise();
-}
-
-async function restoreAccounts(userId, docs, accountIdMap) {
-  const db = mongoose.connection.db;
-
-  const collection = db.collection("accounts");
-
-  await collection.deleteMany({ userId });
-
-  for (const doc of docs) {
-    const oldId = doc._id;
-
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-
-    const inserted = await collection.insertOne(newDoc);
-
-    const newId = inserted.insertedId;
-
-    accountIdMap[oldId] = newId;
-  }
-}
-
-async function restoreCustomers(userId, docs, accountIdMap) {
-  const db = mongoose.connection.db;
-
-  const collection = db.collection("customers");
-
-  await collection.deleteMany({ createdBy: userId });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-
-    if (newDoc.account && accountIdMap[newDoc.account]) {
-      newDoc.account = accountIdMap[newDoc.account];
-    }
-
-    return newDoc;
-  });
-
-  await collection.insertMany(fixedDocs);
-}
-
-async function restoreSuppliers(userId, docs, accountIdMap) {
-  const db = mongoose.connection.db;
-
-  const collection = db.collection("suppliers");
-
-  await collection.deleteMany({ userId });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-
-    if (newDoc.account && accountIdMap[newDoc.account]) {
-      newDoc.account = accountIdMap[newDoc.account];
-    }
-
-    return newDoc;
-  });
-
-  await collection.insertMany(fixedDocs);
-}
-
-async function restoreJournals(
-  userId,
-  docs,
-  accountIdMap,
-  journalIdMap,
-  liabilityIdMap,
-  receivableLoanIdMap,
-) {
-  const db = mongoose.connection.db;
-
-  const collection = db.collection("journalentries");
-
-  await collection.deleteMany({ createdBy: userId });
-
-  for (const doc of docs) {
-    const oldId = doc._id?.toString();
-
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-
-    if (newDoc.lines) {
-      newDoc.lines = newDoc.lines.map((line) => {
-        const newLine = { ...line };
-
-        const oldAccountId = newLine.account?.toString();
-
-        if (oldAccountId && accountIdMap[oldAccountId]) {
-          newLine.account = accountIdMap[oldAccountId];
-        }
-
-        return newLine;
-      });
-    }
-
-    if (Array.isArray(newDoc.accounts)) {
-      newDoc.accounts = newDoc.accounts.map((accountId) => {
-        const oldAccountId = accountId?.toString();
-
-        return accountIdMap[oldAccountId] || accountId;
-      });
-    }
-
-    const oldReferenceId = newDoc.referenceId?.toString();
-
-    if (
-      oldReferenceId &&
-      newDoc.originModule === "business_liability_payment" &&
-      liabilityIdMap[oldReferenceId]
-    ) {
-      newDoc.referenceId = liabilityIdMap[oldReferenceId];
-    }
-
-    if (
-      oldReferenceId &&
-      ["business_receivable_loan", "business_receivable_loan_payment"].includes(
-        newDoc.originModule,
-      ) &&
-      receivableLoanIdMap[oldReferenceId]
-    ) {
-      newDoc.referenceId = receivableLoanIdMap[oldReferenceId];
-    }
-
-    const inserted = await collection.insertOne(newDoc);
-
-    if (oldId) {
-      journalIdMap[oldId] = inserted.insertedId;
-    }
-  }
-}
-
-async function restoreBusinessAssetCategories(
-  userId,
-  docs,
-  assetCategoryIdMap,
-) {
-  const collection = mongoose.connection.db.collection(
-    "businessassetcategories",
-  );
-
-  await collection.deleteMany({ userId });
-
-  for (const doc of docs) {
-    const oldId = doc._id?.toString();
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
-
-    const inserted = await collection.insertOne(newDoc);
-
-    if (oldId) {
-      assetCategoryIdMap[oldId] = inserted.insertedId;
-    }
-  }
-}
-
-async function restoreBusinessAssets(userId, docs, assetCategoryIdMap) {
-  const collection = mongoose.connection.db.collection("businessassets");
-
-  await collection.deleteMany({ userId });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
-
-    const oldCategoryId = newDoc.categoryId?.toString();
-
-    if (oldCategoryId && assetCategoryIdMap[oldCategoryId]) {
-      newDoc.categoryId = assetCategoryIdMap[oldCategoryId];
-    }
-
-    return newDoc;
-  });
-
-  if (fixedDocs.length) {
-    await collection.insertMany(fixedDocs);
-  }
-}
-
-async function restoreBusinessLiabilities(userId, docs, liabilityIdMap) {
-  const collection = mongoose.connection.db.collection("businessliabilities");
-
-  await collection.deleteMany({ userId });
-
-  for (const doc of docs) {
-    const oldId = doc._id?.toString();
-
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-
-    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
-
-    const inserted = await collection.insertOne(newDoc);
-
-    if (oldId) {
-      liabilityIdMap[oldId] = inserted.insertedId;
-    }
-  }
-}
-
-async function restoreBusinessLiabilityPayments(
-  userId,
-  docs,
-  liabilityIdMap,
-  accountIdMap,
-  journalIdMap,
-) {
-  const collection = mongoose.connection.db.collection(
-    "businessliabilitypayments",
-  );
-
-  await collection.deleteMany({ userId });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-
-    const oldLiabilityId = newDoc.liabilityId?.toString();
-
-    if (oldLiabilityId && liabilityIdMap[oldLiabilityId]) {
-      newDoc.liabilityId = liabilityIdMap[oldLiabilityId];
-    }
-
-    const oldAccountId = newDoc.accountId?.toString();
-
-    if (oldAccountId && accountIdMap[oldAccountId]) {
-      newDoc.accountId = accountIdMap[oldAccountId];
-    }
-
-    const oldJournalId = newDoc.journalEntryId?.toString();
-
-    if (oldJournalId && journalIdMap[oldJournalId]) {
-      newDoc.journalEntryId = journalIdMap[oldJournalId];
-    } else {
-      newDoc.journalEntryId = null;
-    }
-
-    const oldReversalJournalId = newDoc.reversalJournalEntryId?.toString();
-
-    if (oldReversalJournalId && journalIdMap[oldReversalJournalId]) {
-      newDoc.reversalJournalEntryId = journalIdMap[oldReversalJournalId];
-    } else {
-      newDoc.reversalJournalEntryId = null;
-    }
-
-    return newDoc;
-  });
-
-  if (fixedDocs.length) {
-    await collection.insertMany(fixedDocs);
-  }
-}
-
-async function restoreBusinessReceivableLoans(
-  userId,
-  docs,
-  receivableLoanIdMap,
-) {
-  const collection = mongoose.connection.db.collection(
-    "businessreceivableloans",
-  );
-
-  await collection.deleteMany({ userId });
-
-  for (const doc of docs) {
-    const oldId = doc._id?.toString();
-
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-    newDoc.updatedBy = new mongoose.Types.ObjectId(userId);
-
-    const inserted = await collection.insertOne(newDoc);
-
-    if (oldId) {
-      receivableLoanIdMap[oldId] = inserted.insertedId;
-    }
-  }
-}
-
-async function restoreBusinessReceivableLoanPayments(
-  userId,
-  docs,
-  receivableLoanIdMap,
-  accountIdMap,
-  journalIdMap,
-) {
-  const collection = mongoose.connection.db.collection(
-    "businessreceivableloanpayments",
-  );
-
-  await collection.deleteMany({ userId });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    newDoc.userId = new mongoose.Types.ObjectId(userId);
-    newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-
-    const oldLoanId = newDoc.loanId?.toString();
-
-    if (oldLoanId && receivableLoanIdMap[oldLoanId]) {
-      newDoc.loanId = receivableLoanIdMap[oldLoanId];
-    }
-
-    const oldAccountId = newDoc.accountId?.toString();
-
-    if (oldAccountId && accountIdMap[oldAccountId]) {
-      newDoc.accountId = accountIdMap[oldAccountId];
-    }
-
-    const oldJournalId = newDoc.journalEntryId?.toString();
-
-    if (oldJournalId && journalIdMap[oldJournalId]) {
-      newDoc.journalEntryId = journalIdMap[oldJournalId];
-    } else {
-      newDoc.journalEntryId = null;
-    }
-
-    const oldReversalJournalId = newDoc.reversalJournalEntryId?.toString();
-
-    if (oldReversalJournalId && journalIdMap[oldReversalJournalId]) {
-      newDoc.reversalJournalEntryId = journalIdMap[oldReversalJournalId];
-    } else {
-      newDoc.reversalJournalEntryId = null;
-    }
-
-    return newDoc;
-  });
-
-  if (fixedDocs.length) {
-    await collection.insertMany(fixedDocs);
-  }
-}
-
-async function restoreGeneric(collectionName, userId, docs) {
-  const db = mongoose.connection.db;
-
-  const collection = db.collection(collectionName);
-
-  const filterField = COLLECTION_CONFIG[collectionName]?.field;
-
-  await collection.deleteMany({
-    [filterField]: new mongoose.Types.ObjectId(userId),
-  });
-
-  const fixedDocs = docs.map((doc) => {
-    const newDoc = { ...doc };
-
-    delete newDoc._id;
-
-    if (newDoc.createdBy) {
-      newDoc.createdBy = new mongoose.Types.ObjectId(userId);
-    }
-
-    if (newDoc.userId) {
-      newDoc.userId = new mongoose.Types.ObjectId(userId);
-    }
-
-    return newDoc;
-  });
-
-  await collection.insertMany(fixedDocs);
-}
-
-async function restoreCollections(userId, tempDir) {
-  const accountIdMap = createAccountIdMap();
-
-  const assetCategoryIdMap = createAssetCategoryIdMap();
-
-  const liabilityIdMap = createBusinessLiabilityIdMap();
-
-  const receivableLoanIdMap = createBusinessReceivableLoanIdMap();
-
-  const journalIdMap = createJournalIdMap();
-
-  for (const collectionName of RESTORE_ORDER) {
-    const filePath = path.join(tempDir, `${collectionName}.json`);
-
-    if (!fs.existsSync(filePath)) {
-      continue;
-    }
-
-    const raw = fs.readFileSync(filePath);
-
-    const docs = JSON.parse(raw);
-
-    if (!docs.length) continue;
-
-    if (collectionName === "accounts") {
-      await restoreAccounts(userId, docs, accountIdMap);
-      continue;
-    }
-
-    if (collectionName === "customers") {
-      await restoreCustomers(userId, docs, accountIdMap);
-      continue;
-    }
-
-    if (collectionName === "suppliers") {
-      await restoreSuppliers(userId, docs, accountIdMap);
-      continue;
-    }
-
-    if (collectionName === "journalentries") {
-      await restoreJournals(
-        userId,
-        docs,
-        accountIdMap,
-        journalIdMap,
-        liabilityIdMap,
-        receivableLoanIdMap,
-      );
-
-      continue;
-    }
-
-    if (collectionName === "businessassetcategories") {
-      await restoreBusinessAssetCategories(userId, docs, assetCategoryIdMap);
-      continue;
-    }
-
-    if (collectionName === "businessassets") {
-      await restoreBusinessAssets(userId, docs, assetCategoryIdMap);
-      continue;
-    }
-
-    if (collectionName === "businessliabilities") {
-      await restoreBusinessLiabilities(userId, docs, liabilityIdMap);
-      continue;
-    }
-
-    if (collectionName === "businessreceivableloans") {
-      await restoreBusinessReceivableLoans(userId, docs, receivableLoanIdMap);
-
-      continue;
-    }
-
-    if (collectionName === "businessliabilitypayments") {
-      await restoreBusinessLiabilityPayments(
-        userId,
-        docs,
-        liabilityIdMap,
-        accountIdMap,
-        journalIdMap,
-      );
-      continue;
-    }
-    if (collectionName === "businessreceivableloanpayments") {
-      await restoreBusinessReceivableLoanPayments(
-        userId,
-        docs,
-        receivableLoanIdMap,
-        accountIdMap,
-        journalIdMap,
-      );
-
-      continue;
-    }
-
-    await restoreGeneric(collectionName, userId, docs);
-  }
-}
-
-function copyRecursive(src, dest) {
-  const stats = fs.lstatSync(src);
-
-  // 📁 folder
-  if (stats.isDirectory()) {
-    if (!fs.existsSync(dest)) {
-      fs.mkdirSync(dest, { recursive: true });
-    }
-
-    const items = fs.readdirSync(src);
-
-    items.forEach((item) => {
-      copyRecursive(path.join(src, item), path.join(dest, item));
-    });
-
-    return;
+  const normalized = entryPath.replace(/\\/g, "/");
+
+  if (
+    normalized.startsWith("/") ||
+    normalized.includes("../") ||
+    normalized.includes("..\\") ||
+    path.isAbsolute(normalized)
+  ) {
+    return false;
   }
 
-  // 📄 file
-  let finalDest = dest;
+  return true;
+}
 
-  if (fs.existsSync(dest)) {
-    const ext = path.extname(dest);
+function findUniqueEntry(directory, entryName) {
+  const matches = directory.files.filter((file) => file.path === entryName);
 
-    const name = path.basename(dest, ext);
-
-    finalDest = path.join(
-      path.dirname(dest),
-      `${name}-restore-${Date.now()}${ext}`,
+  if (matches.length !== 1) {
+    throw new Error(
+      `Backup validation failed: ${entryName} is missing or duplicated`,
     );
   }
 
-  fs.copyFileSync(src, finalDest);
+  return matches[0];
 }
 
-function restoreUploads(tempDir) {
-  const uploadsBackup = path.join(tempDir, "uploads");
+async function readJsonEntry(entry, label) {
+  try {
+    const buffer = await entry.buffer();
 
-  if (!fs.existsSync(uploadsBackup)) {
-    return;
+    return {
+      buffer,
+      data: JSON.parse(buffer.toString("utf8")),
+    };
+  } catch (error) {
+    throw new Error(`Backup validation failed: invalid ${label}`);
+  }
+}
+
+async function validateBackupArchive(zipFile, expectedUserId) {
+  if (!zipFile || !fs.existsSync(zipFile)) {
+    throw new Error("Backup ZIP not found");
   }
 
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  const stats = fs.statSync(zipFile);
+
+  if (!stats.isFile() || stats.size <= 0) {
+    throw new Error("Backup ZIP is empty or invalid");
   }
 
-  const items = fs.readdirSync(uploadsBackup);
+  let directory;
 
-  items.forEach((item) => {
-    copyRecursive(path.join(uploadsBackup, item), path.join(UPLOADS_DIR, item));
+  try {
+    directory = await unzipper.Open.file(zipFile);
+  } catch (error) {
+    throw new Error("Backup ZIP is corrupt or unreadable");
+  }
+
+  if (!directory.files || directory.files.length === 0) {
+    throw new Error("Backup ZIP is empty");
+  }
+
+  if (directory.files.length > 1000) {
+    throw new Error("Backup ZIP contains too many files");
+  }
+
+  for (const entry of directory.files) {
+    if (!isSafeArchivePath(entry.path)) {
+      throw new Error("Backup ZIP contains an unsafe file path");
+    }
+  }
+
+  const metaEntry = findUniqueEntry(directory, "meta.json");
+
+  const manifestEntry = findUniqueEntry(directory, "manifest.json");
+
+  const { data: meta } = await readJsonEntry(metaEntry, "meta.json");
+
+  const { data: manifest } = await readJsonEntry(
+    manifestEntry,
+    "manifest.json",
+  );
+
+  if (meta.software !== "SmartKhata") {
+    throw new Error("This is not a SmartKhata backup");
+  }
+
+  if (String(meta.userId) !== String(expectedUserId)) {
+    throw new Error("This backup belongs to another business/user");
+  }
+
+  const schemaVersion = Number(
+    meta.backupSchemaVersion || manifest.schemaVersion || 0,
+  );
+
+  if (schemaVersion < MIN_BACKUP_SCHEMA_VERSION) {
+    throw new Error(
+      "This is an old unverified backup format. Create a new verified backup before restore.",
+    );
+  }
+
+  if (!manifest.collections || typeof manifest.collections !== "object") {
+    throw new Error("Backup manifest is missing or invalid");
+  }
+
+  for (const collectionName of RESTORE_ORDER) {
+    const config = COLLECTION_CONFIG[collectionName];
+
+    const info = manifest.collections[collectionName];
+
+    if (config?.required && !info) {
+      throw new Error(`Required backup data missing: ${collectionName}`);
+    }
+
+    if (!info) {
+      continue;
+    }
+
+    const expectedFile = `${collectionName}.json`;
+
+    if (info.file !== expectedFile) {
+      throw new Error(`Invalid manifest file for ${collectionName}`);
+    }
+
+    const entry = findUniqueEntry(directory, expectedFile);
+
+    const buffer = await entry.buffer();
+
+    const hash = calculateBufferHash(buffer);
+
+    if (hash !== info.sha256) {
+      throw new Error(`Backup checksum failed: ${collectionName}`);
+    }
+
+    let docs;
+
+    try {
+      docs = JSON.parse(buffer.toString("utf8"));
+    } catch (error) {
+      throw new Error(`Invalid JSON data: ${collectionName}`);
+    }
+
+    if (!Array.isArray(docs)) {
+      throw new Error(`Invalid collection data: ${collectionName}`);
+    }
+
+    if (docs.length !== Number(info.count || 0)) {
+      throw new Error(`Backup count mismatch: ${collectionName}`);
+    }
+  }
+
+  const localUploads = Array.isArray(manifest.localUploads)
+    ? manifest.localUploads
+    : [];
+
+  for (const fileName of localUploads) {
+    const safeName = path.basename(String(fileName));
+
+    if (safeName !== fileName || !safeName) {
+      throw new Error("Backup contains invalid upload metadata");
+    }
+
+    findUniqueEntry(directory, `uploads/${safeName}`);
+  }
+
+  return {
+    meta,
+    manifest,
+    size: stats.size,
+  };
+}
+
+async function readBackupCollection(zipFile, collectionName, manifest) {
+  const info = manifest.collections[collectionName];
+
+  if (!info) {
+    return [];
+  }
+
+  const directory = await unzipper.Open.file(zipFile);
+
+  const entry = findUniqueEntry(directory, info.file);
+
+  const buffer = await entry.buffer();
+
+  if (calculateBufferHash(buffer) !== info.sha256) {
+    throw new Error(`Checksum failed during restore: ${collectionName}`);
+  }
+
+  let docs;
+
+  try {
+    docs = JSON.parse(buffer.toString("utf8"));
+  } catch (error) {
+    throw new Error(`Invalid JSON during restore: ${collectionName}`);
+  }
+
+  if (!Array.isArray(docs) || docs.length !== Number(info.count || 0)) {
+    throw new Error(
+      `Document count mismatch during restore: ${collectionName}`,
+    );
+  }
+
+  return docs;
+}
+
+function castDocuments(collectionName, docs, userId) {
+  const loader = MODEL_LOADERS[collectionName];
+
+  if (!loader) {
+    throw new Error(`No restore model configured for ${collectionName}`);
+  }
+
+  const Model = loader();
+
+  const objectUserId = new mongoose.Types.ObjectId(String(userId));
+
+  return docs.map((rawDoc) => {
+    const prepared = {
+      ...rawDoc,
+    };
+
+    const config = COLLECTION_CONFIG[collectionName];
+
+    if (
+      config?.field === "userId" ||
+      Object.prototype.hasOwnProperty.call(prepared, "userId")
+    ) {
+      prepared.userId = objectUserId;
+    }
+
+    if (
+      config?.field === "createdBy" ||
+      Object.prototype.hasOwnProperty.call(prepared, "createdBy")
+    ) {
+      prepared.createdBy = objectUserId;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(prepared, "updatedBy")) {
+      prepared.updatedBy = objectUserId;
+    }
+
+    const hydrated = Model.hydrate(prepared);
+
+    const validationError = hydrated.validateSync();
+
+    if (validationError) {
+      throw new Error(
+        `Invalid ${collectionName} backup data: ${validationError.message}`,
+      );
+    }
+
+    return hydrated.toObject({
+      depopulate: true,
+      virtuals: false,
+      getters: false,
+      minimize: false,
+      versionKey: true,
+    });
   });
 }
 
-function cleanTemp(tempDir) {
-  if (!fs.existsSync(tempDir)) return;
+async function assertTransactionSupport() {
+  if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+    throw new Error("MongoDB is not connected");
+  }
 
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  const hello = await mongoose.connection.db.admin().command({
+    hello: 1,
+  });
+
+  const transactionSupported =
+    Boolean(hello.setName) || hello.msg === "isdbgrid";
+
+  if (!transactionSupported) {
+    throw new Error(
+      "Safe restore requires MongoDB transaction support. Restore cancelled before changing live data.",
+    );
+  }
 }
 
-async function restoreBackup(userId, fileName = null) {
+async function restoreDatabase(userId, zipFile, manifest) {
+  const db = mongoose.connection.db;
+
+  const objectUserId = new mongoose.Types.ObjectId(String(userId));
+
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(
+      async () => {
+        for (let index = 0; index < RESTORE_ORDER.length; index += 1) {
+          const collectionName = RESTORE_ORDER[index];
+
+          const config = COLLECTION_CONFIG[collectionName];
+
+          const docs = await readBackupCollection(
+            zipFile,
+            collectionName,
+            manifest,
+          );
+
+          const castedDocs = castDocuments(collectionName, docs, userId);
+
+          const collection = db.collection(collectionName);
+
+          const filter = {
+            [config.field]: objectUserId,
+          };
+
+          await collection.deleteMany(filter, {
+            session,
+          });
+
+          if (castedDocs.length > 0) {
+            await collection.insertMany(castedDocs, {
+              session,
+              ordered: true,
+            });
+          }
+
+          const restoredCount = await collection.countDocuments(filter, {
+            session,
+          });
+
+          if (restoredCount !== docs.length) {
+            throw new Error(
+              `Restore verification failed for ${collectionName}`,
+            );
+          }
+
+          const progress =
+            55 + Math.round(((index + 1) / RESTORE_ORDER.length) * 25);
+
+          updateProgress(
+            userId,
+            Math.min(progress, 80),
+            `Restoring ${collectionName}...`,
+          );
+        }
+      },
+      {
+        readConcern: {
+          level: "snapshot",
+        },
+        writeConcern: {
+          w: "majority",
+        },
+      },
+    );
+  } finally {
+    await session.endSession();
+  }
+}
+
+async function verifyRestoredDatabase(userId, manifest) {
+  const db = mongoose.connection.db;
+
+  const objectUserId = new mongoose.Types.ObjectId(String(userId));
+
+  for (const collectionName of RESTORE_ORDER) {
+    const config = COLLECTION_CONFIG[collectionName];
+
+    const expected = Number(manifest.collections[collectionName]?.count || 0);
+
+    const actual = await db.collection(collectionName).countDocuments({
+      [config.field]: objectUserId,
+    });
+
+    if (actual !== expected) {
+      throw new Error(
+        `Final restore verification failed for ${collectionName}. Expected ${expected}, found ${actual}.`,
+      );
+    }
+  }
+}
+
+async function restoreLocalUploads(zipFile, manifest) {
+  const files = Array.isArray(manifest.localUploads)
+    ? manifest.localUploads
+    : [];
+
+  if (files.length === 0) {
+    return;
+  }
+
+  fs.mkdirSync(UPLOADS_DIR, {
+    recursive: true,
+  });
+
+  const directory = await unzipper.Open.file(zipFile);
+
+  for (const fileName of files) {
+    const safeName = path.basename(fileName);
+
+    if (safeName !== fileName || !safeName) {
+      throw new Error("Unsafe upload filename found in backup");
+    }
+
+    const entry = findUniqueEntry(directory, `uploads/${safeName}`);
+
+    const finalPath = path.join(UPLOADS_DIR, safeName);
+
+    const resolvedBase = path.resolve(UPLOADS_DIR);
+
+    const resolvedFinal = path.resolve(finalPath);
+
+    if (!resolvedFinal.startsWith(`${resolvedBase}${path.sep}`)) {
+      throw new Error("Unsafe upload restore path");
+    }
+
+    const temporaryPath = `${finalPath}.restore-${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2, 8)}`;
+
+    const buffer = await entry.buffer();
+
+    fs.writeFileSync(temporaryPath, buffer);
+
+    fs.renameSync(temporaryPath, finalPath);
+  }
+}
+
+async function resolveRestoreSource(userId, source = null) {
+  if (source && typeof source === "object" && source.localFilePath) {
+    const localFilePath = path.resolve(source.localFilePath);
+
+    if (!fs.existsSync(localFilePath)) {
+      throw new Error("Selected backup file not found");
+    }
+
+    return {
+      path: localFilePath,
+      cleanup: false,
+      source: "local-file",
+    };
+  }
+
+  const cloudFileName =
+    typeof source === "string" ? source : source?.fileName || null;
+
+  if (cloudFileName) {
+    const downloaded = await downloadBackupFromCloud(userId, cloudFileName);
+
+    if (!downloaded.success) {
+      throw new Error(downloaded.message || "Failed to download cloud backup");
+    }
+
+    return {
+      path: downloaded.path,
+      cleanup: true,
+      source: "cloud",
+    };
+  }
+
+  return {
+    path: getLatestBackup(userId),
+    cleanup: false,
+    source: "local-latest",
+  };
+}
+
+async function rollbackFromSafetyBackup(userId, safetyBackupPath) {
+  if (!safetyBackupPath || !fs.existsSync(safetyBackupPath)) {
+    throw new Error("Safety backup unavailable");
+  }
+
+  const validation = await validateBackupArchive(safetyBackupPath, userId);
+
+  await restoreDatabase(userId, safetyBackupPath, validation.manifest);
+
+  await verifyRestoredDatabase(userId, validation.manifest);
+
+  await restoreLocalUploads(safetyBackupPath, validation.manifest);
+}
+
+async function restoreBackup(userId, source = null) {
   let safetyBackupPath = null;
+  let restoreSource = null;
 
   const operationId = `restore-${userId}-${Date.now()}`;
 
   const tempDir = getTempDir(operationId);
 
+  let databaseCommitted = false;
+
   try {
+    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) {
+      throw new Error("Invalid user ID");
+    }
+
     initProgress(userId, "restore");
-
-    ensureDirectories(tempDir);
-
-    cleanTemp(tempDir);
-
-    ensureDirectories(tempDir);
 
     updateProgress(userId, 5, "Preparing restore...");
 
-    console.log("🛡️ Creating safety backup before restore...");
+    ensureDirectories();
 
-    /* STEP 1: SAFETY BACKUP */
+    cleanTemp(tempDir);
+
+    fs.mkdirSync(tempDir, {
+      recursive: true,
+    });
+
+    // Never touch live data without transaction support
+    await assertTransactionSupport();
+
+    updateProgress(userId, 10, "Creating safety backup...");
 
     const safetyBackup = await createBackup(userId, {
       skipCloudUpload: true,
+      backupType: "safety",
+      trackProgress: false,
     });
 
     if (!safetyBackup.success) {
-      throw new Error("Safety backup failed. Restore cancelled.");
+      throw new Error(`Safety backup failed: ${safetyBackup.message}`);
     }
 
     safetyBackupPath = safetyBackup.path;
 
-    updateProgress(userId, 20, "Safety backup created");
+    await validateBackupArchive(safetyBackupPath, userId);
 
-    console.log("✅ Safety backup created:", safetyBackupPath);
+    updateProgress(userId, 20, "Safety backup verified");
 
-    /* STEP 2: GET BACKUP */
+    restoreSource = await resolveRestoreSource(userId, source);
 
-    let backupFile;
-
-    if (fileName) {
-      console.log("☁️ Downloading backup from cloud...");
-
-      updateProgress(userId, 30, "Downloading from cloud...");
-
-      const downloaded = await downloadBackupFromCloud(userId, fileName);
-
-      if (!downloaded.success) {
-        throw new Error("Failed to download backup from cloud");
-      }
-
-      backupFile = downloaded.path;
-    } else {
-      backupFile = getLatestBackup(userId);
-    }
-
-    updateProgress(userId, 50, "Extracting backup...");
-
-    /* EXTRACT */
-
-    await extractBackup(backupFile, tempDir);
-
-    updateProgress(userId, 70, "Restoring data...");
-
-    /* RESTORE DATABASE */
-
-    await restoreCollections(new mongoose.Types.ObjectId(userId), tempDir);
-
-    /* ENSURE BASE ACCOUNTS */
-
-    const createBaseAccountsForUser = require("../utils/createBaseAccounts");
-
-    await createBaseAccountsForUser(userId);
-
-    /* REPAIR ACCOUNT METADATA */
-
-    const Account = require("../models/Account");
-
-    await Account.updateMany(
-      {
-        $or: [
-          { category: { $exists: false } },
-          { category: null },
-          { category: "" },
-        ],
-      },
-      { $set: { category: "other" } },
+    updateProgress(
+      userId,
+      30,
+      restoreSource.source === "cloud"
+        ? "Cloud backup downloaded"
+        : "Backup selected",
     );
 
-    await Account.updateMany(
-      {
-        $or: [{ type: { $exists: false } }, { type: null }, { type: "" }],
-      },
-      { $set: { type: "Asset" } },
-    );
+    const validation = await validateBackupArchive(restoreSource.path, userId);
 
-    updateProgress(userId, 85, "Restoring files...");
+    updateProgress(userId, 45, "Backup fully verified");
 
-    /* RESTORE UPLOADS */
+    await restoreDatabase(userId, restoreSource.path, validation.manifest);
 
-    restoreUploads(tempDir);
+    databaseCommitted = true;
 
-    cleanTemp(tempDir);
+    updateProgress(userId, 82, "Verifying restored data...");
 
-    updateProgress(userId, 95, "Finalizing...");
+    await verifyRestoredDatabase(userId, validation.manifest);
 
-    completeProgress(userId, "Restore completed");
+    updateProgress(userId, 90, "Restoring local files...");
 
-    console.log("✅ Restore successful");
+    await restoreLocalUploads(restoreSource.path, validation.manifest);
+
+    updateProgress(userId, 97, "Finalizing restore...");
+
+    completeProgress(userId, "Restore completed and verified");
+
+    console.log("✅ Backup restored and verified successfully");
 
     return {
       success: true,
-      message: "Backup restored successfully",
+      verified: true,
+      source: restoreSource.source,
+      message: "Backup restored and verified successfully",
     };
   } catch (error) {
     console.error("❌ Restore failed:", error.message);
 
-    failProgress(userId, "Restore failed");
+    let rollbackAttempted = false;
+    let rollbackSucceeded = false;
+    let rollbackErrorMessage = null;
 
-    /* ROLLBACK */
+    /*
+      Transaction failure before commit means MongoDB
+      already kept old live data unchanged.
+    */
+    if (databaseCommitted && safetyBackupPath) {
+      rollbackAttempted = true;
 
-    try {
-      if (safetyBackupPath) {
-        console.log("🔄 Rolling back from safety backup...");
+      try {
+        console.log("🔄 Restoring safety backup...");
 
-        await extractBackup(safetyBackupPath, tempDir);
+        await rollbackFromSafetyBackup(userId, safetyBackupPath);
 
-        await restoreCollections(new mongoose.Types.ObjectId(userId), tempDir);
+        rollbackSucceeded = true;
 
-        restoreUploads(tempDir);
+        console.log("✅ Safety rollback completed");
+      } catch (rollbackError) {
+        rollbackErrorMessage = rollbackError.message;
 
-        cleanTemp(tempDir);
-
-        console.log("✅ Rollback successful");
+        console.error(
+          "❌ CRITICAL: Safety rollback failed:",
+          rollbackError.message,
+        );
       }
-    } catch (rollbackError) {
-      console.error("❌ Rollback failed:", rollbackError.message);
     }
+
+    const finalMessage = rollbackAttempted
+      ? rollbackSucceeded
+        ? `Restore failed, but original data was restored safely. Reason: ${error.message}`
+        : `CRITICAL: Restore failed and automatic rollback also failed. Reason: ${error.message}. Rollback error: ${rollbackErrorMessage}`
+      : `Restore cancelled safely before live data was changed. Reason: ${error.message}`;
+
+    failProgress(userId, finalMessage);
 
     return {
       success: false,
-      message: "Restore failed but data recovered",
+      rollbackAttempted,
+      rollbackSucceeded,
+      critical: rollbackAttempted && !rollbackSucceeded,
+      message: finalMessage,
     };
+  } finally {
+    try {
+      cleanTemp(tempDir);
+    } catch (error) {
+      console.error("❌ Restore temp cleanup failed:", error.message);
+    }
+
+    try {
+      if (
+        restoreSource?.cleanup &&
+        restoreSource.path &&
+        fs.existsSync(restoreSource.path)
+      ) {
+        fs.unlinkSync(restoreSource.path);
+      }
+    } catch (error) {
+      console.error("❌ Downloaded backup cleanup failed:", error.message);
+    }
   }
 }
 

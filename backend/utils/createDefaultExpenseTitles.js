@@ -88,23 +88,22 @@ const createDefaultExpenseTitlesForUser = async (userId) => {
         continue;
       }
 
-      await ExpenseTitle.findOneAndUpdate(
-        {
-          name: item.name,
-          userId,
-        },
-        {
-          name: item.name,
-          userId,
-          categoryId: account._id,
-          isDefault: true,
-          isDeleted: false,
-        },
-        {
-          upsert: true,
-          new: true,
-        },
-      );
+      const existingTitle = await ExpenseTitle.findOne({
+        name: item.name,
+        userId,
+      });
+
+      if (existingTitle) {
+        continue;
+      }
+
+      await ExpenseTitle.create({
+        name: item.name,
+        userId,
+        categoryId: account._id,
+        isDefault: true,
+        isDeleted: false,
+      });
     }
 
     console.log(

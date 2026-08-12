@@ -2,6 +2,7 @@ const path = require("path");
 const fs = require("fs");
 
 const { createBackup, getBackupStatus } = require("../services/backupService");
+
 const { restoreBackup } = require("../services/restoreService");
 
 const {
@@ -12,13 +13,46 @@ const {
   getCloudBackupList,
   downloadBackupFromCloud,
 } = require("../services/cloudListService");
+
 const { getProgress, isRunning } = require("../services/backupProgressService");
 
-// CREATE BACKUP
+function getUserId(req) {
+  return req.user?.id || req.userId || null;
+}
+
+function cleanupFile(filePath) {
+  if (!filePath) return;
+
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.error("❌ File cleanup failed:", error.message);
+  }
+}
+
+function validateBackupFileName(fileName) {
+  if (!fileName || typeof fileName !== "string") {
+    return null;
+  }
+
+  const cleanName = path.basename(fileName.trim());
+
+  if (
+    !cleanName ||
+    cleanName !== fileName.trim() ||
+    path.extname(cleanName).toLowerCase() !== ".zip"
+  ) {
+    return null;
+  }
+
+  return cleanName;
+}
 
 exports.createBackupController = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -26,43 +60,41 @@ exports.createBackupController = async (req, res) => {
         message: "User not authenticated",
       });
     }
+
     if (isRunning(userId)) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
-        message: "Another backup/restore already running",
+        message: "Another backup or restore is already running",
       });
     }
+
     const result = await createBackup(userId);
 
     if (!result.success) {
       return res.status(500).json({
         success: false,
-        message: result.message,
+        message: result.message || "Backup creation failed",
       });
     }
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Backup created successfully",
-      file: path.basename(result.path),
+      message: result.message || "Backup created successfully",
+      file: result.path ? path.basename(result.path) : null,
     });
   } catch (error) {
-    console.error("❌ Backup Error:", error);
+    console.error("❌ Backup Controller Error:", error.message);
 
     return res.status(500).json({
       success: false,
-      message: "Backup failed",
+      message: "Backup creation failed",
     });
   }
 };
 
-/* ======================================================
-   RESTORE BACKUP
-====================================================== */
-
 exports.restoreBackupController = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -71,28 +103,44 @@ exports.restoreBackupController = async (req, res) => {
       });
     }
 
-    const { fileName } = req.body;
-
     if (isRunning(userId)) {
+      return res.status(409).json({
+        success: false,
+        message: "Another backup or restore is already running",
+      });
+    }
+
+    const fileName = validateBackupFileName(req.body?.fileName);
+
+    if (!fileName) {
       return res.status(400).json({
         success: false,
-        message: "Another backup/restore already running",
-      });
-    }
-    const result = await restoreBackup(userId, fileName);
-    if (!result.success) {
-      return res.status(500).json({
-        success: false,
-        message: result.message,
+        message: "A valid backup file must be selected",
       });
     }
 
-    return res.json({
+    const result = await restoreBackup(userId, fileName);
+
+    if (!result.success) {
+      const statusCode = result.critical ? 500 : 422;
+
+      return res.status(statusCode).json({
+        success: false,
+        message: result.message || "Restore failed",
+        rollbackAttempted: Boolean(result.rollbackAttempted),
+        rollbackSucceeded: Boolean(result.rollbackSucceeded),
+        critical: Boolean(result.critical),
+      });
+    }
+
+    return res.status(200).json({
       success: true,
-      message: "Backup restored successfully",
+      verified: result.verified === true,
+      source: result.source || "cloud",
+      message: result.message || "Backup restored successfully",
     });
   } catch (error) {
-    console.error("❌ Restore Error:", error);
+    console.error("❌ Restore Controller Error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -101,20 +149,25 @@ exports.restoreBackupController = async (req, res) => {
   }
 };
 
-/* ======================================================
-   BACKUP STATUS
-====================================================== */
-
 exports.getBackupStatusController = (req, res) => {
   try {
-    const status = getBackupStatus();
+    const userId = getUserId(req);
 
-    return res.json({
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
+
+    const status = getBackupStatus(userId);
+
+    return res.status(200).json({
       success: true,
       data: status,
     });
   } catch (error) {
-    console.error("❌ Backup Status Error:", error);
+    console.error("❌ Backup Status Error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -124,45 +177,84 @@ exports.getBackupStatusController = (req, res) => {
 };
 
 exports.downloadBackupController = async (req, res) => {
-  try {
-    const userId = req.user?.id || req.userId;
-    const result = await getCloudBackupList(userId);
+  let downloadedPath = null;
 
-    if (!result.success || !result.files.length) {
-      return res.status(404).json({
+  try {
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
         success: false,
-        message: "No cloud backups found",
+        message: "User not authenticated",
       });
     }
 
-    // latest backup
-    const latestBackup = result.files[0];
+    const requestedFileName = req.query?.fileName
+      ? validateBackupFileName(req.query.fileName)
+      : null;
 
-    const downloaded = await downloadBackupFromCloud(userId, latestBackup.name);
+    if (req.query?.fileName && !requestedFileName) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid backup file name",
+      });
+    }
+
+    let fileName = requestedFileName;
+
+    if (!fileName) {
+      const result = await getCloudBackupList(userId);
+
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          message: result.message || "Failed to fetch cloud backups",
+        });
+      }
+
+      if (!result.files?.length) {
+        return res.status(404).json({
+          success: false,
+          message: "No cloud backups found",
+        });
+      }
+
+      fileName = result.files[0].name;
+    }
+
+    const downloaded = await downloadBackupFromCloud(userId, fileName);
 
     if (!downloaded.success) {
       return res.status(500).json({
         success: false,
-        message: "Failed to download backup from cloud",
+        message: downloaded.message || "Failed to download backup",
       });
     }
 
-    return res.download(downloaded.path, latestBackup.name, (err) => {
-      if (err) {
-        console.error("❌ Download error:", err);
+    downloadedPath = downloaded.path;
+
+    if (!downloadedPath || !fs.existsSync(downloadedPath)) {
+      return res.status(500).json({
+        success: false,
+        message: "Downloaded backup file not found",
+      });
+    }
+
+    return res.download(downloadedPath, fileName, (error) => {
+      if (error) {
+        console.error("❌ Backup download response failed:", error.message);
       }
 
-      // cleanup temp file after download
-      try {
-        if (fs.existsSync(downloaded.path)) {
-          fs.unlinkSync(downloaded.path);
-        }
-      } catch (cleanupError) {
-        console.error("❌ Cleanup error:", cleanupError);
-      }
+      cleanupFile(downloadedPath);
     });
   } catch (error) {
-    console.error("❌ Download Backup Error:", error);
+    console.error("❌ Download Backup Error:", error.message);
+
+    cleanupFile(downloadedPath);
+
+    if (res.headersSent) {
+      return;
+    }
 
     return res.status(500).json({
       success: false,
@@ -172,12 +264,14 @@ exports.downloadBackupController = async (req, res) => {
 };
 
 exports.restoreLocalBackupController = async (req, res) => {
-  try {
-    const userId = req.user?.id || req.userId;
+  const filePath = req.file?.path || null;
 
-    const filePath = req.file?.path;
+  try {
+    const userId = getUserId(req);
 
     if (!userId) {
+      cleanupFile(filePath);
+
       return res.status(401).json({
         success: false,
         message: "User not authenticated",
@@ -192,44 +286,40 @@ exports.restoreLocalBackupController = async (req, res) => {
     }
 
     if (isRunning(userId)) {
-      return res.status(400).json({
+      cleanupFile(filePath);
+
+      return res.status(409).json({
         success: false,
-        message: "Another backup/restore already running",
+        message: "Another backup or restore is already running",
       });
     }
+
     const result = await restoreFromLocalBackup(userId, filePath);
 
+    cleanupFile(filePath);
+
     if (!result.success) {
-      return res.status(500).json({
+      const statusCode = result.critical ? 500 : 422;
+
+      return res.status(statusCode).json({
         success: false,
-        message: result.message,
+        message: result.message || "Local restore failed",
+        rollbackAttempted: Boolean(result.rollbackAttempted),
+        rollbackSucceeded: Boolean(result.rollbackSucceeded),
+        critical: Boolean(result.critical),
       });
     }
 
-    // cleanup uploaded ZIP after successful restore
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (cleanupError) {
-      console.error("❌ Uploaded ZIP cleanup failed:", cleanupError);
-    }
-
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Backup restored successfully",
+      verified: result.verified === true,
+      source: result.source || "local-file",
+      message: result.message || "Backup restored successfully",
     });
   } catch (error) {
-    console.error("❌ Local Restore Controller Error:", error);
+    console.error("❌ Local Restore Controller Error:", error.message);
 
-    // cleanup uploaded ZIP if restore failed
-    try {
-      if (req.file?.path && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-    } catch (cleanupError) {
-      console.error("❌ Failed ZIP cleanup:", cleanupError);
-    }
+    cleanupFile(filePath);
 
     return res.status(500).json({
       success: false,
@@ -240,22 +330,30 @@ exports.restoreLocalBackupController = async (req, res) => {
 
 exports.getCloudBackupListController = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
+
     const result = await getCloudBackupList(userId);
 
     if (!result.success) {
       return res.status(500).json({
         success: false,
-        message: result.message,
+        message: result.message || "Failed to fetch cloud backups",
       });
     }
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      files: result.files,
+      files: result.files || [],
     });
   } catch (error) {
-    console.error("❌ Cloud list controller error:", error);
+    console.error("❌ Cloud List Controller Error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -266,7 +364,7 @@ exports.getCloudBackupListController = async (req, res) => {
 
 exports.getBackupProgressController = (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -277,16 +375,16 @@ exports.getBackupProgressController = (req, res) => {
 
     const progressData = getProgress(userId);
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: progressData,
     });
   } catch (error) {
-    console.error("❌ Progress Error:", error);
+    console.error("❌ Backup Progress Error:", error.message);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to get progress",
+      message: "Failed to get backup progress",
     });
   }
 };

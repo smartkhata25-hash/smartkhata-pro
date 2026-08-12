@@ -12,10 +12,6 @@ const safeNumber = (value) => {
   return isNaN(num) ? 0 : num;
 };
 
-/* ================================
-   Source Label Resolver
-================================ */
-
 const resolveSourceLabel = (type) => {
   switch (type) {
     case "purchase_invoice":
@@ -35,10 +31,6 @@ const resolveSourceLabel = (type) => {
   }
 };
 
-/* ================================
-   Normalize Items
-================================ */
-
 const normalizeItems = (items = []) => {
   if (!Array.isArray(items)) return [];
 
@@ -49,10 +41,6 @@ const normalizeItems = (items = []) => {
     total: safeNumber(it.total),
   }));
 };
-
-/* ================================
-   Main Builder
-================================ */
 
 const buildSupplierDetailLedgerPrint = ({
   supplierName,
@@ -82,10 +70,6 @@ const buildSupplierDetailLedgerPrint = ({
   let totalCredit = 0;
 
   const blocks = [];
-
-  /* ================================
-     Ledger Blocks
-  ================================ */
 
   if (Array.isArray(ledger)) {
     for (const entry of ledger) {
@@ -123,16 +107,8 @@ const buildSupplierDetailLedgerPrint = ({
     }
   }
 
-  /* ================================
-     Closing Balance
-  ================================ */
-
   const closingBalance =
     blocks.length > 1 ? blocks[blocks.length - 1].balance : opening;
-
-  /* ================================
-     Final Print Object
-  ================================ */
 
   return {
     documentTitle: "Supplier Detailed Ledger",

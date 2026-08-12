@@ -1,7 +1,5 @@
 // 📁 services/partyDetailLedgerPrintBuilder.js
 
-// PARTY DETAIL LEDGER PRINT BUILDER
-
 const formatDate = (date) => {
   if (!date) return "-";
 
@@ -36,25 +34,38 @@ const getBalanceStatus = (balance) => {
 const getRoleLabel = (role) => {
   if (role === "customer") return "Customer";
   if (role === "supplier") return "Supplier";
+
   return "Customer + Supplier";
 };
 
 const getEntryNature = (sourceType = "") => {
   const type = String(sourceType || "").toLowerCase();
 
-  if (["sale_invoice", "opening_sale_invoice"].includes(type)) {
+  if (
+    [
+      "opening_balance",
+      "opening_sale_invoice",
+      "opening_refund_invoice",
+      "opening_purchase_invoice",
+      "opening_purchase_return",
+    ].includes(type)
+  ) {
+    return "opening";
+  }
+
+  if (type === "sale_invoice") {
     return "sale";
   }
 
-  if (["purchase_invoice", "opening_purchase_invoice"].includes(type)) {
+  if (type === "purchase_invoice") {
     return "purchase";
   }
 
-  if (["refund_invoice", "opening_refund_invoice"].includes(type)) {
+  if (type === "refund_invoice") {
     return "sale_return";
   }
 
-  if (["purchase_return", "opening_purchase_return"].includes(type)) {
+  if (type === "purchase_return") {
     return "purchase_return";
   }
 
@@ -81,17 +92,28 @@ const getEntryNature = (sourceType = "") => {
 
 const normalizeItem = (item = {}, index = 0) => {
   const quantity = safeNumber(item.quantity);
-  const rate = safeNumber(item.rate || item.price);
+  const rate = safeNumber(item.rate ?? item.price);
+
+  const rawAmount = item.amount ?? item.total;
+
   const amount =
-    safeNumber(item.amount || item.total) || round2(quantity * rate);
+    rawAmount !== undefined && rawAmount !== null
+      ? safeNumber(rawAmount)
+      : round2(quantity * rate);
 
   return {
     sr: item.sr || index + 1,
+
     productName: item.productName || "Product",
+
     unit: item.unit || "PCS",
-    ctn: safeNumber(item.ctn || item.carton || 1),
+
+    ctn: safeNumber(item.ctn ?? item.carton ?? 1),
+
     quantity: round2(quantity),
+
     rate: round2(rate),
+
     amount: round2(amount),
   };
 };
@@ -104,6 +126,7 @@ const normalizeItems = (items = []) => {
 
 const buildEntryTitle = (row = {}) => {
   const bill = row.billNo ? `#${row.billNo}` : "";
+
   const source = row.sourceLabel || row.sourceType || "Entry";
 
   return `${source} ${bill}`.trim();
@@ -119,14 +142,14 @@ const buildPartyDetailLedgerPrint = ({
   endDate,
 
   openingBalance = 0,
-  partyOpeningBalance = 0,
-  totalDebit = 0,
-  totalCredit = 0,
-  closingBalance = 0,
+
+  totalDebit,
+  totalCredit,
+  closingBalance,
 
   ledger = [],
 }) => {
-  const opening = round2(partyOpeningBalance || openingBalance);
+  const opening = round2(openingBalance);
 
   let runningBalance = opening;
 
@@ -134,8 +157,6 @@ const buildPartyDetailLedgerPrint = ({
   let calculatedCredit = 0;
 
   const blocks = [];
-
-  // LEDGER BLOCKS
 
   if (Array.isArray(ledger)) {
     for (const row of ledger) {
@@ -156,55 +177,74 @@ const buildPartyDetailLedgerPrint = ({
       const documentTotal =
         row.documentTotal !== undefined && row.documentTotal !== null
           ? round2(row.documentTotal)
-          : itemTotal || round2(debit || credit);
+          : itemTotal !== 0
+            ? itemTotal
+            : round2(debit || credit);
+
+      const rowBalance =
+        row.balance !== undefined && row.balance !== null
+          ? round2(row.balance)
+          : runningBalance;
 
       blocks.push({
         type: "entry",
+
         nature: getEntryNature(row.sourceType),
 
         key:
           row.key ||
-          `${row.referenceId || row.invoiceId || row._id || "entry"}-${
-            blocks.length
-          }`,
+          `${
+            row.referenceId || row.invoiceId || row._id || "entry"
+          }-${blocks.length}`,
 
         _id: row._id || null,
+
         referenceId: row.referenceId || null,
+
         invoiceId: row.invoiceId || null,
+
         invoiceModel: row.invoiceModel || "",
 
         rawDate: row.date || null,
+
         date: formatDate(row.date),
+
         time: formatTime(row.time),
 
         billNo: row.billNo || "-",
+
         title: buildEntryTitle(row),
 
         sourceType: row.sourceType || "",
+
         sourceLabel: row.sourceLabel || row.sourceType || "-",
+
         originModule: row.originModule || "",
 
         partyText: row.partyText || partyName || "-",
+
         description: row.description || "",
+
         paymentType: row.paymentType || "",
 
         debit: debit > 0 ? debit : null,
+
         credit: credit > 0 ? credit : null,
-        balance:
-          row.balance !== undefined ? round2(row.balance) : runningBalance,
+
+        balance: rowBalance,
 
         documentTotal,
+
         itemTotal,
 
         items,
 
         attachmentUrl: row.attachmentUrl || "",
+
         attachmentType: row.attachmentType || "",
       });
     }
   }
-
-  // FINAL SUMMARY
 
   const finalDebit =
     totalDebit !== undefined && totalDebit !== null
@@ -216,36 +256,48 @@ const buildPartyDetailLedgerPrint = ({
       ? round2(totalCredit)
       : round2(calculatedCredit);
 
+  const calculatedClosing =
+    blocks.length > 0 ? round2(blocks[blocks.length - 1].balance) : opening;
+
   const finalClosing =
     closingBalance !== undefined && closingBalance !== null
       ? round2(closingBalance)
-      : blocks.length > 1
-        ? round2(blocks[blocks.length - 1].balance)
-        : opening;
+      : calculatedClosing;
 
   return {
     documentTitle: "Party Detail Ledger",
 
     party: {
       id: partyId || "",
+
       name: partyName || "-",
+
       phone: partyPhone || "",
+
       role: role || "both",
+
       roleLabel: getRoleLabel(role),
     },
 
     period: {
       from: startDate ? formatDate(startDate) : "All",
+
       to: endDate ? formatDate(endDate) : "All",
+
       rawFrom: startDate || "",
+
       rawTo: endDate || "",
     },
 
     summary: {
       opening,
+
       totalDebit: finalDebit,
+
       totalCredit: finalCredit,
+
       closingBalance: finalClosing,
+
       balanceStatus: getBalanceStatus(finalClosing),
     },
 
@@ -253,10 +305,13 @@ const buildPartyDetailLedgerPrint = ({
 
     meta: {
       generatedAt: new Date().toLocaleString("en-GB"),
+
       totalBlocks: blocks.length,
-      totalEntries: Math.max(blocks.length - 1, 0),
+
+      totalEntries: blocks.length,
+
       hasItems: blocks.some(
-        (b) => Array.isArray(b.items) && b.items.length > 0,
+        (block) => Array.isArray(block.items) && block.items.length > 0,
       ),
     },
   };

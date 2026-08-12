@@ -232,8 +232,8 @@ const PartiesPage = () => {
       return;
     }
 
-    if (party.hiddenReason !== 'deleted') {
-      alert('صرف Delete کی گئی Party restore ہو سکتی ہے');
+    if (party.hiddenReason && party.hiddenReason !== 'deleted') {
+      alert('Converted یا Merged Party restore نہیں ہو سکتی');
       return;
     }
 
@@ -634,7 +634,7 @@ const PartiesPage = () => {
                       {/* ✅ Restore صرف Deleted Party */}
                       {canRestoreParties &&
                         party.isActive === false &&
-                        party.hiddenReason === 'deleted' && (
+                        (!party.hiddenReason || party.hiddenReason === 'deleted') && (
                           <button
                             onClick={(e) => handleRestoreParty(e, party)}
                             style={{

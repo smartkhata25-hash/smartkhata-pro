@@ -215,26 +215,6 @@ const PartyForm = ({ onSubmit, initialData = {}, onCancel }) => {
             }}
           />
 
-          {initialData?._id && (
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              <input
-                type="checkbox"
-                name="isActive"
-                checked={formData.isActive}
-                onChange={handleChange}
-              />
-              Active Party
-            </label>
-          )}
-
           <div className="flex gap-3 mt-4 justify-end">
             {!initialData?._id && (
               <button type="button" onClick={clearForm} style={buttonGray}>

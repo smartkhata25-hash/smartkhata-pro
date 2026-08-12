@@ -1084,10 +1084,9 @@ exports.restoreParty = async (req, res) => {
       });
     }
 
-    // ❌ Converted Party restore نہیں ہوگی
-    if (party.hiddenReason !== "deleted") {
+    if (party.hiddenReason && party.hiddenReason !== "deleted") {
       return res.status(400).json({
-        message: "Only deleted parties can be restored",
+        message: "Converted or merged party cannot be restored",
       });
     }
 

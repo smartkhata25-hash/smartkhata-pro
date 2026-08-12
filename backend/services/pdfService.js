@@ -1,39 +1,37 @@
 const chromium = require("@sparticuz/chromium");
-
 const puppeteerCore = require("puppeteer-core");
-
 const puppeteer = require("puppeteer");
 
 let browserInstance = null;
 
-/**
- * Launch browser once
- */
 const getBrowser = async () => {
   try {
-    if (!browserInstance) {
-      /* ================= PRODUCTION ================= */
-      if (process.env.NODE_ENV === "production") {
-        const executablePath = await chromium.executablePath();
-
-        browserInstance = await puppeteerCore.launch({
-          args: chromium.args,
-          defaultViewport: chromium.defaultViewport,
-          executablePath,
-          headless: chromium.headless,
-        });
-
-        console.log("🌍 Production Browser Started");
-      } else {
-        /* ================= LOCAL DEVELOPMENT ================= */
-
-        browserInstance = await puppeteer.launch({
-          headless: true,
-        });
-      }
-    } else {
-      console.log("♻️ Reusing existing browser instance");
+    if (browserInstance && browserInstance.connected) {
+      return browserInstance;
     }
+
+    browserInstance = null;
+
+    if (process.env.NODE_ENV === "production") {
+      const executablePath = await chromium.executablePath();
+
+      browserInstance = await puppeteerCore.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath,
+        headless: chromium.headless,
+      });
+
+      console.log("🌍 Production Browser Started");
+    } else {
+      browserInstance = await puppeteer.launch({
+        headless: true,
+      });
+    }
+
+    browserInstance.on("disconnected", () => {
+      browserInstance = null;
+    });
 
     return browserInstance;
   } catch (error) {
@@ -42,31 +40,35 @@ const getBrowser = async () => {
       stack: error.stack,
     });
 
+    browserInstance = null;
     throw error;
   }
 };
 
-/**
- * Generate PDF from HTML
- */
 const generatePdfFromHtml = async (html) => {
   const browser = await getBrowser();
-
   const page = await browser.newPage();
 
   try {
     await page.setContent(html, {
-      waitUntil: "networkidle0",
+      waitUntil: "domcontentloaded",
     });
+
     await page.emulateMediaType("screen");
+
+    if (page.evaluate) {
+      await page.evaluate(async () => {
+        if (document.fonts?.ready) {
+          await document.fonts.ready;
+        }
+      });
+    }
 
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
       preferCSSPageSize: true,
     });
-
-    await page.close();
 
     return pdfBuffer;
   } catch (error) {
@@ -75,11 +77,11 @@ const generatePdfFromHtml = async (html) => {
       stack: error.stack,
     });
 
+    throw error;
+  } finally {
     try {
       await page.close();
     } catch (_) {}
-
-    throw error;
   }
 };
 
@@ -87,7 +89,6 @@ const closeBrowser = async () => {
   try {
     if (browserInstance) {
       await browserInstance.close();
-
       browserInstance = null;
     }
   } catch (error) {
@@ -95,6 +96,8 @@ const closeBrowser = async () => {
       message: error.message,
       stack: error.stack,
     });
+
+    browserInstance = null;
   }
 };
 

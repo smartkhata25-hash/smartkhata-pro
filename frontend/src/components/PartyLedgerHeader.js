@@ -137,8 +137,6 @@ const PartyLedgerHeader = ({
     setStart(startDate);
     setEnd(endDate);
 
-    localStorage.removeItem('app_state_parties_page_state');
-
     if (partyId) {
       load(partyId, startDate, endDate);
     }

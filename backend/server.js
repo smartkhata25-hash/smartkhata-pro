@@ -4,8 +4,6 @@ const mongoose = require("mongoose");
 
 const app = require("./app");
 
-const repairBaseAccountsV1 = require("./scripts/repairBaseAccountsV1");
-
 const {
   startAutoBackup,
   runStartupBackupCheck,
@@ -31,29 +29,6 @@ async function startServer() {
   try {
     await connectDatabase();
 
-    // ✅ One-time repair migration
-    try {
-      const migrationResult = await repairBaseAccountsV1();
-
-      if (migrationResult?.skipped) {
-        console.log(
-          "⏭️ Base account repair migration skipped:",
-          migrationResult.reason,
-        );
-      } else if (migrationResult?.success) {
-        console.log("✅ Base account repair migration completed successfully");
-      } else {
-        console.error(
-          "⚠️ Base account repair migration did not complete successfully",
-        );
-      }
-    } catch (migrationError) {
-      console.error(
-        "❌ Base account repair migration error:",
-        migrationError.message,
-      );
-    }
-
     server = app.listen(PORT, () => {
       console.log(`🚀 Server started on port ${PORT}`);
     });
@@ -75,6 +50,7 @@ async function startServer() {
     process.exit(1);
   }
 }
+
 async function gracefulShutdown(signal) {
   if (shuttingDown) {
     return;

@@ -257,26 +257,24 @@ const PayBillForm = () => {
             account.type?.toLowerCase() === 'cash'
         );
 
-        setSelectedSupplierType('supplier');
+        setPaymentEntries((previousEntries) => {
+          const isBlankDefault =
+            previousEntries.length === 1 &&
+            !previousEntries[0]?.account &&
+            !previousEntries[0]?.amount;
 
-        setFormData({
-          supplier: '',
-          partyId: '',
-          date: dayjs().format('YYYY-MM-DD'),
-          time: dayjs().format('HH:mm'),
-          paymentType: 'Cash',
-          discountAmount: '',
-          description: '',
-          attachment: '',
+          if (!isBlankDefault) {
+            return previousEntries;
+          }
+
+          return [
+            {
+              account: handCash?._id || '',
+              amount: '',
+              paymentType: 'Cash',
+            },
+          ];
         });
-
-        setPaymentEntries([
-          {
-            account: handCash?._id || '',
-            amount: '',
-            paymentType: 'Cash',
-          },
-        ]);
       }
     };
 
@@ -288,8 +286,6 @@ const PayBillForm = () => {
   }, [id, canViewPayBills, canEditPayBills, canCreatePayBills]);
 
   useEffect(() => {
-    if (!id) return;
-
     const selectedId = selectedSupplierType === 'party' ? formData.partyId : formData.supplier;
 
     if (!selectedId) {
@@ -298,14 +294,14 @@ const PayBillForm = () => {
     }
 
     loadLedger(selectedId, selectedSupplierType);
-  }, [id, selectedSupplierType, formData.supplier, formData.partyId, loadLedger]);
+  }, [selectedSupplierType, formData.supplier, formData.partyId, loadLedger]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSupplierChange = async (selected) => {
+  const handleSupplierChange = (selected) => {
     const selectedId = selected?.value || '';
     const type = selected?.selectType || 'supplier';
 
@@ -314,16 +310,12 @@ const PayBillForm = () => {
     setFormData((prev) => ({
       ...prev,
       supplier: type === 'supplier' ? selectedId : '',
-
       partyId: type === 'party' ? selectedId : '',
     }));
 
     if (!selectedId) {
       setSupplierLedger([]);
-      return;
     }
-
-    await loadLedger(selectedId, type);
   };
 
   const handleFileChange = (e) => {
@@ -344,23 +336,39 @@ const PayBillForm = () => {
   };
 
   const resetForm = () => {
+    clear();
+
     setFormData({
       supplier: '',
       partyId: '',
       date: dayjs().format('YYYY-MM-DD'),
       time: dayjs().format('HH:mm'),
-      amount: '',
-      discountAmount: '',
       paymentType: 'Cash',
-      account: '',
+      discountAmount: '',
       description: '',
-      attachment: null,
+      attachment: '',
     });
 
-    setPaymentEntries([{ account: '', amount: '', paymentType: 'Cash' }]);
+    setSelectedSupplierType('supplier');
+
+    const handCash = accounts.find(
+      (account) =>
+        account.name?.trim().toLowerCase() === 'hand cash' ||
+        account.name?.trim().toLowerCase() === 'handcash' ||
+        account.category?.toLowerCase() === 'cash' ||
+        account.type?.toLowerCase() === 'cash'
+    );
+
+    setPaymentEntries([
+      {
+        account: handCash?._id || '',
+        amount: '',
+        paymentType: 'Cash',
+      },
+    ]);
 
     setSupplierLedger([]);
-    setSelectedSupplierType('supplier');
+
     setExistingAttachments([]);
     setAttachments([]);
     setModalAttachment(null);
@@ -368,8 +376,6 @@ const PayBillForm = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-
-    localStorage.removeItem('app_state_pay_bill_draft');
   };
 
   const handleRevert = async () => {
@@ -455,31 +461,95 @@ const PayBillForm = () => {
   };
 
   const formState = {
-    formData,
+    formData: {
+      ...formData,
+      attachment: '',
+    },
+    selectedSupplierType,
     paymentEntries,
   };
 
-  useEffect(() => {
-    const saved = localStorage.getItem('app_state_pay_bill_draft');
+  const restorePayBillDraft = useCallback((valueOrUpdater) => {
+    const defaultState = {
+      formData: {
+        supplier: '',
+        partyId: '',
+        date: dayjs().format('YYYY-MM-DD'),
+        time: dayjs().format('HH:mm'),
+        paymentType: 'Cash',
+        discountAmount: '',
+        description: '',
+        attachment: '',
+      },
+      selectedSupplierType: 'supplier',
+      paymentEntries: [
+        {
+          account: '',
+          amount: '',
+          paymentType: 'Cash',
+        },
+      ],
+    };
 
-    if (!saved) return;
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
 
-    try {
-      const parsed = JSON.parse(saved);
+    if (!data || typeof data !== 'object') return;
 
-      const data = parsed.data;
+    const savedFormData = data.formData || {};
 
-      if (!data) return;
+    setFormData({
+      supplier: savedFormData.supplier || '',
+      partyId: savedFormData.partyId || '',
+      date: savedFormData.date || dayjs().format('YYYY-MM-DD'),
+      time: savedFormData.time || dayjs().format('HH:mm'),
+      paymentType: savedFormData.paymentType || 'Cash',
+      discountAmount: savedFormData.discountAmount || '',
+      description: savedFormData.description || '',
+      attachment: '',
+    });
 
-      setFormData(data.formData || {});
+    setSelectedSupplierType(data.selectedSupplierType || 'supplier');
 
-      setPaymentEntries(data.paymentEntries || [{ account: '', amount: '', paymentType: 'Cash' }]);
-    } catch (err) {
-      console.error(err);
-    }
+    const restoredEntries =
+      Array.isArray(data.paymentEntries) && data.paymentEntries.length > 0
+        ? data.paymentEntries.map((entry) => ({
+            account: entry?.account || '',
+            amount: entry?.amount || '',
+            paymentType: entry?.paymentType || 'Cash',
+          }))
+        : [
+            {
+              account: '',
+              amount: '',
+              paymentType: 'Cash',
+            },
+          ];
+
+    setPaymentEntries(restoredEntries);
   }, []);
 
-  useFormPersist(!id ? 'pay_bill_draft' : null, formState, () => {});
+  const shouldSavePayBillDraft = useCallback((draft) => {
+    if (!draft) return false;
+
+    const hasSupplier = Boolean(draft.formData?.supplier) || Boolean(draft.formData?.partyId);
+
+    const hasPayments =
+      Array.isArray(draft.paymentEntries) &&
+      draft.paymentEntries.some((entry) => Boolean(entry?.account) || Boolean(entry?.amount));
+
+    const hasOtherData =
+      Boolean(draft.formData?.description?.trim()) ||
+      Number(draft.formData?.discountAmount || 0) > 0;
+
+    return hasSupplier || hasPayments || hasOtherData;
+  }, []);
+
+  const { clear } = useFormPersist(!id ? 'pay_bill_draft' : null, formState, restorePayBillDraft, {
+    expiryHours: 24,
+    delay: 500,
+    shouldSave: shouldSavePayBillDraft,
+  });
 
   const handleSubmit = async (e, type = 'close') => {
     e.preventDefault();
@@ -531,24 +601,33 @@ const PayBillForm = () => {
 
     try {
       setLoading(true);
+
       if (id) {
         await updatePayBill(id, data);
-        localStorage.removeItem('app_state_pay_bill_draft');
       } else {
         await createPayBill(data);
-        localStorage.removeItem('app_state_pay_bill_draft');
+
+        clear();
       }
 
-      if (type === 'close') {
-        navigate('/dashboard');
-      } else if (type === 'new') {
-        resetForm();
-
+      if (type === 'new') {
         if (id) {
           navigate('/pay-bills/new', {
             replace: true,
           });
         }
+
+        resetForm();
+        return;
+      }
+
+      if (type === 'close') {
+        if (!id) {
+          resetForm();
+        }
+
+        navigate('/dashboard');
+        return;
       }
     } catch (err) {
       alert(t('alerts.error') + ': ' + err.message);

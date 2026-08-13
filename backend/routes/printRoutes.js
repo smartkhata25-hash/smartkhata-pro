@@ -51,6 +51,14 @@ router.post(
   printController.generateSaleReturnPdf,
 );
 
+router.post("/sale-pdf", authMiddleware, printController.generateSalePdf);
+
+router.get(
+  "/sale-pdf/:id",
+  authMiddleware,
+  printController.generateSavedSalePdf,
+);
+
 router.get(
   "/sale-html/:id",
   authMiddleware,

@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const PrintSetting = require("../models/PrintSetting");
@@ -5,7 +6,7 @@ const { defaultSettings } = require("./printSettingController");
 const Customer = require("../models/Customer");
 const Party = require("../models/Party");
 const Account = require("../models/Account");
-
+const JournalEntry = require("../models/JournalEntry");
 const {
   buildSaleInvoicePrint,
   buildSaleReturnPrint,
@@ -47,11 +48,44 @@ const attachCustomerTotalBalance = async (document, userId) => {
     };
   }
 
-  const account = await Account.findById(accountId).select("balance");
+  const objectId = new mongoose.Types.ObjectId(accountId);
+
+  const balanceResult = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: new mongoose.Types.ObjectId(userId),
+        isDeleted: false,
+        sourceType: { $ne: "reversal" },
+        "lines.account": objectId,
+      },
+    },
+    {
+      $unwind: "$lines",
+    },
+    {
+      $match: {
+        "lines.account": objectId,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        balance: {
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "debit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
 
   return {
     ...plainDocument,
-    customerTotalBalance: Number(account?.balance || 0),
+    customerTotalBalance: Number(balanceResult[0]?.balance || 0),
   };
 };
 
@@ -244,6 +278,70 @@ const generateSalePdf = async (req, res) => {
   } catch (err) {
     console.error("❌ PDF Error:", err);
     res.status(500).json({ message: "PDF generation failed" });
+  }
+};
+
+const generateSavedSalePdf = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const { id } = req.params;
+
+    const invoice = await Invoice.findOne({
+      _id: id,
+      createdBy: userId,
+      isDeleted: false,
+    }).populate("items.productId", "name description uom unit");
+
+    if (!invoice) {
+      return res.status(404).json({
+        message: "Sale invoice not found",
+      });
+    }
+
+    let printSetting = await PrintSetting.findOne({ userId });
+
+    if (!printSetting || !printSetting.sales) {
+      const defaults = await defaultSettings(userId);
+
+      if (!printSetting) {
+        printSetting = await PrintSetting.create(defaults);
+      } else {
+        Object.assign(printSetting, defaults);
+        await printSetting.save();
+      }
+    }
+
+    const invoiceWithBalance = await attachCustomerTotalBalance(
+      invoice,
+      userId,
+    );
+
+    const built = buildSaleInvoicePrint(invoiceWithBalance, printSetting);
+
+    built.lang = req.query.lang || "en";
+
+    built.page = {
+      ...built.page,
+      isPdf: true,
+    };
+
+    const html = generateSaleInvoiceHTML(built);
+
+    const pdfBuffer = await generatePdfFromHtml(html);
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename=Invoice-${built.documentInfo.billNo}.pdf`,
+      "Content-Length": pdfBuffer.length,
+    });
+
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("❌ Saved Sale PDF Error:", err);
+
+    return res.status(500).json({
+      message: "PDF generation failed",
+    });
   }
 };
 
@@ -453,5 +551,6 @@ module.exports = {
   getSaleInvoiceHtml,
   generatePreviewSettingsHtml,
   getSaleReturnHtml,
+  generateSavedSalePdf,
   generateSaleReturnPdf,
 };

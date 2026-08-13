@@ -9,14 +9,22 @@ import PartyLedgerHeader from '../components/PartyLedgerHeader';
 import { getPartyLedger } from '../services/partyLedgerService';
 
 import { t } from '../i18n/i18n';
+import usePageMemory from '../hooks/usePageMemory';
+const currentYear = new Date().getFullYear();
+
+const PARTY_LEDGER_DEFAULTS = {
+  selectedPartyId: '',
+  partyName: '',
+  startDate: `${currentYear}-01-01`,
+  endDate: `${currentYear}-12-31`,
+  search: '',
+};
 
 const PartyLedgerPage = () => {
   const { partyId } = useParams();
   const navigate = useNavigate();
 
   const [parties, setParties] = useState([]);
-  const [selectedPartyId, setSelectedPartyId] = useState(partyId || '');
-  const [partyName, setPartyName] = useState('');
   const [ledger, setLedger] = useState([]);
 
   const [summary, setSummary] = useState({
@@ -26,14 +34,44 @@ const PartyLedgerPage = () => {
     closing: 0,
   });
 
-  const currentYear = new Date().getFullYear();
-
-  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
-
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const { state: pageMemory, updateField: updatePageField } = usePageMemory(
+    'party_ledger_page_state',
+    PARTY_LEDGER_DEFAULTS,
+    {
+      expiryHours: 24,
+      delay: 350,
+    }
+  );
+
+  const { selectedPartyId, partyName, startDate, endDate, search } = pageMemory;
+
+  const setSelectedPartyId = useCallback(
+    (value) => updatePageField('selectedPartyId', value || ''),
+    [updatePageField]
+  );
+
+  const setPartyName = useCallback(
+    (value) => updatePageField('partyName', value || ''),
+    [updatePageField]
+  );
+
+  const setStartDate = useCallback(
+    (value) => updatePageField('startDate', value || ''),
+    [updatePageField]
+  );
+
+  const setEndDate = useCallback(
+    (value) => updatePageField('endDate', value || ''),
+    [updatePageField]
+  );
+
+  const setSearch = useCallback(
+    (value) => updatePageField('search', value || ''),
+    [updatePageField]
+  );
 
   useEffect(() => {
     fetchParties()
@@ -46,42 +84,59 @@ const PartyLedgerPage = () => {
       });
   }, []);
 
-  const loadLedger = useCallback(async (id, start, end) => {
-    if (!id) return;
+  const loadLedger = useCallback(
+    async (id, start = startDate, end = endDate) => {
+      if (!id) {
+        setLedger([]);
 
-    setLoading(true);
+        setSummary({
+          opening: 0,
+          debit: 0,
+          credit: 0,
+          closing: 0,
+        });
 
-    try {
-      const data = await getPartyLedger(id, start, end);
+        return;
+      }
 
-      setLedger(Array.isArray(data.ledger) ? data.ledger : []);
+      setLoading(true);
 
-      setSummary({
-        opening: Number(data.openingBalance || 0),
-        debit: Number(data.totalDebit || 0),
-        credit: Number(data.totalCredit || 0),
-        closing: Number(data.closingBalance || 0),
-      });
+      try {
+        const data = await getPartyLedger(id, start || '', end || '');
 
-      setPartyName(data.partyName || '');
-      setSelectedPartyId(data.partyId || id);
-    } catch (err) {
-      console.error('Party ledger load failed:', err);
+        setLedger(Array.isArray(data?.ledger) ? data.ledger : []);
 
-      setLedger([]);
+        setSummary({
+          opening: Number(data?.openingBalance || 0),
+          debit: Number(data?.totalDebit || 0),
+          credit: Number(data?.totalCredit || 0),
+          closing: Number(data?.closingBalance || 0),
+        });
 
-      setSummary({
-        opening: 0,
-        debit: 0,
-        credit: 0,
-        closing: 0,
-      });
+        setSelectedPartyId(data?.partyId || id);
 
-      alert(t('alerts.partyLedgerLoadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        if (data?.partyName) {
+          setPartyName(data.partyName);
+        }
+      } catch (err) {
+        console.error('Party ledger load failed:', err);
+
+        setLedger([]);
+
+        setSummary({
+          opening: 0,
+          debit: 0,
+          credit: 0,
+          closing: 0,
+        });
+
+        alert(t('alerts.partyLedgerLoadFailed'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [startDate, endDate, setSelectedPartyId, setPartyName]
+  );
 
   useEffect(() => {
     if (!partyId) return;
@@ -93,10 +148,41 @@ const PartyLedgerPage = () => {
 
     setSelectedPartyId(selected._id);
     setPartyName(selected.name || '');
+  }, [partyId, parties, setSelectedPartyId, setPartyName]);
 
-    loadLedger(selected._id, startDate, endDate);
-  }, [partyId, parties, startDate, endDate, loadLedger]);
+  useEffect(() => {
+    if (!selectedPartyId) {
+      setLedger([]);
 
+      setSummary({
+        opening: 0,
+        debit: 0,
+        credit: 0,
+        closing: 0,
+      });
+
+      return;
+    }
+
+    if (parties.length === 0) return;
+
+    const selected = parties.find((party) => String(party._id) === String(selectedPartyId));
+
+    if (!selected) {
+      setLedger([]);
+
+      setSummary({
+        opening: 0,
+        debit: 0,
+        credit: 0,
+        closing: 0,
+      });
+
+      return;
+    }
+
+    loadLedger(selectedPartyId, startDate, endDate);
+  }, [selectedPartyId, parties, startDate, endDate, loadLedger]);
   const totalDebit = summary.debit;
   const totalCredit = summary.credit;
   const closingBalance = summary.closing;

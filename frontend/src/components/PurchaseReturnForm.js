@@ -109,14 +109,22 @@ const PurchaseReturnForm = ({ token }) => {
       }
 
       const mappedItems = (data.items || []).map((i) => {
-        const matchedProduct = productList.find((p) => p._id === (i.productId?._id || i.productId));
+        const populatedProduct =
+          i.productId && typeof i.productId === 'object' ? i.productId : null;
+
+        const productId = populatedProduct?._id || i.productId || '';
+
+        const matchedProduct = productList.find((p) => String(p._id) === String(productId));
+
+        const quantity = Number(i.quantity || 0);
+        const price = Number(i.price || 0);
 
         return {
-          productId: i.productId,
-          name: matchedProduct?.name || '',
-          quantity: i.quantity,
-          price: i.price,
-          total: (i.quantity * i.price).toFixed(2),
+          productId,
+          name: populatedProduct?.name || matchedProduct?.name || i.name || '',
+          quantity,
+          price,
+          total: Number(i.total ?? quantity * price).toFixed(2),
         };
       });
 
@@ -255,83 +263,152 @@ const PurchaseReturnForm = ({ token }) => {
     supplierName,
     supplierPhone,
     supplierId,
-    partyId: selectedSupplierType === 'party' ? supplierId : '',
+    selectedSupplierType,
     notes,
     returnMethod,
     accountId,
     paymentType,
     originalInvoiceId,
-    attachments,
+    isOpeningReturn,
+    openingReturnAmount,
   };
-  useEffect(() => {
-    if (id) return;
-    const saved = localStorage.getItem('app_state_purchase_return_draft');
 
-    if (!saved) return;
+  const restorePurchaseReturnDraft = useCallback((valueOrUpdater) => {
+    const now = new Date();
 
-    try {
-      const parsed = JSON.parse(saved);
+    const makeBlankRow = () => ({
+      productId: '',
+      name: '',
+      quantity: '',
+      price: '',
+      total: '',
+    });
 
-      const data = parsed.data;
+    const defaultState = {
+      items: [],
+      billNo: '',
+      returnDate: now.toISOString().slice(0, 10),
+      returnTime: now.toTimeString().slice(0, 5),
+      supplierName: '',
+      supplierPhone: '',
+      supplierId: '',
+      selectedSupplierType: 'supplier',
+      notes: '',
+      returnMethod: 'adjust',
+      accountId: '',
+      paymentType: 'cash',
+      originalInvoiceId: '',
+      isOpeningReturn: false,
+      openingReturnAmount: 0,
+    };
 
-      setAttachments(data.attachments || []);
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
 
-      if (!data) return;
+    if (!data || typeof data !== 'object') return;
 
-      setBillNo(data.billNo || '');
+    setBillNo(data.billNo || '');
 
-      setReturnDate(data.returnDate || new Date().toISOString().slice(0, 10));
+    setReturnDate(data.returnDate || now.toISOString().slice(0, 10));
 
-      setReturnTime(data.returnTime || getCurrentTime());
+    setReturnTime(data.returnTime || now.toTimeString().slice(0, 5));
 
-      setSupplierName(data.supplierName || '');
+    setSupplierName(data.supplierName || '');
+    setSupplierPhone(data.supplierPhone || '');
 
-      setSupplierPhone(data.supplierPhone || '');
+    setSupplierId(data.supplierId || '');
 
-      setSupplierId(data.supplierId || '');
+    setSelectedSupplierType(data.selectedSupplierType || 'supplier');
 
-      if (data.partyId) {
-        setSupplierId(data.partyId);
-        setSelectedSupplierType('party');
-      } else {
-        setSelectedSupplierType('supplier');
-      }
+    setNotes(data.notes || '');
 
-      setNotes(data.notes || '');
+    setReturnMethod(data.returnMethod || 'adjust');
 
-      setReturnMethod(data.returnMethod || 'adjust');
+    setAccountId(data.accountId || '');
 
-      setAccountId(data.accountId || '');
+    setPaymentType(data.paymentType || 'cash');
 
-      setPaymentType(data.paymentType || 'cash');
+    setOriginalInvoiceId(data.originalInvoiceId || '');
 
-      setOriginalInvoiceId(data.originalInvoiceId || '');
+    setIsOpeningReturn(data.isOpeningReturn === true);
 
-      const loadedItems = data.items || [];
+    setOpeningReturnAmount(Number(data.openingReturnAmount || 0));
 
-      const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
-        blankRow()
+    const loadedItems = Array.isArray(data.items) ? data.items : [];
+
+    const emptyRows = Array.from(
+      {
+        length: Math.max(0, 20 - loadedItems.length),
+      },
+      () => makeBlankRow()
+    );
+
+    setItems([...loadedItems, ...emptyRows]);
+  }, []);
+
+  const shouldSavePurchaseReturnDraft = useCallback((draft) => {
+    if (!draft) return false;
+
+    const hasSupplier = Boolean(draft.supplierName?.trim()) || Boolean(draft.supplierId);
+
+    const hasItems =
+      Array.isArray(draft.items) &&
+      draft.items.some(
+        (item) =>
+          item?.productId ||
+          item?.name?.trim() ||
+          Number(item?.quantity || 0) > 0 ||
+          Number(item?.price || 0) > 0
       );
 
-      setItems([...loadedItems, ...emptyRows]);
-    } catch (err) {
-      console.error(err);
+    const hasOtherData =
+      Boolean(draft.billNo?.trim()) ||
+      Boolean(draft.notes?.trim()) ||
+      Boolean(draft.originalInvoiceId) ||
+      draft.isOpeningReturn === true ||
+      Number(draft.openingReturnAmount || 0) > 0;
+
+    return hasSupplier || hasItems || hasOtherData;
+  }, []);
+
+  const { clear } = useFormPersist(
+    !id ? 'purchase_return_draft' : null,
+    formState,
+    restorePurchaseReturnDraft,
+    {
+      expiryHours: 24,
+      delay: 500,
+      shouldSave: shouldSavePurchaseReturnDraft,
     }
-  }, [id]);
-  useFormPersist(!id ? 'purchase_return_draft' : null, formState, () => {});
+  );
 
   const handleRevert = async () => {
     if (!id) {
+      clear();
+
       setBillNo('');
+
       setSupplierName('');
       setSupplierPhone('');
       setSupplierId('');
       setSelectedSupplierType('supplier');
+
+      setSupplierSuggestions([]);
+      setSelectedSupplierIndex(-1);
+
       setNotes('');
+
       setReturnMethod('adjust');
       setAccountId('');
       setPaymentType('cash');
+
+      setOriginalInvoiceId('');
+
+      setIsOpeningReturn(false);
+      setOpeningReturnAmount(0);
+
       setItems(Array.from({ length: 20 }, () => blankRow()));
+
       setAttachments([]);
       setModalAttachment(null);
 
@@ -339,20 +416,34 @@ const PurchaseReturnForm = ({ token }) => {
       setItemHistory([]);
       setShowHistory(false);
 
+      const now = new Date();
+
+      setReturnDate(now.toISOString().slice(0, 10));
+      setReturnTime(now.toTimeString().slice(0, 5));
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
 
-      localStorage.removeItem('app_state_purchase_return_draft');
       return;
     }
 
-    const data = await getPurchaseReturnById(id, token);
-    populateForm(data);
+    try {
+      const data = await getPurchaseReturnById(id, token);
 
-    setSelectedProductId('');
-    setItemHistory([]);
-    setShowHistory(false);
+      populateForm(data);
+
+      setSupplierSuggestions([]);
+      setSelectedSupplierIndex(-1);
+
+      setSelectedProductId('');
+      setItemHistory([]);
+      setShowHistory(false);
+    } catch (err) {
+      console.error('Purchase return revert failed:', err?.response?.data || err.message);
+
+      alert(t('alerts.invoiceLoadFailed'));
+    }
   };
 
   const handleSubmit = async (action) => {
@@ -441,40 +532,36 @@ const PurchaseReturnForm = ({ token }) => {
 
     if (id) {
       await updatePurchaseReturn(id, formData, token);
-      localStorage.removeItem('app_state_purchase_return_draft');
+
       alert(t('alerts.invoiceUpdated'));
     } else {
       await createPurchaseReturn(formData, token);
-      localStorage.removeItem('app_state_purchase_return_draft');
+
+      clear();
+
       alert(t('alerts.invoiceSaved'));
     }
 
-    if (action === 'close') navigate('/dashboard');
-
     if (action === 'new') {
-      setItems(Array.from({ length: 20 }, () => blankRow()));
-      setBillNo('');
-      setSupplierName('');
-      setSupplierPhone('');
-      setSupplierId('');
-      setSelectedSupplierType('supplier');
-      setOriginalInvoiceId('');
-      setNotes('');
-      setReturnDate(new Date().toISOString().slice(0, 10));
-      setReturnTime(getCurrentTime());
-      setReturnMethod('adjust');
-      setAccountId('');
-      setAttachments([]);
-      setModalAttachment(null);
-
-      // 📊 Save & New کے بعد History صاف کریں
-      setSelectedProductId('');
-      setItemHistory([]);
-      setShowHistory(false);
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (id) {
+        navigate('/purchase-returns/new', {
+          replace: true,
+        });
       }
+
+      await handleRevert();
+
+      return;
+    }
+
+    if (action === 'close') {
+      if (!id) {
+        await handleRevert();
+      }
+
+      navigate('/dashboard');
+
+      return;
     }
   };
 

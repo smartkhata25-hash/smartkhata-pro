@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import PageLayout from '../components/PageLayout';
 import LedgerTable from '../components/LedgerTable';
 import PartyForm from '../components/PartyForm';
@@ -17,6 +17,20 @@ import { FaEdit, FaTrash } from 'react-icons/fa';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { useNavigate } from 'react-router-dom';
+import usePageMemory from '../hooks/usePageMemory';
+
+const PARTY_PAGE_DEFAULTS = {
+  searchTerm: '',
+  roleFilter: 'all',
+  activeTab: 'active',
+
+  selectedPartyId: '',
+  selectedPartyName: '',
+
+  ledgerSearch: '',
+  ledgerStartDate: '',
+  ledgerEndDate: '',
+};
 
 const PartiesPage = () => {
   const navigate = useNavigate();
@@ -28,22 +42,14 @@ const PartiesPage = () => {
   const canRestoreParties = hasPermission('parties.restore');
   const canConvertParties = hasPermission('parties.convert');
   const canViewPartyLedger = hasPermission('parties.view_ledger');
+  const ledgerRestoreRef = useRef(false);
   const [parties, setParties] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState('active');
 
   const [showForm, setShowForm] = useState(false);
   const [editingParty, setEditingParty] = useState(null);
 
-  const [selectedPartyId, setSelectedPartyId] = useState('');
-  const [selectedPartyName, setSelectedPartyName] = useState('');
-
   const [ledgerData, setLedgerData] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [ledgerSearch, setLedgerSearch] = useState('');
-  const [ledgerStartDate, setLedgerStartDate] = useState('');
-  const [ledgerEndDate, setLedgerEndDate] = useState('');
 
   const [showLedgerSuggestions, setShowLedgerSuggestions] = useState(false);
 
@@ -51,6 +57,68 @@ const PartiesPage = () => {
   const [deleteId, setDeleteId] = useState(null);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  const {
+    state: pageMemory,
+    updateField: updatePageField,
+    resetFields: resetPageFields,
+  } = usePageMemory('parties_page_state', PARTY_PAGE_DEFAULTS, {
+    expiryHours: 24,
+    delay: 350,
+  });
+
+  const {
+    searchTerm,
+    roleFilter,
+    activeTab,
+
+    selectedPartyId,
+    selectedPartyName,
+
+    ledgerSearch,
+    ledgerStartDate,
+    ledgerEndDate,
+  } = pageMemory;
+
+  const setSearchTerm = useCallback(
+    (value) => updatePageField('searchTerm', value),
+    [updatePageField]
+  );
+
+  const setRoleFilter = useCallback(
+    (value) => updatePageField('roleFilter', value),
+    [updatePageField]
+  );
+
+  const setActiveTab = useCallback(
+    (value) => updatePageField('activeTab', value),
+    [updatePageField]
+  );
+
+  const setSelectedPartyId = useCallback(
+    (value) => updatePageField('selectedPartyId', value || ''),
+    [updatePageField]
+  );
+
+  const setSelectedPartyName = useCallback(
+    (value) => updatePageField('selectedPartyName', value || ''),
+    [updatePageField]
+  );
+
+  const setLedgerSearch = useCallback(
+    (value) => updatePageField('ledgerSearch', value),
+    [updatePageField]
+  );
+
+  const setLedgerStartDate = useCallback(
+    (value) => updatePageField('ledgerStartDate', value),
+    [updatePageField]
+  );
+
+  const setLedgerEndDate = useCallback(
+    (value) => updatePageField('ledgerEndDate', value),
+    [updatePageField]
+  );
 
   useEffect(() => {
     if (!canViewParties) {
@@ -85,27 +153,86 @@ const PartiesPage = () => {
     return () => window.removeEventListener('resize', resize);
   }, []);
 
-  const loadPartyLedger = async (partyId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
-    if (!partyId) return;
+  const loadPartyLedger = useCallback(
+    async (partyId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
+      if (!partyId) {
+        setLedgerData(null);
+        return;
+      }
 
-    if (!canViewPartyLedger) {
-      alert('You do not have permission to view party ledger');
+      if (!canViewPartyLedger) {
+        alert('You do not have permission to view party ledger');
+        return;
+      }
+
+      setLedgerLoading(true);
+
+      try {
+        const data = await getPartyLedger(partyId, startDate || '', endDate || '');
+
+        setLedgerData(data || null);
+      } catch (err) {
+        console.error('Party ledger load failed:', err);
+
+        setLedgerData(null);
+
+        alert(t('alerts.partyLedgerLoadFailed'));
+      } finally {
+        setLedgerLoading(false);
+      }
+    },
+    [ledgerStartDate, ledgerEndDate, canViewPartyLedger]
+  );
+
+  useEffect(() => {
+    if (ledgerRestoreRef.current) return;
+    if (!selectedPartyId) return;
+    if (parties.length === 0) return;
+
+    const selectedParty = parties.find((party) => String(party._id) === String(selectedPartyId));
+
+    if (!selectedParty) {
+      setSelectedPartyId('');
+      setSelectedPartyName('');
+      setLedgerData(null);
+
+      ledgerRestoreRef.current = true;
+
       return;
     }
 
-    setLedgerLoading(true);
+    ledgerRestoreRef.current = true;
 
-    try {
-      const data = await getPartyLedger(partyId, startDate, endDate);
-      setLedgerData(data);
-    } catch (err) {
-      console.error('Party ledger load failed:', err);
-      setLedgerData(null);
-      alert(t('alerts.partyLedgerLoadFailed'));
+    setSelectedPartyName(selectedParty.name || '');
+
+    loadPartyLedger(selectedPartyId, ledgerStartDate, ledgerEndDate);
+  }, [
+    parties,
+    selectedPartyId,
+    ledgerStartDate,
+    ledgerEndDate,
+    loadPartyLedger,
+    setSelectedPartyId,
+    setSelectedPartyName,
+  ]);
+
+  useEffect(() => {
+    if (!selectedPartyId || parties.length === 0) {
+      return;
     }
 
-    setLedgerLoading(false);
-  };
+    const timer = setTimeout(() => {
+      const selectedElement = document.getElementById(`party-${selectedPartyId}`);
+
+      selectedElement?.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'auto',
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [selectedPartyId, parties]);
 
   const handleAddClick = () => {
     if (!canCreateParties) {
@@ -429,9 +556,7 @@ const PartiesPage = () => {
 
             <button
               onClick={() => {
-                setSearchTerm('');
-                setRoleFilter('all');
-                setActiveTab('active');
+                resetPageFields(['searchTerm', 'roleFilter', 'activeTab']);
               }}
               style={{
                 height: 32,
@@ -509,6 +634,7 @@ const PartiesPage = () => {
 
               return (
                 <div
+                  id={`party-${party._id}`}
                   key={party._id}
                   onClick={() => {
                     setSelectedPartyId(party._id);

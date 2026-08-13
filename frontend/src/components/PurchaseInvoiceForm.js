@@ -369,6 +369,9 @@ const PurchaseInvoiceForm = () => {
       setSupplierName(data.name);
       setSupplierPhone(data.phone || '');
 
+      setSelectedSupplierId(data._id || '');
+      setSelectedSupplierType('supplier');
+
       const updatedSuppliers = await fetchSuppliers();
       setSuppliers(updatedSuppliers);
 
@@ -416,6 +419,8 @@ const PurchaseInvoiceForm = () => {
   const formState = {
     supplierName,
     supplierPhone,
+    selectedSupplierId,
+    selectedSupplierType,
     billNo,
     invoiceDate,
     invoiceTime,
@@ -425,46 +430,112 @@ const PurchaseInvoiceForm = () => {
     paidAmount,
     paymentType,
     selectedAccountId,
+    isOpeningPurchase,
+    openingPurchaseAmount,
   };
 
-  useEffect(() => {
-    if (isEdit) return;
-    const saved = localStorage.getItem('app_state_purchase_invoice_draft');
+  const restorePurchaseDraft = useCallback((valueOrUpdater) => {
+    const now = new Date();
 
-    if (!saved) return;
+    const defaultState = {
+      supplierName: '',
+      supplierPhone: '',
+      selectedSupplierId: '',
+      selectedSupplierType: 'supplier',
+      billNo: '',
+      invoiceDate: now.toISOString().split('T')[0],
+      invoiceTime: now.toTimeString().slice(0, 5),
+      items: [],
+      discountPercent: 0,
+      discountAmount: 0,
+      paidAmount: 0,
+      paymentType: 'cash',
+      selectedAccountId: '',
+      isOpeningPurchase: false,
+      openingPurchaseAmount: 0,
+    };
 
-    try {
-      const parsed = JSON.parse(saved);
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
 
-      const data = parsed.data;
+    if (!data || typeof data !== 'object') return;
 
-      if (!data) return;
+    setSupplierName(data.supplierName || '');
+    setSupplierPhone(data.supplierPhone || '');
 
-      setSupplierName(data.supplierName || '');
-      setSupplierPhone(data.supplierPhone || '');
-      setBillNo(data.billNo || '');
+    setSelectedSupplierId(data.selectedSupplierId || '');
+    setSelectedSupplierType(data.selectedSupplierType || 'supplier');
 
-      setInvoiceDate(data.invoiceDate || '');
-      setInvoiceTime(data.invoiceTime || '');
+    setBillNo(data.billNo || '');
 
-      setItems(data.items || []);
+    setInvoiceDate(data.invoiceDate || now.toISOString().split('T')[0]);
 
-      setDiscountPercent(data.discountPercent || 0);
-      setDiscountAmount(data.discountAmount || 0);
+    setInvoiceTime(data.invoiceTime || now.toTimeString().slice(0, 5));
 
-      setPaidAmount(data.paidAmount || 0);
+    const restoredItems = Array.isArray(data.items) ? data.items : [];
 
-      setPaymentType(data.paymentType || 'cash');
+    setItems([
+      ...restoredItems,
+      ...Array.from(
+        {
+          length: Math.max(0, 15 - restoredItems.length),
+        },
+        (_, i) => generateEmptyRow(restoredItems.length + i)
+      ),
+    ]);
 
-      setSelectedAccountId(data.selectedAccountId || '');
-    } catch (err) {
-      console.error(err);
+    setDiscountPercent(Number(data.discountPercent || 0));
+    setDiscountAmount(Number(data.discountAmount || 0));
+
+    setPaidAmount(Number(data.paidAmount || 0));
+
+    setPaymentType(data.paymentType || 'cash');
+
+    setSelectedAccountId(data.selectedAccountId || '');
+
+    setIsOpeningPurchase(data.isOpeningPurchase === true);
+
+    setOpeningPurchaseAmount(Number(data.openingPurchaseAmount || 0));
+  }, []);
+
+  const shouldSavePurchaseDraft = useCallback((draft) => {
+    if (!draft) return false;
+
+    const hasSupplier = Boolean(draft.supplierName?.trim()) || Boolean(draft.selectedSupplierId);
+
+    const hasBillNo = Boolean(draft.billNo?.trim());
+
+    const hasItems =
+      Array.isArray(draft.items) &&
+      draft.items.some(
+        (item) =>
+          item?.productId ||
+          item?.name?.trim() ||
+          item?.search?.trim() ||
+          Number(item?.rate || 0) > 0 ||
+          Number(item?.amount || 0) > 0
+      );
+
+    const hasOtherData =
+      Number(draft.discountPercent || 0) > 0 ||
+      Number(draft.discountAmount || 0) > 0 ||
+      Number(draft.paidAmount || 0) > 0 ||
+      draft.isOpeningPurchase === true ||
+      Number(draft.openingPurchaseAmount || 0) > 0;
+
+    return hasSupplier || hasBillNo || hasItems || hasOtherData;
+  }, []);
+
+  const { clear } = useFormPersist(
+    !isEdit ? 'purchase_invoice_draft' : null,
+    formState,
+    restorePurchaseDraft,
+    {
+      expiryHours: 24,
+      delay: 500,
+      shouldSave: shouldSavePurchaseDraft,
     }
-  }, [isEdit]);
-
-  const stableDraftSetter = useCallback(() => {}, []);
-
-  useFormPersist(!isEdit ? 'purchase_invoice_draft' : null, formState, stableDraftSetter);
+  );
 
   const handleProductHistory = (productId) => {
     if (!productId) return;
@@ -585,8 +656,10 @@ const PurchaseInvoiceForm = () => {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
     } else {
       await purchaseInvoiceService.addPurchaseInvoice(formData);
-      localStorage.removeItem('app_state_purchase_invoice_draft');
+
+      clear();
     }
+
     return true;
   };
 
@@ -608,30 +681,44 @@ const PurchaseInvoiceForm = () => {
       if (!saved) return;
 
       setBillNo('');
+
       setSupplierName('');
       setSupplierPhone('');
 
       setSelectedSupplierId('');
       setSelectedSupplierType('supplier');
 
+      setSupplierSuggestions([]);
+      setSelectedSupplierIndex(-1);
+      setShowSupplierAddOptions(false);
+
       setItems(Array.from({ length: 15 }, (_, i) => generateEmptyRow(i)));
 
       setDiscountPercent(0);
       setDiscountAmount(0);
+
       setPaidAmount(0);
+
+      setPaymentType('cash');
       setSelectedAccountId('');
+      setAccountError('');
 
       setAttachments([]);
       setModalAttachment(null);
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      setIsOpeningPurchase(false);
+      setOpeningPurchaseAmount(0);
+
       setShowHistory(false);
       setItemHistory([]);
       setSelectedProductId(null);
 
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       const now = new Date();
+
       setInvoiceDate(now.toISOString().split('T')[0]);
       setInvoiceTime(now.toTimeString().slice(0, 5));
     } catch (err) {
@@ -730,11 +817,13 @@ const PurchaseInvoiceForm = () => {
 
     try {
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
-      localStorage.removeItem('app_state_purchase_invoice_draft');
+
       alert(t('alerts.invoiceUpdated'));
+
       navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error updating invoice:', err?.response?.data || err.message);
+
       alert(t('alerts.invoiceUpdateFailed'));
     }
   };
@@ -743,23 +832,40 @@ const PurchaseInvoiceForm = () => {
     if (isEdit && invoiceId) {
       const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(invoiceId);
 
-      setBillNo(invoice.billNo);
-      setInvoiceDate(invoice.invoiceDate?.slice(0, 10));
-      setInvoiceTime(invoice.invoiceTime);
-      setSupplierName(invoice.supplierName);
-      setSupplierPhone(invoice.supplierPhone);
+      setBillNo(invoice.billNo || '');
 
-      setDiscountPercent(invoice.discountPercent || 0);
-      setDiscountAmount(invoice.discountAmount || 0);
-      setPaidAmount(invoice.paidAmount || 0);
+      setInvoiceDate(invoice.invoiceDate?.slice(0, 10) || '');
+      setInvoiceTime(invoice.invoiceTime || '');
+
+      setSupplierName(invoice.supplierName || '');
+      setSupplierPhone(invoice.supplierPhone || '');
+
+      if (invoice.partyId) {
+        setSelectedSupplierType('party');
+        setSelectedSupplierId(invoice.partyId?._id || invoice.partyId || '');
+      } else {
+        setSelectedSupplierType('supplier');
+        setSelectedSupplierId(invoice.supplier?._id || invoice.supplier || '');
+      }
+
+      setDiscountPercent(Number(invoice.discountPercent || 0));
+      setDiscountAmount(Number(invoice.discountAmount || 0));
+
+      setPaidAmount(Number(invoice.paidAmount || 0));
+
       setPaymentType(invoice.paymentType || 'credit');
-      setSelectedAccountId(invoice.accountId || '');
+
+      setSelectedAccountId(invoice.accountId?._id || invoice.accountId || '');
+
+      setAccountError('');
+
       const openingMode =
         invoice.isOpening === true ||
         invoice.billNo === 'OPENING' ||
         (invoice.items || []).length === 0;
 
       setIsOpeningPurchase(openingMode);
+
       setOpeningPurchaseAmount(
         openingMode ? Number(invoice.grandTotal || invoice.totalAmount || 0) : 0
       );
@@ -773,52 +879,82 @@ const PurchaseInvoiceForm = () => {
         return {
           itemNo: index + 1,
           productId: product?._id || item.productId || '',
-          search: product?.name || '',
-          name: product?.name || '',
-          description: product?.description || '',
-          cost: Number(item.salePrice ?? product?.salePrice ?? 0),
-          rate: Number(item.price ?? 0),
-          quantity: Number(item.quantity ?? 1),
-          amount: Number(item.total ?? 0),
+          search: product?.name || item.name || '',
+          name: product?.name || item.name || '',
+          description: product?.description || item.description || '',
+          cost: Number(item.salePrice ?? product?.salePrice ?? product?.unitCost ?? 0),
+          rate: Number(item.price || 0),
+          quantity: Number(item.quantity || 1),
+          amount: Number(item.total || Number(item.quantity || 0) * Number(item.price || 0)),
         };
       });
 
-      const emptyRows = Array.from({ length: 10 }, (_, i) => ({
-        itemNo: loadedItems.length + i + 1,
-        search: '',
-        productId: '',
-        name: '',
-        description: '',
-        cost: 0,
-        quantity: 1,
-        rate: 0,
-        amount: 0,
-      }));
+      const emptyRows = Array.from({ length: 10 }, (_, i) =>
+        generateEmptyRow(loadedItems.length + i)
+      );
 
       setItems([...loadedItems, ...emptyRows]);
+
+      setAttachments(invoice.attachments || []);
+
+      setSupplierSuggestions([]);
+      setSelectedSupplierIndex(-1);
+      setShowSupplierAddOptions(false);
+
+      setShowHistory(false);
+      setItemHistory([]);
+      setSelectedProductId(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
 
       return;
     }
 
+    clear();
+
     setBillNo('');
+
     setSupplierName('');
     setSupplierPhone('');
+
     setSelectedSupplierId('');
     setSelectedSupplierType('supplier');
+
+    setSupplierSuggestions([]);
+    setSelectedSupplierIndex(-1);
+    setShowSupplierAddOptions(false);
+
     setItems(Array.from({ length: 15 }, (_, i) => generateEmptyRow(i)));
+
     setDiscountPercent(0);
     setDiscountAmount(0);
+
     setPaidAmount(0);
+
+    setPaymentType('cash');
     setSelectedAccountId('');
+    setAccountError('');
+
     setAttachments([]);
     setModalAttachment(null);
+
+    setIsOpeningPurchase(false);
+    setOpeningPurchaseAmount(0);
+
+    setShowHistory(false);
+    setItemHistory([]);
+    setSelectedProductId(null);
+
+    const now = new Date();
+
+    setInvoiceDate(now.toISOString().split('T')[0]);
+    setInvoiceTime(now.toTimeString().slice(0, 5));
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-    setShowHistory(false);
-    setItemHistory([]);
-    setSelectedProductId(null);
   };
 
   const handleSubmit = async (e) => {
@@ -909,15 +1045,20 @@ const PurchaseInvoiceForm = () => {
     try {
       if (isEdit) {
         await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
+
         alert(t('alerts.invoiceUpdated'));
       } else {
         await purchaseInvoiceService.addPurchaseInvoice(formData);
+
+        clear();
+
         alert(t('alerts.invoiceSaved'));
       }
 
       navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error saving invoice:', err?.response?.data || err.message);
+
       alert(t('alerts.invoiceSaveFailed'));
     }
   };
@@ -1539,6 +1680,9 @@ const PurchaseInvoiceForm = () => {
               // ✅ Auto select supplier
               setSupplierName(newSupplier.name);
               setSupplierPhone(newSupplier.phone || '');
+
+              setSelectedSupplierId(newSupplier._id || '');
+              setSelectedSupplierType('supplier');
 
               // ✅ Refresh suppliers list
               const updatedSuppliers = await fetchSuppliers();

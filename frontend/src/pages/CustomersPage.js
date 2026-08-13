@@ -23,8 +23,24 @@ import { FaWhatsapp } from 'react-icons/fa';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 
 import { getCurrentLanguage } from '../i18n/i18n';
-import useFormPersist from '../hooks/useFormPersist';
+
+import usePageMemory from '../hooks/usePageMemory';
 import { hasPermission } from '../utils/permissionHelper';
+
+const CUSTOMER_PAGE_DEFAULTS = {
+  searchTerm: '',
+  activeTab: 'active',
+  balanceFilter: 'all',
+  nameSort: 'none',
+  balanceSort: 'none',
+
+  selectedCustomerId: '',
+  customerName: '',
+
+  ledgerStartDate: '',
+  ledgerEndDate: '',
+  ledgerSearch: '',
+};
 
 const CustomersPage = () => {
   const [customers, setCustomers] = useState([]);
@@ -32,24 +48,90 @@ const CustomersPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [filterType] = useState('all');
-  const [balanceSort, setBalanceSort] = useState('none');
-  const [activeTab, setActiveTab] = useState('active');
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerData, setLedgerData] = useState(null);
-  const [ledgerStartDate, setLedgerStartDate] = useState('');
-  const [ledgerEndDate, setLedgerEndDate] = useState('');
-  const [balanceFilter, setBalanceFilter] = useState('all');
-  const [nameSort, setNameSort] = useState('none');
+
   const [selectedIndex, setSelectedIndex] = useState(-1);
+
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [mergeData, setMergeData] = useState(null);
-  const [ledgerSearch, setLedgerSearch] = useState('');
-  const [customerName, setCustomerName] = useState('');
+
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [businessName, setBusinessName] = useState('');
+
+  const {
+    state: pageMemory,
+    updateField: updatePageField,
+    resetFields: resetPageFields,
+    isHydrated: isPageMemoryReady,
+  } = usePageMemory('customers_page_state', CUSTOMER_PAGE_DEFAULTS, {
+    expiryHours: 24,
+    delay: 350,
+  });
+
+  const {
+    searchTerm,
+    activeTab,
+    balanceFilter,
+    nameSort,
+    balanceSort,
+
+    selectedCustomerId,
+    customerName,
+
+    ledgerStartDate,
+    ledgerEndDate,
+    ledgerSearch,
+  } = pageMemory;
+
+  const setSearchTerm = useCallback(
+    (value) => updatePageField('searchTerm', value),
+    [updatePageField]
+  );
+
+  const setActiveTab = useCallback(
+    (value) => updatePageField('activeTab', value),
+    [updatePageField]
+  );
+
+  const setBalanceFilter = useCallback(
+    (value) => updatePageField('balanceFilter', value),
+    [updatePageField]
+  );
+
+  const setNameSort = useCallback((value) => updatePageField('nameSort', value), [updatePageField]);
+
+  const setBalanceSort = useCallback(
+    (value) => updatePageField('balanceSort', value),
+    [updatePageField]
+  );
+
+  const setSelectedCustomerId = useCallback(
+    (value) => updatePageField('selectedCustomerId', value),
+    [updatePageField]
+  );
+
+  const setCustomerName = useCallback(
+    (value) => updatePageField('customerName', value),
+    [updatePageField]
+  );
+
+  const setLedgerStartDate = useCallback(
+    (value) => updatePageField('ledgerStartDate', value),
+    [updatePageField]
+  );
+
+  const setLedgerEndDate = useCallback(
+    (value) => updatePageField('ledgerEndDate', value),
+    [updatePageField]
+  );
+
+  const setLedgerSearch = useCallback(
+    (value) => updatePageField('ledgerSearch', value),
+    [updatePageField]
+  );
   // 📱 MOBILE VIEW STATE
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [printSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
@@ -65,7 +147,7 @@ const CustomersPage = () => {
   const canMergeCustomers = hasPermission('customers.merge');
   const canConvertCustomers = hasPermission('customers.convert');
   const canViewCustomerLedger = hasPermission('customers.view_ledger');
-  const restoredRef = useRef(false);
+  const ledgerRestoreRef = useRef(false);
 
   useEffect(() => {
     if (!canViewCustomers) {
@@ -73,7 +155,7 @@ const CustomersPage = () => {
     }
   }, [canViewCustomers, navigate]);
   const loadCustomers = useCallback(async () => {
-    if (!canViewCustomers) {
+    if (!canViewCustomers || !isPageMemoryReady) {
       return;
     }
 
@@ -87,11 +169,11 @@ const CustomersPage = () => {
       console.error(t('alerts.customersLoadFailed'), error);
       setCustomers([]);
     }
-  }, [token, canViewCustomers, activeTab]);
+  }, [token, canViewCustomers, activeTab, isPageMemoryReady]);
 
   useEffect(() => {
     loadCustomers();
-  }, [loadCustomers, activeTab]);
+  }, [loadCustomers]);
 
   useEffect(() => {
     const fetchBusinessInfo = async () => {
@@ -136,7 +218,10 @@ const CustomersPage = () => {
 
   const loadCustomerLedger = useCallback(
     async (customerId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
-      if (!customerId) return;
+      if (!customerId) {
+        setLedgerData(null);
+        return;
+      }
 
       if (!canViewCustomerLedger) {
         alert('You do not have permission to view customer ledger');
@@ -146,56 +231,89 @@ const CustomersPage = () => {
       setLedgerLoading(true);
 
       try {
-        const customer = customers.find((c) => c._id === customerId);
+        const customer = customers.find((item) => String(item._id) === String(customerId));
 
-        if (!customer) return;
+        if (!customer) {
+          setLedgerData(null);
+          return;
+        }
 
-        const data = await getLedgerByCustomerAccount(
-          customer.account?._id || customer.account,
-          startDate,
-          endDate
-        );
-        setLedgerData(data);
+        const accountId = customer.account?._id || customer.account;
+
+        if (!accountId) {
+          setLedgerData(null);
+          return;
+        }
+
+        const data = await getLedgerByCustomerAccount(accountId, startDate || '', endDate || '');
+
+        setLedgerData(data || null);
       } catch (error) {
         console.error(t('alerts.ledgerLoadFailed'), error);
-        setLedgerData(null);
-      }
 
-      setLedgerLoading(false);
+        setLedgerData(null);
+      } finally {
+        setLedgerLoading(false);
+      }
     },
     [customers, ledgerStartDate, ledgerEndDate, canViewCustomerLedger]
   );
 
   useEffect(() => {
-    const saved = localStorage.getItem('app_state_customers_page_state');
+    if (!isPageMemoryReady) return;
+    if (ledgerRestoreRef.current) return;
+    if (!selectedCustomerId) return;
+    if (customers.length === 0) return;
 
-    if (!saved || customers.length === 0 || restoredRef.current) return;
+    const selectedCustomer = customers.find(
+      (customer) => String(customer._id) === String(selectedCustomerId)
+    );
 
-    try {
-      const parsed = JSON.parse(saved);
-      const data = parsed.data;
+    if (!selectedCustomer) {
+      setSelectedCustomerId('');
+      setCustomerName('');
+      setLedgerData(null);
 
-      if (!data) return;
+      ledgerRestoreRef.current = true;
 
-      setSelectedCustomerId(data.selectedCustomerId || '');
-      setCustomerName(data.customerName || '');
-      setLedgerStartDate(data.ledgerStartDate || '');
-      setLedgerEndDate(data.ledgerEndDate || '');
-      setLedgerSearch(data.ledgerSearch || '');
-      setSearchTerm(data.searchTerm || '');
-      setActiveTab(data.activeTab || 'active');
-      setBalanceFilter(data.balanceFilter || 'all');
-      setNameSort(data.nameSort || 'none');
-      setBalanceSort(data.balanceSort || 'none');
-
-      if (data.selectedCustomerId) {
-        loadCustomerLedger(data.selectedCustomerId);
-      }
-      restoredRef.current = true;
-    } catch (err) {
-      console.error(err);
+      return;
     }
-  }, [customers, loadCustomerLedger]);
+
+    const restoreLedger = async () => {
+      await loadCustomerLedger(selectedCustomerId, ledgerStartDate, ledgerEndDate);
+
+      ledgerRestoreRef.current = true;
+    };
+
+    restoreLedger();
+  }, [
+    isPageMemoryReady,
+    customers,
+    selectedCustomerId,
+    ledgerStartDate,
+    ledgerEndDate,
+    loadCustomerLedger,
+    setSelectedCustomerId,
+    setCustomerName,
+  ]);
+
+  useEffect(() => {
+    if (!selectedCustomerId || customers.length === 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const selectedElement = document.getElementById(`customer-${selectedCustomerId}`);
+
+      selectedElement?.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'auto',
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [selectedCustomerId, customers]);
 
   const handleAddClick = () => {
     if (!canCreateCustomers) {
@@ -479,29 +597,21 @@ const CustomersPage = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, selectedIndex, loadCustomerLedger, activeCustomers, hiddenCustomers]);
+  }, [
+    activeTab,
+    selectedIndex,
+    loadCustomerLedger,
+    activeCustomers,
+    hiddenCustomers,
+    setSelectedCustomerId,
+    setCustomerName,
+  ]);
 
   const closing = ledgerData?.ledger?.length
     ? Number(ledgerData.ledger[ledgerData.ledger.length - 1].balance || 0)
     : Number(ledgerData?.openingBalance || 0);
 
   const closingColor = closing > 0 ? '#16a34a' : closing < 0 ? '#2563eb' : '#6b7280';
-
-  const persistState = {
-    selectedCustomerId,
-    customerName,
-    ledgerStartDate,
-    ledgerEndDate,
-    ledgerSearch,
-
-    searchTerm,
-    activeTab,
-    balanceFilter,
-    nameSort,
-    balanceSort,
-  };
-
-  useFormPersist('customers_page_state', persistState, () => {});
 
   return (
     <PageLayout>
@@ -595,14 +705,15 @@ const CustomersPage = () => {
             </button>
             <button
               onClick={() => {
-                setSearchTerm('');
-                setBalanceFilter('all');
-                setNameSort('none');
-                setBalanceSort('none');
-                setActiveTab('active');
-                setCustomers([]);
+                resetPageFields([
+                  'searchTerm',
+                  'activeTab',
+                  'balanceFilter',
+                  'nameSort',
+                  'balanceSort',
+                ]);
 
-                localStorage.removeItem('app_state_customers_page_state');
+                setSelectedIndex(-1);
               }}
               style={{
                 height: 30,

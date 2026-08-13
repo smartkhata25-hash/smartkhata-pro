@@ -1,8 +1,7 @@
 // 📁 src/pages/SupplierDetailLedgerPage.js
 // بسم اللہ الرحمن الرحیم
-
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 
 import { getSupplierDetailedLedger } from '../services/supplierDetailLedgerService';
@@ -11,16 +10,23 @@ import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
+import usePageMemory from '../hooks/usePageMemory';
+
+const SUPPLIER_DETAIL_LEDGER_DEFAULTS = {
+  selectedSupplierId: '',
+  supplierName: '',
+  startDate: '',
+  endDate: '',
+  searchText: '',
+};
 
 export default function SupplierDetailLedgerPage() {
   const { supplierId } = useParams();
+  const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
-  const [selectedSupplierId, setSelectedSupplierId] = useState(supplierId || '');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-
   const [blocks, setBlocks] = useState([]);
+
   const [summary, setSummary] = useState({
     opening: 0,
     debit: 0,
@@ -30,10 +36,46 @@ export default function SupplierDetailLedgerPage() {
 
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [supplierName, setSupplierName] = useState('');
   const [suppliers, setSuppliers] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [searchText, setSearchText] = useState('');
+
+  const handledRouteSupplierRef = useRef('');
+
+  const { state: pageMemory, updateField: updatePageField } = usePageMemory(
+    'supplier_detail_ledger_page_state',
+    SUPPLIER_DETAIL_LEDGER_DEFAULTS,
+    {
+      expiryHours: 24,
+      delay: 350,
+    }
+  );
+
+  const { selectedSupplierId, supplierName, startDate, endDate, searchText } = pageMemory;
+
+  const setSelectedSupplierId = useCallback(
+    (value) => updatePageField('selectedSupplierId', value || ''),
+    [updatePageField]
+  );
+
+  const setSupplierName = useCallback(
+    (value) => updatePageField('supplierName', value || ''),
+    [updatePageField]
+  );
+
+  const setStartDate = useCallback(
+    (value) => updatePageField('startDate', value || ''),
+    [updatePageField]
+  );
+
+  const setEndDate = useCallback(
+    (value) => updatePageField('endDate', value || ''),
+    [updatePageField]
+  );
+
+  const setSearchText = useCallback(
+    (value) => updatePageField('searchText', value || ''),
+    [updatePageField]
+  );
 
   // ✅ Print Size (Default A5)
   const [printSize, setPrintSize] = useState(
@@ -45,30 +87,51 @@ export default function SupplierDetailLedgerPage() {
   }, [printSize]);
 
   const loadData = useCallback(
-    async (sid, s, e) => {
-      if (!sid) return;
+    async (sid, s = startDate, e = endDate) => {
+      if (!sid) {
+        setBlocks([]);
 
-      setLoading(true);
-      try {
-        const supplier = suppliers.find((x) => x._id === sid);
-        if (!supplier) {
-          setLoading(false);
-          return;
-        }
-
-        // 🟢 MASTER LEDGER (ACCOUNT BASED)
-        const master = await fetchSupplierLedger(sid, {
-          startDate: s,
-          endDate: e,
+        setSummary({
+          opening: 0,
+          debit: 0,
+          credit: 0,
+          closing: 0,
         });
 
-        const opening = master.openingBalance || 0;
-        const rows = Array.isArray(master.ledger) ? master.ledger : [];
+        return;
+      }
 
-        const closing = rows.length > 0 ? rows[rows.length - 1].balance : opening;
+      const supplier = suppliers.find((item) => String(item._id) === String(sid));
 
-        const debit = rows.reduce((sum, r) => sum + (r.debit || 0), 0);
-        const credit = rows.reduce((sum, r) => sum + (r.credit || 0), 0);
+      if (!supplier) return;
+
+      setLoading(true);
+
+      try {
+        const [master, detail] = await Promise.all([
+          fetchSupplierLedger(sid, {
+            startDate: s || '',
+            endDate: e || '',
+          }),
+
+          getSupplierDetailedLedger(sid, s || '', e || ''),
+        ]);
+
+        const opening = Number(master?.openingBalance || 0);
+
+        const rows = Array.isArray(master?.ledger) ? master.ledger : [];
+
+        const closing = rows.length > 0 ? Number(rows[rows.length - 1]?.balance || 0) : opening;
+
+        const debit = rows.reduce((sum, row) => sum + Number(row.debit || 0), 0);
+
+        const credit = rows.reduce((sum, row) => sum + Number(row.credit || 0), 0);
+
+        const detailRows = Array.isArray(detail?.ledger) ? detail.ledger : [];
+
+        setSelectedSupplierId(sid);
+
+        setSupplierName(detail?.supplierName || supplier.name || '');
 
         setSummary({
           opening,
@@ -77,17 +140,12 @@ export default function SupplierDetailLedgerPage() {
           closing,
         });
 
-        // 🟡 DETAIL LEDGER (DISPLAY)
-        const detail = await getSupplierDetailedLedger(sid, s, e);
-
-        setSupplierName(detail?.supplierName || '');
-
-        const grouped = buildBlocks(detail?.ledger || []);
+        const grouped = buildBlocks(detailRows);
 
         const openingBlock = {
           key: 'opening-balance',
           billNo: '-',
-          date: startDate ? new Date(startDate) : new Date(),
+          date: s ? new Date(s) : new Date(),
           sourceType: 'opening_balance',
           sourceLabel: 'Opening Balance',
           items: [],
@@ -99,18 +157,57 @@ export default function SupplierDetailLedgerPage() {
         setBlocks([openingBlock, ...grouped]);
       } catch (err) {
         console.error('❌ Supplier detail ledger load failed', err);
+
+        setBlocks([]);
+
+        setSummary({
+          opening: 0,
+          debit: 0,
+          credit: 0,
+          closing: 0,
+        });
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     },
-    [suppliers, startDate]
+    [suppliers, startDate, endDate, setSelectedSupplierId, setSupplierName]
   );
 
   useEffect(() => {
-    if (supplierId) {
-      setSelectedSupplierId(supplierId);
-      loadData(supplierId, startDate, endDate);
+    if (!supplierId) return;
+    if (suppliers.length === 0) return;
+
+    if (handledRouteSupplierRef.current === String(supplierId)) {
+      return;
     }
-  }, [supplierId, startDate, endDate, loadData]);
+
+    const selectedSupplier = suppliers.find(
+      (supplier) => String(supplier._id) === String(supplierId)
+    );
+
+    if (!selectedSupplier) return;
+
+    handledRouteSupplierRef.current = String(supplierId);
+
+    setSelectedSupplierId(selectedSupplier._id);
+    setSupplierName(selectedSupplier.name || '');
+
+    loadData(selectedSupplier._id, startDate, endDate);
+  }, [supplierId, suppliers, startDate, endDate, loadData, setSelectedSupplierId, setSupplierName]);
+
+  useEffect(() => {
+    if (supplierId) return;
+    if (!selectedSupplierId) return;
+    if (suppliers.length === 0) return;
+
+    const selectedSupplier = suppliers.find(
+      (supplier) => String(supplier._id) === String(selectedSupplierId)
+    );
+
+    if (!selectedSupplier) return;
+
+    loadData(selectedSupplierId, startDate, endDate);
+  }, [supplierId, selectedSupplierId, suppliers, startDate, endDate, loadData]);
 
   useEffect(() => {
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/suppliers`, {
@@ -273,8 +370,22 @@ export default function SupplierDetailLedgerPage() {
               placeholder={t('supplier.search')}
               value={supplierName}
               onChange={(e) => {
-                setSupplierName(e.target.value);
+                const value = e.target.value;
+
+                setSupplierName(value);
                 setShowSuggestions(true);
+
+                if (selectedSupplierId) {
+                  setSelectedSupplierId('');
+                  setBlocks([]);
+
+                  setSummary({
+                    opening: 0,
+                    debit: 0,
+                    credit: 0,
+                    closing: 0,
+                  });
+                }
               }}
               onFocus={() => setShowSuggestions(true)}
               style={{
@@ -310,9 +421,16 @@ export default function SupplierDetailLedgerPage() {
                     <div
                       key={s._id}
                       onClick={() => {
+                        handledRouteSupplierRef.current = String(s._id);
+
                         setSupplierName(s.name);
                         setSelectedSupplierId(s._id);
                         setShowSuggestions(false);
+
+                        navigate(`/supplier-ledger/${s._id}/detail`, {
+                          replace: true,
+                        });
+
                         loadData(s._id, startDate, endDate);
                       }}
                       style={{

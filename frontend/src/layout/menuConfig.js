@@ -162,6 +162,7 @@ const menuConfig = [
           { label: 'reports.trialBalance', path: '/trial-balance' },
           { label: 'ledger.generalLedger', path: '/ledger' },
           { label: 'reports.incomeStatement', path: '/income-statement' },
+          { label: 'reports.agingReport', path: '/aging-report' },
         ],
       },
       {

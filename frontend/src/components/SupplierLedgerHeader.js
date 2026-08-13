@@ -345,7 +345,7 @@ const SupplierLedgerHeader = ({
               }}
               onClick={() => {
                 setSearch('');
-                localStorage.removeItem('app_state_suppliers_page_state');
+
                 const currentYear = new Date().getFullYear();
                 setStart(`${currentYear}-01-01`);
                 setEnd(`${currentYear}-12-31`);

@@ -853,7 +853,10 @@ const InvoiceForm = ({
       setCustomerName(data.name);
       setCustomerPhone(data.phone || '');
 
-      onCustomerChange && onCustomerChange(data._id);
+      setSelectedCustomerId(data._id || '');
+      setSelectedCustomerType('customer');
+
+      onCustomerChange && onCustomerChange(data._id || '');
 
       // ✅ dropdown hide
       setCustomerSuggestions([]);
@@ -1011,10 +1014,14 @@ const InvoiceForm = ({
 
     setAttachments(selectedFiles);
   };
+  const isEditMode = new URLSearchParams(location.search).has('invoiceId');
+
   const formState = {
     billNo,
     customerName,
     customerPhone,
+    selectedCustomerId,
+    selectedCustomerType,
     invoiceDate,
     invoiceTime,
     items,
@@ -1026,59 +1033,98 @@ const InvoiceForm = ({
     by,
   };
 
-  const isEditMode = new URLSearchParams(location.search).has('invoiceId');
+  const restoreSaleDraft = useCallback((valueOrUpdater) => {
+    const defaultState = {
+      billNo: 'Auto',
+      customerName: '',
+      customerPhone: '',
+      selectedCustomerId: '',
+      selectedCustomerType: 'customer',
+      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceTime: new Date().toTimeString().slice(0, 5),
+      items: [],
+      discountPercent: 0,
+      discountAmount: 0,
+      paidAmount: 0,
+      paymentType: 'credit',
+      selectedAccountId: '',
+      by: '',
+    };
 
-  useEffect(() => {
-    if (isEditMode) return;
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
 
-    const saved = localStorage.getItem('app_state_sale_invoice_draft');
+    if (!data || typeof data !== 'object') return;
 
-    if (!saved) return;
+    setBillNo(data.billNo || 'Auto');
+    setCustomerName(data.customerName || '');
+    setCustomerPhone(data.customerPhone || '');
 
-    try {
-      const parsed = JSON.parse(saved);
-      if (!parsed || !parsed.data) return;
+    setSelectedCustomerId(data.selectedCustomerId || '');
+    setSelectedCustomerType(data.selectedCustomerType || 'customer');
 
-      const data = parsed.data;
+    const safeDate =
+      data.invoiceDate && !Number.isNaN(new Date(data.invoiceDate).getTime())
+        ? data.invoiceDate
+        : new Date().toISOString().split('T')[0];
 
-      if (!data) return;
-      setBillNo(data.billNo || 'Auto');
-      setCustomerName(data.customerName || '');
-      setCustomerPhone(data.customerPhone || '');
+    setInvoiceDate(safeDate);
+    setInvoiceTime(data.invoiceTime || new Date().toTimeString().slice(0, 5));
 
-      const safeDate =
-        data.invoiceDate && !isNaN(new Date(data.invoiceDate))
-          ? data.invoiceDate
-          : new Date().toISOString().split('T')[0];
+    const restoredItems = Array.isArray(data.items)
+      ? data.items.map((item) => (item?.productId ? item : blankRow()))
+      : [];
 
-      setInvoiceDate(safeDate);
-      setInvoiceTime(data.invoiceTime || '');
+    setItems([
+      ...restoredItems.slice(0, 20),
+      ...Array.from({ length: Math.max(0, 20 - restoredItems.length) }, () => blankRow()),
+    ]);
 
-      const restoredItems = Array.isArray(data.items)
-        ? data.items.map((item) => (item?.productId ? item : blankRow()))
-        : [];
+    setDiscountPercent(Number(data.discountPercent || 0));
+    setDiscountAmount(Number(data.discountAmount || 0));
+    setPaidAmount(Number(data.paidAmount || 0));
 
-      setItems([
-        ...restoredItems.slice(0, 20),
-        ...Array.from({ length: Math.max(0, 20 - restoredItems.length) }, () => blankRow()),
-      ]);
+    setPaymentType(data.paymentType || 'credit');
+    setSelectedAccountId(data.selectedAccountId || '');
 
-      setDiscountPercent(data.discountPercent || 0);
-      setDiscountAmount(data.discountAmount || 0);
+    setBy(data.by || '');
+  }, []);
 
-      setPaidAmount(data.paidAmount || 0);
+  const shouldSaveDraft = useCallback((draft) => {
+    if (!draft) return false;
 
-      setPaymentType(data.paymentType || 'credit');
+    const hasCustomer = Boolean(draft.customerName?.trim()) || Boolean(draft.selectedCustomerId);
 
-      setSelectedAccountId(data.selectedAccountId || '');
+    const hasItems =
+      Array.isArray(draft.items) &&
+      draft.items.some(
+        (item) =>
+          item?.productId ||
+          item?.name?.trim() ||
+          item?.search?.trim() ||
+          Number(item?.quantity || 0) > 0 ||
+          Number(item?.rate || 0) > 0
+      );
 
-      setBy(data.by || '');
-    } catch (err) {
-      console.error(err);
+    const hasOtherData =
+      Boolean(draft.by?.trim()) ||
+      Number(draft.discountPercent || 0) > 0 ||
+      Number(draft.discountAmount || 0) > 0 ||
+      Number(draft.paidAmount || 0) > 0;
+
+    return hasCustomer || hasItems || hasOtherData;
+  }, []);
+
+  const { clear } = useFormPersist(
+    isEditMode ? null : 'sale_invoice_draft',
+    formState,
+    restoreSaleDraft,
+    {
+      expiryHours: 24,
+      delay: 500,
+      shouldSave: shouldSaveDraft,
     }
-  }, [isEditMode]);
-
-  const { clear } = useFormPersist(isEditMode ? null : 'sale_invoice_draft', formState, () => {});
+  );
 
   const handleClear = async () => {
     if (editingInvoiceFromAPI?._id) {
@@ -1093,6 +1139,10 @@ const InvoiceForm = ({
           setEditingInvoiceFromAPI(freshInvoice);
         }, 0);
 
+        setAttachments([]);
+        setModalAttachment(null);
+        setShowAttachmentModal(false);
+
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -1105,23 +1155,31 @@ const InvoiceForm = ({
       }
     }
 
-    // ✅ NEW MODE → clear form
-    localStorage.removeItem('app_state_sale_invoice_draft');
+    clear();
+
+    setBillNo('Auto');
 
     setCustomerName('');
     setCustomerPhone('');
     setSelectedCustomerId('');
     setSelectedCustomerType('customer');
 
+    setCustomerSuggestions([]);
+    setSelectedCustomerIndex(-1);
+    setShowCustomerAddOptions(false);
+
     setCustomerLedger([]);
     setCustomerBalance(0);
 
     setItems(Array.from({ length: 20 }, () => blankRow()));
+
     setDiscountPercent(0);
     setDiscountAmount(0);
     setPaidAmount(0);
+
     setPaymentType('credit');
     setSelectedAccountId('');
+
     setBy('');
 
     const now = new Date();
@@ -1130,14 +1188,24 @@ const InvoiceForm = ({
     setInvoiceTime(now.toTimeString().slice(0, 5));
 
     setAttachments([]);
+    setExistingAttachments([]);
 
     setShowAttachmentModal(false);
     setModalAttachment(null);
 
+    setHistoryRowIndex(null);
+
+    onHistoryReset && onHistoryReset();
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+
+    setTimeout(() => {
+      customerInputRef.current?.focus();
+    }, 0);
   };
+
   const handleSubmit = async (e, mode = 'close', skipOverpayCheck = false) => {
     e.preventDefault();
 
@@ -1163,7 +1231,8 @@ const InvoiceForm = ({
 
     if (!invoiceDate || isNaN(new Date(invoiceDate))) {
       alert('Invalid invoice date');
-      return;
+      setSaveLoading(false);
+      return false;
     }
 
     const mappedItems = items
@@ -1286,36 +1355,31 @@ const InvoiceForm = ({
 
       clear();
 
-      if (mode === 'print') {
-        return true;
-      }
-
-      if (mode === 'new') {
+      const resetSavedInvoiceForm = () => {
         const now = new Date();
-        const today = now.toISOString().split('T')[0];
-        const currentTime = now.toTimeString().slice(0, 5);
-
-        // ✅ Edit Mode ختم کریں
-        setEditingInvoiceFromAPI(null);
-
-        // ✅ پرانی invoiceId URL سے ہٹائیں
-        navigate('/create-sale', { replace: true });
 
         setBillNo('Auto');
-        setInvoiceDate(today);
-        setInvoiceTime(currentTime);
+        setInvoiceDate(now.toISOString().split('T')[0]);
+        setInvoiceTime(now.toTimeString().slice(0, 5));
 
         setCustomerName('');
         setCustomerPhone('');
         setSelectedCustomerId('');
         setSelectedCustomerType('customer');
+
+        setCustomerSuggestions([]);
+        setSelectedCustomerIndex(-1);
+        setShowCustomerAddOptions(false);
+
         setCustomerLedger([]);
         setCustomerBalance(0);
 
         setHistoryRowIndex(null);
-        onHistoryReset && onHistoryReset();
+
         setBy('');
+
         setItems(Array.from({ length: 20 }, () => blankRow()));
+
         setDiscountPercent(0);
         setDiscountAmount(0);
         setPaidAmount(0);
@@ -1329,18 +1393,41 @@ const InvoiceForm = ({
         setShowAttachmentModal(false);
         setModalAttachment(null);
 
-        clear();
-
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
+      };
+
+      if (mode === 'print') {
+        resetSavedInvoiceForm();
+
+        onHistoryReset && onHistoryReset();
+
+        return true;
+      }
+
+      if (mode === 'new') {
+        setEditingInvoiceFromAPI(null);
+
+        navigate('/create-sale', { replace: true });
+
+        resetSavedInvoiceForm();
+
+        onHistoryReset && onHistoryReset();
 
         setTimeout(() => {
           customerInputRef.current?.focus();
         }, 100);
-      } else {
-        navigate('/dashboard');
+
+        return true;
       }
+
+      resetSavedInvoiceForm();
+
+      onHistoryReset && onHistoryReset();
+
+      navigate('/dashboard');
+
       return true;
     } catch (err) {
       console.error('Save error:', err);

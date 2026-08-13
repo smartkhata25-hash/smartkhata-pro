@@ -1,6 +1,6 @@
 // src/components/ReceivePaymentForm.js
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   createReceivePayment,
   updateReceivePayment,
@@ -264,13 +264,24 @@ const ReceivePaymentForm = () => {
           );
 
           if (handCashAccount) {
-            setPaymentEntries([
-              {
-                account: handCashAccount._id,
-                amount: '',
-                paymentType: 'Cash',
-              },
-            ]);
+            setPaymentEntries((previousEntries) => {
+              const isBlankDefault =
+                previousEntries.length === 1 &&
+                !previousEntries[0]?.amount &&
+                !previousEntries[0]?.account;
+
+              if (!isBlankDefault) {
+                return previousEntries;
+              }
+
+              return [
+                {
+                  account: handCashAccount._id,
+                  amount: '',
+                  paymentType: 'Cash',
+                },
+              ];
+            });
           }
         }
       } else {
@@ -284,10 +295,7 @@ const ReceivePaymentForm = () => {
       cancelled = true;
     };
   }, [id]);
-
   useEffect(() => {
-    if (!id) return;
-
     const selectedId = selectedCustomerType === 'party' ? formData.partyId : formData.customer;
 
     if (!selectedId) {
@@ -297,7 +305,7 @@ const ReceivePaymentForm = () => {
 
     let cancelled = false;
 
-    const loadEditLedger = async () => {
+    const loadSelectedLedger = async () => {
       try {
         setLedgerLoading(true);
 
@@ -313,7 +321,10 @@ const ReceivePaymentForm = () => {
           const accountId = customerObject?.account?._id || customerObject?.account;
 
           if (!accountId) {
-            setCustomerLedger([]);
+            if (!cancelled) {
+              setCustomerLedger([]);
+            }
+
             return;
           }
 
@@ -337,13 +348,13 @@ const ReceivePaymentForm = () => {
     };
 
     if (selectedCustomerType === 'party' || customers.length > 0) {
-      loadEditLedger();
+      loadSelectedLedger();
     }
 
     return () => {
       cancelled = true;
     };
-  }, [id, selectedCustomerType, formData.customer, formData.partyId, customers]);
+  }, [selectedCustomerType, formData.customer, formData.partyId, customers]);
   const loadLedger = async (recordId, type = selectedCustomerType) => {
     if (!recordId) {
       setCustomerLedger([]);
@@ -406,13 +417,16 @@ const ReceivePaymentForm = () => {
   };
 
   const resetForm = () => {
+    clear();
+
     setFormData({
       customer: '',
+      partyId: '',
       date: dayjs().format('YYYY-MM-DD'),
       time: dayjs().format('HH:mm'),
       amount: '',
-      discountAmount: '',
       paymentType: 'Cash',
+      discountAmount: '',
       account: '',
       description: '',
       attachments: [],
@@ -421,7 +435,12 @@ const ReceivePaymentForm = () => {
     setCustomerName('');
     setSelectedCustomerType('customer');
 
-    const handCash = accounts.find((acc) => acc.name?.toLowerCase() === 'handcash');
+    setShowSuggestions(false);
+    setCustomerLedger([]);
+
+    const handCash = accounts.find(
+      (acc) => acc.name?.toLowerCase() === 'handcash' || acc.category === 'cash'
+    );
 
     setPaymentEntries([
       {
@@ -431,9 +450,11 @@ const ReceivePaymentForm = () => {
       },
     ]);
 
-    setCustomerLedger([]);
+    setModalAttachment(null);
 
-    clear();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleRevert = async () => {
@@ -742,12 +763,111 @@ const ReceivePaymentForm = () => {
   };
 
   const formState = {
-    formData,
+    formData: {
+      ...formData,
+      attachments: [],
+    },
     customerName,
+    selectedCustomerType,
     paymentEntries,
   };
 
-  const { clear } = useFormPersist('receive_payment_draft', formState, () => {});
+  const restoreReceivePaymentDraft = useCallback((valueOrUpdater) => {
+    const defaultState = {
+      formData: {
+        customer: '',
+        partyId: '',
+        date: dayjs().format('YYYY-MM-DD'),
+        time: dayjs().format('HH:mm'),
+        amount: '',
+        paymentType: 'Cash',
+        discountAmount: '',
+        account: '',
+        description: '',
+        attachments: [],
+      },
+      customerName: '',
+      selectedCustomerType: 'customer',
+      paymentEntries: [
+        {
+          account: '',
+          amount: '',
+          paymentType: 'Cash',
+        },
+      ],
+    };
+
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
+
+    if (!data || typeof data !== 'object') return;
+
+    const savedFormData = data.formData || {};
+
+    setFormData({
+      customer: savedFormData.customer || '',
+      partyId: savedFormData.partyId || '',
+      date: savedFormData.date || dayjs().format('YYYY-MM-DD'),
+      time: savedFormData.time || dayjs().format('HH:mm'),
+      amount: savedFormData.amount || '',
+      paymentType: savedFormData.paymentType || 'Cash',
+      discountAmount: savedFormData.discountAmount || '',
+      account: savedFormData.account || '',
+      description: savedFormData.description || '',
+      attachments: [],
+    });
+
+    setCustomerName(data.customerName || '');
+
+    setSelectedCustomerType(data.selectedCustomerType || 'customer');
+
+    const restoredEntries =
+      Array.isArray(data.paymentEntries) && data.paymentEntries.length > 0
+        ? data.paymentEntries.map((entry) => ({
+            account: entry?.account || '',
+            amount: entry?.amount || '',
+            paymentType: entry?.paymentType || 'Cash',
+          }))
+        : [
+            {
+              account: '',
+              amount: '',
+              paymentType: 'Cash',
+            },
+          ];
+
+    setPaymentEntries(restoredEntries);
+  }, []);
+
+  const shouldSaveReceivePaymentDraft = useCallback((draft) => {
+    if (!draft) return false;
+
+    const hasCustomer =
+      Boolean(draft.customerName?.trim()) ||
+      Boolean(draft.formData?.customer) ||
+      Boolean(draft.formData?.partyId);
+
+    const hasPayments =
+      Array.isArray(draft.paymentEntries) &&
+      draft.paymentEntries.some((entry) => Boolean(entry?.amount) || Boolean(entry?.account));
+
+    const hasOtherData =
+      Boolean(draft.formData?.description?.trim()) ||
+      Number(draft.formData?.discountAmount || 0) > 0;
+
+    return hasCustomer || hasPayments || hasOtherData;
+  }, []);
+
+  const { clear } = useFormPersist(
+    !id ? 'receive_payment_draft' : null,
+    formState,
+    restoreReceivePaymentDraft,
+    {
+      expiryHours: 24,
+      delay: 500,
+      shouldSave: shouldSaveReceivePaymentDraft,
+    }
+  );
 
   const filteredSuggestions = useMemo(() => {
     const search = customerName.trim().toLowerCase();
@@ -833,28 +953,35 @@ const ReceivePaymentForm = () => {
 
     try {
       setLoading(true);
+
       if (id) {
         await updateReceivePayment(id, data);
-        clear();
+
         alert(t('alerts.paymentUpdated'));
       } else {
         await createReceivePayment(data);
 
-        await loadLedger(formData.customer);
-
         clear();
       }
 
-      if (type === 'close') {
-        navigate('/dashboard');
-      } else if (type === 'new') {
-        resetForm();
-
+      if (type === 'new') {
         if (id) {
           navigate('/receive-payments/new', {
             replace: true,
           });
         }
+
+        resetForm();
+        return;
+      }
+
+      if (type === 'close') {
+        if (!id) {
+          resetForm();
+        }
+
+        navigate('/dashboard');
+        return;
       }
     } catch (err) {
       alert(err.message);
@@ -904,8 +1031,20 @@ const ReceivePaymentForm = () => {
                 placeholder={t('customer.search')}
                 value={customerName}
                 onChange={(e) => {
-                  setCustomerName(e.target.value);
+                  const value = e.target.value;
+
+                  setCustomerName(value);
                   setShowSuggestions(true);
+
+                  setSelectedCustomerType('customer');
+
+                  setFormData((previous) => ({
+                    ...previous,
+                    customer: '',
+                    partyId: '',
+                  }));
+
+                  setCustomerLedger([]);
                 }}
                 onFocus={() => setShowSuggestions(true)}
                 className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-1 md:focus:ring-2 focus:ring-blue-500 outline-none"
@@ -940,7 +1079,6 @@ const ReceivePaymentForm = () => {
                         }));
 
                         setShowSuggestions(false);
-                        loadLedger(c._id, c.selectType);
                       }}
                       style={{
                         padding: '8px 10px',

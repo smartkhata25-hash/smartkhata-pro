@@ -20,8 +20,23 @@ import { t } from '../i18n/i18n';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import { FaEdit, FaTrash } from 'react-icons/fa';
-import useFormPersist from '../hooks/useFormPersist';
+import usePageMemory from '../hooks/usePageMemory';
 import { hasPermission } from '../utils/permissionHelper';
+
+const SUPPLIER_PAGE_DEFAULTS = {
+  searchTerm: '',
+  activeTab: 'active',
+  balanceFilter: 'all',
+  nameSort: 'none',
+  balanceSort: 'none',
+
+  selectedSupplierId: '',
+  supplierName: '',
+
+  ledgerStartDate: '',
+  ledgerEndDate: '',
+  ledgerSearch: '',
+};
 
 const SuppliersPage = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -29,26 +44,92 @@ const SuppliersPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [filterType] = useState('all');
-  const [balanceSort, setBalanceSort] = useState('none');
-  const [activeTab, setActiveTab] = useState('active');
-  const [selectedSupplierId, setSelectedSupplierId] = useState(null);
+
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [ledgerData, setLedgerData] = useState(null);
-  const [ledgerStartDate, setLedgerStartDate] = useState('');
-  const [ledgerEndDate, setLedgerEndDate] = useState('');
-  const [balanceFilter, setBalanceFilter] = useState('all');
-  const [nameSort, setNameSort] = useState('none');
+
   const [selectedIndex, setSelectedIndex] = useState(-1);
+
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [mergeData, setMergeData] = useState(null);
-  const [ledgerSearch, setLedgerSearch] = useState('');
-  const [supplierName, setSupplierName] = useState('');
+
   const [showSuggestions, setShowSuggestions] = useState(false);
+
   const [printSize] = useState('A5');
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  const {
+    state: pageMemory,
+    updateField: updatePageField,
+    resetFields: resetPageFields,
+  } = usePageMemory('suppliers_page_state', SUPPLIER_PAGE_DEFAULTS, {
+    expiryHours: 24,
+    delay: 350,
+  });
+
+  const {
+    searchTerm,
+    activeTab,
+    balanceFilter,
+    nameSort,
+    balanceSort,
+
+    selectedSupplierId,
+    supplierName,
+
+    ledgerStartDate,
+    ledgerEndDate,
+    ledgerSearch,
+  } = pageMemory;
+
+  const setSearchTerm = useCallback(
+    (value) => updatePageField('searchTerm', value),
+    [updatePageField]
+  );
+
+  const setActiveTab = useCallback(
+    (value) => updatePageField('activeTab', value),
+    [updatePageField]
+  );
+
+  const setBalanceFilter = useCallback(
+    (value) => updatePageField('balanceFilter', value),
+    [updatePageField]
+  );
+
+  const setNameSort = useCallback((value) => updatePageField('nameSort', value), [updatePageField]);
+
+  const setBalanceSort = useCallback(
+    (value) => updatePageField('balanceSort', value),
+    [updatePageField]
+  );
+
+  const setSelectedSupplierId = useCallback(
+    (value) => updatePageField('selectedSupplierId', value || ''),
+    [updatePageField]
+  );
+
+  const setSupplierName = useCallback(
+    (value) => updatePageField('supplierName', value),
+    [updatePageField]
+  );
+
+  const setLedgerStartDate = useCallback(
+    (value) => updatePageField('ledgerStartDate', value),
+    [updatePageField]
+  );
+
+  const setLedgerEndDate = useCallback(
+    (value) => updatePageField('ledgerEndDate', value),
+    [updatePageField]
+  );
+
+  const setLedgerSearch = useCallback(
+    (value) => updatePageField('ledgerSearch', value),
+    [updatePageField]
+  );
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -64,29 +145,13 @@ const SuppliersPage = () => {
   const canConvertSuppliers = hasPermission('suppliers.convert');
   const canViewSupplierLedger = hasPermission('suppliers.view_ledger');
 
-  const restoredRef = useRef(false);
+  const ledgerRestoreRef = useRef(false);
 
   useEffect(() => {
     if (!canViewSuppliers) {
       navigate('/dashboard');
     }
   }, [canViewSuppliers, navigate]);
-
-  const persistState = {
-    selectedSupplierId,
-    supplierName,
-    ledgerStartDate,
-    ledgerEndDate,
-    ledgerSearch,
-
-    // ✅ Filters persist
-    searchTerm,
-    balanceFilter,
-    nameSort,
-    balanceSort,
-    activeTab,
-  };
-  useFormPersist('suppliers_page_state', persistState, () => {});
 
   const loadSuppliers = useCallback(async () => {
     if (!canViewSuppliers) {
@@ -131,8 +196,11 @@ const SuppliersPage = () => {
     }
   }, [location.search, canCreateSuppliers]);
   const loadSupplierLedger = useCallback(
-    async (supplierId) => {
-      if (!supplierId) return;
+    async (supplierId, startDate = ledgerStartDate, endDate = ledgerEndDate) => {
+      if (!supplierId) {
+        setLedgerData(null);
+        return;
+      }
 
       if (!canViewSupplierLedger) {
         alert('You do not have permission to view supplier ledger');
@@ -140,51 +208,78 @@ const SuppliersPage = () => {
       }
 
       setLedgerLoading(true);
+
       try {
         const data = await fetchSupplierLedger(supplierId, {
-          start: ledgerStartDate,
-          end: ledgerEndDate,
+          start: startDate || '',
+          end: endDate || '',
         });
-        setLedgerData(data);
+
+        setLedgerData(data || null);
       } catch (error) {
         console.error(t('alerts.loadLedgerFailed'), error);
+
         setLedgerData(null);
+      } finally {
+        setLedgerLoading(false);
       }
-      setLedgerLoading(false);
     },
     [ledgerStartDate, ledgerEndDate, canViewSupplierLedger]
   );
 
   useEffect(() => {
-    const saved = localStorage.getItem('app_state_suppliers_page_state');
+    if (ledgerRestoreRef.current) return;
+    if (!selectedSupplierId) return;
+    if (suppliers.length === 0) return;
 
-    if (!saved || suppliers.length === 0 || restoredRef.current) return;
+    const selectedSupplier = suppliers.find(
+      (supplier) => String(supplier._id) === String(selectedSupplierId)
+    );
 
-    try {
-      const parsed = JSON.parse(saved);
-      const data = parsed.data;
+    if (!selectedSupplier) {
+      setSelectedSupplierId('');
+      setSupplierName('');
+      setLedgerData(null);
 
-      if (!data) return;
+      ledgerRestoreRef.current = true;
 
-      setSelectedSupplierId(data.selectedSupplierId || '');
-      setSupplierName(data.supplierName || '');
-      setLedgerStartDate(data.ledgerStartDate || '');
-      setLedgerEndDate(data.ledgerEndDate || '');
-      setLedgerSearch(data.ledgerSearch || '');
-      setSearchTerm(data.searchTerm || '');
-      setBalanceFilter(data.balanceFilter || 'all');
-      setNameSort(data.nameSort || 'none');
-      setBalanceSort(data.balanceSort || 'none');
-      setActiveTab(data.activeTab || 'active');
-
-      if (data.selectedSupplierId) {
-        loadSupplierLedger(data.selectedSupplierId);
-      }
-      restoredRef.current = true;
-    } catch (err) {
-      console.error(err);
+      return;
     }
-  }, [suppliers, loadSupplierLedger]);
+
+    const restoreLedger = async () => {
+      await loadSupplierLedger(selectedSupplierId, ledgerStartDate, ledgerEndDate);
+
+      ledgerRestoreRef.current = true;
+    };
+
+    restoreLedger();
+  }, [
+    suppliers,
+    selectedSupplierId,
+    ledgerStartDate,
+    ledgerEndDate,
+    loadSupplierLedger,
+    setSelectedSupplierId,
+    setSupplierName,
+  ]);
+
+  useEffect(() => {
+    if (!selectedSupplierId || suppliers.length === 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const selectedElement = document.getElementById(`supplier-${selectedSupplierId}`);
+
+      selectedElement?.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'auto',
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [selectedSupplierId, suppliers]);
 
   const handleAddClick = () => {
     if (!canCreateSuppliers) {
@@ -472,7 +567,14 @@ const SuppliersPage = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, selectedIndex, loadSupplierLedger, activeSuppliers, hiddenSuppliers]);
+  }, [
+    activeTab,
+    selectedIndex,
+    loadSupplierLedger,
+    activeSuppliers,
+    hiddenSuppliers,
+    setSelectedSupplierId,
+  ]);
 
   const closing = ledgerData?.ledger?.length
     ? Number(ledgerData.ledger[ledgerData.ledger.length - 1].balance || 0)
@@ -597,18 +699,15 @@ const SuppliersPage = () => {
             </button>
             <button
               onClick={() => {
-                setSearchTerm('');
-                setBalanceFilter('all');
-                setNameSort('none');
-                setBalanceSort('none');
-                setSelectedSupplierId(null);
-                setSupplierName('');
-                setLedgerData(null);
-                setSelectedIndex(-1);
-                setSuppliers([]);
-                setActiveTab('active');
+                resetPageFields([
+                  'searchTerm',
+                  'activeTab',
+                  'balanceFilter',
+                  'nameSort',
+                  'balanceSort',
+                ]);
 
-                localStorage.removeItem('app_state_suppliers_page_state');
+                setSelectedIndex(-1);
               }}
               style={{
                 height: 30,

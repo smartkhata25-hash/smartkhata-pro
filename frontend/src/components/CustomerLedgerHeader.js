@@ -344,8 +344,6 @@ const CustomerLedgerHeader = ({
                 setStart(startDate);
                 setEnd(endDate);
 
-                localStorage.removeItem('app_state_customers_page_state');
-
                 if (cid) {
                   load(cid, startDate, endDate);
                 }

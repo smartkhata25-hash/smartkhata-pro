@@ -1,6 +1,6 @@
 // src/pages/PartyDetailLedgerPage.js
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
@@ -14,23 +14,28 @@ import { t } from '../i18n/i18n';
 
 import { FaWhatsapp } from 'react-icons/fa';
 
+import usePageMemory from '../hooks/usePageMemory';
+
 const API = process.env.REACT_APP_API_BASE_URL;
+
+const currentYear = new Date().getFullYear();
+
+const PARTY_DETAIL_LEDGER_DEFAULTS = {
+  selectedPartyId: '',
+  partyName: '',
+  startDate: `${currentYear}-01-01`,
+  endDate: `${currentYear}-12-31`,
+  searchText: '',
+};
 
 const PartyDetailLedgerPage = () => {
   const { partyId } = useParams();
   const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
-  const currentYear = new Date().getFullYear();
 
   const [parties, setParties] = useState([]);
-  const [selectedPartyId, setSelectedPartyId] = useState(partyId || '');
-
-  const [partyName, setPartyName] = useState('');
   const [partyPhone, setPartyPhone] = useState('');
-
-  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
 
   const [blocks, setBlocks] = useState([]);
 
@@ -41,12 +46,49 @@ const PartyDetailLedgerPage = () => {
     closing: 0,
   });
 
-  const [searchText, setSearchText] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  const handledRoutePartyRef = useRef('');
+
+  const { state: pageMemory, updateField: updatePageField } = usePageMemory(
+    'party_detail_ledger_page_state',
+    PARTY_DETAIL_LEDGER_DEFAULTS,
+    {
+      expiryHours: 24,
+      delay: 350,
+    }
+  );
+
+  const { selectedPartyId, partyName, startDate, endDate, searchText } = pageMemory;
+
+  const setSelectedPartyId = useCallback(
+    (value) => updatePageField('selectedPartyId', value || ''),
+    [updatePageField]
+  );
+
+  const setPartyName = useCallback(
+    (value) => updatePageField('partyName', value || ''),
+    [updatePageField]
+  );
+
+  const setStartDate = useCallback(
+    (value) => updatePageField('startDate', value || ''),
+    [updatePageField]
+  );
+
+  const setEndDate = useCallback(
+    (value) => updatePageField('endDate', value || ''),
+    [updatePageField]
+  );
+
+  const setSearchText = useCallback(
+    (value) => updatePageField('searchText', value || ''),
+    [updatePageField]
+  );
 
   const [printSize, setPrintSize] = useState(
     localStorage.getItem('partyDetailLedgerPrintSize') || 'A5'
@@ -113,30 +155,39 @@ const PartyDetailLedgerPage = () => {
   }, []);
 
   const loadData = useCallback(
-    async (id, start, end) => {
-      if (!id) return;
+    async (id, start = startDate, end = endDate) => {
+      if (!id) {
+        setBlocks([]);
+
+        setSummary({
+          opening: 0,
+          debit: 0,
+          credit: 0,
+          closing: 0,
+        });
+
+        return;
+      }
 
       setLoading(true);
 
       try {
-        const data = await getPartyDetailedLedger(id, start, end);
+        const data = await getPartyDetailedLedger(id, start || '', end || '');
 
-        setSelectedPartyId(data.partyId || id);
-        setPartyName(data.partyName || '');
-        setPartyPhone(data.partyPhone || '');
+        setSelectedPartyId(data?.partyId || id);
+        setPartyName(data?.partyName || '');
+        setPartyPhone(data?.partyPhone || '');
 
         setSummary({
-          opening: Number(data.partyOpeningBalance ?? data.openingBalance ?? 0),
-          debit: Number(data.totalDebit || 0),
-          credit: Number(data.totalCredit || 0),
-          closing: Number(data.closingBalance || 0),
+          opening: Number(data?.partyOpeningBalance ?? data?.openingBalance ?? 0),
+          debit: Number(data?.totalDebit || 0),
+          credit: Number(data?.totalCredit || 0),
+          closing: Number(data?.closingBalance || 0),
         });
 
-        setBlocks(buildBlocks(data.ledger || []));
+        setBlocks(buildBlocks(Array.isArray(data?.ledger) ? data.ledger : []));
       } catch (err) {
         console.error('Party detail ledger load failed:', err);
-
-        alert(t('alerts.partyDetailLedgerLoadFailed'));
 
         setBlocks([]);
 
@@ -146,13 +197,14 @@ const PartyDetailLedgerPage = () => {
           credit: 0,
           closing: 0,
         });
+
+        alert(t('alerts.partyDetailLedgerLoadFailed'));
       } finally {
         setLoading(false);
       }
     },
-    [buildBlocks]
+    [startDate, endDate, buildBlocks, setSelectedPartyId, setPartyName]
   );
-
   useEffect(() => {
     fetchParties()
       .then((data) => {
@@ -169,16 +221,36 @@ const PartyDetailLedgerPage = () => {
     if (!partyId) return;
     if (parties.length === 0) return;
 
-    const party = parties.find((p) => String(p._id) === String(partyId));
+    if (handledRoutePartyRef.current === String(partyId)) {
+      return;
+    }
+
+    const party = parties.find((item) => String(item._id) === String(partyId));
 
     if (!party) return;
+
+    handledRoutePartyRef.current = String(partyId);
 
     setSelectedPartyId(party._id);
     setPartyName(party.name || '');
     setPartyPhone(party.phone || '');
 
     loadData(party._id, startDate, endDate);
-  }, [partyId, parties, startDate, endDate, loadData]);
+  }, [partyId, parties, startDate, endDate, loadData, setSelectedPartyId, setPartyName]);
+
+  useEffect(() => {
+    if (partyId) return;
+    if (!selectedPartyId) return;
+    if (parties.length === 0) return;
+
+    const party = parties.find((item) => String(item._id) === String(selectedPartyId));
+
+    if (!party) return;
+
+    setPartyPhone(party.phone || '');
+
+    loadData(selectedPartyId, startDate, endDate);
+  }, [partyId, selectedPartyId, parties, startDate, endDate, loadData]);
 
   const filteredBlocks = useMemo(() => {
     const q = String(searchText || '')
@@ -225,12 +297,18 @@ const PartyDetailLedgerPage = () => {
     }).toString();
 
   const handleSelectParty = (party) => {
+    if (!party?._id) return;
+
+    handledRoutePartyRef.current = String(party._id);
+
     setSelectedPartyId(party._id);
     setPartyName(party.name || '');
     setPartyPhone(party.phone || '');
     setShowSuggestions(false);
 
-    navigate(`/party-ledger/${party._id}/detail`, { replace: true });
+    navigate(`/party-ledger/${party._id}/detail`, {
+      replace: true,
+    });
 
     loadData(party._id, startDate, endDate);
   };
@@ -332,16 +410,15 @@ const PartyDetailLedgerPage = () => {
   };
 
   const handleClear = () => {
-    const start = `${currentYear}-01-01`;
+    const defaultStart = `${currentYear}-01-01`;
+    const defaultEnd = `${currentYear}-12-31`;
 
-    const end = `${currentYear}-12-31`;
-
-    setStartDate(start);
-    setEndDate(end);
+    setStartDate(defaultStart);
+    setEndDate(defaultEnd);
     setSearchText('');
 
     if (selectedPartyId) {
-      loadData(selectedPartyId, start, end);
+      loadData(selectedPartyId, defaultStart, defaultEnd);
     }
   };
 
@@ -441,9 +518,23 @@ const PartyDetailLedgerPage = () => {
               placeholder={t('party.searchParty')}
               value={partyName}
               onChange={(e) => {
-                setPartyName(e.target.value);
+                const value = e.target.value;
 
+                setPartyName(value);
                 setShowSuggestions(true);
+
+                if (selectedPartyId) {
+                  setSelectedPartyId('');
+                  setPartyPhone('');
+                  setBlocks([]);
+
+                  setSummary({
+                    opening: 0,
+                    debit: 0,
+                    credit: 0,
+                    closing: 0,
+                  });
+                }
               }}
               onFocus={() => setShowSuggestions(true)}
               style={inputStyle}

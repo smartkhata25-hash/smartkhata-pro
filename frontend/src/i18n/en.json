@@ -1509,5 +1509,6 @@
   "backup.loading": "Loading...",
   "backup.loadingCloudBackups": "Loading cloud backups...",
   "backup.noCloudBackups": "No cloud backups found",
-  "backup.createdAt": "Created"
+  "backup.createdAt": "Created",
+  "reports.agingReport": "Aging Report"
 }

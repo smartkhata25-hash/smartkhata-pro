@@ -1,6 +1,6 @@
 // 📁 src/pages/CustomerLedgerPage.js
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -13,27 +13,23 @@ import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
+import usePageMemory from '../hooks/usePageMemory';
+
+const CUSTOMER_LEDGER_DEFAULTS = {
+  search: '',
+  cid: '',
+  customerName: '',
+  start: `${new Date().getFullYear()}-01-01`,
+  end: `${new Date().getFullYear()}-12-31`,
+};
 
 export default function CustomerLedgerPage() {
-  useEffect(() => {
-    setTimeout(() => {
-      const scrollElements = document.querySelectorAll('*');
-
-      scrollElements.forEach((el) => {
-        if (el.scrollHeight > el.clientHeight) {
-        }
-      });
-    }, 2000);
-  }, []);
   const { customerId } = useParams();
   const token = localStorage.getItem('token');
   const navigate = useNavigate();
 
   const [customers, setCustomers] = useState([]);
-  const [search, setSearch] = useState('');
 
-  const [cid, setCid] = useState('');
-  const [customerName, setCustomerName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [ledger, setLedger] = useState([]);
 
@@ -41,11 +37,35 @@ export default function CustomerLedgerPage() {
 
   const currentYear = new Date().getFullYear();
 
-  const [start, setStart] = useState(`${currentYear}-01-01`);
-  const [end, setEnd] = useState(`${currentYear}-12-31`);
   const [loading, setLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [pdfLoading, setPdfLoading] = React.useState(false);
+
+  const handledRouteCustomerRef = useRef('');
+
+  const { state: pageMemory, updateField: updatePageField } = usePageMemory(
+    'customer_ledger_page_state',
+    CUSTOMER_LEDGER_DEFAULTS,
+    {
+      expiryHours: 24,
+      delay: 350,
+    }
+  );
+
+  const { search, cid, customerName, start, end } = pageMemory;
+
+  const setSearch = useCallback((value) => updatePageField('search', value), [updatePageField]);
+
+  const setCid = useCallback((value) => updatePageField('cid', value || ''), [updatePageField]);
+
+  const setCustomerName = useCallback(
+    (value) => updatePageField('customerName', value || ''),
+    [updatePageField]
+  );
+
+  const setStart = useCallback((value) => updatePageField('start', value), [updatePageField]);
+
+  const setEnd = useCallback((value) => updatePageField('end', value), [updatePageField]);
 
   const [printSize, setPrintSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
 
@@ -95,44 +115,91 @@ export default function CustomerLedgerPage() {
 
   const load = useCallback(
     async (id = cid, s = start, e = end) => {
-      if (!id) return;
+      if (!id) {
+        setLedger([]);
+        setOpening(0);
+        return;
+      }
 
-      const customer = customers.find((c) => c._id === id);
+      const customer = customers.find((item) => String(item._id) === String(id));
 
-      if (!customer) return;
+      if (!customer) {
+        setLedger([]);
+        setOpening(0);
+        return;
+      }
+
+      const accountId = customer.account?._id || customer.account;
+
+      if (!accountId) {
+        setLedger([]);
+        setOpening(0);
+        return;
+      }
 
       setLoading(true);
+
       try {
-        const data = await getLedgerByCustomerAccount(
-          customer.account?._id || customer.account,
-          s,
-          e
-        );
+        const data = await getLedgerByCustomerAccount(accountId, s || '', e || '');
 
-        let openingBalance = data.openingBalance || 0;
+        const ledgerRows = Array.isArray(data?.ledger) ? data.ledger : [];
 
-        setOpening(data.openingBalance || 0);
+        setCid(customer._id);
+        setCustomerName(customer.name || '');
 
-        const ledgerRows = Array.isArray(data.ledger) ? data.ledger : [];
-
+        setOpening(Number(data?.openingBalance || 0));
         setLedger(ledgerRows);
-        setOpening(openingBalance);
       } catch (err) {
         console.error('LEDGER LOAD ERROR:', err);
-        console.log('ERROR RESPONSE:', err?.response?.data);
+
+        setLedger([]);
+        setOpening(0);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     },
-    [cid, start, end, customers]
+    [cid, start, end, customers, setCid, setCustomerName]
   );
 
   useEffect(() => {
     if (!customerId) return;
     if (customers.length === 0) return;
 
-    setCid(customerId);
-    load(customerId, start, end);
-  }, [customerId, customers, load, start, end]);
+    if (handledRouteCustomerRef.current === String(customerId)) {
+      return;
+    }
+
+    const selectedCustomer = customers.find(
+      (customer) => String(customer._id) === String(customerId)
+    );
+
+    if (!selectedCustomer) return;
+
+    handledRouteCustomerRef.current = String(customerId);
+
+    setCid(selectedCustomer._id);
+    setCustomerName(selectedCustomer.name || '');
+  }, [customerId, customers, setCid, setCustomerName]);
+
+  useEffect(() => {
+    if (!cid) {
+      setLedger([]);
+      setOpening(0);
+      return;
+    }
+
+    if (customers.length === 0) return;
+
+    const selectedCustomer = customers.find((customer) => String(customer._id) === String(cid));
+
+    if (!selectedCustomer) {
+      setLedger([]);
+      setOpening(0);
+      return;
+    }
+
+    load(cid, start, end);
+  }, [cid, customers, start, end, load]);
 
   const print = async () => {
     if (!cid) return;
@@ -324,8 +391,16 @@ export default function CustomerLedgerPage() {
                 placeholder={t('customer.search')}
                 value={customerName}
                 onChange={(e) => {
-                  setCustomerName(e.target.value);
+                  const value = e.target.value;
+
+                  setCustomerName(value);
                   setShowSuggestions(true);
+
+                  if (cid) {
+                    setCid('');
+                    setLedger([]);
+                    setOpening(0);
+                  }
                 }}
                 onFocus={() => setShowSuggestions(true)}
                 style={{
@@ -361,12 +436,15 @@ export default function CustomerLedgerPage() {
                       <div
                         key={c._id}
                         onClick={() => {
-                          console.log('🔥 CUSTOMER SELECT =>', c);
+                          handledRouteCustomerRef.current = String(c._id);
+
                           setCustomerName(c.name);
                           setCid(c._id);
                           setShowSuggestions(false);
 
-                          load(c._id);
+                          navigate(`/customer-ledger/${c._id}`, {
+                            replace: true,
+                          });
                         }}
                         style={{
                           padding: '8px 10px',
@@ -575,10 +653,16 @@ export default function CustomerLedgerPage() {
                 transition: 'all 0.2s ease',
               }}
               onClick={() => {
+                const defaultStart = `${currentYear}-01-01`;
+                const defaultEnd = `${currentYear}-12-31`;
+
                 setSearch('');
-                setStart(`${currentYear}-01-01`);
-                setEnd(`${currentYear}-12-31`);
-                load(cid, `${currentYear}-01-01`, `${currentYear}-12-31`);
+                setStart(defaultStart);
+                setEnd(defaultEnd);
+
+                if (cid) {
+                  load(cid, defaultStart, defaultEnd);
+                }
               }}
             >
               {t('common.clear')}
@@ -605,12 +689,6 @@ export default function CustomerLedgerPage() {
             onDelete={null}
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
-
-              alert(
-                `TYPE: ${type}
-REFERENCE: ${entry.referenceId}
-INVOICE: ${entry.invoiceId}`
-              );
 
               // ✅ Sale Invoice + Opening Sale Invoice
               if (

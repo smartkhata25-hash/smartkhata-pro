@@ -1510,5 +1510,6 @@
   "backup.loading": "لوڈ ہو رہا ہے...",
   "backup.loadingCloudBackups": "کلاؤڈ بیک اپس لوڈ ہو رہے ہیں...",
   "backup.noCloudBackups": "کوئی کلاؤڈ بیک اپ موجود نہیں",
-  "backup.createdAt": "بننے کا وقت"
+  "backup.createdAt": "بننے کا وقت",
+  "reports.agingReport": "ایجنگ رپورٹ"
 }

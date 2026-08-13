@@ -392,18 +392,20 @@ const RefundInvoiceForm = ({
   };
 
   const handleClear = () => {
+    clear();
+
     setItems(Array.from({ length: 20 }, () => blankRow()));
 
     setBillNo('');
 
     setInvoiceDate(new Date().toISOString().slice(0, 10));
-
     setInvoiceTime(getCurrentTime());
 
     setCustomerName('');
     setCustomerPhone('');
     setCustomerId('');
     setSelectedCustomerType('customer');
+
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
     setCustomerBalance(0);
@@ -426,7 +428,7 @@ const RefundInvoiceForm = ({
       fileInputRef.current.value = '';
     }
 
-    localStorage.removeItem('app_state_refund_invoice_draft');
+    onCustomerChange && onCustomerChange('');
   };
 
   const handleRevert = async () => {
@@ -522,62 +524,112 @@ const RefundInvoiceForm = ({
     invoiceTime,
     customerName,
     customerPhone,
+    customerId,
+    selectedCustomerType,
     notes,
     refundMethod,
     accountId,
-    customerId,
-    partyId: selectedCustomerType === 'party' ? customerId : '',
     paymentType,
     originalInvoiceId,
-    attachments,
+    isOpeningRefund,
+    openingRefundAmount,
   };
 
-  useEffect(() => {
-    if (id) return;
-    const saved = localStorage.getItem('app_state_refund_invoice_draft');
+  const restoreRefundDraft = useCallback((valueOrUpdater) => {
+    const defaultState = {
+      items: [],
+      billNo: '',
+      invoiceDate: new Date().toISOString().slice(0, 10),
+      invoiceTime: getCurrentTime(),
+      customerName: '',
+      customerPhone: '',
+      customerId: '',
+      selectedCustomerType: 'customer',
+      notes: '',
+      refundMethod: 'credit',
+      accountId: '',
+      paymentType: 'cash',
+      originalInvoiceId: '',
+      isOpeningRefund: false,
+      openingRefundAmount: 0,
+    };
 
-    if (!saved) return;
+    const data =
+      typeof valueOrUpdater === 'function' ? valueOrUpdater(defaultState) : valueOrUpdater;
 
-    try {
-      const parsed = JSON.parse(saved);
+    if (!data || typeof data !== 'object') return;
 
-      const data = parsed.data;
+    const loadedItems = Array.isArray(data.items) ? data.items : [];
 
-      if (!data) return;
+    const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
+      blankRow()
+    );
 
-      const loadedItems = data.items || [];
+    setItems([...loadedItems, ...emptyRows]);
 
-      const emptyRows = Array.from({ length: Math.max(0, 20 - loadedItems.length) }, () =>
-        blankRow()
+    setBillNo(data.billNo || '');
+
+    setInvoiceDate(data.invoiceDate || new Date().toISOString().slice(0, 10));
+
+    setInvoiceTime(data.invoiceTime || getCurrentTime());
+
+    setCustomerName(data.customerName || '');
+    setCustomerPhone(data.customerPhone || '');
+
+    setCustomerId(data.customerId || '');
+
+    setSelectedCustomerType(data.selectedCustomerType || 'customer');
+
+    setNotes(data.notes || '');
+
+    setRefundMethod(data.refundMethod || 'credit');
+
+    setAccountId(data.accountId || '');
+
+    setPaymentType(data.paymentType || 'cash');
+
+    setOriginalInvoiceId(data.originalInvoiceId || '');
+
+    setIsOpeningRefund(data.isOpeningRefund === true);
+
+    setOpeningRefundAmount(Number(data.openingRefundAmount || 0));
+  }, []);
+
+  const shouldSaveRefundDraft = useCallback((draft) => {
+    if (!draft) return false;
+
+    const hasCustomer = Boolean(draft.customerName?.trim()) || Boolean(draft.customerId);
+
+    const hasItems =
+      Array.isArray(draft.items) &&
+      draft.items.some(
+        (item) =>
+          item?.productId ||
+          item?.name?.trim() ||
+          Number(item?.quantity || 0) > 0 ||
+          Number(item?.price || 0) > 0
       );
 
-      setItems([...loadedItems, ...emptyRows]);
+    const hasOtherData =
+      Boolean(draft.billNo?.trim()) ||
+      Boolean(draft.notes?.trim()) ||
+      Boolean(draft.originalInvoiceId) ||
+      draft.isOpeningRefund === true ||
+      Number(draft.openingRefundAmount || 0) > 0;
 
-      setBillNo(data.billNo || '');
+    return hasCustomer || hasItems || hasOtherData;
+  }, []);
 
-      setInvoiceDate(data.invoiceDate || '');
-      setInvoiceTime(data.invoiceTime || getCurrentTime());
-
-      setCustomerName(data.customerName || '');
-      setCustomerPhone(data.customerPhone || '');
-
-      setNotes(data.notes || '');
-
-      setRefundMethod(data.refundMethod || 'credit');
-
-      setAccountId(data.accountId || '');
-
-      setCustomerId(data.customerId?._id || data.customerId || '');
-
-      setPaymentType(data.paymentType || 'cash');
-
-      setOriginalInvoiceId(data.originalInvoiceId || '');
-    } catch (err) {
-      console.error(err);
+  const { clear } = useFormPersist(
+    !id ? 'refund_invoice_draft' : null,
+    formState,
+    restoreRefundDraft,
+    {
+      expiryHours: 24,
+      delay: 500,
+      shouldSave: shouldSaveRefundDraft,
     }
-  }, [id]);
-
-  useFormPersist(!id ? 'refund_invoice_draft' : null, formState, () => {});
+  );
 
   const handleSubmit = async (action) => {
     if (saveLoading) return false;
@@ -696,11 +748,19 @@ const RefundInvoiceForm = ({
         savedRefund = await createRefund(formData, token);
       }
 
-      localStorage.removeItem('app_state_refund_invoice_draft');
+      clear();
 
       if (action === 'new') {
+        if (id) {
+          navigate('/refunds/new', { replace: true });
+        }
+
         handleClear();
       } else if (action === 'close') {
+        if (!id) {
+          handleClear();
+        }
+
         navigate('/dashboard');
       }
 
@@ -777,7 +837,13 @@ const RefundInvoiceForm = ({
     if (value.trim() === '') {
       setCustomerSuggestions([]);
       setSelectedCustomerIndex(-1);
+
       setCustomerPhone('');
+      setCustomerId('');
+      setSelectedCustomerType('customer');
+      setCustomerBalance(0);
+
+      onCustomerChange && onCustomerChange('');
     } else {
       const customerResults = customers.map((c) => ({
         ...c,
@@ -793,6 +859,7 @@ const RefundInvoiceForm = ({
       const filtered = [...customerResults, ...partyResults].filter(
         (c) => c.name.toLowerCase().includes(value.toLowerCase()) || (c.phone || '').includes(value)
       );
+
       setCustomerSuggestions(filtered);
       setSelectedCustomerIndex(-1);
     }

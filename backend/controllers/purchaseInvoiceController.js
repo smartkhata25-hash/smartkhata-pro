@@ -1001,27 +1001,30 @@ const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   });
 });
 
-// ✅ Get Purchase Invoices - Fast Pagination List
+// ✅ Get Purchase Invoices - Pagination + Filters + Total Purchases
 const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
 
-  // ✅ Page number
+  // Pagination
   const page = Math.max(parseInt(req.query.page || "1", 10), 1);
 
-  // ✅ One page records
   const requestedLimit = parseInt(req.query.limit || "50", 10);
+
   const limit = Math.min(Math.max(requestedLimit, 1), 100);
 
   const skip = (page - 1) * limit;
 
-  // ✅ Search and status
+  // Filters
   const search = (req.query.search || "").trim();
   const status = (req.query.status || "").trim();
 
-  // ✅ Search special characters safe
+  const dateFilter = (req.query.dateFilter || "").trim();
+  const fromDate = (req.query.fromDate || "").trim();
+  const toDate = (req.query.toDate || "").trim();
+
   const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // ✅ Active suppliers and parties together
+  // Active suppliers + parties
   const [activeSuppliers, activeParties] = await Promise.all([
     Supplier.find({
       userId,
@@ -1040,9 +1043,10 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
   ]);
 
   const activeSupplierIds = activeSuppliers.map((supplier) => supplier._id);
+
   const activePartyIds = activeParties.map((party) => party._id);
 
-  // ✅ Main filter
+  // Main filter
   const filter = {
     userId,
     isDeleted: false,
@@ -1057,12 +1061,12 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
     ],
   };
 
-  // ✅ Status filter
+  // Status filter
   if (status) {
     filter.status = status;
   }
 
-  // ✅ Search by bill, supplier/party name or phone
+  // Search filter
   if (safeSearch) {
     filter.$and.push({
       $or: [
@@ -1088,10 +1092,137 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
     });
   }
 
-  // ✅ List and total count together
-  const [invoices, totalInvoices] = await Promise.all([
+  // =========================
+  // DATE FILTER
+  // =========================
+
+  const now = new Date();
+
+  let startDate = null;
+  let endDate = null;
+
+  const startOfDay = (date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const endOfDay = (date) => {
+    const d = new Date(date);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  };
+
+  if (dateFilter === "today") {
+    startDate = startOfDay(now);
+    endDate = endOfDay(now);
+  }
+
+  if (dateFilter === "yesterday") {
+    const yesterday = new Date(now);
+
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    startDate = startOfDay(yesterday);
+    endDate = endOfDay(yesterday);
+  }
+
+  if (dateFilter === "this_week") {
+    const current = new Date(now);
+
+    const day = current.getDay();
+
+    const diff = day === 0 ? -6 : 1 - day;
+
+    current.setDate(current.getDate() + diff);
+
+    startDate = startOfDay(current);
+    endDate = endOfDay(now);
+  }
+
+  if (dateFilter === "last_week") {
+    const current = new Date(now);
+
+    const day = current.getDay();
+
+    const diff = day === 0 ? -6 : 1 - day;
+
+    const thisMonday = new Date(current);
+
+    thisMonday.setDate(current.getDate() + diff);
+
+    const lastMonday = new Date(thisMonday);
+
+    lastMonday.setDate(lastMonday.getDate() - 7);
+
+    const lastSunday = new Date(thisMonday);
+
+    lastSunday.setDate(lastSunday.getDate() - 1);
+
+    startDate = startOfDay(lastMonday);
+    endDate = endOfDay(lastSunday);
+  }
+
+  if (dateFilter === "this_month") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+    endDate = endOfDay(now);
+  }
+
+  if (dateFilter === "last_month") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  }
+
+  if (dateFilter === "this_year") {
+    startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+
+    endDate = endOfDay(now);
+  }
+
+  if (dateFilter === "last_year") {
+    startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
+
+    endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+  }
+
+  if (dateFilter === "custom") {
+    if (fromDate) {
+      const parsedFromDate = new Date(`${fromDate}T00:00:00`);
+
+      if (!Number.isNaN(parsedFromDate.getTime())) {
+        startDate = parsedFromDate;
+      }
+    }
+
+    if (toDate) {
+      const parsedToDate = new Date(`${toDate}T23:59:59.999`);
+
+      if (!Number.isNaN(parsedToDate.getTime())) {
+        endDate = parsedToDate;
+      }
+    }
+  }
+
+  if (startDate || endDate) {
+    filter.invoiceDate = {};
+
+    if (startDate) {
+      filter.invoiceDate.$gte = startDate;
+    }
+
+    if (endDate) {
+      filter.invoiceDate.$lte = endDate;
+    }
+  }
+
+  // =========================
+  // LIST + COUNT + TOTAL
+  // =========================
+
+  const [invoices, totalInvoices, purchaseSummary] = await Promise.all([
     PurchaseInvoice.find(filter)
-      // ✅ List page کے لیے صرف ضروری fields
       .select(
         [
           "billNo",
@@ -1110,6 +1241,7 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
         ].join(" "),
       )
       .sort({
+        invoiceDate: -1,
         createdAt: -1,
         _id: -1,
       })
@@ -1118,12 +1250,49 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
       .lean(),
 
     PurchaseInvoice.countDocuments(filter),
+
+    PurchaseInvoice.aggregate([
+      {
+        $match: {
+          ...filter,
+
+          // ✅ Opening Purchase کو Total Purchases میں شامل نہ کریں
+          isOpening: { $ne: true },
+        },
+      },
+
+      {
+        $group: {
+          _id: null,
+
+          totalPurchases: {
+            $sum: {
+              $ifNull: [
+                "$grandTotal",
+                {
+                  $ifNull: ["$totalAmount", 0],
+                },
+              ],
+            },
+          },
+        },
+      },
+    ]),
   ]);
+
+  const totalPurchases =
+    purchaseSummary.length > 0
+      ? Number(purchaseSummary[0].totalPurchases || 0)
+      : 0;
 
   const totalPages = Math.max(Math.ceil(totalInvoices / limit), 1);
 
   return res.status(200).json({
     invoices,
+
+    summary: {
+      totalPurchases,
+    },
 
     pagination: {
       page,

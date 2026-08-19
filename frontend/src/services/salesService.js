@@ -14,7 +14,7 @@ export const createInvoice = async (invoiceData, token) => {
   return res.data;
 };
 
-// ✅ Get invoices with pagination, search and status filter
+// ✅ Get invoices with pagination, search, status and date filters
 export const getInvoices = async (token, params = {}) => {
   const res = await axios.get(API_URL, {
     headers: {
@@ -26,6 +26,9 @@ export const getInvoices = async (token, params = {}) => {
       limit: params.limit || 50,
       search: params.search || '',
       status: params.status || '',
+      dateFilter: params.dateFilter || '',
+      fromDate: params.fromDate || '',
+      toDate: params.toDate || '',
     },
   });
 

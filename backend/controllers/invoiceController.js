@@ -768,29 +768,27 @@ exports.createInvoice = async (req, res) => {
   }
 };
 
-// ✅ Get Invoices - Fast Pagination List
+// ✅ Get Invoices - Pagination + Filters + Total Sales
 exports.getInvoices = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
 
-    // ✅ Pagination
+    // Pagination
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
-
     const requestedLimit = parseInt(req.query.limit || "50", 10);
-
-    // ✅ Maximum 100 records at one time
     const limit = Math.min(Math.max(requestedLimit, 1), 100);
-
     const skip = (page - 1) * limit;
 
-    // ✅ Filters
+    // Filters
     const search = (req.query.search || "").trim();
     const status = (req.query.status || "").trim();
+    const dateFilter = (req.query.dateFilter || "").trim();
+    const fromDate = (req.query.fromDate || "").trim();
+    const toDate = (req.query.toDate || "").trim();
 
-    // ✅ Search text safety
     const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    // ✅ Active customers and parties together
+    // Active Customers + Parties
     const [activeCustomers, activeParties] = await Promise.all([
       Customer.find({
         createdBy: userId,
@@ -809,9 +807,10 @@ exports.getInvoices = async (req, res) => {
     ]);
 
     const activeCustomerIds = activeCustomers.map((customer) => customer._id);
+
     const activePartyIds = activeParties.map((party) => party._id);
 
-    // ✅ Main invoice filter
+    // Main filter
     const filter = {
       createdBy: userId,
       isDeleted: { $ne: true },
@@ -826,12 +825,12 @@ exports.getInvoices = async (req, res) => {
       ],
     };
 
-    // ✅ Status filter
+    // Status Filter
     if (status) {
       filter.status = status;
     }
 
-    // ✅ Search by bill number, customer/party name or phone
+    // Search Filter
     if (safeSearch) {
       filter.$and.push({
         $or: [
@@ -857,10 +856,134 @@ exports.getInvoices = async (req, res) => {
       });
     }
 
-    // ✅ List data and total count together
-    const [invoices, totalInvoices] = await Promise.all([
+    const now = new Date();
+
+    let startDate = null;
+    let endDate = null;
+
+    const startOfDay = (date) => {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    const endOfDay = (date) => {
+      const d = new Date(date);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    };
+
+    if (dateFilter === "today") {
+      startDate = startOfDay(now);
+      endDate = endOfDay(now);
+    }
+
+    if (dateFilter === "yesterday") {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      startDate = startOfDay(yesterday);
+      endDate = endOfDay(yesterday);
+    }
+
+    if (dateFilter === "this_week") {
+      const current = new Date(now);
+      const day = current.getDay();
+
+      // Monday = start of week
+      const diff = day === 0 ? -6 : 1 - day;
+
+      current.setDate(current.getDate() + diff);
+
+      startDate = startOfDay(current);
+      endDate = endOfDay(now);
+    }
+
+    if (dateFilter === "last_week") {
+      const current = new Date(now);
+      const day = current.getDay();
+
+      const diff = day === 0 ? -6 : 1 - day;
+
+      const thisMonday = new Date(current);
+      thisMonday.setDate(current.getDate() + diff);
+
+      const lastMonday = new Date(thisMonday);
+      lastMonday.setDate(lastMonday.getDate() - 7);
+
+      const lastSunday = new Date(thisMonday);
+      lastSunday.setDate(lastSunday.getDate() - 1);
+
+      startDate = startOfDay(lastMonday);
+      endDate = endOfDay(lastSunday);
+    }
+
+    if (dateFilter === "this_month") {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+      endDate = endOfDay(now);
+    }
+
+    if (dateFilter === "last_month") {
+      startDate = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1,
+        0,
+        0,
+        0,
+        0,
+      );
+
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    }
+
+    if (dateFilter === "this_year") {
+      startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+
+      endDate = endOfDay(now);
+    }
+
+    if (dateFilter === "last_year") {
+      startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
+
+      endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+    }
+
+    // Custom Date
+    if (dateFilter === "custom") {
+      if (fromDate) {
+        const parsedFromDate = new Date(`${fromDate}T00:00:00`);
+
+        if (!Number.isNaN(parsedFromDate.getTime())) {
+          startDate = parsedFromDate;
+        }
+      }
+
+      if (toDate) {
+        const parsedToDate = new Date(`${toDate}T23:59:59.999`);
+
+        if (!Number.isNaN(parsedToDate.getTime())) {
+          endDate = parsedToDate;
+        }
+      }
+    }
+
+    // Apply date filter on Invoice Date
+    if (startDate || endDate) {
+      filter.invoiceDate = {};
+
+      if (startDate) {
+        filter.invoiceDate.$gte = startDate;
+      }
+
+      if (endDate) {
+        filter.invoiceDate.$lte = endDate;
+      }
+    }
+
+    const [invoices, totalInvoices, salesSummary] = await Promise.all([
       Invoice.find(filter)
-        // ✅ Only fields required on Sales Invoice List
         .select(
           [
             "billNo",
@@ -878,6 +1001,7 @@ exports.getInvoices = async (req, res) => {
           ].join(" "),
         )
         .sort({
+          invoiceDate: -1,
           createdAt: -1,
           _id: -1,
         })
@@ -886,12 +1010,38 @@ exports.getInvoices = async (req, res) => {
         .lean(),
 
       Invoice.countDocuments(filter),
+
+      Invoice.aggregate([
+        {
+          $match: {
+            ...filter,
+            isOpening: { $ne: true },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalSales: {
+              $sum: {
+                $ifNull: ["$totalAmount", 0],
+              },
+            },
+          },
+        },
+      ]),
     ]);
+
+    const totalSales =
+      salesSummary.length > 0 ? Number(salesSummary[0].totalSales || 0) : 0;
 
     const totalPages = Math.max(Math.ceil(totalInvoices / limit), 1);
 
     return res.json({
       invoices,
+
+      summary: {
+        totalSales,
+      },
 
       pagination: {
         page,

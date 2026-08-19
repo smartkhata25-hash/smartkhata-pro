@@ -27,7 +27,7 @@ const addPurchaseInvoice = async (invoiceData) => {
   }
 };
 
-// ✅ Get Purchase Invoices with pagination, search and status filter
+// ✅ Get Purchase Invoices with pagination, search, status and date filters
 const getAllPurchaseInvoices = async (params = {}) => {
   try {
     const response = await axios.get(API_URL, {
@@ -38,6 +38,9 @@ const getAllPurchaseInvoices = async (params = {}) => {
         limit: params.limit || 50,
         search: params.search || '',
         status: params.status || '',
+        dateFilter: params.dateFilter || '',
+        fromDate: params.fromDate || '',
+        toDate: params.toDate || '',
       },
     });
 

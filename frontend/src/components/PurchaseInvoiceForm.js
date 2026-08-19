@@ -80,9 +80,9 @@ const PurchaseInvoiceForm = () => {
 
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [accountError, setAccountError] = useState('');
-  const [loading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [printLoading, setPrintLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
-  // 📊 Item History States
 
   const [itemHistory, setItemHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -662,20 +662,74 @@ const PurchaseInvoiceForm = () => {
 
     return true;
   };
-
   const handleSaveAndClose = async () => {
+    if (saveLoading) return;
+
     try {
+      setSaveLoading(true);
+
       const saved = await savePurchaseInvoice();
 
       if (!saved) return;
 
+      // ✅ Draft clear
+      clear();
+
+      // ✅ Form state بھی مکمل clear
+      setBillNo('');
+
+      setSupplierName('');
+      setSupplierPhone('');
+
+      setSelectedSupplierId('');
+      setSelectedSupplierType('supplier');
+
+      setSupplierSuggestions([]);
+      setSelectedSupplierIndex(-1);
+      setShowSupplierAddOptions(false);
+
+      setItems(Array.from({ length: 15 }, (_, i) => generateEmptyRow(i)));
+
+      setDiscountPercent(0);
+      setDiscountAmount(0);
+
+      setPaidAmount(0);
+
+      setPaymentType('cash');
+      setSelectedAccountId('');
+      setAccountError('');
+
+      setAttachments([]);
+      setModalAttachment(null);
+
+      setIsOpeningPurchase(false);
+      setOpeningPurchaseAmount(0);
+
+      setShowHistory(false);
+      setItemHistory([]);
+      setSelectedProductId(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       navigate('/dashboard');
     } catch (err) {
-      console.error('❌ Error saving invoice:', err);
+      console.error('❌ Error saving invoice:', err?.response?.data || err.message);
+
+      alert(
+        err?.response?.data?.message || err?.response?.data?.error || 'Purchase invoice save failed'
+      );
+    } finally {
+      setSaveLoading(false);
     }
   };
   const handleSaveAndNew = async () => {
+    if (saveLoading) return;
+
     try {
+      setSaveLoading(true);
+
       const saved = await savePurchaseInvoice();
 
       if (!saved) return;
@@ -723,6 +777,12 @@ const PurchaseInvoiceForm = () => {
       setInvoiceTime(now.toTimeString().slice(0, 5));
     } catch (err) {
       console.error('❌ Error in Save & New:', err?.response?.data || err.message);
+
+      alert(
+        err?.response?.data?.message || err?.response?.data?.error || 'Purchase invoice save failed'
+      );
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -732,10 +792,13 @@ const PurchaseInvoiceForm = () => {
       return;
     }
 
+    if (saveLoading) return;
+
     if (Number(paidAmount || 0) > 0 && !canPayPurchaseBill) {
       alert('You do not have permission to pay purchase bills');
       return;
     }
+
     const selectedSupplier =
       selectedSupplierType === 'supplier'
         ? suppliers.find((s) => s._id === selectedSupplierId || s.name === supplierName)
@@ -764,6 +827,7 @@ const PurchaseInvoiceForm = () => {
           }));
 
     const journalEntries = [];
+
     if (paidAmount > 0 && selectedAccountId) {
       journalEntries.push({
         type: 'debit',
@@ -771,6 +835,7 @@ const PurchaseInvoiceForm = () => {
         amount: paidAmount,
         narration: `Paid to supplier ${supplierName}`,
       });
+
       journalEntries.push({
         type: 'credit',
         accountId: supplierAccountId,
@@ -780,16 +845,19 @@ const PurchaseInvoiceForm = () => {
     }
 
     const formData = new FormData();
+
     formData.append('billNo', billNo);
     formData.append('invoiceDate', invoiceDate);
     formData.append('invoiceTime', invoiceTime);
     formData.append('supplierName', supplierName);
     formData.append('supplierPhone', supplierPhone);
+
     if (selectedSupplierType === 'party') {
       formData.append('partyId', selectedSupplierId);
     } else {
       formData.append('supplierId', selectedSupplier?._id || selectedSupplierId || '');
     }
+
     formData.append('totalAmount', totalAmount);
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);
@@ -797,6 +865,7 @@ const PurchaseInvoiceForm = () => {
     formData.append('paidAmount', paidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
+
     attachments.forEach((file) => {
       if (file instanceof File) {
         formData.append('attachments', file);
@@ -811,20 +880,29 @@ const PurchaseInvoiceForm = () => {
     formData.append('items', JSON.stringify(validItems));
     formData.append('createJournal', 'true');
     formData.append('journalEntries', JSON.stringify(journalEntries));
+
     if (isOpeningPurchase) {
       formData.append('isOpening', true);
     }
 
     try {
+      setSaveLoading(true);
+
       await purchaseInvoiceService.updatePurchaseInvoice(invoiceId, formData);
 
       alert(t('alerts.invoiceUpdated'));
-
+      clear();
       navigate('/dashboard');
     } catch (err) {
       console.error('❌ Error updating invoice:', err?.response?.data || err.message);
 
-      alert(t('alerts.invoiceUpdateFailed'));
+      alert(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          t('alerts.invoiceUpdateFailed')
+      );
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -1458,9 +1536,14 @@ const PurchaseInvoiceForm = () => {
                         <button
                           type="button"
                           onClick={handleUpdate}
-                          className="bg-orange-600 text-white px-4 py-2 rounded"
+                          disabled={saveLoading}
+                          className={`text-white px-4 py-2 rounded ${
+                            saveLoading
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : 'bg-orange-600 hover:bg-orange-700'
+                          }`}
                         >
-                          🔁 {t('updateClose')}
+                          {saveLoading ? '⏳ Updating...' : `🔁 ${t('updateClose')}`}
                         </button>
                       ) : (
                         !isEdit &&
@@ -1469,27 +1552,41 @@ const PurchaseInvoiceForm = () => {
                             <button
                               type="button"
                               onClick={handleSaveAndClose}
-                              disabled={loading}
+                              disabled={saveLoading}
                               className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
-                                loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600'
+                                saveLoading
+                                  ? 'bg-gray-400 cursor-not-allowed'
+                                  : 'bg-green-600 hover:bg-green-700'
                               }`}
                             >
-                              <span className="md:hidden">{t('saveClose')}</span>
-
-                              <span className="hidden md:inline">💾 {t('saveClose')}</span>
+                              {saveLoading ? (
+                                '⏳ Saving...'
+                              ) : (
+                                <>
+                                  <span className="md:hidden">{t('saveClose')}</span>
+                                  <span className="hidden md:inline">💾 {t('saveClose')}</span>
+                                </>
+                              )}
                             </button>
 
                             <button
                               type="button"
                               onClick={handleSaveAndNew}
-                              disabled={loading}
+                              disabled={saveLoading}
                               className={`text-white px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm rounded ${
-                                loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600'
+                                saveLoading
+                                  ? 'bg-gray-400 cursor-not-allowed'
+                                  : 'bg-blue-600 hover:bg-blue-700'
                               }`}
                             >
-                              <span className="md:hidden">{t('saveNew')}</span>
-
-                              <span className="hidden md:inline">📄 {t('saveNew')}</span>
+                              {saveLoading ? (
+                                '⏳ Saving...'
+                              ) : (
+                                <>
+                                  <span className="md:hidden">{t('saveNew')}</span>
+                                  <span className="hidden md:inline">📄 {t('saveNew')}</span>
+                                </>
+                              )}
                             </button>
                           </>
                         )
@@ -1508,11 +1605,40 @@ const PurchaseInvoiceForm = () => {
 
                       <button
                         type="button"
-                        onClick={handlePrint}
-                        className="bg-purple-600 text-white px-2 py-1 md:px-4 md:py-2 rounded"
+                        disabled={printLoading || saveLoading}
+                        onClick={async () => {
+                          if (printLoading || saveLoading) return;
+
+                          try {
+                            setPrintLoading(true);
+
+                            await new Promise((resolve) => setTimeout(resolve, 150));
+
+                            handlePrint();
+                          } catch (err) {
+                            console.error('❌ Print failed:', err);
+
+                            alert('Purchase invoice print failed');
+                          } finally {
+                            setTimeout(() => {
+                              setPrintLoading(false);
+                            }, 500);
+                          }
+                        }}
+                        className={`text-white px-2 py-1 md:px-4 md:py-2 rounded ${
+                          printLoading
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : 'bg-purple-600 hover:bg-purple-700'
+                        }`}
                       >
-                        <span className="md:hidden">🖨</span>
-                        <span className="hidden md:inline">🖨 {t('print')}</span>
+                        {printLoading ? (
+                          '⏳ Printing...'
+                        ) : (
+                          <>
+                            <span className="md:hidden">🖨</span>
+                            <span className="hidden md:inline">🖨 {t('print')}</span>
+                          </>
+                        )}
                       </button>
 
                       <button

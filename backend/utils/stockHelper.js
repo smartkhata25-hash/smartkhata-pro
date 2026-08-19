@@ -2,7 +2,6 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 const mongoose = require("mongoose");
 
 // 1️⃣ GET SINGLE PRODUCT LIVE STOCK
-
 exports.getProductStock = async (productId, userId) => {
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     throw new Error("Invalid productId");
@@ -38,11 +37,10 @@ exports.getProductStock = async (productId, userId) => {
 
   const { totalIn = 0, totalOut = 0 } = summary[0] || {};
 
-  return totalIn - totalOut;
+  return Number(totalIn || 0) - Number(totalOut || 0);
 };
 
-//  2️⃣ GET MULTIPLE PRODUCTS STOCK (Optimized for list page)
-
+// 2️⃣ GET MULTIPLE PRODUCTS STOCK
 exports.getMultipleProductsStock = async (productIds = [], userId) => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error("Invalid userId");
@@ -90,8 +88,7 @@ exports.getMultipleProductsStock = async (productIds = [], userId) => {
   return stockMap;
 };
 
-// 3️⃣ CREATE INVENTORY ENTRY (SAFE WRAPPER)
-
+// 3️⃣ CREATE INVENTORY ENTRY
 exports.createInventoryEntry = async ({
   productId,
   type,
@@ -101,35 +98,78 @@ exports.createInventoryEntry = async ({
   invoiceModel = null,
   userId,
   rate = 0,
+
+  // ✅ Optional MongoDB transaction session
+  session = null,
 }) => {
-  if (!productId || !type || !quantity || !userId) {
+  const numericQuantity = Number(quantity);
+  const numericRate = Number(rate || 0);
+
+  if (!productId || !type || !userId) {
     throw new Error("Missing required inventory fields");
   }
 
-  return await InventoryTransaction.create({
+  if (
+    !mongoose.Types.ObjectId.isValid(productId) ||
+    !mongoose.Types.ObjectId.isValid(userId)
+  ) {
+    throw new Error("Invalid inventory product or user");
+  }
+
+  if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
+    throw new Error("Invalid inventory quantity");
+  }
+
+  if (!Number.isFinite(numericRate) || numericRate < 0) {
+    throw new Error("Invalid inventory rate");
+  }
+
+  const transactionData = {
     productId,
     type,
-    quantity,
+    quantity: numericQuantity,
     note,
     invoiceId,
     invoiceModel,
     userId,
-    rate,
-  });
+    rate: numericRate,
+  };
+
+  if (session) {
+    const created = await InventoryTransaction.create([transactionData], {
+      session,
+    });
+
+    return created[0];
+  }
+
+  return await InventoryTransaction.create(transactionData);
 };
 
-// 4️⃣ DELETE TRANSACTIONS BY REFERENCE (SAFE ROLLBACK)
-
+// 4️⃣ DELETE TRANSACTIONS BY REFERENCE
 exports.deleteTransactionsByReference = async ({
   referenceId,
   invoiceModel,
   userId,
-}) => {
-  if (!referenceId || !invoiceModel) return;
 
-  await InventoryTransaction.deleteMany({
+  // ✅ Optional MongoDB transaction session
+  session = null,
+}) => {
+  if (!referenceId || !invoiceModel || !userId) {
+    return;
+  }
+
+  const filter = {
     invoiceId: referenceId,
     invoiceModel,
     userId,
-  });
+  };
+
+  if (session) {
+    await InventoryTransaction.deleteMany(filter, { session });
+
+    return;
+  }
+
+  await InventoryTransaction.deleteMany(filter);
 };

@@ -19,6 +19,7 @@ const createPaymentEntry = async ({
   partyId = null,
   entryDate = new Date(),
   entryTime = new Date().toTimeString().slice(0, 8),
+  session = null,
 }) => {
   amount = Number(amount);
 
@@ -26,7 +27,14 @@ const createPaymentEntry = async ({
     throw new Error("Missing required payment fields");
   }
 
-  if (amount <= 0) {
+  if (
+    !mongoose.Types.ObjectId.isValid(accountId) ||
+    !mongoose.Types.ObjectId.isValid(counterPartyAccountId)
+  ) {
+    throw new Error("Invalid payment account");
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("Invalid payment amount");
   }
 
@@ -123,14 +131,20 @@ const createPaymentEntry = async ({
     lines,
   });
 
-  await journal.save();
+  if (session) {
+    await journal.save({ session });
+  } else {
+    await journal.save();
+  }
 
-  const uniqueAccounts = [
-    ...new Set(lines.map((line) => line.account.toString())),
-  ];
+  if (!session) {
+    const uniqueAccounts = [
+      ...new Set(lines.map((line) => line.account.toString())),
+    ];
 
-  for (const accId of uniqueAccounts) {
-    await recalculateAccountBalance(accId);
+    for (const accId of uniqueAccounts) {
+      await recalculateAccountBalance(accId);
+    }
   }
 
   return journal;
@@ -144,42 +158,70 @@ const createDiscountEntry = async ({
   discountAmount,
   description = "",
   originModule = "",
-
   sourceType = "sale_discount",
-
-  // ✅ NEW
   discountAccountCode = "SALES_DISCOUNT",
-
   discountAccountName = "sales discount",
-
   entryDate = new Date(),
-
   entryTime = new Date().toTimeString().slice(0, 8),
-
   customerId = null,
   supplierId = null,
   partyId = null,
+  session = null,
 }) => {
   discountAmount = Number(discountAmount);
 
   if (!customerAccountId || !discountAmount) {
     throw new Error("Missing required discount fields");
   }
-  let salesDiscountAccount = await Account.findOne({
+
+  if (!mongoose.Types.ObjectId.isValid(customerAccountId)) {
+    throw new Error("Invalid customer account");
+  }
+
+  if (!Number.isFinite(discountAmount) || discountAmount <= 0) {
+    throw new Error("Invalid discount amount");
+  }
+
+  let accountQuery = Account.findOne({
     code: discountAccountCode,
     userId,
   });
 
+  if (session) {
+    accountQuery = accountQuery.session(session);
+  }
+
+  let salesDiscountAccount = await accountQuery;
+
   if (!salesDiscountAccount) {
-    salesDiscountAccount = await Account.create({
-      userId,
-      name: discountAccountName,
-      type: "Expense",
-      normalBalance: "debit",
-      code: discountAccountCode,
-      category: "discount",
-      isSystem: true,
-    });
+    if (session) {
+      const createdAccounts = await Account.create(
+        [
+          {
+            userId,
+            name: discountAccountName,
+            type: "Expense",
+            normalBalance: "debit",
+            code: discountAccountCode,
+            category: "discount",
+            isSystem: true,
+          },
+        ],
+        { session },
+      );
+
+      salesDiscountAccount = createdAccounts[0];
+    } else {
+      salesDiscountAccount = await Account.create({
+        userId,
+        name: discountAccountName,
+        type: "Expense",
+        normalBalance: "debit",
+        code: discountAccountCode,
+        category: "discount",
+        isSystem: true,
+      });
+    }
   }
 
   let lines = [];
@@ -221,6 +263,7 @@ const createDiscountEntry = async ({
     billNo,
     createdBy: userId,
     description,
+
     customerId: customerId || null,
     supplierId: supplierId || null,
     partyId: partyId || null,
@@ -228,14 +271,20 @@ const createDiscountEntry = async ({
     lines,
   });
 
-  await journal.save();
+  if (session) {
+    await journal.save({ session });
+  } else {
+    await journal.save();
+  }
 
-  const uniqueAccounts = [
-    ...new Set(lines.map((line) => line.account.toString())),
-  ];
+  if (!session) {
+    const uniqueAccounts = [
+      ...new Set(lines.map((line) => line.account.toString())),
+    ];
 
-  for (const accId of uniqueAccounts) {
-    await recalculateAccountBalance(accId);
+    for (const accId of uniqueAccounts) {
+      await recalculateAccountBalance(accId);
+    }
   }
 
   return journal;
@@ -253,6 +302,7 @@ const createReceivePaymentDiscountEntry = async ({
   partyId = null,
   entryDate = new Date(),
   entryTime = new Date().toTimeString().slice(0, 8),
+  session = null,
 }) => {
   discountAmount = Number(discountAmount);
 
@@ -260,21 +310,54 @@ const createReceivePaymentDiscountEntry = async ({
     throw new Error("Missing required receive payment discount fields");
   }
 
-  let discountAccount = await Account.findOne({
+  if (!mongoose.Types.ObjectId.isValid(customerAccountId)) {
+    throw new Error("Invalid customer account");
+  }
+
+  if (!Number.isFinite(discountAmount) || discountAmount <= 0) {
+    throw new Error("Invalid discount amount");
+  }
+
+  let accountQuery = Account.findOne({
     code: "RECEIVE_PAYMENT_DISCOUNT",
     userId,
   });
 
+  if (session) {
+    accountQuery = accountQuery.session(session);
+  }
+
+  let discountAccount = await accountQuery;
+
   if (!discountAccount) {
-    discountAccount = await Account.create({
-      userId,
-      name: "receive payment discount",
-      type: "Expense",
-      normalBalance: "debit",
-      code: "RECEIVE_PAYMENT_DISCOUNT",
-      category: "discount",
-      isSystem: true,
-    });
+    if (session) {
+      const createdAccounts = await Account.create(
+        [
+          {
+            userId,
+            name: "receive payment discount",
+            type: "Expense",
+            normalBalance: "debit",
+            code: "RECEIVE_PAYMENT_DISCOUNT",
+            category: "discount",
+            isSystem: true,
+          },
+        ],
+        { session },
+      );
+
+      discountAccount = createdAccounts[0];
+    } else {
+      discountAccount = await Account.create({
+        userId,
+        name: "receive payment discount",
+        type: "Expense",
+        normalBalance: "debit",
+        code: "RECEIVE_PAYMENT_DISCOUNT",
+        category: "discount",
+        isSystem: true,
+      });
+    }
   }
 
   const lines = [
@@ -298,7 +381,8 @@ const createReceivePaymentDiscountEntry = async ({
     referenceId,
     billNo,
     createdBy: userId,
-    description: "Receive Payment Discount",
+
+    description: description || "Receive Payment Discount",
 
     customerId: customerId || null,
     partyId: partyId || null,
@@ -306,14 +390,20 @@ const createReceivePaymentDiscountEntry = async ({
     lines,
   });
 
-  await journal.save();
+  if (session) {
+    await journal.save({ session });
+  } else {
+    await journal.save();
+  }
 
-  const uniqueAccounts = [
-    ...new Set(lines.map((line) => line.account.toString())),
-  ];
+  if (!session) {
+    const uniqueAccounts = [
+      ...new Set(lines.map((line) => line.account.toString())),
+    ];
 
-  for (const accId of uniqueAccounts) {
-    await recalculateAccountBalance(accId);
+    for (const accId of uniqueAccounts) {
+      await recalculateAccountBalance(accId);
+    }
   }
 
   return journal;

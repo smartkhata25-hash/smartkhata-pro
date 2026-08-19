@@ -1398,10 +1398,14 @@ const InvoiceForm = ({
         }
       };
 
-      if (mode === 'print') {
+      if (mode === 'print' || mode === 'preview') {
         resetSavedInvoiceForm();
 
+        setEditingInvoiceFromAPI(null);
+
         onHistoryReset && onHistoryReset();
+
+        navigate('/create-sale', { replace: true });
 
         return true;
       }
@@ -1897,7 +1901,10 @@ const InvoiceForm = ({
                       <>
                         <button
                           type="button"
-                          onClick={() => {
+                          disabled={saveLoading}
+                          onClick={async (e) => {
+                            if (saveLoading) return;
+
                             const previewItems = items
                               .filter((i) => i.productId && i.quantity > 0)
                               .map((i) => ({
@@ -1910,61 +1917,49 @@ const InvoiceForm = ({
                                 total: i.amount,
                               }));
 
-                            // ✅ Edit Mode کی عارضی تبدیلیاں Preview سے پہلے محفوظ کریں
-                            if (editingInvoiceFromAPI?._id) {
-                              sessionStorage.setItem(
-                                `sale_edit_preview_draft_${editingInvoiceFromAPI._id}`,
-                                JSON.stringify({
-                                  billNo,
-                                  invoiceDate,
-                                  invoiceTime,
-                                  customerName,
-                                  customerPhone,
-                                  by,
-                                  items,
-                                  discountPercent,
-                                  discountAmount,
-                                  paidAmount,
-                                  paymentType,
-                                  selectedAccountId,
-                                  selectedCustomerId,
-                                  selectedCustomerType,
-                                  openingBalanceAmount,
-                                })
-                              );
-                            }
+                            const previewData = {
+                              lang: localStorage.getItem('lang'),
+                              invoiceDate,
+                              invoiceTime,
+                              billNo,
+                              customerName: customerName || '-',
+                              customerPhone: customerPhone || '',
+                              by,
+                              items: previewItems,
+                              totalAmount,
+                              discountAmount: finalDiscount,
+                              grandTotal,
+                              paidAmount,
+                              paymentType,
+                              customerTotalBalance: editingInvoiceFromAPI
+                                ? customerBalance -
+                                  ((editingInvoiceFromAPI.totalAmount || 0) -
+                                    (editingInvoiceFromAPI.paidAmount || 0)) +
+                                  (grandTotal - paidAmount)
+                                : customerBalance + (grandTotal - paidAmount),
+                            };
+
+                            const saved = await handleSubmit(e, 'preview');
+
+                            if (!saved) return;
 
                             navigate(`/print/sale/preview`, {
+                              replace: true,
                               state: {
+                                autoPrint: false,
                                 isPreview: true,
                                 type: 'sale',
-                                invoiceData: {
-                                  lang: localStorage.getItem('lang'),
-                                  invoiceDate,
-                                  invoiceTime,
-                                  billNo,
-                                  customerName: customerName || '-',
-                                  customerPhone: customerPhone || '',
-                                  by,
-                                  items: previewItems,
-                                  totalAmount,
-                                  discountAmount: finalDiscount,
-                                  grandTotal,
-                                  paidAmount,
-                                  paymentType,
-                                  customerTotalBalance: editingInvoiceFromAPI
-                                    ? customerBalance -
-                                      ((editingInvoiceFromAPI.totalAmount || 0) -
-                                        (editingInvoiceFromAPI.paidAmount || 0)) +
-                                      (grandTotal - paidAmount)
-                                    : customerBalance + (grandTotal - paidAmount),
-                                },
+                                invoiceData: previewData,
                               },
                             });
                           }}
-                          className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm shadow-md"
+                          className={`text-white px-4 py-2 rounded text-sm shadow-md ${
+                            saveLoading
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : 'bg-gray-600 hover:bg-gray-700'
+                          }`}
                         >
-                          👁️ {t('preview')}
+                          {saveLoading ? '⏳ Saving...' : `👁️ ${t('preview')}`}
                         </button>
 
                         {/* 🖨️ PRINT */}

@@ -76,14 +76,28 @@ async function uploadInvoiceFiles(files, userId) {
   return uploadedAttachments;
 }
 
-// ✅ Create Invoice - UPDATED
 exports.createInvoice = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  let uploadedAttachments = [];
+  let savedInvoice = null;
+  let creditLimitExceeded = false;
+
   try {
-    const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
+    const rawUserId = req.user?.id || req.userId;
+
+    if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(401).json({
+        message: "Invalid or missing user.",
+      });
+    }
+
+    const userId = new mongoose.Types.ObjectId(rawUserId);
 
     const {
       customerName,
       customerPhone,
+      customerId,
       by,
       invoiceDate,
       invoiceTime,
@@ -99,122 +113,104 @@ exports.createInvoice = async (req, res) => {
       partyId,
     } = req.body;
 
+    const openingInvoice = isOpening === true || isOpening === "true";
+
+    const numericTotalAmount = Number(totalAmount || 0);
+    const numericSubTotal = Number(subTotal || totalAmount || 0);
+    const numericDiscountAmount = Number(discountAmount || 0);
+    const numericPaidAmount = Number(paidAmount || 0);
+
+    if (!Number.isFinite(numericTotalAmount) || numericTotalAmount < 0) {
+      return res.status(400).json({
+        message: "Invalid invoice total amount.",
+      });
+    }
+
+    if (!Number.isFinite(numericSubTotal) || numericSubTotal < 0) {
+      return res.status(400).json({
+        message: "Invalid invoice subtotal.",
+      });
+    }
+
+    if (!Number.isFinite(numericDiscountAmount) || numericDiscountAmount < 0) {
+      return res.status(400).json({
+        message: "Invalid discount amount.",
+      });
+    }
+
+    if (!Number.isFinite(numericPaidAmount) || numericPaidAmount < 0) {
+      return res.status(400).json({
+        message: "Invalid paid amount.",
+      });
+    }
+
+    if (!customerName?.trim()) {
+      return res.status(400).json({
+        message: "Customer name is required.",
+      });
+    }
+
     const parsedInvoiceDate = new Date(invoiceDate);
 
-    if (paidAmount > 0 && !accountId) {
+    if (Number.isNaN(parsedInvoiceDate.getTime())) {
       return res.status(400).json({
-        message: "Account is required for paid invoices.",
+        message: "Invalid invoice date.",
       });
     }
 
-    const items =
-      typeof req.body.items === "string"
-        ? JSON.parse(req.body.items)
-        : req.body.items;
+    let items = [];
 
-    // ✅ Normal invoice needs items
-    if (
-      (!isOpening || isOpening === "false") &&
-      (!items || items.length === 0)
-    ) {
+    try {
+      items =
+        typeof req.body.items === "string"
+          ? JSON.parse(req.body.items)
+          : req.body.items;
+    } catch (err) {
       return res.status(400).json({
-        message: "Invoice items are required",
+        message: "Invalid invoice items.",
       });
     }
 
-    // 🔥 ATOMIC BILL NUMBER GENERATION
-    let counter = await Counter.findOne({
-      type: "sale_invoice",
-      userId: userId,
-    });
+    if (!Array.isArray(items)) {
+      items = [];
+    }
 
-    if (!counter) {
-      counter = await Counter.create({
-        type: "sale_invoice",
-        userId: userId,
-        seq: 1000,
+    if (!openingInvoice && items.length === 0) {
+      return res.status(400).json({
+        message: "Invoice items are required.",
       });
     }
 
-    counter.seq += 1;
-    await counter.save();
+    if (numericPaidAmount > 0) {
+      if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
+        return res.status(400).json({
+          message: "Valid payment account is required for paid invoices.",
+        });
+      }
 
-    const billNo = counter.seq.toString();
+      const paymentAccount = await Account.findOne({
+        _id: accountId,
+        userId,
+      }).lean();
 
-    let status = "Unpaid";
-    if (paidAmount >= totalAmount) status = "Paid";
-    else if (paidAmount > 0) status = "Partial";
-
-    // ✅ Historical Snapshot Items
-    const snapshotItems = [];
-
-    for (let item of items) {
-      const product = await Product.findById(item.productId);
-
-      const quantity = Number(item.quantity || 0);
-
-      const salePrice = Number(item.price || 0);
-
-      const total = Number(item.total || 0);
-
-      // ✅ Historical cost at sale time
-      const costPrice = Number(product?.unitCost || 0);
-
-      // ✅ Profit
-      const profit = (salePrice - costPrice) * quantity;
-
-      // ✅ Margin %
-      const margin =
-        salePrice > 0
-          ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
-          : 0;
-
-      snapshotItems.push({
-        ...item,
-        costPrice,
-        profit,
-        margin,
-      });
+      if (!paymentAccount) {
+        return res.status(400).json({
+          message: "Payment account not found.",
+        });
+      }
     }
-
-    let uploadedAttachments = await uploadInvoiceFiles(req.files, userId);
-
-    const invoice = new Invoice({
-      billNo,
-      customerName,
-      customerPhone,
-      by,
-      invoiceDate: parsedInvoiceDate,
-      invoiceTime,
-      dueDate,
-
-      // ✅ Save snapshot items
-      items: snapshotItems,
-
-      totalAmount: Number(totalAmount),
-      subTotal: Number(subTotal || totalAmount),
-      discountAmount: Number(discountAmount || 0),
-
-      paidAmount,
-      status,
-      notes,
-      paymentType,
-      accountId,
-      isOpening: isOpening || false,
-      createdBy: userId,
-      attachments: uploadedAttachments,
-
-      attachmentUrl: uploadedAttachments[0]?.key || "",
-      attachmentType: uploadedAttachments[0]?.type || "",
-      attachmentSize: uploadedAttachments[0]?.size || 0,
-      attachmentOriginalName: uploadedAttachments[0]?.originalName || "",
-    });
 
     let customer = null;
     let party = null;
     let counterPartyAccountId = null;
 
     if (partyId) {
+      if (!mongoose.Types.ObjectId.isValid(partyId)) {
+        return res.status(400).json({
+          message: "Invalid party.",
+        });
+      }
+
       party = await Party.findOne({
         _id: partyId,
         userId,
@@ -222,305 +218,553 @@ exports.createInvoice = async (req, res) => {
         isActive: true,
       });
 
-      if (!party) {
-        return res.status(404).json({ message: "Party not found" });
+      if (!party || !party.account) {
+        return res.status(404).json({
+          message: "Party or party account not found.",
+        });
       }
 
       counterPartyAccountId = party.account;
     } else {
-      customer = await Customer.findOne({
-        name: customerName,
-        createdBy: userId,
-      });
+      if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+        customer = await Customer.findOne({
+          _id: customerId,
+          createdBy: userId,
+        });
+      }
 
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        customer = await Customer.findOne({
+          name: customerName.trim(),
+          createdBy: userId,
+        });
+      }
+
+      if (!customer || !customer.account) {
+        return res.status(404).json({
+          message: "Customer or customer account not found.",
+        });
       }
 
       counterPartyAccountId = customer.account;
     }
 
-    // ⚠️ CREDIT LIMIT WARNING ONLY (invoice save ہوگی)
-    let creditLimitExceeded = false;
-
-    if (!partyId && customer?.creditLimit && customer.creditLimit > 0) {
+    if (!openingInvoice && customer?.creditLimit > 0) {
       const currentBalance = await getCustomerBalanceFromJournal(
         customer._id,
         userId,
       );
 
-      if (currentBalance + totalAmount > customer.creditLimit) {
+      if (
+        Number(currentBalance || 0) + numericTotalAmount >
+        Number(customer.creditLimit)
+      ) {
         creditLimitExceeded = true;
       }
     }
-    invoice.customerId = customer?._id || null;
-    invoice.partyId = party?._id || null;
 
-    const saved = await invoice.save();
+    const snapshotItems = [];
 
-    // ✅ Stock Updates (skip for opening invoice)
-    if (!isOpening || isOpening === "false") {
-      for (let item of snapshotItems) {
-        await createInventoryEntry({
-          productId: item.productId,
-          type: "OUT",
-          quantity: item.quantity,
-          note: `Sale Invoice #${billNo}`,
-          invoiceId: saved._id,
-          invoiceModel: "Invoice",
-          userId: userId,
+    if (!openingInvoice) {
+      for (const item of items) {
+        if (
+          !item?.productId ||
+          !mongoose.Types.ObjectId.isValid(item.productId)
+        ) {
+          return res.status(400).json({
+            message: "Invalid product in invoice.",
+          });
+        }
 
-          // ✅ Historical inventory rate
-          rate: Number(item.costPrice || 0),
+        const quantity = Number(item.quantity || 0);
+        const salePrice = Number(item.price || 0);
+
+        if (
+          !Number.isFinite(quantity) ||
+          quantity <= 0 ||
+          !Number.isFinite(salePrice) ||
+          salePrice <= 0
+        ) {
+          return res.status(400).json({
+            message: "Invalid product quantity or price.",
+          });
+        }
+
+        const product = await Product.findById(item.productId);
+
+        if (!product) {
+          return res.status(404).json({
+            message: "Invoice product not found.",
+          });
+        }
+
+        const productOwner =
+          product.userId || product.createdBy || product.ownerId || null;
+
+        if (productOwner && productOwner.toString() !== userId.toString()) {
+          return res.status(403).json({
+            message: "Invalid product ownership.",
+          });
+        }
+
+        const costPrice = Number(product.unitCost || 0);
+        const itemTotal = quantity * salePrice;
+        const profit = (salePrice - costPrice) * quantity;
+
+        const margin =
+          salePrice > 0
+            ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
+            : 0;
+
+        snapshotItems.push({
+          ...item,
+          productId: product._id,
+          quantity,
+          price: salePrice,
+          total: itemTotal,
+          costPrice,
+          profit,
+          margin,
         });
       }
     }
 
-    const allIncomeAccounts = await Account.find({
-      type: "Income",
-      userId: userId,
-    });
+    uploadedAttachments = await uploadInvoiceFiles(req.files, userId);
 
-    // ✅ 🔑 FETCH or AUTO-CREATE Sales Income Account
-    let incomeAccount = await Account.findOne({
-      name: "sales",
-      type: "Income",
-      userId: userId,
-    });
-
-    if (!incomeAccount) {
-      console.log(
-        "⚠️ Sales income account not found. Creating automatically...",
+    await session.withTransaction(async () => {
+      /*
+       * REAL ATOMIC COUNTER
+       */
+      const counter = await Counter.findOneAndUpdate(
+        {
+          type: "sale_invoice",
+          userId,
+        },
+        {
+          $inc: {
+            seq: 1,
+          },
+          $setOnInsert: {
+            type: "sale_invoice",
+            userId,
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+          session,
+          setDefaultsOnInsert: true,
+        },
       );
 
-      incomeAccount = await Account.create({
-        userId: userId,
-        name: "sales",
-        type: "Income",
-        normalBalance: "credit",
-        code: "INC-SALES",
-        balance: 0,
-        openingBalance: 0,
-        category: "other",
-      });
-
-      console.log("✅ Sales income account AUTO-CREATED:", incomeAccount._id);
-    } else {
-      console.log("🏦 Sales income account FOUND:", incomeAccount._id);
-    }
-
-    let invoiceDateTime = new Date(parsedInvoiceDate);
-
-    if (invoiceTime) {
-      const combined = new Date(`${invoiceDate}T${invoiceTime}`);
-      if (!isNaN(combined.getTime())) {
-        invoiceDateTime = combined;
+      if (!counter) {
+        throw new Error("Unable to generate invoice number.");
       }
-    }
 
-    // 🧮 COGS calculate using historical snapshot
-    let totalCogs = 0;
+      const billNo = counter.seq.toString();
 
-    if (!isOpening || isOpening === "false") {
-      for (let item of snapshotItems) {
-        totalCogs += Number(item.costPrice || 0) * Number(item.quantity || 0);
+      let status = "Unpaid";
+
+      if (numericPaidAmount >= numericTotalAmount) {
+        status = "Paid";
+      } else if (numericPaidAmount > 0) {
+        status = "Partial";
       }
-    }
 
-    // 🏦 Inventory & COGS accounts
-    const inventoryAccount = await Account.findOne({
-      code: "INVENTORY",
-      userId: userId,
-    });
+      let incomeAccount = null;
+      let finalInventoryAccount = null;
+      let finalCogsAccount = null;
+      let openingBalanceAccount = null;
 
-    const cogsAccount = await Account.findOne({
-      code: "COGS",
-      userId: userId,
-    });
+      if (openingInvoice) {
+        openingBalanceAccount = await Account.findOne({
+          code: "OPENING_BALANCE",
+          userId,
+        }).session(session);
 
-    let finalInventoryAccount = inventoryAccount;
-    let finalCogsAccount = cogsAccount;
+        if (!openingBalanceAccount) {
+          throw new Error(
+            "Opening Balance account not found. Please repair base accounts.",
+          );
+        }
+      } else {
+        incomeAccount = await Account.findOne({
+          name: "sales",
+          type: "Income",
+          userId,
+        }).session(session);
 
-    if (!finalInventoryAccount) {
-      finalInventoryAccount = await Account.create({
-        userId: userId,
-        name: "inventory",
-        type: "Asset",
-        normalBalance: "debit",
-        category: "other",
-        code: "INVENTORY",
-        isSystem: true,
+        if (!incomeAccount) {
+          const createdIncomeAccounts = await Account.create(
+            [
+              {
+                userId,
+                name: "sales",
+                type: "Income",
+                normalBalance: "credit",
+                code: "INC-SALES",
+                balance: 0,
+                openingBalance: 0,
+                category: "other",
+              },
+            ],
+            { session },
+          );
+
+          incomeAccount = createdIncomeAccounts[0];
+        }
+
+        finalInventoryAccount = await Account.findOne({
+          code: "INVENTORY",
+          userId,
+        }).session(session);
+
+        if (!finalInventoryAccount) {
+          const createdInventoryAccounts = await Account.create(
+            [
+              {
+                userId,
+                name: "inventory",
+                type: "Asset",
+                normalBalance: "debit",
+                category: "other",
+                code: "INVENTORY",
+                isSystem: true,
+              },
+            ],
+            { session },
+          );
+
+          finalInventoryAccount = createdInventoryAccounts[0];
+        }
+
+        finalCogsAccount = await Account.findOne({
+          code: "COGS",
+          userId,
+        }).session(session);
+
+        if (!finalCogsAccount) {
+          const createdCogsAccounts = await Account.create(
+            [
+              {
+                userId,
+                name: "cogs",
+                type: "Expense",
+                normalBalance: "debit",
+                category: "other",
+                code: "COGS",
+                isSystem: true,
+              },
+            ],
+            { session },
+          );
+
+          finalCogsAccount = createdCogsAccounts[0];
+        }
+      }
+
+      const invoice = new Invoice({
+        billNo,
+        customerName: customerName.trim(),
+        customerPhone,
+        by,
+        invoiceDate: parsedInvoiceDate,
+        invoiceTime,
+        dueDate,
+
+        items: snapshotItems,
+
+        totalAmount: numericTotalAmount,
+        subTotal: numericSubTotal,
+        discountAmount: numericDiscountAmount,
+        paidAmount: numericPaidAmount,
+
+        status,
+        notes,
+        paymentType: numericPaidAmount > 0 ? paymentType : "credit",
+
+        accountId: numericPaidAmount > 0 ? accountId : null,
+
+        isOpening: openingInvoice,
+
+        createdBy: userId,
+
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
+
+        attachments: uploadedAttachments,
+
+        attachmentUrl: uploadedAttachments[0]?.key || "",
+        attachmentType: uploadedAttachments[0]?.type || "",
+        attachmentSize: uploadedAttachments[0]?.size || 0,
+        attachmentOriginalName: uploadedAttachments[0]?.originalName || "",
       });
-    }
 
-    if (!finalCogsAccount) {
-      finalCogsAccount = await Account.create({
-        userId: userId,
-        name: "cogs",
-        type: "Expense",
-        normalBalance: "debit",
-        category: "other",
-        code: "COGS",
-        isSystem: true,
-      });
-    }
+      savedInvoice = await invoice.save({ session });
 
-    const journal = new JournalEntry({
-      date: invoiceDateTime,
-      time: invoiceTime || "",
-      description:
-        Number(discountAmount || 0) > 0
-          ? `${notes || "Sale Invoice"} (Disc: ${discountAmount})`
-          : notes || "Sale Invoice",
-      sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
-      originModule: "sale_invoice",
-      referenceId: saved._id,
-      invoiceId: saved._id,
-      billNo,
+      /*
+       * STOCK
+       */
+      if (!openingInvoice) {
+        for (const item of snapshotItems) {
+          await createInventoryEntry({
+            productId: item.productId,
+            type: "OUT",
+            quantity: item.quantity,
+            note: `Sale Invoice #${billNo}`,
+            invoiceId: savedInvoice._id,
+            invoiceModel: "Invoice",
+            userId,
+            rate: Number(item.costPrice || 0),
 
-      createdBy: userId,
-      customerId: customer?._id || null,
-      partyId: party?._id || null,
-      attachmentUrl: saved.attachmentUrl || "",
-      attachmentType: saved.attachmentType || "",
-      lines: isOpening
+            session,
+          });
+        }
+      }
+
+      let invoiceDateTime = new Date(parsedInvoiceDate);
+
+      if (invoiceTime) {
+        const combined = new Date(`${invoiceDate}T${invoiceTime}`);
+
+        if (!Number.isNaN(combined.getTime())) {
+          invoiceDateTime = combined;
+        }
+      }
+
+      let totalCogs = 0;
+
+      if (!openingInvoice) {
+        totalCogs = snapshotItems.reduce(
+          (sum, item) =>
+            sum + Number(item.costPrice || 0) * Number(item.quantity || 0),
+          0,
+        );
+      }
+
+      const journalLines = openingInvoice
         ? [
-            // ✅ Opening Balance Entry
             {
               account: new mongoose.Types.ObjectId(counterPartyAccountId),
               type: "debit",
-              amount: totalAmount,
+              amount: numericTotalAmount,
             },
-
             {
-              account: new mongoose.Types.ObjectId(
-                (
-                  await Account.findOne({
-                    code: "OPENING_BALANCE",
-                    userId,
-                  })
-                )._id,
-              ),
+              account: new mongoose.Types.ObjectId(openingBalanceAccount._id),
               type: "credit",
-              amount: totalAmount,
+              amount: numericTotalAmount,
             },
           ]
         : [
-            // 👤 Customer debit
             {
               account: new mongoose.Types.ObjectId(counterPartyAccountId),
               type: "debit",
-              amount: Number(subTotal || totalAmount),
+              amount: numericSubTotal,
             },
-
-            // 💰 Sales credit
             {
               account: new mongoose.Types.ObjectId(incomeAccount._id),
               type: "credit",
-              amount: Number(subTotal || totalAmount),
+              amount: numericSubTotal,
             },
-
-            // 📉 COGS (expense)
             {
               account: new mongoose.Types.ObjectId(finalCogsAccount._id),
               type: "debit",
               amount: totalCogs,
             },
-
-            // 📦 Inventory kam
             {
               account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
               type: "credit",
               amount: totalCogs,
             },
-          ],
-    });
+          ];
 
-    try {
-      const savedJournal = await journal.save();
+      const journal = new JournalEntry({
+        date: invoiceDateTime,
+        time: invoiceTime || "",
 
-      if (
-        (!isOpening || isOpening === "false") &&
-        Number(discountAmount || 0) > 0
-      ) {
+        description:
+          numericDiscountAmount > 0
+            ? `${notes || "Sale Invoice"} (Disc: ${numericDiscountAmount})`
+            : notes || "Sale Invoice",
+
+        sourceType: openingInvoice ? "opening_sale_invoice" : "sale_invoice",
+
+        originModule: "sale_invoice",
+
+        referenceId: savedInvoice._id,
+        invoiceId: savedInvoice._id,
+        billNo,
+
+        createdBy: userId,
+
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
+
+        attachmentUrl: savedInvoice.attachmentUrl || "",
+        attachmentType: savedInvoice.attachmentType || "",
+
+        lines: journalLines,
+      });
+
+      await journal.save({ session });
+
+      savedInvoice.journalEntryId = journal._id;
+      await savedInvoice.save({ session });
+
+      if (!openingInvoice && numericDiscountAmount > 0) {
         await createDiscountEntry({
           userId,
-          referenceId: saved._id,
-          billNo: saved.billNo,
+          referenceId: savedInvoice._id,
+          billNo: savedInvoice.billNo,
           customerAccountId: counterPartyAccountId,
-          discountAmount: Number(discountAmount),
+          discountAmount: numericDiscountAmount,
           description: "Sale Invoice Discount",
           originModule: "sale_invoice",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+
+          session,
         });
       }
 
-      if ((!isOpening || isOpening === "false") && paidAmount > 0) {
+      if (!openingInvoice && numericPaidAmount > 0) {
         await createPaymentEntry({
-          userId: userId,
-          referenceId: saved._id,
+          userId,
+          referenceId: savedInvoice._id,
           sourceType: "receive_payment",
           originModule: "sale_invoice",
-          billNo: saved.billNo,
+          billNo: savedInvoice.billNo,
           accountId,
           counterPartyAccountId,
-          amount: paidAmount,
+          amount: numericPaidAmount,
           paymentType,
           description: "Sale Invoice Payment",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+
+          session,
         });
       }
-    } catch (err) {
-      console.error("❌ Journal SAVE FAILED");
-      console.error("Message:", err.message);
-      console.error("Errors:", err.errors);
-    }
-
-    if (accountId && paidAmount > 0) {
-      await recalculateAccountBalance(accountId);
-    }
-
-    if (!isOpening || isOpening === "false") {
-      await recalculateAccountBalance(finalInventoryAccount._id);
-      await recalculateAccountBalance(finalCogsAccount._id);
-    }
-
-    await logActivity({
-      req,
-      action: "create",
-      module: "sales",
-      entityType: "Invoice",
-      entityId: saved._id,
-      title: `Sale Invoice ${saved.billNo}`,
-      description: `${saved.customerName} کی Sale Invoice بنائی گئی`,
-      billNo: saved.billNo,
-      after: {
-        customerName: saved.customerName,
-        customerPhone: saved.customerPhone,
-        invoiceDate: saved.invoiceDate,
-        totalAmount: saved.totalAmount,
-        paidAmount: saved.paidAmount,
-        status: saved.status,
-        itemCount: saved.items?.length || 0,
-        isOpening: saved.isOpening,
-      },
     });
 
-    res.status(201).json({
-      invoice: saved,
+    if (savedInvoice) {
+      const accountsToRecalculate = new Set();
+
+      if (counterPartyAccountId) {
+        accountsToRecalculate.add(counterPartyAccountId.toString());
+      }
+
+      if (accountId && numericPaidAmount > 0) {
+        accountsToRecalculate.add(accountId.toString());
+      }
+
+      const inventoryAccount = await Account.findOne({
+        code: "INVENTORY",
+        userId,
+      }).select("_id");
+
+      const cogsAccount = await Account.findOne({
+        code: "COGS",
+        userId,
+      }).select("_id");
+
+      const salesAccount = await Account.findOne({
+        name: "sales",
+        type: "Income",
+        userId,
+      }).select("_id");
+
+      const openingAccount = await Account.findOne({
+        code: "OPENING_BALANCE",
+        userId,
+      }).select("_id");
+
+      if (inventoryAccount?._id && !openingInvoice) {
+        accountsToRecalculate.add(inventoryAccount._id.toString());
+      }
+
+      if (cogsAccount?._id && !openingInvoice) {
+        accountsToRecalculate.add(cogsAccount._id.toString());
+      }
+
+      if (salesAccount?._id && !openingInvoice) {
+        accountsToRecalculate.add(salesAccount._id.toString());
+      }
+
+      if (openingAccount?._id && openingInvoice) {
+        accountsToRecalculate.add(openingAccount._id.toString());
+      }
+
+      for (const accId of accountsToRecalculate) {
+        try {
+          await recalculateAccountBalance(accId);
+        } catch (balanceError) {
+          console.error(
+            "Balance recalculation failed:",
+            accId,
+            balanceError.message,
+          );
+        }
+      }
+    }
+
+    try {
+      await logActivity({
+        req,
+        action: "create",
+        module: "sales",
+        entityType: "Invoice",
+        entityId: savedInvoice._id,
+        title: `Sale Invoice ${savedInvoice.billNo}`,
+        description: `${savedInvoice.customerName} کی Sale Invoice بنائی گئی`,
+        billNo: savedInvoice.billNo,
+
+        after: {
+          customerName: savedInvoice.customerName,
+          customerPhone: savedInvoice.customerPhone,
+          invoiceDate: savedInvoice.invoiceDate,
+          totalAmount: savedInvoice.totalAmount,
+          paidAmount: savedInvoice.paidAmount,
+          status: savedInvoice.status,
+          itemCount: savedInvoice.items?.length || 0,
+          isOpening: savedInvoice.isOpening,
+        },
+      });
+    } catch (logError) {
+      console.error("Activity log failed:", logError.message);
+    }
+
+    return res.status(201).json({
+      invoice: savedInvoice,
       creditLimitExceeded,
     });
   } catch (error) {
-    if (error.code === 11000) {
+    if (uploadedAttachments.length > 0) {
+      for (const attachment of uploadedAttachments) {
+        try {
+          if (attachment.key) {
+            await deleteFile(attachment.key);
+          }
+        } catch (cleanupError) {
+          console.error("Attachment cleanup failed:", cleanupError.message);
+        }
+      }
+    }
+
+    if (error?.code === 11000) {
       return res.status(400).json({
-        message: "Bill number already exists",
+        message: "Bill number already exists.",
       });
     }
 
     console.error("Invoice save error:", error);
-    res.status(500).json({ message: "Invoice creation failed", error });
+
+    return res.status(500).json({
+      message: "Invoice creation failed",
+      error: error.message,
+    });
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -707,10 +951,23 @@ exports.getInvoiceById = async (req, res) => {
   }
 };
 
-// ✅ Delete Invoice (Soft delete invoice + journal)
 exports.deleteInvoice = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  let deletedInvoice = null;
+  let attachmentsToDelete = [];
+  const accountsToRecalculate = new Set();
+
   try {
-    const userId = req.user?.id || req.userId;
+    const rawUserId = req.user?.id || req.userId;
+
+    if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(401).json({
+        message: "Invalid or missing user.",
+      });
+    }
+
+    const userId = new mongoose.Types.ObjectId(rawUserId);
 
     const invoice = await Invoice.findOne({
       _id: req.params.id,
@@ -735,55 +992,116 @@ exports.deleteInvoice = async (req, res) => {
       isOpening: invoice.isOpening,
     };
 
-    invoice.isDeleted = true;
-    await invoice.save();
+    attachmentsToDelete = formatAttachments(invoice);
 
-    const attachmentsToDelete = formatAttachments(invoice);
+    await session.withTransaction(async () => {
+      const currentInvoice = await Invoice.findOne({
+        _id: req.params.id,
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      }).session(session);
 
+      if (!currentInvoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      const journalEntries = await JournalEntry.find({
+        $or: [
+          { referenceId: currentInvoice._id },
+          { invoiceId: currentInvoice._id },
+        ],
+        isDeleted: { $ne: true },
+      }).session(session);
+
+      for (const entry of journalEntries) {
+        for (const line of entry.lines || []) {
+          if (line.account) {
+            accountsToRecalculate.add(line.account.toString());
+          }
+        }
+      }
+
+      if (currentInvoice.accountId) {
+        accountsToRecalculate.add(currentInvoice.accountId.toString());
+      }
+
+      if (!currentInvoice.isOpening) {
+        await deleteTransactionsByReference({
+          referenceId: currentInvoice._id,
+          invoiceModel: "Invoice",
+          userId,
+          session,
+        });
+      }
+
+      await JournalEntry.updateMany(
+        {
+          $or: [
+            { referenceId: currentInvoice._id },
+            { invoiceId: currentInvoice._id },
+          ],
+          isDeleted: { $ne: true },
+        },
+        {
+          $set: {
+            isDeleted: true,
+          },
+        },
+        { session },
+      );
+
+      currentInvoice.isDeleted = true;
+
+      await currentInvoice.save({ session });
+
+      deletedInvoice = currentInvoice;
+    });
+
+    /*
+     * DB delete کامیاب ہونے کے بعد attachments delete کریں۔
+     */
     for (const att of attachmentsToDelete) {
-      if (att.key) {
-        await deleteFile(att.key);
+      try {
+        if (att.key) {
+          await deleteFile(att.key);
+        }
+      } catch (fileError) {
+        console.error("Attachment delete failed:", fileError.message);
       }
     }
 
-    if (!invoice.isOpening) {
-      await deleteTransactionsByReference({
-        referenceId: invoice._id,
-        invoiceModel: "Invoice",
-        userId,
-      });
+    for (const accId of accountsToRecalculate) {
+      try {
+        await recalculateAccountBalance(accId);
+      } catch (balanceError) {
+        console.error(
+          "Balance recalculation failed:",
+          accId,
+          balanceError.message,
+        );
+      }
     }
 
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
-        isDeleted: false,
-      },
-      {
-        $set: {
+    try {
+      await logActivity({
+        req,
+        action: "delete",
+        module: "sales",
+        entityType: "Invoice",
+        entityId: deletedInvoice._id,
+        title: `Sale Invoice ${deletedInvoice.billNo}`,
+        description: `${deletedInvoice.customerName} کی Sale Invoice Delete کی گئی`,
+        billNo: deletedInvoice.billNo,
+
+        before: beforeDelete,
+
+        after: {
           isDeleted: true,
         },
-      },
-    );
-
-    if (invoice.accountId) {
-      await recalculateAccountBalance(invoice.accountId);
+      });
+    } catch (logError) {
+      console.error("Activity log failed:", logError.message);
     }
-
-    await logActivity({
-      req,
-      action: "delete",
-      module: "sales",
-      entityType: "Invoice",
-      entityId: invoice._id,
-      title: `Sale Invoice ${invoice.billNo}`,
-      description: `${invoice.customerName} کی Sale Invoice Delete کی گئی`,
-      billNo: invoice.billNo,
-      before: beforeDelete,
-      after: {
-        isDeleted: true,
-      },
-    });
 
     return res.json({
       message: "Invoice and related journal deleted successfully",
@@ -795,45 +1113,64 @@ exports.deleteInvoice = async (req, res) => {
       message: "Invoice deletion failed",
       error: error.message,
     });
+  } finally {
+    await session.endSession();
   }
 };
 
-// ✅ Update Invoice - Safe DateTime Version
 exports.updateInvoice = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  let newUploadedAttachments = [];
+  let removedAttachments = [];
+  let updatedInvoice = null;
+  let accountsToRecalculate = new Set();
+
   try {
-    const userId = req.user?.id || req.userId;
-    const invoice = await Invoice.findOne({
+    const rawUserId = req.user?.id || req.userId;
+
+    if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(401).json({
+        message: "Invalid or missing user.",
+      });
+    }
+
+    const userId = new mongoose.Types.ObjectId(rawUserId);
+
+    const existingInvoice = await Invoice.findOne({
       _id: req.params.id,
       createdBy: userId,
+      isDeleted: { $ne: true },
     });
 
-    if (!invoice) {
+    if (!existingInvoice) {
       return res.status(404).json({
         message: "Invoice not found",
       });
     }
 
     const beforeUpdate = {
-      customerName: invoice.customerName,
-      customerPhone: invoice.customerPhone,
-      invoiceDate: invoice.invoiceDate,
-      invoiceTime: invoice.invoiceTime,
-      dueDate: invoice.dueDate,
-      totalAmount: invoice.totalAmount,
-      subTotal: invoice.subTotal,
-      discountAmount: invoice.discountAmount,
-      paidAmount: invoice.paidAmount,
-      status: invoice.status,
-      paymentType: invoice.paymentType,
-      accountId: invoice.accountId,
-      notes: invoice.notes,
-      itemCount: invoice.items?.length || 0,
-      isOpening: invoice.isOpening,
+      customerName: existingInvoice.customerName,
+      customerPhone: existingInvoice.customerPhone,
+      invoiceDate: existingInvoice.invoiceDate,
+      invoiceTime: existingInvoice.invoiceTime,
+      dueDate: existingInvoice.dueDate,
+      totalAmount: existingInvoice.totalAmount,
+      subTotal: existingInvoice.subTotal,
+      discountAmount: existingInvoice.discountAmount,
+      paidAmount: existingInvoice.paidAmount,
+      status: existingInvoice.status,
+      paymentType: existingInvoice.paymentType,
+      accountId: existingInvoice.accountId,
+      notes: existingInvoice.notes,
+      itemCount: existingInvoice.items?.length || 0,
+      isOpening: existingInvoice.isOpening,
     };
 
     const {
       customerName,
       customerPhone,
+      customerId,
       by,
       invoiceDate,
       invoiceTime,
@@ -849,22 +1186,200 @@ exports.updateInvoice = async (req, res) => {
       partyId,
     } = req.body;
 
-    const items =
-      typeof req.body.items === "string"
-        ? JSON.parse(req.body.items)
-        : req.body.items;
+    const openingInvoice = isOpening === true || isOpening === "true";
 
-    // ✅ Normal invoice needs items
-    if (
-      (!isOpening || isOpening === "false") &&
-      (!items || items.length === 0)
-    ) {
+    const numericTotalAmount = Number(totalAmount || 0);
+    const numericSubTotal = Number(subTotal || totalAmount || 0);
+    const numericDiscountAmount = Number(discountAmount || 0);
+    const numericPaidAmount = Number(paidAmount || 0);
+
+    if (!customerName?.trim()) {
       return res.status(400).json({
-        message: "Invoice items are required",
+        message: "Customer name is required.",
       });
     }
 
-    let currentAttachments = formatAttachments(invoice).map((a) => ({
+    if (
+      !Number.isFinite(numericTotalAmount) ||
+      numericTotalAmount < 0 ||
+      !Number.isFinite(numericSubTotal) ||
+      numericSubTotal < 0 ||
+      !Number.isFinite(numericDiscountAmount) ||
+      numericDiscountAmount < 0 ||
+      !Number.isFinite(numericPaidAmount) ||
+      numericPaidAmount < 0
+    ) {
+      return res.status(400).json({
+        message: "Invalid invoice amounts.",
+      });
+    }
+
+    const parsedInvoiceDate = new Date(invoiceDate);
+
+    if (Number.isNaN(parsedInvoiceDate.getTime())) {
+      return res.status(400).json({
+        message: "Invalid invoice date.",
+      });
+    }
+
+    let items = [];
+
+    try {
+      items =
+        typeof req.body.items === "string"
+          ? JSON.parse(req.body.items)
+          : req.body.items;
+    } catch (err) {
+      return res.status(400).json({
+        message: "Invalid invoice items.",
+      });
+    }
+
+    if (!Array.isArray(items)) {
+      items = [];
+    }
+
+    if (!openingInvoice && items.length === 0) {
+      return res.status(400).json({
+        message: "Invoice items are required.",
+      });
+    }
+
+    if (numericPaidAmount > 0) {
+      if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
+        return res.status(400).json({
+          message: "Valid payment account is required.",
+        });
+      }
+
+      const paymentAccount = await Account.findOne({
+        _id: accountId,
+        userId,
+      }).lean();
+
+      if (!paymentAccount) {
+        return res.status(400).json({
+          message: "Payment account not found.",
+        });
+      }
+    }
+
+    let customer = null;
+    let party = null;
+    let counterPartyAccountId = null;
+
+    if (partyId) {
+      if (!mongoose.Types.ObjectId.isValid(partyId)) {
+        return res.status(400).json({
+          message: "Invalid party.",
+        });
+      }
+
+      party = await Party.findOne({
+        _id: partyId,
+        userId,
+        isDeleted: false,
+        isActive: true,
+      });
+
+      if (!party || !party.account) {
+        return res.status(404).json({
+          message: "Party or party account not found.",
+        });
+      }
+
+      counterPartyAccountId = party.account;
+    } else {
+      if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
+        customer = await Customer.findOne({
+          _id: customerId,
+          createdBy: userId,
+        });
+      }
+
+      if (!customer) {
+        customer = await Customer.findOne({
+          name: customerName.trim(),
+          createdBy: userId,
+        });
+      }
+
+      if (!customer || !customer.account) {
+        return res.status(404).json({
+          message: "Customer or customer account not found.",
+        });
+      }
+
+      counterPartyAccountId = customer.account;
+    }
+
+    const snapshotItems = [];
+
+    if (!openingInvoice) {
+      for (const item of items) {
+        if (
+          !item?.productId ||
+          !mongoose.Types.ObjectId.isValid(item.productId)
+        ) {
+          return res.status(400).json({
+            message: "Invalid product in invoice.",
+          });
+        }
+
+        const quantity = Number(item.quantity || 0);
+        const salePrice = Number(item.price || 0);
+
+        if (
+          !Number.isFinite(quantity) ||
+          quantity <= 0 ||
+          !Number.isFinite(salePrice) ||
+          salePrice <= 0
+        ) {
+          return res.status(400).json({
+            message: "Invalid product quantity or price.",
+          });
+        }
+
+        const product = await Product.findById(item.productId);
+
+        if (!product) {
+          return res.status(404).json({
+            message: "Invoice product not found.",
+          });
+        }
+
+        const productOwner =
+          product.userId || product.createdBy || product.ownerId || null;
+
+        if (productOwner && productOwner.toString() !== userId.toString()) {
+          return res.status(403).json({
+            message: "Invalid product ownership.",
+          });
+        }
+
+        const costPrice = Number(product.unitCost || 0);
+        const itemTotal = quantity * salePrice;
+        const profit = (salePrice - costPrice) * quantity;
+
+        const margin =
+          salePrice > 0
+            ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
+            : 0;
+
+        snapshotItems.push({
+          ...item,
+          productId: product._id,
+          quantity,
+          price: salePrice,
+          total: itemTotal,
+          costPrice,
+          profit,
+          margin,
+        });
+      }
+    }
+
+    let currentAttachments = formatAttachments(existingInvoice).map((a) => ({
       key: a.key,
       type: a.type,
       size: a.size,
@@ -882,517 +1397,611 @@ exports.updateInvoice = async (req, res) => {
     }
 
     if (Array.isArray(keepAttachmentKeys)) {
-      const removedAttachments = currentAttachments.filter(
+      removedAttachments = currentAttachments.filter(
         (att) => !keepAttachmentKeys.includes(att.key),
       );
-
-      for (const att of removedAttachments) {
-        await deleteFile(att.key);
-      }
 
       currentAttachments = currentAttachments.filter((att) =>
         keepAttachmentKeys.includes(att.key),
       );
     }
 
-    const newAttachments = await uploadInvoiceFiles(req.files, userId);
+    newUploadedAttachments = await uploadInvoiceFiles(req.files, userId);
 
-    if (currentAttachments.length + newAttachments.length > 3) {
-      for (const att of newAttachments) {
-        await deleteFile(att.key);
+    if (currentAttachments.length + newUploadedAttachments.length > 3) {
+      for (const att of newUploadedAttachments) {
+        if (att.key) {
+          await deleteFile(att.key);
+        }
       }
+
+      newUploadedAttachments = [];
 
       return res.status(400).json({
         message: "Maximum 3 attachments allowed",
       });
     }
-    const finalAttachments = [...currentAttachments, ...newAttachments];
 
-    if (!invoice.isOpening) {
-      await deleteTransactionsByReference({
-        referenceId: invoice._id,
-        invoiceModel: "Invoice",
-        userId,
-      });
-    }
-    // ✅ Update invoice fields
+    const finalAttachments = [...currentAttachments, ...newUploadedAttachments];
 
-    invoice.customerName = customerName;
-    invoice.customerPhone = customerPhone;
-    invoice.by = by;
+    await session.withTransaction(async () => {
+      const invoice = await Invoice.findOne({
+        _id: req.params.id,
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      }).session(session);
 
-    // ✅ Safely parse dates
-    const parsedInvoiceDate = new Date(invoiceDate);
-    invoice.invoiceDate = !isNaN(parsedInvoiceDate)
-      ? parsedInvoiceDate
-      : new Date();
+      if (!invoice) {
+        throw new Error("Invoice not found.");
+      }
 
-    invoice.invoiceTime = invoiceTime;
-    invoice.dueDate = dueDate;
+      const oldEntries = await JournalEntry.find({
+        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
+        isDeleted: { $ne: true },
+      }).session(session);
 
-    // ✅ Historical Snapshot Items
-    const snapshotItems = [];
+      for (const entry of oldEntries) {
+        for (const line of entry.lines || []) {
+          if (line.account) {
+            accountsToRecalculate.add(line.account.toString());
+          }
+        }
+      }
 
-    for (let item of items) {
-      const product = await Product.findById(item.productId);
+      if (invoice.accountId) {
+        accountsToRecalculate.add(invoice.accountId.toString());
+      }
 
-      const quantity = Number(item.quantity || 0);
-
-      const salePrice = Number(item.price || 0);
-
-      // ✅ Historical cost at update time
-      const costPrice = Number(product?.unitCost || 0);
-
-      // ✅ Item Profit
-      const profit = (salePrice - costPrice) * quantity;
-
-      // ✅ Margin %
-      const margin =
-        salePrice > 0
-          ? Number((((salePrice - costPrice) / salePrice) * 100).toFixed(2))
-          : 0;
-
-      snapshotItems.push({
-        ...item,
-        costPrice,
-        profit,
-        margin,
-      });
-    }
-
-    // ✅ Save snapshot items
-    invoice.items = snapshotItems;
-
-    invoice.totalAmount = Number(totalAmount);
-    invoice.subTotal = Number(subTotal || totalAmount);
-    invoice.discountAmount = Number(discountAmount || 0);
-    invoice.paidAmount =
-      paidAmount !== undefined ? Number(paidAmount) : invoice.paidAmount;
-    invoice.notes = notes;
-    invoice.paymentType = paymentType;
-    invoice.accountId = accountId;
-    invoice.isOpening = isOpening || false;
-
-    const finalPaid = invoice.paidAmount;
-
-    invoice.status =
-      finalPaid >= totalAmount ? "Paid" : finalPaid > 0 ? "Partial" : "Unpaid";
-
-    invoice.attachments = finalAttachments;
-
-    invoice.attachmentUrl = finalAttachments[0]?.key || "";
-    invoice.attachmentType = finalAttachments[0]?.type || "";
-    invoice.attachmentSize = finalAttachments[0]?.size || 0;
-    invoice.attachmentOriginalName = finalAttachments[0]?.originalName || "";
-
-    // ✅ Skip stock for opening invoice
-    if (!isOpening || isOpening === "false") {
-      for (let item of snapshotItems) {
-        await createInventoryEntry({
-          productId: item.productId,
-          type: "OUT",
-          quantity: item.quantity,
-          note: `Updated Sale Invoice #${invoice.billNo}`,
-          invoiceId: invoice._id,
+      if (!invoice.isOpening) {
+        await deleteTransactionsByReference({
+          referenceId: invoice._id,
           invoiceModel: "Invoice",
-          userId: userId,
-
-          // ✅ Historical inventory rate
-          rate: Number(item.costPrice || 0),
+          userId,
+          session,
         });
       }
-    }
 
-    const oldEntries = await JournalEntry.find({
-      $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
-      isDeleted: false,
-    });
-
-    // ✅ Remove old journal entries
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
+      await JournalEntry.updateMany(
+        {
+          $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
+          isDeleted: { $ne: true },
         },
-      },
-    );
+        {
+          $set: {
+            isDeleted: true,
+          },
+        },
+        { session },
+      );
 
-    // 🧮 COGS calculate using historical snapshot
-    let totalCogs = 0;
+      let incomeAccount = null;
+      let inventoryAccount = null;
+      let cogsAccount = null;
+      let openingBalanceAccount = null;
 
-    if (!isOpening || isOpening === "false") {
-      for (let item of snapshotItems) {
-        totalCogs += Number(item.costPrice || 0) * Number(item.quantity || 0);
+      if (openingInvoice) {
+        openingBalanceAccount = await Account.findOne({
+          code: "OPENING_BALANCE",
+          userId,
+        }).session(session);
+
+        if (!openingBalanceAccount) {
+          throw new Error("Opening Balance account not found.");
+        }
+      } else {
+        incomeAccount = await Account.findOne({
+          name: "sales",
+          type: "Income",
+          userId,
+        }).session(session);
+
+        if (!incomeAccount) {
+          const created = await Account.create(
+            [
+              {
+                userId,
+                name: "sales",
+                type: "Income",
+                normalBalance: "credit",
+                code: "INC-SALES",
+                balance: 0,
+                openingBalance: 0,
+                category: "other",
+              },
+            ],
+            { session },
+          );
+
+          incomeAccount = created[0];
+        }
+
+        inventoryAccount = await Account.findOne({
+          code: "INVENTORY",
+          userId,
+        }).session(session);
+
+        if (!inventoryAccount) {
+          const created = await Account.create(
+            [
+              {
+                userId,
+                name: "inventory",
+                type: "Asset",
+                normalBalance: "debit",
+                category: "other",
+                code: "INVENTORY",
+                isSystem: true,
+              },
+            ],
+            { session },
+          );
+
+          inventoryAccount = created[0];
+        }
+
+        cogsAccount = await Account.findOne({
+          code: "COGS",
+          userId,
+        }).session(session);
+
+        if (!cogsAccount) {
+          const created = await Account.create(
+            [
+              {
+                userId,
+                name: "cogs",
+                type: "Expense",
+                normalBalance: "debit",
+                category: "other",
+                code: "COGS",
+                isSystem: true,
+              },
+            ],
+            { session },
+          );
+
+          cogsAccount = created[0];
+        }
       }
-    }
 
-    // 🏦 Inventory & COGS accounts
-    const inventoryAccount = await Account.findOne({
-      code: "INVENTORY",
-      userId: userId,
-    });
+      invoice.customerName = customerName.trim();
+      invoice.customerPhone = customerPhone || "";
+      invoice.by = by || "";
 
-    const cogsAccount = await Account.findOne({
-      code: "COGS",
-      userId: userId,
-    });
+      invoice.invoiceDate = parsedInvoiceDate;
+      invoice.invoiceTime = invoiceTime || "";
+      invoice.dueDate = dueDate || null;
 
-    let finalInventoryAccount = inventoryAccount;
-    let finalCogsAccount = cogsAccount;
+      invoice.items = snapshotItems;
 
-    if (!finalInventoryAccount) {
-      finalInventoryAccount = await Account.create({
-        userId: userId,
-        name: "inventory",
-        type: "Asset",
-        category: "other",
-        code: "INVENTORY",
-        isSystem: true,
-      });
-    }
+      invoice.totalAmount = numericTotalAmount;
+      invoice.subTotal = numericSubTotal;
+      invoice.discountAmount = numericDiscountAmount;
+      invoice.paidAmount = numericPaidAmount;
 
-    if (!finalCogsAccount) {
-      finalCogsAccount = await Account.create({
-        userId: userId,
-        name: "cogs",
-        type: "Expense",
-        category: "other",
-        code: "COGS",
-        isSystem: true,
-      });
-    }
+      invoice.notes = notes || "";
 
-    let customer = null;
-    let party = null;
-    let counterPartyAccountId = null;
+      invoice.paymentType = numericPaidAmount > 0 ? paymentType : "credit";
 
-    if (partyId) {
-      party = await Party.findOne({
-        _id: partyId,
-        userId,
-        isDeleted: false,
-        isActive: true,
-      });
+      invoice.accountId = numericPaidAmount > 0 ? accountId : null;
 
-      if (!party) {
-        return res.status(404).json({ message: "Party not found" });
+      invoice.isOpening = openingInvoice;
+
+      invoice.customerId = customer?._id || null;
+      invoice.partyId = party?._id || null;
+
+      invoice.status =
+        numericPaidAmount >= numericTotalAmount
+          ? "Paid"
+          : numericPaidAmount > 0
+            ? "Partial"
+            : "Unpaid";
+
+      invoice.attachments = finalAttachments;
+
+      invoice.attachmentUrl = finalAttachments[0]?.key || "";
+
+      invoice.attachmentType = finalAttachments[0]?.type || "";
+
+      invoice.attachmentSize = finalAttachments[0]?.size || 0;
+
+      invoice.attachmentOriginalName = finalAttachments[0]?.originalName || "";
+
+      await invoice.save({ session });
+
+      if (!openingInvoice) {
+        for (const item of snapshotItems) {
+          await createInventoryEntry({
+            productId: item.productId,
+            type: "OUT",
+            quantity: item.quantity,
+            note: `Updated Sale Invoice #${invoice.billNo}`,
+            invoiceId: invoice._id,
+            invoiceModel: "Invoice",
+            userId,
+            rate: Number(item.costPrice || 0),
+            session,
+          });
+        }
       }
 
-      counterPartyAccountId = party.account;
-    } else {
-      customer = await Customer.findOne({
-        name: customerName,
-        createdBy: userId,
-      });
-
-      if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
-      }
-
-      counterPartyAccountId = customer.account;
-    }
-
-    // ✅ update customer/party link
-    invoice.customerId = customer?._id || null;
-    invoice.partyId = party?._id || null;
-    await invoice.save();
-    const incomeAccount = await Account.findOne({
-      name: "sales",
-      type: "Income",
-      userId: userId,
-    });
-
-    if (!incomeAccount) {
-      return res
-        .status(400)
-        .json({ message: "Income account 'sales' not found" });
-    }
-
-    if (customer || party) {
-      // ✅ Safe DateTime for journal entry
-      let parsedInvoiceDate = new Date(invoiceDate);
-
-      let journalDateTime = parsedInvoiceDate;
+      let journalDateTime = new Date(parsedInvoiceDate);
 
       if (invoiceTime) {
         const combined = new Date(`${invoiceDate}T${invoiceTime}`);
-        if (!isNaN(combined.getTime())) {
+
+        if (!Number.isNaN(combined.getTime())) {
           journalDateTime = combined;
         }
       }
 
+      const totalCogs = openingInvoice
+        ? 0
+        : snapshotItems.reduce(
+            (sum, item) =>
+              sum + Number(item.costPrice || 0) * Number(item.quantity || 0),
+            0,
+          );
+
+      const lines = openingInvoice
+        ? [
+            {
+              account: new mongoose.Types.ObjectId(counterPartyAccountId),
+              type: "debit",
+              amount: numericTotalAmount,
+            },
+            {
+              account: new mongoose.Types.ObjectId(openingBalanceAccount._id),
+              type: "credit",
+              amount: numericTotalAmount,
+            },
+          ]
+        : [
+            {
+              account: new mongoose.Types.ObjectId(counterPartyAccountId),
+              type: "debit",
+              amount: numericSubTotal,
+            },
+            {
+              account: new mongoose.Types.ObjectId(incomeAccount._id),
+              type: "credit",
+              amount: numericSubTotal,
+            },
+            {
+              account: new mongoose.Types.ObjectId(cogsAccount._id),
+              type: "debit",
+              amount: totalCogs,
+            },
+            {
+              account: new mongoose.Types.ObjectId(inventoryAccount._id),
+              type: "credit",
+              amount: totalCogs,
+            },
+          ];
+
       const journal = new JournalEntry({
         date: journalDateTime,
         time: invoiceTime || "",
+
         description:
-          Number(discountAmount || 0) > 0
-            ? `Updated Sale Invoice (Disc: ${discountAmount})`
+          numericDiscountAmount > 0
+            ? `Updated Sale Invoice (Disc: ${numericDiscountAmount})`
             : "Updated Sale Invoice",
-        sourceType: isOpening ? "opening_sale_invoice" : "sale_invoice",
+
+        sourceType: openingInvoice ? "opening_sale_invoice" : "sale_invoice",
+
         originModule: "sale_invoice",
+
         referenceId: invoice._id,
         invoiceId: invoice._id,
         billNo: invoice.billNo,
+
         createdBy: userId,
 
         customerId: customer?._id || null,
         partyId: party?._id || null,
 
-        lines: isOpening
-          ? [
-              // ✅ Opening Balance Entry
-              {
-                account: new mongoose.Types.ObjectId(counterPartyAccountId),
-                type: "debit",
-                amount: totalAmount,
-              },
-
-              {
-                account: new mongoose.Types.ObjectId(
-                  (
-                    await Account.findOne({
-                      code: "OPENING_BALANCE",
-                      userId,
-                    })
-                  )._id,
-                ),
-                type: "credit",
-                amount: totalAmount,
-              },
-            ]
-          : [
-              // 👤 Customer debit
-
-              {
-                account: new mongoose.Types.ObjectId(counterPartyAccountId),
-                type: "debit",
-                amount: Number(subTotal || totalAmount),
-              },
-
-              // 💰 Sales credit
-              {
-                account: new mongoose.Types.ObjectId(incomeAccount._id),
-                type: "credit",
-                amount: Number(subTotal || totalAmount),
-              },
-              // 📉 COGS (expense)
-              {
-                account: new mongoose.Types.ObjectId(finalCogsAccount._id),
-                type: "debit",
-                amount: totalCogs,
-              },
-
-              // 📦 Inventory kam
-              {
-                account: new mongoose.Types.ObjectId(finalInventoryAccount._id),
-                type: "credit",
-                amount: totalCogs,
-              },
-            ],
-
         attachmentUrl: invoice.attachmentUrl || "",
         attachmentType: invoice.attachmentType || "",
+
+        lines,
       });
 
-      await journal.save();
+      await journal.save({ session });
 
-      if (
-        (!isOpening || isOpening === "false") &&
-        Number(discountAmount || 0) > 0
-      ) {
+      invoice.journalEntryId = journal._id;
+      await invoice.save({ session });
+
+      for (const line of lines) {
+        if (line.account) {
+          accountsToRecalculate.add(line.account.toString());
+        }
+      }
+
+      if (!openingInvoice && numericDiscountAmount > 0) {
         await createDiscountEntry({
           userId,
           referenceId: invoice._id,
           billNo: invoice.billNo,
           customerAccountId: counterPartyAccountId,
-          discountAmount: Number(discountAmount),
+          discountAmount: numericDiscountAmount,
           description: "Updated Sale Invoice Discount",
           originModule: "sale_invoice",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          session,
         });
       }
 
-      const allEntries = await JournalEntry.find({
-        $or: [{ referenceId: invoice._id }, { invoiceId: invoice._id }],
-      });
-
-      if ((!isOpening || isOpening === "false") && paidAmount > 0) {
+      if (!openingInvoice && numericPaidAmount > 0) {
         await createPaymentEntry({
-          userId: userId,
+          userId,
           referenceId: invoice._id,
           sourceType: "receive_payment",
           originModule: "sale_invoice",
           billNo: invoice.billNo,
           accountId,
           counterPartyAccountId,
-          amount: paidAmount,
+          amount: numericPaidAmount,
           paymentType,
           description: "Sale Invoice Payment",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          session,
         });
+
+        accountsToRecalculate.add(accountId.toString());
+        accountsToRecalculate.add(counterPartyAccountId.toString());
       }
 
-      invoice.journalEntryId = journal._id;
+      updatedInvoice = invoice;
+    });
 
-      if (!isOpening || isOpening === "false") {
-        await recalculateAccountBalance(finalInventoryAccount._id);
-        await recalculateAccountBalance(finalCogsAccount._id);
-      }
-
-      if (accountId) {
-        await recalculateAccountBalance(accountId);
+    for (const att of removedAttachments) {
+      try {
+        if (att.key) {
+          await deleteFile(att.key);
+        }
+      } catch (fileError) {
+        console.error("Old attachment cleanup failed:", fileError.message);
       }
     }
 
-    await logActivity({
-      req,
-      action: "update",
-      module: "sales",
-      entityType: "Invoice",
-      entityId: invoice._id,
-      title: `Sale Invoice ${invoice.billNo}`,
-      description: `${invoice.customerName} کی Sale Invoice Update کی گئی`,
-      billNo: invoice.billNo,
-      before: beforeUpdate,
-      after: {
-        customerName: invoice.customerName,
-        customerPhone: invoice.customerPhone,
-        invoiceDate: invoice.invoiceDate,
-        invoiceTime: invoice.invoiceTime,
-        dueDate: invoice.dueDate,
-        totalAmount: invoice.totalAmount,
-        subTotal: invoice.subTotal,
-        discountAmount: invoice.discountAmount,
-        paidAmount: invoice.paidAmount,
-        status: invoice.status,
-        paymentType: invoice.paymentType,
-        accountId: invoice.accountId,
-        notes: invoice.notes,
-        itemCount: invoice.items?.length || 0,
-        isOpening: invoice.isOpening,
-      },
-    });
+    for (const accId of accountsToRecalculate) {
+      try {
+        await recalculateAccountBalance(accId);
+      } catch (balanceError) {
+        console.error(
+          "Balance recalculation failed:",
+          accId,
+          balanceError.message,
+        );
+      }
+    }
 
-    res.json(invoice);
+    try {
+      await logActivity({
+        req,
+        action: "update",
+        module: "sales",
+        entityType: "Invoice",
+        entityId: updatedInvoice._id,
+        title: `Sale Invoice ${updatedInvoice.billNo}`,
+        description: `${updatedInvoice.customerName} کی Sale Invoice Update کی گئی`,
+        billNo: updatedInvoice.billNo,
+
+        before: beforeUpdate,
+
+        after: {
+          customerName: updatedInvoice.customerName,
+          customerPhone: updatedInvoice.customerPhone,
+          invoiceDate: updatedInvoice.invoiceDate,
+          invoiceTime: updatedInvoice.invoiceTime,
+          dueDate: updatedInvoice.dueDate,
+          totalAmount: updatedInvoice.totalAmount,
+          subTotal: updatedInvoice.subTotal,
+          discountAmount: updatedInvoice.discountAmount,
+          paidAmount: updatedInvoice.paidAmount,
+          status: updatedInvoice.status,
+          paymentType: updatedInvoice.paymentType,
+          accountId: updatedInvoice.accountId,
+          notes: updatedInvoice.notes,
+          itemCount: updatedInvoice.items?.length || 0,
+          isOpening: updatedInvoice.isOpening,
+        },
+      });
+    } catch (logError) {
+      console.error("Activity log failed:", logError.message);
+    }
+
+    return res.json(updatedInvoice);
   } catch (error) {
+    for (const att of newUploadedAttachments) {
+      try {
+        if (att.key) {
+          await deleteFile(att.key);
+        }
+      } catch (cleanupError) {
+        console.error("New attachment cleanup failed:", cleanupError.message);
+      }
+    }
+
     console.error("Invoice update error:", error);
-    res.status(500).json({ message: "Invoice update failed", error });
+
+    return res.status(500).json({
+      message: "Invoice update failed",
+      error: error.message,
+    });
+  } finally {
+    await session.endSession();
   }
 };
 
 // ✅ Record Additional Payment
 exports.recordPayment = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  let updatedInvoice = null;
+  const accountsToRecalculate = new Set();
+
   try {
-    const userId = req.user?.id || req.userId;
+    const rawUserId = req.user?.id || req.userId;
+
+    if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(401).json({
+        message: "Invalid or missing user.",
+      });
+    }
+
+    const userId = new mongoose.Types.ObjectId(rawUserId);
+
     const { amount, accountId, paymentType } = req.body;
 
     const payAmount = Number(amount || 0);
 
-    if (payAmount <= 0) {
-      return res.status(400).json({ message: "Invalid payment amount" });
-    }
-
-    if (!accountId) {
-      return res.status(400).json({ message: "Payment account required" });
-    }
-
-    const invoice = await Invoice.findOne({
-      _id: req.params.id,
-      createdBy: userId,
-      isDeleted: { $ne: true },
-    });
-
-    if (!invoice) {
-      return res.status(404).json({ message: "Invoice not found" });
-    }
-
-    let customer = null;
-    let party = null;
-    let counterPartyAccountId = null;
-
-    if (invoice.partyId) {
-      party = await Party.findOne({
-        _id: invoice.partyId,
-        userId,
-        isDeleted: false,
-        isActive: true,
+    if (!Number.isFinite(payAmount) || payAmount <= 0) {
+      return res.status(400).json({
+        message: "Invalid payment amount",
       });
-
-      if (!party || !party.account) {
-        return res.status(404).json({ message: "Party account not found" });
-      }
-
-      counterPartyAccountId = party.account;
-    } else {
-      customer = await Customer.findOne({
-        _id: invoice.customerId,
-        createdBy: userId,
-      });
-
-      if (!customer || !customer.account) {
-        return res.status(404).json({ message: "Customer account not found" });
-      }
-
-      counterPartyAccountId = customer.account;
     }
 
-    invoice.paidAmount = Number(invoice.paidAmount || 0) + payAmount;
+    if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({
+        message: "Valid payment account required",
+      });
+    }
 
-    invoice.status =
-      invoice.paidAmount >= invoice.totalAmount
-        ? "Paid"
-        : invoice.paidAmount > 0
-          ? "Partial"
-          : "Unpaid";
-
-    await invoice.save();
-
-    await createPaymentEntry({
+    const paymentAccount = await Account.findOne({
+      _id: accountId,
       userId,
-      referenceId: invoice._id,
-      sourceType: "receive_payment",
-      originModule: "sale_invoice",
-      billNo: invoice.billNo,
-      accountId,
-      counterPartyAccountId,
-      amount: payAmount,
-      paymentType,
-      description: `Additional payment for Invoice ${invoice.billNo}`,
-      customerId: customer?._id || null,
-      partyId: party?._id || null,
-    });
+    }).lean();
 
-    await recalculateAccountBalance(counterPartyAccountId);
-    await recalculateAccountBalance(accountId);
+    if (!paymentAccount) {
+      return res.status(404).json({
+        message: "Payment account not found",
+      });
+    }
 
-    await logActivity({
-      req,
-      action: "update",
-      module: "sales",
-      entityType: "Invoice",
-      entityId: invoice._id,
-      title: `Invoice Payment ${invoice.billNo}`,
-      description: `Sale Invoice ${invoice.billNo} میں مزید Payment شامل کی گئی`,
-      billNo: invoice.billNo,
-      after: {
-        paymentAdded: payAmount,
-        paymentType,
+    await session.withTransaction(async () => {
+      const invoice = await Invoice.findOne({
+        _id: req.params.id,
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      }).session(session);
+
+      if (!invoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      let customer = null;
+      let party = null;
+      let counterPartyAccountId = null;
+
+      if (invoice.partyId) {
+        party = await Party.findOne({
+          _id: invoice.partyId,
+          userId,
+          isDeleted: false,
+          isActive: true,
+        }).session(session);
+
+        if (!party || !party.account) {
+          throw new Error("Party account not found.");
+        }
+
+        counterPartyAccountId = party.account;
+      } else {
+        customer = await Customer.findOne({
+          _id: invoice.customerId,
+          createdBy: userId,
+        }).session(session);
+
+        if (!customer || !customer.account) {
+          throw new Error("Customer account not found.");
+        }
+
+        counterPartyAccountId = customer.account;
+      }
+
+      invoice.paidAmount = Number(invoice.paidAmount || 0) + payAmount;
+
+      invoice.status =
+        invoice.paidAmount >= Number(invoice.totalAmount || 0)
+          ? "Paid"
+          : invoice.paidAmount > 0
+            ? "Partial"
+            : "Unpaid";
+
+      await invoice.save({ session });
+
+      await createPaymentEntry({
+        userId,
+        referenceId: invoice._id,
+        sourceType: "receive_payment",
+        originModule: "sale_invoice",
+        billNo: invoice.billNo,
         accountId,
-        totalPaidAmount: invoice.paidAmount,
-        totalAmount: invoice.totalAmount,
-        status: invoice.status,
-      },
+        counterPartyAccountId,
+        amount: payAmount,
+        paymentType,
+        description: `Additional payment for Invoice ${invoice.billNo}`,
+        customerId: customer?._id || null,
+        partyId: party?._id || null,
+        session,
+      });
+
+      accountsToRecalculate.add(accountId.toString());
+      accountsToRecalculate.add(counterPartyAccountId.toString());
+
+      updatedInvoice = invoice;
     });
 
-    res.json(invoice);
+    for (const accId of accountsToRecalculate) {
+      try {
+        await recalculateAccountBalance(accId);
+      } catch (balanceError) {
+        console.error(
+          "Balance recalculation failed:",
+          accId,
+          balanceError.message,
+        );
+      }
+    }
+
+    try {
+      await logActivity({
+        req,
+        action: "update",
+        module: "sales",
+        entityType: "Invoice",
+        entityId: updatedInvoice._id,
+        title: `Invoice Payment ${updatedInvoice.billNo}`,
+        description: `Sale Invoice ${updatedInvoice.billNo} میں مزید Payment شامل کی گئی`,
+        billNo: updatedInvoice.billNo,
+
+        after: {
+          paymentAdded: payAmount,
+          paymentType,
+          accountId,
+          totalPaidAmount: updatedInvoice.paidAmount,
+          totalAmount: updatedInvoice.totalAmount,
+          status: updatedInvoice.status,
+        },
+      });
+    } catch (logError) {
+      console.error("Activity log failed:", logError.message);
+    }
+
+    return res.json(updatedInvoice);
   } catch (error) {
-    res.status(500).json({ message: "Payment update failed", error });
+    console.error("Payment update failed:", error);
+
+    return res.status(500).json({
+      message: "Payment update failed",
+      error: error.message,
+    });
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -1403,6 +2012,7 @@ exports.getInvoiceByBillNo = async (req, res) => {
     const invoice = await Invoice.findOne({
       billNo: req.params.billNo,
       createdBy: userId,
+      isDeleted: { $ne: true },
     });
 
     if (!invoice) {
@@ -1421,7 +2031,10 @@ exports.searchInvoices = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const queryText = req.query.q || "";
 
-    const filters = { createdBy: userId };
+    const filters = {
+      createdBy: userId,
+      isDeleted: { $ne: true },
+    };
     queryText.split(" ").forEach((pair) => {
       const [key, value] = pair.split(":");
       if (key && value) {
@@ -1461,31 +2074,80 @@ exports.navigateInvoice = async (req, res) => {
     const { billNo, direction } = req.query;
 
     if (!billNo || !direction) {
-      return res.status(400).json({ message: "billNo and direction required" });
+      return res.status(400).json({
+        message: "billNo and direction required",
+      });
     }
 
-    let invoice;
-
-    if (direction === "next") {
-      invoice = await Invoice.findOne({
-        createdBy: userId,
-        billNo: { $gt: billNo },
-      }).sort({ billNo: 1 });
-    } else if (direction === "previous") {
-      invoice = await Invoice.findOne({
-        createdBy: userId,
-        billNo: { $lt: billNo },
-      }).sort({ billNo: -1 });
+    if (!["next", "previous"].includes(direction)) {
+      return res.status(400).json({
+        message: "Invalid navigation direction",
+      });
     }
+
+    const numericBillNo = Number(billNo);
+
+    if (!Number.isFinite(numericBillNo)) {
+      return res.status(400).json({
+        message: "Invalid bill number",
+      });
+    }
+
+    const comparison =
+      direction === "next" ? { $gt: numericBillNo } : { $lt: numericBillNo };
+
+    const sortDirection = direction === "next" ? 1 : -1;
+
+    const invoices = await Invoice.aggregate([
+      {
+        $match: {
+          createdBy: new mongoose.Types.ObjectId(userId),
+          isDeleted: { $ne: true },
+        },
+      },
+      {
+        $addFields: {
+          numericBillNo: {
+            $convert: {
+              input: "$billNo",
+              to: "long",
+              onError: null,
+              onNull: null,
+            },
+          },
+        },
+      },
+      {
+        $match: {
+          numericBillNo: comparison,
+        },
+      },
+      {
+        $sort: {
+          numericBillNo: sortDirection,
+        },
+      },
+      {
+        $limit: 1,
+      },
+    ]);
+
+    const invoice = invoices[0];
 
     if (!invoice) {
-      return res.status(404).json({ message: "No more invoices" });
+      return res.status(404).json({
+        message: "No more invoices",
+      });
     }
 
-    res.json(invoice);
+    return res.json(invoice);
   } catch (error) {
     console.error("Navigation error:", error);
-    res.status(500).json({ message: "Navigation failed", error });
+
+    return res.status(500).json({
+      message: "Navigation failed",
+      error: error.message,
+    });
   }
 };
 

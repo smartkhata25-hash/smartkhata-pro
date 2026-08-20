@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
   getCustomers,
+  getCustomerDataVersion,
   addCustomer,
   updateCustomer,
   deleteCustomer,
@@ -18,6 +19,13 @@ const { requirePermission } = require("../middleware/permissionMiddleware");
 
 // Get All Customers
 router.get("/", protect, requirePermission("customers.view"), getCustomers);
+
+router.get(
+  "/data-version",
+  protect,
+  requirePermission("customers.view"),
+  getCustomerDataVersion,
+);
 
 // Add Customer
 router.post("/", protect, requirePermission("customers.create"), addCustomer);

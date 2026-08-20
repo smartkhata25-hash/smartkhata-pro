@@ -1,5 +1,14 @@
 // ✅ src/services/customerService.js
+
 import axios from 'axios';
+
+import {
+  getCachedCustomers,
+  setCachedCustomers,
+  hasCustomerCache,
+  setCustomerVersion,
+  isCustomerVersionChanged,
+} from '../utils/customerCache';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/customers`;
@@ -7,10 +16,11 @@ const API_URL = `${BASE_URL}/api/customers`;
 const getToken = () => localStorage.getItem('token');
 
 const getAuthHeaders = (token = null) => ({
-  headers: { Authorization: `Bearer ${token || getToken()}` },
+  headers: {
+    Authorization: `Bearer ${token || getToken()}`,
+  },
 });
 
-// ✅ Get Customers
 export const getCustomers = async (token = null, params = {}) => {
   const response = await axios.get(API_URL, {
     ...getAuthHeaders(token),
@@ -20,68 +30,121 @@ export const getCustomers = async (token = null, params = {}) => {
   return response.data;
 };
 
-// ✅ Get All Customers (for dropdowns etc.)
+export const fetchCustomerDataVersion = async (token = null) => {
+  const response = await axios.get(`${API_URL}/data-version`, getAuthHeaders(token));
+
+  return response.data;
+};
+
 export const fetchCustomers = async (token = null, params = {}, forceRefresh = false) => {
-  if (!forceRefresh && Object.keys(params).length === 0) {
-    const cached = localStorage.getItem('customers');
+  const safeParams = params || {};
 
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (_) {}
+  const cacheableAllRequest = Object.keys(safeParams).length === 1 && safeParams.status === 'all';
+
+  const hasNonCacheableParams = Object.keys(safeParams).length > 0 && !cacheableAllRequest;
+
+  if (hasNonCacheableParams) {
+    return await getCustomers(token, safeParams);
+  }
+
+  if (forceRefresh) {
+    const [data, versionData] = await Promise.all([
+      getCustomers(token, safeParams),
+      fetchCustomerDataVersion(token),
+    ]);
+
+    setCachedCustomers(data);
+
+    if (versionData?.version !== null && versionData?.version !== undefined) {
+      setCustomerVersion(versionData.version);
     }
+
+    return data;
   }
 
-  const data = await getCustomers(token, params);
+  const cacheExists = hasCustomerCache();
 
-  if (Object.keys(params).length === 0) {
-    localStorage.setItem('customers', JSON.stringify(data));
+  if (!cacheExists) {
+    const [data, versionData] = await Promise.all([
+      getCustomers(token),
+      fetchCustomerDataVersion(token),
+    ]);
+
+    setCachedCustomers(data);
+
+    if (versionData?.version !== null && versionData?.version !== undefined) {
+      setCustomerVersion(versionData.version);
+    }
+
+    return data;
   }
 
-  return data;
+  const cachedCustomers = getCachedCustomers();
+
+  try {
+    const versionData = await fetchCustomerDataVersion(token);
+
+    const serverVersion = versionData?.version ?? null;
+
+    if (!isCustomerVersionChanged(serverVersion)) {
+      return cachedCustomers;
+    }
+
+    const freshCustomers = await getCustomers(token);
+
+    setCachedCustomers(freshCustomers);
+
+    if (serverVersion !== null && serverVersion !== undefined) {
+      setCustomerVersion(serverVersion);
+    }
+
+    return freshCustomers;
+  } catch (error) {
+    console.error('Customer cache/version check failed:', error);
+
+    return cachedCustomers;
+  }
 };
 
-// ✅ Add New Customer
-export const addCustomer = async (customerData, token) => {
+export const addCustomer = async (customerData, token = null) => {
   const response = await axios.post(API_URL, customerData, getAuthHeaders(token));
+
   return response.data;
 };
 
-// ✅ Update Customer
-export const updateCustomer = async (id, customerData, token) => {
+export const updateCustomer = async (id, customerData, token = null) => {
   const response = await axios.put(`${API_URL}/${id}`, customerData, getAuthHeaders(token));
+
   return response.data;
 };
 
-// ✅ Delete Customer
-export const deleteCustomer = async (id, token) => {
+export const deleteCustomer = async (id, token = null) => {
   const response = await axios.delete(`${API_URL}/${id}`, getAuthHeaders(token));
+
   return response.data;
 };
 
-// ✅ Restore Hidden Customer
 export const restoreCustomer = async (id, token = null) => {
   const response = await axios.post(`${API_URL}/${id}/restore`, {}, getAuthHeaders(token));
 
   return response.data;
 };
 
-// ✅ Search Customer by Name (for Refund Invoice)
 export const fetchCustomerByName = async (name, token = null) => {
   const response = await axios.get(
     `${API_URL}/search?name=${encodeURIComponent(name)}`,
     getAuthHeaders(token)
   );
+
   return response.data;
 };
 
-// ✅ Confirm Merge Customers
-export const confirmMergeCustomers = async (payload, token) => {
+export const confirmMergeCustomers = async (payload, token = null) => {
   const response = await axios.post(`${API_URL}/merge/confirm`, payload, getAuthHeaders(token));
+
   return response.data;
 };
 
-// ✅ Convert Customer → Party
 export const convertCustomerToParty = async (id, token = null) => {
   const response = await axios.post(`${API_URL}/${id}/convert-to-party`, {}, getAuthHeaders(token));
 

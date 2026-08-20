@@ -14,6 +14,58 @@ const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
+const getCustomerDataVersion = async (req, res) => {
+  try {
+    const userId =
+      req.user?.businessOwnerId || req.user?.id || req.user?._id || req.userId;
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({
+        message: "Invalid user",
+      });
+    }
+
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+
+    const [latestCustomer, latestJournal] = await Promise.all([
+      Customer.findOne({
+        createdBy: objectUserId,
+      })
+        .sort({ updatedAt: -1 })
+        .select("updatedAt")
+        .lean(),
+
+      JournalEntry.findOne({
+        createdBy: objectUserId,
+        customerId: { $ne: null },
+      })
+        .sort({ updatedAt: -1 })
+        .select("updatedAt")
+        .lean(),
+    ]);
+
+    const customerTime = latestCustomer?.updatedAt
+      ? new Date(latestCustomer.updatedAt).getTime()
+      : 0;
+
+    const journalTime = latestJournal?.updatedAt
+      ? new Date(latestJournal.updatedAt).getTime()
+      : 0;
+
+    const version = Math.max(customerTime, journalTime);
+
+    return res.json({
+      version: String(version),
+    });
+  } catch (error) {
+    console.error("Get Customer Data Version Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to check customer data version",
+    });
+  }
+};
+
 // ✅ 1. Get customers with Active / Hidden support
 const getCustomers = async (req, res) => {
   try {
@@ -1074,9 +1126,6 @@ const getCustomerDetailedLedger = async (req, res) => {
 
     const accountId = customer.account._id.toString();
 
-    // ===============================
-    // 🔑 STEP 1: OPENING BALANCE (NEW – FIX)
-    // ===============================
     let openingBalance = 0;
 
     if (startDate) {
@@ -1114,9 +1163,6 @@ const getCustomerDetailedLedger = async (req, res) => {
       openingBalance = result[0]?.balance || 0;
     }
 
-    // ===============================
-    // 🔄 STEP 2: MAIN LEDGER (OLD FEATURES KE SATH)
-    // ===============================
     const match = {
       createdBy: userId,
       customerId: customer._id,
@@ -1226,9 +1272,6 @@ const getCustomerDetailedLedger = async (req, res) => {
       ledger.push(row);
     }
 
-    // ===============================
-    // ✅ FINAL RESPONSE
-    // ===============================
     res.json({
       customerName: customer.name,
       openingBalance,
@@ -1244,6 +1287,7 @@ const getCustomerDetailedLedger = async (req, res) => {
 
 module.exports = {
   getCustomers,
+  getCustomerDataVersion,
   addCustomer,
   updateCustomer,
   deleteCustomer,

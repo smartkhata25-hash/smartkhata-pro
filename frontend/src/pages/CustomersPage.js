@@ -2,7 +2,7 @@
 import axios from 'axios';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  getCustomers,
+  fetchCustomers,
   addCustomer,
   updateCustomer,
   deleteCustomer,
@@ -26,6 +26,7 @@ import { getCurrentLanguage } from '../i18n/i18n';
 
 import usePageMemory from '../hooks/usePageMemory';
 import { hasPermission } from '../utils/permissionHelper';
+import { getCachedCustomers } from '../utils/customerCache';
 
 const CUSTOMER_PAGE_DEFAULTS = {
   searchTerm: '',
@@ -43,7 +44,7 @@ const CUSTOMER_PAGE_DEFAULTS = {
 };
 
 const CustomersPage = () => {
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState(() => getCachedCustomers());
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -160,16 +161,15 @@ const CustomersPage = () => {
     }
 
     try {
-      const data = await getCustomers(token, {
-        status: activeTab === 'hidden' ? 'hidden' : 'active',
+      const data = await fetchCustomers(token, {
+        status: 'all',
       });
 
       setCustomers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(t('alerts.customersLoadFailed'), error);
-      setCustomers([]);
     }
-  }, [token, canViewCustomers, activeTab, isPageMemoryReady]);
+  }, [token, canViewCustomers, isPageMemoryReady]);
 
   useEffect(() => {
     loadCustomers();

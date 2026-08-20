@@ -107,9 +107,6 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
     };
 
     fetchAlerts();
-
-    const interval = setInterval(fetchAlerts, 60000);
-    return () => clearInterval(interval);
   }, [token, baseUrl]);
 
   const handleInstallClick = async () => {

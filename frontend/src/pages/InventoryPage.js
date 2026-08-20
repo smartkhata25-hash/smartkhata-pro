@@ -6,14 +6,23 @@ import LowStockModal from '../components/LowStockModal';
 import MultipleProductForm from '../components/MultipleProductForm';
 
 import { useLocation } from 'react-router-dom';
-import { fetchProducts } from '../services/inventoryService';
+import { fetchProducts, fetchInventoryVersion } from '../services/inventoryService';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 
+import {
+  getCachedProducts,
+  setCachedProducts,
+  hasInventoryCache,
+  getInventoryVersion,
+  setInventoryVersion,
+  isInventoryVersionChanged,
+  removeCachedProduct,
+} from '../utils/inventoryCache';
+
 const InventoryPage = () => {
   const [products, setProducts] = useState(() => {
-    const saved = sessionStorage.getItem('products');
-    return saved ? JSON.parse(saved) : [];
+    return getCachedProducts();
   });
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
@@ -29,15 +38,63 @@ const InventoryPage = () => {
   const canEditProducts = hasPermission('products.edit');
   const canBulkCreateProducts = hasPermission('products.bulk_create');
 
-  // 🔁 Load Products
-  const loadProducts = async () => {
+  const loadProducts = async (inventoryVersion = null) => {
     const data = await fetchProducts();
+
     setProducts(data);
-    sessionStorage.setItem('products', JSON.stringify(data));
+    setCachedProducts(data);
+
+    if (inventoryVersion !== null && inventoryVersion !== undefined) {
+      setInventoryVersion(inventoryVersion);
+    }
+
+    return data;
   };
 
   useEffect(() => {
-    loadProducts();
+    const prepareInventory = async () => {
+      try {
+        const cacheExists = hasInventoryCache();
+
+        if (cacheExists) {
+          setProducts(getCachedProducts());
+        }
+
+        const versionData = await fetchInventoryVersion();
+
+        const serverVersion = versionData?.version ?? versionData?.inventoryVersion ?? null;
+
+        if (!cacheExists) {
+          await loadProducts(serverVersion);
+          return;
+        }
+
+        if (isInventoryVersionChanged(serverVersion)) {
+          await loadProducts(serverVersion);
+          return;
+        }
+
+        if (
+          serverVersion !== null &&
+          serverVersion !== undefined &&
+          getInventoryVersion() === null
+        ) {
+          setInventoryVersion(serverVersion);
+        }
+      } catch (error) {
+        console.error('Inventory preparation failed:', error);
+
+        if (!hasInventoryCache()) {
+          try {
+            await loadProducts();
+          } catch (loadError) {
+            console.error('Inventory load failed:', loadError);
+          }
+        }
+      }
+    };
+
+    prepareInventory();
 
     const query = new URLSearchParams(location.search);
 
@@ -67,7 +124,7 @@ const InventoryPage = () => {
   const handleUpdate = (updatedProducts) => {
     setProducts(updatedProducts);
 
-    sessionStorage.setItem('products', JSON.stringify(updatedProducts));
+    setCachedProducts(updatedProducts);
 
     setShowModal(false);
   };
@@ -76,7 +133,12 @@ const InventoryPage = () => {
   const handleDelete = (id) => {
     const confirm = window.confirm(t('alerts.deleteProductConfirm'));
     if (!confirm) return;
-    setProducts(products.filter((p) => p._id !== id));
+
+    const updatedProducts = products.filter((p) => p._id !== id);
+
+    setProducts(updatedProducts);
+
+    removeCachedProduct(id);
   };
 
   // ✏️ Edit Product
@@ -154,7 +216,7 @@ const InventoryPage = () => {
           onBulkAdd={(updatedProducts) => {
             setProducts(updatedProducts);
 
-            sessionStorage.setItem('products', JSON.stringify(updatedProducts));
+            setCachedProducts(updatedProducts);
           }}
           onClose={() => setShowMultipleForm(false)}
         />

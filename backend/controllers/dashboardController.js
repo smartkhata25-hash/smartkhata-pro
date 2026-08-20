@@ -8,14 +8,39 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
+
 const { getProfitSummary } = require("../services/accounting/profitService");
 
-// ✅ Dashboard Summary + Receivable / Payable Breakdown
+const {
+  getDashboardCache,
+  setDashboardCache,
+} = require("../services/dashboardCacheService");
+
 const getDashboardSummary = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    const { startDate, endDate, filterType } = req.query;
+    const {
+      startDate = "",
+      endDate = "",
+      filterType = "",
+      refresh = "false",
+    } = req.query;
+
+    const forceRefresh = String(refresh).toLowerCase() === "true";
+
+    if (!forceRefresh) {
+      const cachedResult = getDashboardCache({
+        userId,
+        filterType,
+        startDate,
+        endDate,
+      });
+
+      if (cachedResult) {
+        return res.json(cachedResult.data);
+      }
+    }
 
     let dateFilter = {};
 
@@ -352,7 +377,7 @@ const getDashboardSummary = async (req, res) => {
       })
       .reduce((sum, item) => sum + Number(item.total || 0), 0);
 
-    res.json({
+    const dashboardData = {
       totalSales: Number(Number(netSales || 0).toFixed(2)),
       totalExpenses: Number(dashboardExpenses.toFixed(2)),
       netProfit: Number(Number(netProfit || 0).toFixed(2)),
@@ -365,7 +390,17 @@ const getDashboardSummary = async (req, res) => {
 
       receivableDetails,
       payableDetails,
+    };
+
+    setDashboardCache({
+      userId,
+      filterType,
+      startDate,
+      endDate,
+      data: dashboardData,
     });
+
+    return res.json(dashboardData);
   } catch (error) {
     console.error("Dashboard Summary Error:", error);
 
@@ -558,10 +593,6 @@ const getDashboardAlerts = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    /* ======================================================
-       🔎 QUERY FILTERS
-    ====================================================== */
-
     const {
       startDate,
       endDate,
@@ -584,20 +615,12 @@ const getDashboardAlerts = async (req, res) => {
       };
     }
 
-    /* ======================================================
-   ✅ ACTIVE CUSTOMERS ONLY
-====================================================== */
-
     const activeCustomers = await Customer.find({
       createdBy: userId,
       isActive: true,
     }).select("_id");
 
     const activeCustomerIds = activeCustomers.map((c) => c._id);
-
-    /* ======================================================
-   1️⃣ OVERDUE INVOICES
-====================================================== */
 
     const overdueQuery = {
       createdBy: userId,
@@ -616,10 +639,6 @@ const getDashboardAlerts = async (req, res) => {
         ? Promise.resolve(0)
         : Invoice.countDocuments(overdueQuery);
 
-    /* ======================================================
-   2️⃣ PENDING PAYMENTS
-====================================================== */
-
     const pendingQuery = {
       createdBy: userId,
       isDeleted: { $ne: true },
@@ -635,10 +654,6 @@ const getDashboardAlerts = async (req, res) => {
       onlyOverdue === "true"
         ? Promise.resolve(0)
         : Invoice.countDocuments(pendingQuery);
-
-    /* ======================================================
-       3️⃣ LOW STOCK (Filtered + Optimized)
-    ====================================================== */
 
     let productFilter = { userId };
 
@@ -708,10 +723,6 @@ const getDashboardAlerts = async (req, res) => {
         lowStock++;
       }
     });
-
-    /* ======================================================
-       FINAL PARALLEL EXECUTION
-    ====================================================== */
 
     const [overdueInvoices, pendingPayments] = await Promise.all([
       overdueInvoicesPromise,

@@ -21,9 +21,6 @@ exports.getIncomeStatement = async (req, res) => {
       date: { $gte: start, $lte: end },
     }).populate("lines.account");
 
-    // ===============================
-    // Totals
-    // ===============================
     let sales = 0;
     let salesReturn = 0;
     let netSales = 0;
@@ -39,9 +36,6 @@ exports.getIncomeStatement = async (req, res) => {
     const cogsBreakdown = {};
     const expenseBreakdown = {};
 
-    // ===============================
-    // Process journal lines
-    // ===============================
     entries.forEach((entry) => {
       entry.lines.forEach((line) => {
         const account = line.account;
@@ -49,9 +43,6 @@ exports.getIncomeStatement = async (req, res) => {
 
         const amount = Number(line.amount || 0);
 
-        // -------------------------------
-        // Revenue (Income accounts)
-        // -------------------------------
         if (account.type === "Income") {
           if (line.type === "credit") {
             sales += amount;
@@ -64,9 +55,6 @@ exports.getIncomeStatement = async (req, res) => {
           }
         }
 
-        // -------------------------------
-        // COGS (Expense with code COGS)
-        // -------------------------------
         if (
           account.type === "Expense" &&
           account.code === "COGS" &&
@@ -77,9 +65,6 @@ exports.getIncomeStatement = async (req, res) => {
             (cogsBreakdown[account.name] || 0) + amount;
         }
 
-        // -------------------------------
-        // Operating Expenses (all other expenses)
-        // -------------------------------
         if (
           account.type === "Expense" &&
           account.code !== "COGS" &&
@@ -92,16 +77,10 @@ exports.getIncomeStatement = async (req, res) => {
       });
     });
 
-    // ===============================
-    // Final calculations
-    // ===============================
     netSales = sales - salesReturn;
     grossProfit = netSales - cogs;
     netProfit = grossProfit - operatingExpenses;
 
-    // ===============================
-    // Response
-    // ===============================
     res.status(200).json({
       period: {
         startDate,
@@ -148,9 +127,6 @@ exports.getIncomeStatement = async (req, res) => {
   }
 };
 
-// ======================================
-// 📊 Month vs Month Income Comparison
-// ======================================
 exports.getMonthVsMonthIncome = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;

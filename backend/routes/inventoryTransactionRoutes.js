@@ -61,6 +61,14 @@ router.post(
   controller.adjustInventoryBulk,
 );
 
+// ⚡ Lightweight Inventory Version Check
+router.get(
+  "/version",
+  authMiddleware,
+  requirePermission(PERMISSIONS.INVENTORY.VIEW),
+  controller.getInventoryVersion,
+);
+
 // 📋 Inventory Adjust List
 router.get(
   "/adjust-list",

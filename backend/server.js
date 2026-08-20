@@ -4,10 +4,7 @@ const mongoose = require("mongoose");
 
 const app = require("./app");
 
-const {
-  startAutoBackup,
-  runStartupBackupCheck,
-} = require("./services/backupScheduler");
+const { startAutoBackup } = require("./services/backupScheduler");
 
 const PORT = Number(process.env.PORT) || 5000;
 
@@ -34,16 +31,6 @@ async function startServer() {
     });
 
     startAutoBackup();
-
-    if (process.env.ENABLE_STARTUP_BACKUP === "true") {
-      setImmediate(async () => {
-        try {
-          await runStartupBackupCheck();
-        } catch (error) {
-          console.error("❌ Startup backup check failed:", error.message);
-        }
-      });
-    }
   } catch (error) {
     console.error("❌ Server startup failed:", error.message);
 

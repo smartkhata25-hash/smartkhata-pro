@@ -7,7 +7,7 @@ const { getCloudBackupList } = require("./cloudListService");
 const { isRunning } = require("./backupProgressService");
 
 const TIMEZONE = "Asia/Karachi";
-const STARTUP_DELAY_MS = 10 * 60 * 1000;
+
 const RETRY_DELAY_MS = 30 * 60 * 1000;
 const MAX_BACKUP_ATTEMPTS = 2;
 
@@ -264,18 +264,6 @@ function startAutoBackup() {
   schedulerStarted = true;
 
   console.log("📦 Auto Backup Scheduler Started - Asia/Karachi");
-
-  setTimeout(async () => {
-    try {
-      console.log("⏳ Running delayed startup backup check...");
-
-      await backupAllUsers({
-        reason: "delayed_startup",
-      });
-    } catch (error) {
-      console.error("❌ Delayed startup backup failed:", error.message);
-    }
-  }, STARTUP_DELAY_MS);
 
   cron.schedule(
     "0 14 * * *",

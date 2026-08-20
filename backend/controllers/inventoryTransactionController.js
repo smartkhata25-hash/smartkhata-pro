@@ -238,3 +238,58 @@ exports.getAdjustList = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch adjust list" });
   }
 };
+
+// ⚡ Lightweight Inventory Version Check
+exports.getInventoryVersion = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        message: "Invalid user",
+      });
+    }
+
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+
+    const [latestTransaction, latestProduct] = await Promise.all([
+      InventoryTransaction.findOne({
+        userId: objectUserId,
+      })
+        .sort({ updatedAt: -1, _id: -1 })
+        .select("updatedAt createdAt")
+        .lean(),
+
+      Product.findOne({
+        userId: objectUserId,
+      })
+        .sort({ updatedAt: -1, _id: -1 })
+        .select("updatedAt createdAt")
+        .lean(),
+    ]);
+
+    const transactionTime =
+      latestTransaction?.updatedAt || latestTransaction?.createdAt || null;
+
+    const productTime =
+      latestProduct?.updatedAt || latestProduct?.createdAt || null;
+
+    const transactionTimestamp = transactionTime
+      ? new Date(transactionTime).getTime()
+      : 0;
+
+    const productTimestamp = productTime ? new Date(productTime).getTime() : 0;
+
+    const latestTimestamp = Math.max(transactionTimestamp, productTimestamp);
+
+    return res.json({
+      version: latestTimestamp || 0,
+    });
+  } catch (error) {
+    console.error("Inventory Version Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to check inventory version",
+    });
+  }
+};

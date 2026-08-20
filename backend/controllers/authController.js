@@ -11,7 +11,7 @@ const InviteCode = require("../models/InviteCode");
 const PasswordReset = require("../models/PasswordReset");
 
 const { generateDeviceId } = require("../utils/deviceHelper");
-const { recalculateAllUserAccounts } = require("../utils/accountHelper");
+
 const { logActivity } = require("../utils/activityLogger");
 
 const createBaseAccountsForUser = require("../utils/createBaseAccounts");
@@ -193,10 +193,8 @@ const loginUser = async (req, res) => {
         });
       }
 
-      // Owner account calculations
       setTimeout(async () => {
         try {
-          await recalculateAllUserAccounts(businessOwnerId);
           await fixLegacyExpenseTitles(businessOwnerId);
         } catch (backgroundError) {
           console.error(

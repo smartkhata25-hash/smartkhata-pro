@@ -1,5 +1,5 @@
 const JournalEntry = require("../models/JournalEntry");
-const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { recalculateAccountBalances } = require("../utils/accountHelper");
 const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const JOURNAL_RULES = require("../utils/journalRules");
@@ -8,14 +8,21 @@ const { isBalanced } = require("../utils/journalHelper");
 const { logAudit } = require("../utils/auditHelper");
 const { isPeriodLocked } = require("../utils/periodLockHelper");
 
-// ✅ Helper: Recalculate all involved accounts
+// ✅ Helper: Recalculate all involved accounts in one batch
 const recalculateInvolvedAccounts = async (lines) => {
   const uniqueAccounts = [
-    ...new Set(lines.map((line) => line.account.toString())),
+    ...new Set(
+      lines
+        .filter((line) => line?.account)
+        .map((line) => line.account.toString()),
+    ),
   ];
-  for (let accId of uniqueAccounts) {
-    await recalculateAccountBalance(accId);
+
+  if (uniqueAccounts.length === 0) {
+    return [];
   }
+
+  return await recalculateAccountBalances(uniqueAccounts);
 };
 
 // ✅ Create Entry

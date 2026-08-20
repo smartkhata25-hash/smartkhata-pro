@@ -85,7 +85,126 @@ exports.recalculateAccountBalance = async (accountId) => {
   }
 };
 
-// ✅ 3. تمام اکاؤنٹس کا بیلنس ریفریش کریں (کسی مخصوص یوزر کے لیے)
+// ✅ Multiple involved accounts کو ایک ہی aggregation میں recalculate کریں
+exports.recalculateAccountBalances = async (accountIds = []) => {
+  const validIds = [
+    ...new Set(
+      accountIds
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => id.toString()),
+    ),
+  ];
+
+  if (validIds.length === 0) {
+    return [];
+  }
+
+  const objectIds = validIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const accounts = await Account.find({
+    _id: { $in: objectIds },
+  }).select("_id userId name normalBalance");
+
+  if (accounts.length === 0) {
+    return [];
+  }
+
+  const userIds = [
+    ...new Set(accounts.map((account) => account.userId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const summary = await JournalEntry.aggregate([
+    {
+      $match: {
+        createdBy: { $in: userIds },
+        isDeleted: false,
+        "lines.account": { $in: objectIds },
+      },
+    },
+    {
+      $unwind: "$lines",
+    },
+    {
+      $match: {
+        "lines.account": { $in: objectIds },
+      },
+    },
+    {
+      $group: {
+        _id: "$lines.account",
+
+        totalDebit: {
+          $sum: {
+            $cond: [{ $eq: ["$lines.type", "debit"] }, "$lines.amount", 0],
+          },
+        },
+
+        totalCredit: {
+          $sum: {
+            $cond: [{ $eq: ["$lines.type", "credit"] }, "$lines.amount", 0],
+          },
+        },
+      },
+    },
+  ]);
+
+  const summaryMap = new Map(
+    summary.map((item) => [
+      item._id.toString(),
+      {
+        totalDebit: Number(item.totalDebit || 0),
+        totalCredit: Number(item.totalCredit || 0),
+      },
+    ]),
+  );
+
+  const updates = accounts.map((account) => {
+    const totals = summaryMap.get(account._id.toString()) || {
+      totalDebit: 0,
+      totalCredit: 0,
+    };
+
+    const balance =
+      account.normalBalance === "debit"
+        ? totals.totalDebit - totals.totalCredit
+        : totals.totalCredit - totals.totalDebit;
+
+    return {
+      updateOne: {
+        filter: {
+          _id: account._id,
+          userId: account.userId,
+        },
+        update: {
+          $set: { balance },
+        },
+      },
+    };
+  });
+
+  if (updates.length > 0) {
+    await Account.bulkWrite(updates);
+  }
+
+  return accounts.map((account) => {
+    const totals = summaryMap.get(account._id.toString()) || {
+      totalDebit: 0,
+      totalCredit: 0,
+    };
+
+    const balance =
+      account.normalBalance === "debit"
+        ? totals.totalDebit - totals.totalCredit
+        : totals.totalCredit - totals.totalDebit;
+
+    return {
+      accountId: account._id,
+      name: account.name,
+      balance,
+    };
+  });
+};
+
 exports.recalculateAllUserAccounts = async (userId) => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     console.warn("⚠️ Invalid User ID for full recalculation");

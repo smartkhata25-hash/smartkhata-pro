@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ProfitSummaryModal from '../components/profit/ProfitSummaryModal';
@@ -35,22 +35,27 @@ const DashboardPage = () => {
   const [showProfitModal, setShowProfitModal] = useState(false);
 
   const [profitData, setProfitData] = useState(null);
+
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState('month');
+
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
     localStorage.setItem(key, JSON.stringify(showCards));
   }, [showCards, isMobile]);
 
-  useEffect(() => {
-    const fetchSummary = async () => {
+  const fetchSummary = useCallback(
+    async ({ forceRefresh = false } = {}) => {
       if (!canViewSummaryCards) {
         return;
       }
 
       try {
+        setSummaryLoading(true);
+
         const token = localStorage.getItem('token');
         const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -59,7 +64,6 @@ const DashboardPage = () => {
 
         const year = selectedYear;
 
-        // ✅ Date کو YYYY-MM-DD Format میں بنائیں
         const formatDate = (date) => {
           const dateYear = date.getFullYear();
           const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
@@ -68,7 +72,6 @@ const DashboardPage = () => {
           return `${dateYear}-${dateMonth}-${dateDay}`;
         };
 
-        // ✅ Pakistan Time (+05:00) کے مطابق مکمل Date Range
         if (filterType === 'today') {
           const today = new Date();
           const todayDate = formatDate(today);
@@ -90,29 +93,49 @@ const DashboardPage = () => {
           endDate = `${year}-12-31T23:59:59.999+05:00`;
         }
 
-        let url = `${baseUrl}/api/dashboard-summary`;
+        const params = new URLSearchParams();
 
         if (filterType !== 'all' && startDate && endDate) {
-          const params = new URLSearchParams({
-            filterType,
-            startDate,
-            endDate,
-          });
-
-          url += `?${params.toString()}`;
+          params.set('filterType', filterType);
+          params.set('startDate', startDate);
+          params.set('endDate', endDate);
         }
 
+        if (forceRefresh) {
+          params.set('refresh', 'true');
+        }
+
+        const queryString = params.toString();
+
+        const url = `${baseUrl}/api/dashboard-summary${queryString ? `?${queryString}` : ''}`;
+
         const res = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         });
+
         setSummary(res.data);
       } catch (err) {
         console.error(t('alerts.dashboardSummaryFetchError'), err);
+      } finally {
+        setSummaryLoading(false);
       }
-    };
+    },
+    [canViewSummaryCards, selectedMonth, selectedYear, filterType]
+  );
 
-    fetchSummary();
-  }, [selectedMonth, selectedYear, filterType, canViewSummaryCards]);
+  useEffect(() => {
+    const sessionKey = 'dashboard_summary_loaded_this_session';
+
+    const alreadyLoadedThisSession = sessionStorage.getItem(sessionKey) === 'true';
+
+    fetchSummary({
+      forceRefresh: !alreadyLoadedThisSession,
+    }).then(() => {
+      sessionStorage.setItem(sessionKey, 'true');
+    });
+  }, [fetchSummary]);
 
   return (
     <div className="space-y-10">
@@ -124,6 +147,20 @@ const DashboardPage = () => {
 
         {canViewSummaryCards && (
           <div className="flex items-center gap-2">
+            {/* 🔄 Manual Refresh */}
+            <button
+              type="button"
+              onClick={() => fetchSummary({ forceRefresh: true })}
+              disabled={summaryLoading}
+              className="text-xs md:text-sm px-3 rounded-full
+bg-white/80 backdrop-blur-md border border-gray-300
+shadow-sm hover:shadow-md hover:bg-gray-100
+transition-all duration-200
+font-medium h-[36px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {summaryLoading ? 'Refreshing...' : '🔄 Refresh'}
+            </button>
+
             {/* 👁 Toggle */}
             <button
               onClick={() => setShowCards((prev) => !prev)}

@@ -10,12 +10,13 @@ import {
   navigateInvoice,
   getLastInvoiceNo,
 } from '../services/salesService';
-import { fetchProductsWithToken } from '../services/inventoryService';
-
-import { getValidPaymentAccounts } from '../services/accountService';
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
-import { fetchSaleParties } from '../services/partyService';
-import { getPartyLedger } from '../services/partyLedgerService';
+import { getCustomerBalance } from '../services/customerLedgerService';
+import { getPartyBalance } from '../services/partyLedgerService';
+import {
+  fetchInvoiceFormOptions,
+  getCachedInvoiceFormOptions,
+  invalidateInvoiceFormOptionsSections,
+} from '../services/invoiceFormOptionsService';
 
 import InvoiceTable from './InvoiceTable';
 import { useLocation } from 'react-router-dom';
@@ -161,6 +162,16 @@ const InvoiceForm = ({
 
       sessionStorage.removeItem(`sale_edit_preview_draft_${editingInvoiceFromAPI._id}`);
 
+      if (!editingInvoiceFromAPI.isOpening) {
+        invalidateInvoiceFormOptionsSections(['products']);
+
+        try {
+          await fetchInvoiceFormOptions();
+        } catch (error) {
+          console.error('Product stock refresh failed:', error);
+        }
+      }
+
       alert('Invoice deleted successfully');
 
       onHistoryReset && onHistoryReset();
@@ -191,9 +202,30 @@ const InvoiceForm = ({
   useEffect(() => {
     const handler = (e) => {
       const newProduct = e.detail;
-      const cached = JSON.parse(localStorage.getItem('products') || '[]');
-      localStorage.setItem('products', JSON.stringify([...cached, newProduct]));
       const rowIndex = Number(localStorage.getItem('lastCreatedProductRow'));
+
+      if (newProduct?._id) {
+        invalidateInvoiceFormOptionsSections(['products']);
+
+        setProducts((previousProducts) => {
+          const existingIndex = previousProducts.findIndex(
+            (product) => String(product?._id) === String(newProduct._id)
+          );
+
+          if (existingIndex === -1) {
+            return [...previousProducts, newProduct];
+          }
+
+          const updatedProducts = [...previousProducts];
+
+          updatedProducts[existingIndex] = {
+            ...updatedProducts[existingIndex],
+            ...newProduct,
+          };
+
+          return updatedProducts;
+        });
+      }
 
       if (!newProduct || rowIndex < 0) return;
 
@@ -529,134 +561,28 @@ const InvoiceForm = ({
 
     let cancelled = false;
 
-    // ✅ Load Customers from Cache
-    try {
-      const cachedCustomers = localStorage.getItem('customers');
+    const applyOptions = (data) => {
+      if (!data || cancelled) return;
 
-      if (cachedCustomers) {
-        const parsed = JSON.parse(cachedCustomers);
+      setCustomers(Array.isArray(data.customers) ? data.customers : []);
+      setParties(Array.isArray(data.parties) ? data.parties : []);
+      setProducts(Array.isArray(data.products) ? data.products : []);
+      setAccounts(Array.isArray(data.paymentAccounts) ? data.paymentAccounts : []);
+    };
 
-        if (Array.isArray(parsed)) {
-          setCustomers(parsed);
-        }
-      }
-    } catch (err) {
-      console.error('Customers cache failed:', err);
-    }
+    const cachedOptions = getCachedInvoiceFormOptions();
 
-    // ✅ Load Parties from Cache
-    try {
-      const cachedParties = localStorage.getItem('saleParties');
-
-      if (cachedParties) {
-        const parsed = JSON.parse(cachedParties);
-
-        if (Array.isArray(parsed)) {
-          setParties(parsed);
-        }
-      }
-    } catch (err) {
-      console.error('Parties cache failed:', err);
-    }
-
-    // ✅ Load Accounts from Cache
-    try {
-      const cachedAccounts = localStorage.getItem('paymentAccounts');
-
-      if (cachedAccounts) {
-        const parsed = JSON.parse(cachedAccounts);
-
-        if (Array.isArray(parsed)) {
-          setAccounts(parsed);
-        }
-      }
-    } catch (err) {
-      console.error('Accounts cache failed:', err);
-    }
-    // ✅ Cached products فوراً دکھائیں
-    try {
-      const cachedProducts = localStorage.getItem('products');
-
-      if (cachedProducts) {
-        const parsedProducts = JSON.parse(cachedProducts);
-
-        if (Array.isArray(parsedProducts)) {
-          setProducts(parsedProducts);
-        }
-      }
-    } catch (err) {
-      console.error('Cached products read failed:', err);
+    if (cachedOptions) {
+      applyOptions(cachedOptions);
     }
 
     const loadFormOptions = async () => {
-      const results = await Promise.allSettled([
-        fetch(`${API}/api/customers?limit=500`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }).then(async (res) => {
-          if (!res.ok) {
-            throw new Error('Customers load failed');
-          }
+      try {
+        const data = await fetchInvoiceFormOptions();
 
-          return res.json();
-        }),
-
-        fetchSaleParties(token),
-
-        fetchProductsWithToken(token),
-
-        getValidPaymentAccounts(),
-      ]);
-
-      if (cancelled) return;
-
-      const [customerResult, partyResult, productResult, accountResult] = results;
-
-      if (customerResult.status === 'fulfilled') {
-        const customerData = customerResult.value;
-
-        const customerList = Array.isArray(customerData)
-          ? customerData
-          : Array.isArray(customerData?.customers)
-            ? customerData.customers
-            : [];
-
-        setCustomers(customerList);
-
-        localStorage.setItem('customers', JSON.stringify(customerList));
-      } else {
-        console.error('Customers load failed:', customerResult.reason);
-      }
-
-      if (partyResult.status === 'fulfilled') {
-        const partyList = Array.isArray(partyResult.value) ? partyResult.value : [];
-
-        setParties(partyList);
-
-        localStorage.setItem('saleParties', JSON.stringify(partyList));
-      } else {
-        console.error('Sale parties load failed:', partyResult.reason);
-      }
-
-      if (productResult.status === 'fulfilled') {
-        const productData = Array.isArray(productResult.value) ? productResult.value : [];
-
-        setProducts(productData);
-
-        localStorage.setItem('products', JSON.stringify(productData));
-      } else {
-        console.error('Products load failed:', productResult.reason);
-      }
-
-      if (accountResult.status === 'fulfilled') {
-        const accountList = Array.isArray(accountResult.value) ? accountResult.value : [];
-
-        setAccounts(accountList);
-
-        localStorage.setItem('paymentAccounts', JSON.stringify(accountList));
-      } else {
-        console.error('Accounts load failed:', accountResult.reason);
+        applyOptions(data);
+      } catch (error) {
+        console.error('Invoice form options load failed:', error);
       }
     };
 
@@ -666,7 +592,6 @@ const InvoiceForm = ({
       cancelled = true;
     };
   }, [token]);
-  // 🔥 FIX: restore customerId after reload
   useEffect(() => {
     if (!customerName || customers.length === 0) return;
 
@@ -700,34 +625,65 @@ const InvoiceForm = ({
   };
 
   const debounceTimer = useRef(null);
+
   useEffect(() => {
-    const restoreCustomerBalance = async () => {
-      if (!customerName || customers.length === 0) return;
+    if (!selectedCustomerId) {
+      setCustomerLedger([]);
+      setCustomerBalance(0);
+      return;
+    }
 
-      const matchedCustomer = customers.find(
-        (c) => c.name.toLowerCase() === customerName.toLowerCase()
-      );
+    let cancelled = false;
 
-      if (!matchedCustomer) return;
-
+    const loadCustomerBalance = async () => {
       try {
-        const accountId = matchedCustomer?.account?._id || matchedCustomer?.account;
+        let balance = 0;
 
-        if (!accountId) return;
+        if (selectedCustomerType === 'party') {
+          const res = await getPartyBalance(selectedCustomerId);
 
-        const res = await getLedgerByCustomerAccount(accountId);
+          balance = Number(res?.balance || 0);
+        } else {
+          const selectedCustomer = customers.find(
+            (customer) => String(customer?._id) === String(selectedCustomerId)
+          );
 
-        const closingBalance =
-          res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].runningBalance || 0 : 0;
+          const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
 
-        setCustomerBalance(closingBalance);
+          if (!accountId) {
+            if (!cancelled) {
+              setCustomerLedger([]);
+              setCustomerBalance(0);
+            }
+
+            return;
+          }
+
+          const res = await getCustomerBalance(accountId);
+
+          balance = Number(res?.balance || 0);
+        }
+
+        if (cancelled) return;
+
+        setCustomerLedger([]);
+        setCustomerBalance(Number.isFinite(balance) ? balance : 0);
       } catch (err) {
-        console.error('Restore balance failed', err);
+        if (cancelled) return;
+
+        console.error('Customer balance load failed:', err);
+
+        setCustomerLedger([]);
+        setCustomerBalance(0);
       }
     };
 
-    restoreCustomerBalance();
-  }, [customerName, customers]);
+    loadCustomerBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomerId, selectedCustomerType, customers]);
   const handleCustomerInput = (e) => {
     const value = e.target.value;
     setCustomerName(value);
@@ -783,9 +739,9 @@ const InvoiceForm = ({
     }
   };
 
-  const handleCustomerSelect = async (name, phone, id, type = 'customer') => {
+  const handleCustomerSelect = (name, phone, id, type = 'customer') => {
     setCustomerName(name);
-    setCustomerPhone(phone);
+    setCustomerPhone(phone || '');
 
     setSelectedCustomerId(id);
     setSelectedCustomerType(type);
@@ -795,35 +751,6 @@ const InvoiceForm = ({
     setCustomerSuggestions([]);
     setSelectedCustomerIndex(-1);
     setShowCustomerAddOptions(false);
-
-    try {
-      let res;
-
-      if (type === 'party') {
-        res = await getPartyLedger(id);
-      } else {
-        const selectedCustomer = customers.find((c) => c._id === id);
-
-        const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
-
-        if (!accountId) {
-          setCustomerBalance(0);
-          return;
-        }
-
-        res = await getLedgerByCustomerAccount(accountId);
-      }
-
-      setCustomerLedger(res.ledger || []);
-
-      const closingBalance =
-        res.ledger?.length > 0 ? res.ledger[res.ledger.length - 1].balance || 0 : 0;
-
-      setCustomerBalance(closingBalance);
-    } catch (err) {
-      console.error('Customer ledger load failed', err);
-      setCustomerBalance(0);
-    }
   };
 
   const quickAddCustomer = async (name) => {
@@ -849,8 +776,19 @@ const InvoiceForm = ({
         return;
       }
 
-      // ✅ customer set
-      setCustomerName(data.name);
+      invalidateInvoiceFormOptionsSections(['customers']);
+
+      setCustomers((previousCustomers) => {
+        if (!data?._id) return previousCustomers;
+
+        const exists = previousCustomers.some(
+          (customer) => String(customer?._id) === String(data._id)
+        );
+
+        return exists ? previousCustomers : [...previousCustomers, data];
+      });
+
+      setCustomerName(data.name || name);
       setCustomerPhone(data.phone || '');
 
       setSelectedCustomerId(data._id || '');
@@ -858,14 +796,13 @@ const InvoiceForm = ({
 
       onCustomerChange && onCustomerChange(data._id || '');
 
-      // ✅ dropdown hide
       setCustomerSuggestions([]);
       setSelectedCustomerIndex(-1);
       setShowCustomerAddOptions(false);
 
-      // ✅ cursor Search Item میں
       setTimeout(() => {
         const firstItemInput = document.querySelector('input[placeholder="Search Item..."]');
+
         firstItemInput?.focus();
       }, 0);
     } catch (err) {
@@ -1346,6 +1283,20 @@ const InvoiceForm = ({
 
         if (response?.invoice?.billNo) {
           setBillNo(response.invoice.billNo);
+        }
+      }
+
+      if (!isOpeningInvoice) {
+        invalidateInvoiceFormOptionsSections(['products']);
+
+        try {
+          const refreshedOptions = await fetchInvoiceFormOptions();
+
+          if (Array.isArray(refreshedOptions?.products)) {
+            setProducts(refreshedOptions.products);
+          }
+        } catch (error) {
+          console.error('Product stock refresh failed:', error);
         }
       }
 
@@ -2754,7 +2705,7 @@ const InvoiceForm = ({
         <CustomerForm
           initialData={{ name: customerFormName }}
           onSubmit={async (data) => {
-            await fetch(`${API}/api/customers`, {
+            const res = await fetch(`${API}/api/customers`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -2763,17 +2714,39 @@ const InvoiceForm = ({
               body: JSON.stringify(data),
             });
 
-            setCustomerName(data.name);
-            setCustomerPhone(data.phone || '');
+            const createdCustomer = await res.json();
 
-            onCustomerChange && onCustomerChange(data._id);
+            if (!res.ok) {
+              alert(createdCustomer?.message || t('alerts.customerAddFailed'));
+              return;
+            }
+
+            invalidateInvoiceFormOptionsSections(['customers']);
+
+            setCustomers((previousCustomers) => {
+              if (!createdCustomer?._id) return previousCustomers;
+
+              const exists = previousCustomers.some(
+                (customer) => String(customer?._id) === String(createdCustomer._id)
+              );
+
+              return exists ? previousCustomers : [...previousCustomers, createdCustomer];
+            });
+
+            setCustomerName(createdCustomer.name || data.name || '');
+            setCustomerPhone(createdCustomer.phone || data.phone || '');
+
+            setSelectedCustomerId(createdCustomer._id || '');
+            setSelectedCustomerType('customer');
+
+            onCustomerChange && onCustomerChange(createdCustomer._id || '');
 
             setShowCustomerForm(false);
             setShowCustomerAddOptions(false);
 
-            // cursor Search Item میں
             setTimeout(() => {
               const firstItemInput = document.querySelector('input[placeholder="Search Item..."]');
+
               firstItemInput?.focus();
             }, 0);
           }}

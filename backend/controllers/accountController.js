@@ -302,15 +302,10 @@ exports.getAccountTransactions = async (req, res) => {
 
           const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
 
-          /*
-           * Invoice والی entries میں invoiceId استعمال ہوگی۔
-           * Receive Payment، Pay Bill، Expense وغیرہ میں referenceId استعمال ہوگی۔
-           */
           const clickableReferenceId =
             entry.referenceId || entry.invoiceId || null;
 
           return {
-            // Journal Entry کی اپنی ID
             _id: entry._id,
 
             date: entry.date,
@@ -321,15 +316,12 @@ exports.getAccountTransactions = async (req, res) => {
             debit,
             credit,
 
-            // ✅ Source کی مکمل معلومات
             sourceType: entry.sourceType || "",
             referenceType: entry.sourceType || "",
             originModule: entry.originModule || "",
 
-            // ✅ Clickable routing کے لیے اصل record ID
             referenceId: clickableReferenceId,
 
-            // ✅ اصل محفوظ fields بھی واپس دیں
             invoiceId: entry.invoiceId || null,
             invoiceModel: entry.invoiceModel || null,
 

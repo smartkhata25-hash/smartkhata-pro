@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 const invoiceController = require("../controllers/invoiceController");
+const {
+  getInvoiceFormOptions,
+} = require("../controllers/invoiceFormOptionsController");
 const { protect } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 
@@ -43,6 +46,17 @@ router.get(
   protect,
   requirePermission(PERMISSIONS.SALES.VIEW),
   invoiceController.navigateInvoice,
+);
+
+router.get(
+  "/form-options",
+  protect,
+  requirePermission(
+    PERMISSIONS.SALES.VIEW,
+    PERMISSIONS.SALES.CREATE,
+    PERMISSIONS.SALES.EDIT,
+  ),
+  getInvoiceFormOptions,
 );
 
 router.get(

@@ -90,14 +90,19 @@ export const updateInvoice = async (id, invoiceData, token) => {
   });
   return res.data;
 };
-// ✅ Search invoices by query string (e.g., bill no, customer name, etc.)
-export const searchInvoices = async (query) => {
+export const searchInvoices = async (query, limit = 50) => {
   const token = localStorage.getItem('token');
-  const res = await axios.get(`${API_URL}/search?q=${query}`, {
+
+  const res = await axios.get(`${API_URL}/search`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    params: {
+      q: query,
+      limit,
+    },
   });
+
   return res.data;
 };
 // ✅ Navigate Invoice (Next / Previous)

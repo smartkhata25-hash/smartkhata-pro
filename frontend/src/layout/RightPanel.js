@@ -60,7 +60,7 @@ const AlertCard = ({ title, count, color, onClick }) => (
   </div>
 );
 
-const RightPanel = () => {
+const RightPanel = ({ dashboardAlerts, refreshDashboardAlerts }) => {
   const canViewRightPanel = hasPermission('dashboard.right_panel');
 
   const [summary, setSummary] = useState({
@@ -70,11 +70,11 @@ const RightPanel = () => {
     payableDetails: [],
   });
 
-  const [alerts, setAlerts] = useState({
+  const alerts = dashboardAlerts || {
     lowStock: 0,
     overdueInvoices: 0,
     pendingPayments: 0,
-  });
+  };
 
   // ✅ receivable یا payable Modal
   const [breakdownType, setBreakdownType] = useState(null);
@@ -115,18 +115,11 @@ const RightPanel = () => {
     }
 
     try {
-      const [summaryRes, alertsRes] = await Promise.all([
-        axios.get(`${baseUrl}/api/dashboard-summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-
-        axios.get(`${baseUrl}/api/dashboard-alerts`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
+      const summaryRes = await axios.get(`${baseUrl}/api/dashboard-summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       setSummary(summaryRes.data);
-      setAlerts(alertsRes.data?.summary || {});
     } catch (err) {
       console.error(t('alerts.panelLoadError'), err);
     }
@@ -144,7 +137,9 @@ const RightPanel = () => {
       {/* 🔄 Refresh Button */}
       <div className="flex justify-end mb-3">
         <button
-          onClick={fetchData}
+          onClick={async () => {
+            await Promise.all([fetchData(), refreshDashboardAlerts?.()]);
+          }}
           className="text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100"
         >
           🔄 {t('common.refresh')}

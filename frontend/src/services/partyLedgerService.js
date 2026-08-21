@@ -30,12 +30,25 @@ export const getPartyLedger = async (partyId, startDate = '', endDate = '') => {
   return res.data;
 };
 
+export const getPartyBalance = async (partyId) => {
+  if (!partyId) {
+    throw new Error('Party ID is required');
+  }
+
+  const res = await axios.get(`${API_URL}/balance/${partyId}`, {
+    ...getAuthHeaders(),
+  });
+
+  return res.data;
+};
+
 // ✅ Alias
 export const fetchPartyLedger = getPartyLedger;
 
 const partyLedgerService = {
   getPartyLedger,
   fetchPartyLedger,
+  getPartyBalance,
 };
 
 export default partyLedgerService;

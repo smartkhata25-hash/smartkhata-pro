@@ -17,13 +17,18 @@ export async function createExpense(formData) {
 
 export async function getAllExpenses() {
   const response = await axios.get(API_URL, getConfig());
-  return response.data;
+
+  return Array.isArray(response.data) ? response.data : [];
 }
 
-// ✅ Get Single Expense by ID (for editing)
 export async function getExpenseById(id) {
+  if (!id) {
+    throw new Error('Expense ID is required');
+  }
+
   const response = await axios.get(`${API_URL}/${id}`, getConfig());
-  return response.data;
+
+  return response.data || null;
 }
 
 // ✅ Update Expense

@@ -14,13 +14,18 @@ const getAuthHeaders = () => {
   };
 };
 
-// 🔍 Get Titles (search)
 export const getExpenseTitles = async (search = '') => {
   try {
-    const res = await axios.get(`${API}?search=${search}`, getAuthHeaders());
-    return res.data;
+    const res = await axios.get(API, {
+      ...getAuthHeaders(),
+      params: {
+        search: String(search || '').trim(),
+      },
+    });
+
+    return Array.isArray(res.data) ? res.data : [];
   } catch (error) {
-    console.error('❌ getExpenseTitles error:', error);
+    console.error('getExpenseTitles error:', error);
     throw error;
   }
 };

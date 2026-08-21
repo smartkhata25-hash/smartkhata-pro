@@ -5,6 +5,32 @@ const API_URL = `${BASE_URL}/api/accounts`;
 
 const getToken = () => localStorage.getItem('token');
 
+const ACCOUNTS_CACHE_KEY = 'accounts_cache_v1';
+
+const getCachedAccounts = () => {
+  try {
+    const cached = localStorage.getItem(ACCOUNTS_CACHE_KEY);
+
+    if (!cached) return null;
+
+    const parsed = JSON.parse(cached);
+
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedAccounts = (accounts) => {
+  if (!Array.isArray(accounts)) return;
+
+  localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify(accounts));
+};
+
+export const clearAccountsCache = () => {
+  localStorage.removeItem(ACCOUNTS_CACHE_KEY);
+};
+
 const authHeaders = () => ({
   headers: {
     Authorization: `Bearer ${getToken()}`,
@@ -12,10 +38,22 @@ const authHeaders = () => ({
   },
 });
 
-// ✅ تمام اکاؤنٹس لائیں (unfiltered)
-export const getAccounts = async () => {
+export const getAccounts = async (forceRefresh = false) => {
+  if (!forceRefresh) {
+    const cached = getCachedAccounts();
+
+    if (cached) {
+      return cached;
+    }
+  }
+
   const res = await axios.get(API_URL, authHeaders());
-  return res.data;
+
+  const data = Array.isArray(res.data) ? res.data : [];
+
+  setCachedAccounts(data);
+
+  return data;
 };
 
 // ✅ filtered اکاؤنٹس لائیں جو صرف invoice payment کے لیے valid ہوں
@@ -46,16 +84,25 @@ export const getAccountsByCategory = async (category) => {
 
 export const createAccount = async (data) => {
   const res = await axios.post(API_URL, data, authHeaders());
+
+  clearAccountsCache();
+
   return res.data;
 };
 
 export const updateAccount = async (id, data) => {
   const res = await axios.put(`${API_URL}/${id}`, data, authHeaders());
+
+  clearAccountsCache();
+
   return res.data;
 };
 
 export const deleteAccount = async (id) => {
   const res = await axios.delete(`${API_URL}/${id}`, authHeaders());
+
+  clearAccountsCache();
+
   return res.data;
 };
 

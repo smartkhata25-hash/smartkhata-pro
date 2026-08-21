@@ -266,6 +266,8 @@ exports.createInvoice = async (req, res) => {
     const snapshotItems = [];
 
     if (!openingInvoice) {
+      const productIds = [];
+
       for (const item of items) {
         if (
           !item?.productId ||
@@ -290,7 +292,19 @@ exports.createInvoice = async (req, res) => {
           });
         }
 
-        const product = await Product.findById(item.productId);
+        productIds.push(new mongoose.Types.ObjectId(item.productId));
+      }
+
+      const products = await Product.find({
+        _id: { $in: productIds },
+      }).lean();
+
+      const productMap = new Map(
+        products.map((product) => [String(product._id), product]),
+      );
+
+      for (const item of items) {
+        const product = productMap.get(String(item.productId));
 
         if (!product) {
           return res.status(404).json({
@@ -307,7 +321,10 @@ exports.createInvoice = async (req, res) => {
           });
         }
 
+        const quantity = Number(item.quantity || 0);
+        const salePrice = Number(item.price || 0);
         const costPrice = Number(product.unitCost || 0);
+
         const itemTotal = quantity * salePrice;
         const profit = (salePrice - costPrice) * quantity;
 
@@ -1466,6 +1483,8 @@ exports.updateInvoice = async (req, res) => {
     const snapshotItems = [];
 
     if (!openingInvoice) {
+      const productIds = [];
+
       for (const item of items) {
         if (
           !item?.productId ||
@@ -1490,7 +1509,19 @@ exports.updateInvoice = async (req, res) => {
           });
         }
 
-        const product = await Product.findById(item.productId);
+        productIds.push(new mongoose.Types.ObjectId(item.productId));
+      }
+
+      const products = await Product.find({
+        _id: { $in: productIds },
+      }).lean();
+
+      const productMap = new Map(
+        products.map((product) => [String(product._id), product]),
+      );
+
+      for (const item of items) {
+        const product = productMap.get(String(item.productId));
 
         if (!product) {
           return res.status(404).json({
@@ -1507,7 +1538,10 @@ exports.updateInvoice = async (req, res) => {
           });
         }
 
+        const quantity = Number(item.quantity || 0);
+        const salePrice = Number(item.price || 0);
         const costPrice = Number(product.unitCost || 0);
+
         const itemTotal = quantity * salePrice;
         const profit = (salePrice - costPrice) * quantity;
 
@@ -2179,44 +2213,110 @@ exports.getInvoiceByBillNo = async (req, res) => {
 exports.searchInvoices = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const queryText = req.query.q || "";
+    const queryText = String(req.query.q || "").trim();
+
+    const requestedLimit = Number.parseInt(req.query.limit || "50", 10);
+    const limit = Math.min(
+      Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 50, 1),
+      100,
+    );
+
+    const escapeRegex = (value) =>
+      String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     const filters = {
       createdBy: userId,
       isDeleted: { $ne: true },
     };
+
     queryText.split(" ").forEach((pair) => {
-      const [key, value] = pair.split(":");
-      if (key && value) {
-        if (key === "billNo") filters.billNo = value;
-        if (key === "customerName")
-          filters.customerName = { $regex: value, $options: "i" };
-        if (key === "customerPhone")
-          filters.customerPhone = { $regex: value, $options: "i" };
-        if (key === "startDate") {
+      const separatorIndex = pair.indexOf(":");
+
+      if (separatorIndex <= 0) {
+        return;
+      }
+
+      const key = pair.slice(0, separatorIndex);
+      const value = pair.slice(separatorIndex + 1).trim();
+
+      if (!value) {
+        return;
+      }
+
+      if (key === "billNo") {
+        filters.billNo = value;
+      }
+
+      if (key === "customerName") {
+        filters.customerName = {
+          $regex: escapeRegex(value),
+          $options: "i",
+        };
+      }
+
+      if (key === "customerPhone") {
+        filters.customerPhone = {
+          $regex: escapeRegex(value),
+          $options: "i",
+        };
+      }
+
+      if (key === "startDate") {
+        const startDate = new Date(`${value}T00:00:00`);
+
+        if (!Number.isNaN(startDate.getTime())) {
           filters.invoiceDate = {
             ...filters.invoiceDate,
-            $gte: new Date(value),
+            $gte: startDate,
           };
         }
+      }
 
-        if (key === "endDate") {
+      if (key === "endDate") {
+        const endDate = new Date(`${value}T23:59:59.999`);
+
+        if (!Number.isNaN(endDate.getTime())) {
           filters.invoiceDate = {
             ...filters.invoiceDate,
-            $lte: new Date(value + "T23:59:59.999Z"),
+            $lte: endDate,
           };
         }
       }
     });
 
-    const invoices = await Invoice.find(filters).sort({ createdAt: -1 });
-    res.json(invoices);
+    const invoices = await Invoice.find(filters)
+      .select(
+        [
+          "billNo",
+          "customerName",
+          "customerPhone",
+          "invoiceDate",
+          "totalAmount",
+          "paidAmount",
+          "status",
+          "customerId",
+          "partyId",
+          "createdAt",
+        ].join(" "),
+      )
+      .sort({
+        invoiceDate: -1,
+        createdAt: -1,
+        _id: -1,
+      })
+      .limit(limit)
+      .lean();
+
+    return res.json(invoices);
   } catch (error) {
-    console.error("❌ Invoice search error:", error);
-    res.status(500).json({ message: "Invoice search failed", error });
+    console.error("Invoice search error:", error);
+
+    return res.status(500).json({
+      message: "Invoice search failed",
+      error: error.message,
+    });
   }
 };
-
 // ✅ Navigate Invoice (Next / Previous by billNo)
 exports.navigateInvoice = async (req, res) => {
   try {

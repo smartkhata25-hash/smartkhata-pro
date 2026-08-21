@@ -126,8 +126,14 @@ async function createUserBackup(userId) {
   };
 }
 
-function scheduleFailedBackupRetry() {
+function scheduleFailedBackupRetry(userIds = []) {
   if (retryTimer) {
+    return;
+  }
+
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+
+  if (uniqueUserIds.length === 0) {
     return;
   }
 
@@ -135,10 +141,13 @@ function scheduleFailedBackupRetry() {
     retryTimer = null;
 
     try {
-      console.log("🔄 Running automatic backup retry...");
+      console.log(
+        `🔄 Running automatic backup retry for ${uniqueUserIds.length} user(s)...`,
+      );
 
       await backupAllUsers({
         reason: "retry",
+        userIds: uniqueUserIds,
       });
     } catch (error) {
       console.error("❌ Automatic backup retry failed:", error.message);
@@ -146,7 +155,7 @@ function scheduleFailedBackupRetry() {
   }, RETRY_DELAY_MS);
 }
 
-async function backupAllUsers({ reason = "scheduled" } = {}) {
+async function backupAllUsers({ reason = "scheduled", userIds = null } = {}) {
   if (backupAllUsersRunning) {
     console.log(
       "⚠️ Automatic backup batch already running, skipping duplicate run",
@@ -170,8 +179,15 @@ async function backupAllUsers({ reason = "scheduled" } = {}) {
     failed: 0,
   };
 
+  const retryUserIds = [];
+
   try {
-    const users = await getBusinessOwners();
+    const users =
+      Array.isArray(userIds) && userIds.length > 0
+        ? userIds.map((userId) => ({
+            _id: userId,
+          }))
+        : await getBusinessOwners();
 
     summary.total = users.length;
 
@@ -209,6 +225,8 @@ async function backupAllUsers({ reason = "scheduled" } = {}) {
         if (result.busy) {
           summary.busy += 1;
 
+          retryUserIds.push(userId);
+
           console.log(`⚠️ Backup skipped because user ${userId} is busy`);
 
           continue;
@@ -216,12 +234,16 @@ async function backupAllUsers({ reason = "scheduled" } = {}) {
 
         summary.failed += 1;
 
+        retryUserIds.push(userId);
+
         console.error(
           `❌ Automatic backup failed for ${userId}:`,
           result.message,
         );
       } catch (error) {
         summary.failed += 1;
+
+        retryUserIds.push(userId);
 
         console.error(
           `❌ Automatic backup failed for ${userId}:`,
@@ -232,8 +254,8 @@ async function backupAllUsers({ reason = "scheduled" } = {}) {
 
     console.log("📦 Automatic backup batch completed:", summary);
 
-    if (summary.failed > 0 || summary.busy > 0) {
-      scheduleFailedBackupRetry();
+    if (retryUserIds.length > 0) {
+      scheduleFailedBackupRetry(retryUserIds);
     }
 
     return {
@@ -243,7 +265,9 @@ async function backupAllUsers({ reason = "scheduled" } = {}) {
   } catch (error) {
     console.error("❌ Backup scheduler error:", error.message);
 
-    scheduleFailedBackupRetry();
+    if (Array.isArray(userIds) && userIds.length > 0) {
+      scheduleFailedBackupRetry(userIds);
+    }
 
     return {
       success: false,

@@ -2,11 +2,6 @@ const mongoose = require("mongoose");
 const Party = require("../models/Party");
 const JournalEntry = require("../models/JournalEntry");
 
-/* =========================================================
-   GET PARTY LEDGER
-   One ledger for Sale + Purchase + Receive + Pay Bill
-========================================================= */
-
 const getPartyLedger = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
@@ -47,9 +42,6 @@ const getPartyLedger = async (req, res) => {
       matchFilter.date = { $gte: start, $lte: end };
     }
 
-    /* ===============================
-       Opening Balance before startDate
-    =============================== */
     let openingBalance = 0;
 
     if (startDate) {
@@ -91,9 +83,6 @@ const getPartyLedger = async (req, res) => {
       openingBalance = result[0]?.balance || 0;
     }
 
-    /* ===============================
-       Main Entries
-    =============================== */
     const entries = await JournalEntry.find(matchFilter)
       .select(
         "date time billNo description sourceType originModule lines paymentType attachmentUrl attachmentType invoiceId invoiceModel referenceId partyId customerId supplierId",
@@ -207,6 +196,84 @@ const getPartySourceLabel = (entry) => {
   return type || "-";
 };
 
+const getPartyBalance = async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
+    const { partyId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(partyId)) {
+      return res.status(400).json({
+        message: "Invalid party ID",
+      });
+    }
+
+    const party = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+    })
+      .select("_id account")
+      .lean();
+
+    if (!party?.account) {
+      return res.status(404).json({
+        message: "Party not found",
+      });
+    }
+
+    const accountObjectId = new mongoose.Types.ObjectId(party.account);
+
+    const result = await JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: userId,
+          isDeleted: false,
+          sourceType: { $ne: "reversal" },
+          "lines.account": accountObjectId,
+        },
+      },
+      {
+        $unwind: "$lines",
+      },
+      {
+        $match: {
+          "lines.account": accountObjectId,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          balance: {
+            $sum: {
+              $cond: [
+                { $eq: ["$lines.type", "debit"] },
+                "$lines.amount",
+                { $multiply: ["$lines.amount", -1] },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const balance = Number(result[0]?.balance || 0);
+
+    return res.json({
+      partyId: party._id,
+      accountId: party.account,
+      balance,
+    });
+  } catch (err) {
+    console.error("Party balance fetch error:", err);
+
+    return res.status(500).json({
+      message: "Failed to fetch party balance",
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   getPartyLedger,
+  getPartyBalance,
 };

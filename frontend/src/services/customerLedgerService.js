@@ -27,6 +27,20 @@ export const getLedgerByCustomerAccount = async (accountId, start, end) => {
 
   return res.data;
 };
+
+export const getCustomerBalance = async (accountId) => {
+  if (!accountId) {
+    throw new Error('AccountId is required for balance');
+  }
+
+  const res = await axios.get(`${API_URL}/balance/${accountId}`, {
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+    },
+  });
+
+  return res.data;
+};
 // ✅ Add new journal entry
 export const addJournalEntry = async (entryData) => {
   const res = await axios.post(API_URL, entryData, {

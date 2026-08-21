@@ -2,49 +2,41 @@ const ExpenseTitle = require("../models/ExpenseTitle");
 const Account = require("../models/Account");
 const mongoose = require("mongoose");
 
-/* =========================================================
-   🔍 GET TITLES (SEARCH + DROPDOWN)
-========================================================= */
-
 exports.getExpenseTitles = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const { search = "" } = req.query;
+    const search = String(req.query.search || "").trim();
 
     const query = {
       userId,
       isDeleted: false,
     };
 
-    // 🔍 Search filter (case insensitive)
-    if (search.trim()) {
-      query.name = { $regex: search.trim(), $options: "i" };
+    if (search) {
+      const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      query.name = {
+        $regex: safeSearch,
+        $options: "i",
+      };
     }
 
     const titles = await ExpenseTitle.find(query)
-
+      .select("name categoryId isDefault")
       .populate("categoryId", "name")
-      .sort({ name: 1 })
-      .limit(50);
-    console.log("👉 QUERY:", query);
-    console.log("👉 TOTAL FOUND:", titles.length);
-    console.log(
-      "👉 TITLES:",
-      titles.map((t) => t.name),
-    );
+      .sort({ name: 1, _id: 1 })
+      .limit(50)
+      .lean();
 
-    res.json(titles);
+    return res.json(titles);
   } catch (error) {
     console.error("Get Expense Titles Error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       error: "Failed to fetch expense titles",
     });
   }
 };
-
-/* =========================================================
-   ➕ CREATE NEW TITLE (MODAL SAVE)
-========================================================= */
 
 exports.createExpenseTitle = async (req, res) => {
   try {
@@ -64,7 +56,6 @@ exports.createExpenseTitle = async (req, res) => {
       });
     }
 
-    // 🔎 Check category exists & belongs to user
     const account = await Account.findOne({
       _id: categoryId,
       userId,
@@ -79,12 +70,14 @@ exports.createExpenseTitle = async (req, res) => {
 
     const trimmedName = name.trim();
 
-    // ❌ Duplicate check
     const existing = await ExpenseTitle.findOne({
-      name: trimmedName,
       userId,
       isDeleted: false,
-    });
+      name: {
+        $regex: `^${trimmedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      },
+    }).lean();
 
     if (existing) {
       return res.status(400).json({
@@ -119,10 +112,6 @@ exports.createExpenseTitle = async (req, res) => {
     });
   }
 };
-
-/* =========================================================
-   ❌ DELETE TITLE (SAFE DELETE)
-========================================================= */
 
 exports.deleteExpenseTitle = async (req, res) => {
   try {
@@ -169,10 +158,6 @@ exports.deleteExpenseTitle = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✏️ UPDATE TITLE (RENAME / CHANGE CATEGORY)
-========================================================= */
-
 exports.updateExpenseTitle = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -209,7 +194,6 @@ exports.updateExpenseTitle = async (req, res) => {
       });
     }
 
-    // 🔒 Default protection (optional rename allow karna ya nahi aap decide karein)
     if (title.isDefault) {
       return res.status(403).json({
         error: "Default titles cannot be modified",
@@ -218,13 +202,15 @@ exports.updateExpenseTitle = async (req, res) => {
 
     const trimmedName = name.trim();
 
-    // ❌ Duplicate check
     const existing = await ExpenseTitle.findOne({
-      name: trimmedName,
       userId,
       _id: { $ne: id },
       isDeleted: false,
-    });
+      name: {
+        $regex: `^${trimmedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      },
+    }).lean();
 
     if (existing) {
       return res.status(400).json({

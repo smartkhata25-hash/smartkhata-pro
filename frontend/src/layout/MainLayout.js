@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import axios from 'axios';
 import { Outlet, useLocation } from 'react-router-dom';
 import TopHeader from './TopHeader';
 import Sidebar from './Sidebar';
@@ -32,10 +33,52 @@ const MainLayout = () => {
   }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(() => {
     const savedState = localStorage.getItem('rightPanelOpen');
     return savedState !== null ? JSON.parse(savedState) : true;
   });
+
+  const [dashboardAlerts, setDashboardAlerts] = useState({
+    lowStock: 0,
+    negativeStock: 0,
+    overdueInvoices: 0,
+    pendingPayments: 0,
+  });
+
+  const fetchDashboardAlerts = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const baseUrl = process.env.REACT_APP_API_BASE_URL;
+
+      const res = await axios.get(`${baseUrl}/api/dashboard-alerts`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setDashboardAlerts(res.data?.summary || {});
+    } catch (error) {
+      console.error('Dashboard alerts fetch failed:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardAlerts();
+  }, [fetchDashboardAlerts]);
 
   const rightPanelRef = useRef(null);
   useEffect(() => {
@@ -81,6 +124,7 @@ const MainLayout = () => {
           setIsRightPanelOpen={setIsRightPanelOpen}
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
+          dashboardAlerts={dashboardAlerts}
         />
       </div>
 
@@ -108,36 +152,51 @@ const MainLayout = () => {
         {/* 🔹 Right Panel ledger میں hide */}
         {!isLedgerPage && (
           <>
-            {/* 📱 Mobile Overlay */}
-            {isRightPanelOpen && (
-              <div
-                className="fixed inset-0 bg-black bg-opacity-40 z-30 md:hidden"
-                onClick={() => setIsRightPanelOpen(false)}
-              />
+            {/* 📱 Mobile */}
+            {isMobile && (
+              <>
+                {isRightPanelOpen && (
+                  <div
+                    className="fixed inset-0 bg-black bg-opacity-40 z-30 md:hidden"
+                    onClick={() => setIsRightPanelOpen(false)}
+                  />
+                )}
+
+                <div
+                  ref={rightPanelRef}
+                  className={`
+            fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
+            transform transition-transform duration-300
+            ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+            md:hidden
+          `}
+                >
+                  {isRightPanelOpen && (
+                    <RightPanel
+                      dashboardAlerts={dashboardAlerts}
+                      refreshDashboardAlerts={fetchDashboardAlerts}
+                    />
+                  )}
+                </div>
+              </>
             )}
 
-            {/* 📱 Mobile Panel */}
-            <div
-              ref={rightPanelRef}
-              className={`
-    fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
-    transform transition-transform duration-300
-    ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
-    md:hidden
-  `}
-            >
-              <RightPanel />
-            </div>
-
-            {/* 💻 Desktop Panel */}
-            <div
-              ref={rightPanelRef}
-              className={`hidden md:block transition-all duration-300 ${
-                isRightPanelOpen ? 'w-64' : 'w-0'
-              } overflow-hidden`}
-            >
-              {isRightPanelOpen && <RightPanel />}
-            </div>
+            {/* 💻 Desktop */}
+            {!isMobile && (
+              <div
+                ref={rightPanelRef}
+                className={`hidden md:block transition-all duration-300 ${
+                  isRightPanelOpen ? 'w-64' : 'w-0'
+                } overflow-hidden`}
+              >
+                {isRightPanelOpen && (
+                  <RightPanel
+                    dashboardAlerts={dashboardAlerts}
+                    refreshDashboardAlerts={fetchDashboardAlerts}
+                  />
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

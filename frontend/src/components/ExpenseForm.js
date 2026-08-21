@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
@@ -11,6 +11,7 @@ import { hasPermission } from '../utils/permissionHelper';
 
 const ExpenseForm = () => {
   const [accounts, setAccounts] = useState([]);
+  const [allTitles, setAllTitles] = useState([]);
   const [titles, setTitles] = useState([]);
   const [search, setSearch] = useState('');
   const dropdownRef = useRef(null);
@@ -46,11 +47,14 @@ const ExpenseForm = () => {
   const expenseAccounts = accounts.filter((a) => a.type === 'Expense');
   const creditableAccounts = accounts.filter(
     (a) =>
-      ['Cash', 'Bank', 'Payable', 'Asset'].includes(a.type) &&
-      !a.name?.toLowerCase().startsWith('customer:')
+      a.type === 'Asset' &&
+      ['cash', 'bank', 'online', 'cheque'].includes(a.category) &&
+      a.isActive !== false
   );
 
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchData() {
       if (id && (!canViewExpenses || !canEditExpenses)) {
         alert('You do not have permission to edit expenses');
@@ -64,40 +68,58 @@ const ExpenseForm = () => {
         return;
       }
 
-      const aData = await getAccounts();
-      setAccounts(aData);
+      try {
+        const [aData, titleData, existing] = await Promise.all([
+          getAccounts(),
 
-      if (id) {
-        const existing = await getExpenseById(id);
+          canViewExpenses ? getExpenseTitles('') : Promise.resolve([]),
 
-        // 🛠 Extract IDs from populated objects
-        const fixedCategoryId = existing.category?._id || existing.category || '';
-        const fixedCreditEntries =
-          existing.creditEntries?.map((entry) => ({
-            account: entry.account?._id || entry.account || '',
-            amount: entry.amount || '',
-            paymentType: entry.paymentType || 'Cash',
-          })) || [];
+          id ? getExpenseById(id) : Promise.resolve(null),
+        ]);
 
-        setFormData({
-          title: existing.title || '',
-          titleId: existing.titleId?._id || existing.titleId || null,
-          date: existing.date ? dayjs(existing.date).format('YYYY-MM-DD') : '',
-          time: existing.time || '',
-          description: existing.description || '',
-          attachment: null,
-          paymentType: existing.paymentType || 'Cash',
-          category: fixedCategoryId,
-        });
+        if (cancelled) return;
 
-        setSearch(existing.title || '');
+        setAccounts(Array.isArray(aData) ? aData : []);
 
+        const safeTitles = Array.isArray(titleData) ? titleData : [];
+
+        setAllTitles(safeTitles);
         setTitles([]);
 
-        setCreditEntries(fixedCreditEntries);
+        if (existing) {
+          const fixedCategoryId = existing.category?._id || existing.category || '';
+
+          const fixedCreditEntries =
+            existing.creditEntries?.map((entry) => ({
+              account: entry.account?._id || entry.account || '',
+              amount: entry.amount || '',
+              paymentType: entry.paymentType || 'Cash',
+            })) || [];
+
+          setFormData({
+            title: existing.title || '',
+            titleId: existing.titleId?._id || existing.titleId || null,
+            date: existing.date ? dayjs(existing.date).format('YYYY-MM-DD') : '',
+            time: existing.time || '',
+            description: existing.description || '',
+            attachment: null,
+            paymentType: existing.paymentType || 'Cash',
+            category: fixedCategoryId,
+          });
+
+          setSearch(existing.title || '');
+          setCreditEntries(fixedCreditEntries);
+        }
+      } catch (error) {
+        console.error('Expense form load failed:', error);
       }
     }
+
     fetchData();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id, canViewExpenses, canCreateExpenses, canEditExpenses, navigate]);
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -109,26 +131,35 @@ const ExpenseForm = () => {
     setFormData((prev) => ({ ...prev, attachment: file }));
     setShowPreview(false);
   };
-  const fetchAccounts = useCallback(async () => {
-    const data = await getAccounts();
-    setAccounts(data);
-  }, []);
+  const filterTitlesLocal = (value = '') => {
+    if (!canViewExpenses) {
+      setTitles([]);
+      return;
+    }
 
-  const fetchTitles = useCallback(
-    async (query = '') => {
-      if (!canViewExpenses) {
-        setTitles([]);
-        return;
-      }
+    const query = String(value || '')
+      .trim()
+      .toLowerCase();
 
-      try {
-        const data = await getExpenseTitles(query);
-        setTitles(data || []);
-      } catch (err) {
-        console.error('Title fetch error', err);
-      }
-    },
-    [canViewExpenses]
+    const filtered = allTitles
+      .filter((item) => {
+        const name = String(item?.name || '').toLowerCase();
+
+        return !query || name.includes(query);
+      })
+      .slice(0, 50);
+
+    setTitles(filtered);
+  };
+
+  const hasExactTitleMatch = allTitles.some(
+    (item) =>
+      String(item?.name || '')
+        .trim()
+        .toLowerCase() ===
+      String(search || '')
+        .trim()
+        .toLowerCase()
   );
   const resetForm = () => {
     setFormData({
@@ -151,10 +182,6 @@ const ExpenseForm = () => {
     setTitles([]);
   };
 
-  useEffect(() => {
-    fetchAccounts();
-    fetchTitles();
-  }, [fetchAccounts, fetchTitles]);
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -214,18 +241,22 @@ const ExpenseForm = () => {
         });
       }
     });
-    formData.amount = calculateCreditTotal().toFixed(2);
+    const expensePayload = {
+      ...formData,
+      amount: creditTotal.toFixed(2),
+    };
+
     const data = new FormData();
-    Object.entries(formData).forEach(([key, value]) => {
-      if (value !== null) data.append(key, value);
+
+    Object.entries(expensePayload).forEach(([key, value]) => {
+      if (value !== null) {
+        data.append(key, value);
+      }
     });
 
     data.append('createJournal', 'true');
     data.append('creditEntries', JSON.stringify(creditEntries));
 
-    for (let [key, value] of data.entries()) {
-      console.log(`${key}:`, value);
-    }
     try {
       setLoading(true);
       if (id) {
@@ -301,14 +332,27 @@ const ExpenseForm = () => {
             type="text"
             value={search}
             onChange={(e) => {
-              setSearch(e.target.value);
-              fetchTitles(e.target.value);
+              const value = e.target.value;
+
+              setSearch(value);
+
+              setFormData((prev) => ({
+                ...prev,
+                title: value,
+                titleId: null,
+                category: '',
+              }));
+
+              filterTitlesLocal(value);
+            }}
+            onFocus={() => {
+              filterTitlesLocal(search);
             }}
             placeholder={t('expense.searchPlaceholder')}
             className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
           />
 
-          {titles.length > 0 && (
+          {(titles.length > 0 || (canManageExpenseTitles && search.trim())) && (
             <div className="absolute z-10 bg-white w-full border border-gray-200 rounded-xl shadow-lg max-h-52 overflow-y-auto mt-1">
               {titles.map((item) => (
                 <div
@@ -320,8 +364,9 @@ const ExpenseForm = () => {
                       ...prev,
                       title: item.name,
                       titleId: item._id,
-                      category: item.categoryId?._id || '',
+                      category: item.categoryId?._id || item.categoryId || '',
                     }));
+
                     setTitles([]);
                   }}
                   className="p-3 hover:bg-blue-50 cursor-pointer border-b"
@@ -329,9 +374,17 @@ const ExpenseForm = () => {
                   {item.name}
                 </div>
               ))}
-              {canManageExpenseTitles && (
+
+              {canManageExpenseTitles && search.trim() && !hasExactTitleMatch && (
                 <div
-                  onClick={() => setShowModal(true)}
+                  onClick={() => {
+                    setNewAccount((prev) => ({
+                      ...prev,
+                      name: search,
+                    }));
+
+                    setShowModal(true);
+                  }}
                   className="p-3 text-blue-600 font-semibold cursor-pointer hover:bg-gray-100"
                 >
                   + {t('expense.addNewTitle')} "{search}"
@@ -608,17 +661,32 @@ const ExpenseForm = () => {
                     categoryId: newAccount.category,
                   });
 
-                  setShowModal(false);
-                  setSearch(res.name);
+                  const createdTitle = {
+                    ...res,
+                  };
+
+                  setAllTitles((prev) =>
+                    [
+                      ...prev.filter((item) => String(item?._id) !== String(createdTitle._id)),
+                      createdTitle,
+                    ].sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                  );
+
+                  setSearch(createdTitle.name || '');
 
                   setFormData((prev) => ({
                     ...prev,
-                    title: res.name,
-                    titleId: res._id,
-                    category: res.categoryId,
+                    title: createdTitle.name || '',
+                    titleId: createdTitle._id,
+                    category: createdTitle.categoryId?._id || createdTitle.categoryId || '',
                   }));
 
-                  fetchTitles();
+                  setTitles([]);
+                  setNewAccount({
+                    name: '',
+                    category: '',
+                  });
+                  setShowModal(false);
                 }}
                 className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg"
               >

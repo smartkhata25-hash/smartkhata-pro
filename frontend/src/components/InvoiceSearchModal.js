@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { searchInvoices } from '../services/salesService';
-import { fetchCustomers } from '../services/customerService';
+import {
+  fetchInvoiceFormOptions,
+  getCachedInvoiceFormOptions,
+} from '../services/invoiceFormOptionsService';
 import { t } from '../i18n/i18n';
 
 const InvoiceSearchModal = ({ onSelect, onClose }) => {
@@ -18,7 +21,31 @@ const InvoiceSearchModal = ({ onSelect, onClose }) => {
   const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1);
 
   useEffect(() => {
-    fetchCustomers().then(setAllCustomers);
+    let mounted = true;
+
+    const loadCustomers = async () => {
+      const cachedOptions = getCachedInvoiceFormOptions();
+
+      if (cachedOptions?.customers?.length && mounted) {
+        setAllCustomers(cachedOptions.customers);
+      }
+
+      try {
+        const options = await fetchInvoiceFormOptions();
+
+        if (mounted) {
+          setAllCustomers(options.customers || []);
+        }
+      } catch (error) {
+        console.error('Invoice search customers load failed:', error);
+      }
+    };
+
+    loadCustomers();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleChange = (e) => {
@@ -33,9 +60,14 @@ const InvoiceSearchModal = ({ onSelect, onClose }) => {
       setCustomerSuggestions([]);
       setSelectedCustomerIndex(-1);
     } else {
-      const filtered = allCustomers.filter(
-        (c) => c.name.toLowerCase().includes(value.toLowerCase()) || c.phone.includes(value)
-      );
+      const searchValue = value.toLowerCase();
+
+      const filtered = allCustomers.filter((c) => {
+        const name = String(c?.name || '').toLowerCase();
+        const phone = String(c?.phone || '');
+
+        return name.includes(searchValue) || phone.includes(value);
+      });
       setCustomerSuggestions(filtered);
       setSelectedCustomerIndex(-1);
     }
@@ -67,14 +99,20 @@ const InvoiceSearchModal = ({ onSelect, onClose }) => {
   const handleSearch = async () => {
     try {
       const searchString = Object.entries(query)
-        .filter(([_, v]) => v.trim())
-        .map(([k, v]) => `${k}:${v.trim()}`)
+        .filter(([_, value]) => String(value || '').trim())
+        .map(([key, value]) => `${key}:${String(value).trim()}`)
         .join(' ');
 
-      if (!searchString) return alert(t('alerts.searchFieldRequired'));
+      if (!searchString) {
+        alert(t('alerts.searchFieldRequired'));
+        return;
+      }
 
-      const data = await searchInvoices(searchString);
-      setResults(data);
+      const data = await searchInvoices(searchString, 50);
+
+      setResults(Array.isArray(data) ? data : []);
+      setCustomerSuggestions([]);
+      setSelectedCustomerIndex(-1);
     } catch (err) {
       console.error('Search error:', err);
       alert(t('alerts.searchFailed'));

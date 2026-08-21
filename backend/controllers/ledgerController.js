@@ -186,6 +186,84 @@ const getCustomerLedger = async (req, res) => {
   }
 };
 
+const getCustomerBalance = async (req, res) => {
+  try {
+    const { accountId } = req.params;
+
+    if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({
+        message: "Invalid account ID",
+      });
+    }
+
+    const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
+
+    const accountObjectId = new mongoose.Types.ObjectId(accountId);
+
+    const customer = await Customer.findOne({
+      account: accountObjectId,
+      createdBy: userId,
+    })
+      .select("_id")
+      .lean();
+
+    if (!customer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
+    }
+
+    const result = await JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: userId,
+          isDeleted: false,
+          sourceType: { $ne: "reversal" },
+          "lines.account": accountObjectId,
+        },
+      },
+      {
+        $unwind: "$lines",
+      },
+      {
+        $match: {
+          "lines.account": accountObjectId,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          balance: {
+            $sum: {
+              $cond: [
+                { $eq: ["$lines.type", "debit"] },
+                "$lines.amount",
+                { $multiply: ["$lines.amount", -1] },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const balance = Number(result[0]?.balance || 0);
+
+    return res.json({
+      customerId: customer._id,
+      accountId,
+      balance,
+    });
+  } catch (err) {
+    console.error("Customer balance fetch error:", err);
+
+    return res.status(500).json({
+      message: "Failed to fetch customer balance",
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   getCustomerLedger,
+  getCustomerBalance,
 };

@@ -59,22 +59,28 @@ exports.createExpense = async (req, res) => {
       });
     }
 
+    const numericAmount = Number(amount);
+
     const totalCredit = creditEntries.reduce(
-      (sum, e) => sum + Number(e.amount),
+      (sum, entry) => sum + Number(entry.amount || 0),
       0,
     );
 
-    if (totalCredit !== Number(amount)) {
+    if (
+      !Number.isFinite(numericAmount) ||
+      numericAmount <= 0 ||
+      !Number.isFinite(totalCredit) ||
+      Math.abs(totalCredit - numericAmount) > 0.001
+    ) {
       return res.status(400).json({
         message: "Debit and credit must be equal.",
       });
     }
-
     const lines = [
       {
         account: finalCategory,
         type: "debit",
-        amount: Number(amount),
+        amount: numericAmount,
       },
       ...creditEntries.map((entry) => ({
         account: entry.account,
@@ -101,13 +107,13 @@ exports.createExpense = async (req, res) => {
       category: finalCategory,
       date,
       time,
-      amount: Number(amount),
+      amount: numericAmount,
       paymentType,
       account: null,
       description,
       attachment: attachmentPath,
       userId,
-      titleId: titleId || null, // 🔥 NEW FIELD
+      titleId: titleId || null,
     });
 
     await expense.save();
@@ -202,34 +208,19 @@ exports.updateExpense = async (req, res) => {
       });
     }
 
-    const oldAccounts = [expense.category, expense.account];
-
-    if (req.file && expense.attachment) {
-      fs.unlinkSync(path.resolve(expense.attachment));
-    }
-
-    expense.title = finalTitle;
-    expense.category = finalCategory;
-    expense.date = date;
-    expense.time = time;
-    expense.amount = Number(amount);
-    expense.paymentType = paymentType;
-    expense.account = null;
-    expense.description = description;
-    expense.titleId = titleId || null;
-
-    if (req.file) {
-      expense.attachment = `uploads/${req.file.filename}`;
-    }
-
-    await expense.save();
+    const numericAmount = Number(amount);
 
     const totalCredit = creditEntries.reduce(
-      (sum, e) => sum + Number(e.amount),
+      (sum, entry) => sum + Number(entry.amount || 0),
       0,
     );
 
-    if (totalCredit !== Number(amount)) {
+    if (
+      !Number.isFinite(numericAmount) ||
+      numericAmount <= 0 ||
+      !Number.isFinite(totalCredit) ||
+      Math.abs(totalCredit - numericAmount) > 0.001
+    ) {
       return res.status(400).json({
         message: "Debit and credit must be equal.",
       });
@@ -239,12 +230,12 @@ exports.updateExpense = async (req, res) => {
       {
         account: finalCategory,
         type: "debit",
-        amount: Number(amount),
+        amount: numericAmount,
       },
       ...creditEntries.map((entry) => ({
         account: entry.account,
         type: "credit",
-        amount: Number(entry.amount),
+        amount: Number(entry.amount || 0),
         paymentType:
           entry.paymentType?.toLowerCase() ||
           paymentType?.toLowerCase() ||
@@ -257,6 +248,32 @@ exports.updateExpense = async (req, res) => {
         message: "Journal entry is not balanced.",
       });
     }
+
+    const oldAccounts = [expense.category, expense.account].filter(Boolean);
+
+    if (req.file && expense.attachment) {
+      const oldAttachmentPath = path.resolve(expense.attachment);
+
+      if (fs.existsSync(oldAttachmentPath)) {
+        fs.unlinkSync(oldAttachmentPath);
+      }
+    }
+
+    expense.title = finalTitle;
+    expense.category = finalCategory;
+    expense.date = date;
+    expense.time = time;
+    expense.amount = numericAmount;
+    expense.paymentType = paymentType;
+    expense.account = null;
+    expense.description = description;
+    expense.titleId = titleId || null;
+
+    if (req.file) {
+      expense.attachment = `uploads/${req.file.filename}`;
+    }
+
+    await expense.save();
 
     await JournalEntry.deleteMany({
       referenceId: expense._id,
@@ -343,7 +360,6 @@ exports.deleteExpense = async (req, res) => {
   }
 };
 
-// ✅ Get All Expenses (NO BREAK, SAME)
 exports.getAllExpenses = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -353,34 +369,58 @@ exports.getAllExpenses = async (req, res) => {
       isDeleted: false,
     })
       .populate("category", "name")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const formatted = await Promise.all(
-      expenses.map(async (e) => {
-        const journal = await JournalEntry.findOne({
-          referenceId: e._id,
-          sourceType: "expense",
-          isDeleted: false,
-        }).populate("lines.account", "name");
+    if (expenses.length === 0) {
+      return res.json([]);
+    }
 
-        const creditLines =
-          journal?.lines?.filter((l) => l.type === "credit") || [];
+    const expenseIds = expenses.map((expense) => expense._id);
 
-        return {
-          ...e.toObject(),
-          paymentMode: creditLines[0]?.paymentType || e.paymentType || "-",
-          creditAccounts: creditLines
-            .map((l) => l.account?.name)
-            .filter(Boolean)
-            .join(", "),
-        };
-      }),
-    );
+    const journals = await JournalEntry.find({
+      referenceId: { $in: expenseIds },
+      sourceType: "expense",
+      isDeleted: false,
+    })
+      .select("referenceId lines")
+      .populate("lines.account", "name")
+      .lean();
 
-    res.json(formatted);
+    const journalMap = new Map();
+
+    for (const journal of journals) {
+      const key = String(journal.referenceId);
+
+      if (!journalMap.has(key)) {
+        journalMap.set(key, journal);
+      }
+    }
+
+    const formatted = expenses.map((expense) => {
+      const journal = journalMap.get(String(expense._id));
+
+      const creditLines =
+        journal?.lines?.filter((line) => line.type === "credit") || [];
+
+      return {
+        ...expense,
+        paymentMode: creditLines[0]?.paymentType || expense.paymentType || "-",
+
+        creditAccounts: creditLines
+          .map((line) => line.account?.name)
+          .filter(Boolean)
+          .join(", "),
+      };
+    });
+
+    return res.json(formatted);
   } catch (err) {
-    console.error("❌ Get Expenses Error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Get Expenses Error:", err);
+
+    return res.status(500).json({
+      error: err.message,
+    });
   }
 };
 

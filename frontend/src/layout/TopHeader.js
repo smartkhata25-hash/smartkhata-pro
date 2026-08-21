@@ -9,7 +9,13 @@ import { getCurrentLanguage, setLanguage } from '../i18n/i18n';
 import { t } from '../i18n/i18n';
 import axios from 'axios';
 
-const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIsSidebarOpen }) => {
+const TopHeader = ({
+  isRightPanelOpen,
+  setIsRightPanelOpen,
+  isSidebarOpen,
+  setIsSidebarOpen,
+  dashboardAlerts,
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -22,7 +28,10 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   const userMenuRef = React.useRef(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [alertCount, setAlertCount] = useState(0);
+  const alertCount =
+    (dashboardAlerts?.lowStock || 0) +
+    (dashboardAlerts?.overdueInvoices || 0) +
+    (dashboardAlerts?.pendingPayments || 0);
 
   const [isInstalled, setIsInstalled] = useState(false);
 
@@ -67,46 +76,29 @@ const TopHeader = ({ isRightPanelOpen, setIsRightPanelOpen, isSidebarOpen, setIs
   }, []);
 
   useEffect(() => {
-    const fetchAlerts = async () => {
+    const fetchNotifications = async () => {
       try {
-        const res = await axios.get(`${baseUrl}/api/dashboard-alerts`, {
+        const notifRes = await axios.get(`${baseUrl}/api/notifications/my`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        const data = res.data?.summary || {};
+        const notifications = notifRes.data;
 
-        const total =
-          (data.lowStock || 0) + (data.overdueInvoices || 0) + (data.pendingPayments || 0);
+        if (notifications.length > 0) {
+          const latestMsg = notifications[0].message;
+          const savedMsg = localStorage.getItem('seenNotification');
 
-        setAlertCount(total);
-        // 🔥 notifications fetch
-        try {
-          const notifRes = await axios.get(`${baseUrl}/api/notifications/my`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-
-          const notifications = notifRes.data;
-
-          if (notifications.length > 0) {
-            const latestMsg = notifications[0].message;
-            const savedMsg = localStorage.getItem('seenNotification');
-
-            if (latestMsg && latestMsg !== savedMsg) {
-              setNotificationMsg(latestMsg);
-              setShowMessagePopup(true);
-            }
+          if (latestMsg && latestMsg !== savedMsg) {
+            setNotificationMsg(latestMsg);
+            setShowMessagePopup(true);
           }
-        } catch (err) {
-          console.error(t('alerts.notificationError'), err);
-        }
-        if (total > 0) {
         }
       } catch (err) {
-        console.error(t('alerts.alertFetchError'), err);
+        console.error(t('alerts.notificationError'), err);
       }
     };
 
-    fetchAlerts();
+    fetchNotifications();
   }, [token, baseUrl]);
 
   const handleInstallClick = async () => {

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { useNavigate, useOutletContext } from 'react-router-dom';
+
 import ProfitSummaryModal from '../components/profit/ProfitSummaryModal';
 import { t } from '../i18n/i18n';
 import PermissionGuard from '../components/PermissionGuard';
@@ -9,137 +9,143 @@ import { hasPermission } from '../utils/permissionHelper';
 const DashboardPage = () => {
   const navigate = useNavigate();
 
+  const { dashboardSummary, dashboardSummaryLoading, fetchDashboardSummary, refreshDashboard } =
+    useOutletContext();
+
   const canViewSummaryCards = hasPermission('dashboard.summary_cards');
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // 🔥 separate state for mobile & desktop
   const [showCards, setShowCards] = useState(() => {
-    const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
+    const key =
+      window.innerWidth <= 768 ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
+
     const saved = localStorage.getItem(key);
-    return saved !== null ? JSON.parse(saved) : true;
+
+    try {
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
   });
 
-  const [summary, setSummary] = useState({
+  const [showProfitModal, setShowProfitModal] = useState(false);
+  const [profitData, setProfitData] = useState(null);
+
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  const [filterType, setFilterType] = useState('month');
+
+  const summary = dashboardSummary || {
     totalSales: 0,
     totalExpenses: 0,
     totalCash: 0,
     totalBank: 0,
-  });
-  const [showProfitModal, setShowProfitModal] = useState(false);
+    netProfit: 0,
+  };
 
-  const [profitData, setProfitData] = useState(null);
+  const summaryLoading = Boolean(dashboardSummaryLoading);
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [filterType, setFilterType] = useState('month');
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
 
-  const [summaryLoading, setSummaryLoading] = useState(false);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   useEffect(() => {
     const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
+
     localStorage.setItem(key, JSON.stringify(showCards));
   }, [showCards, isMobile]);
 
-  const fetchSummary = useCallback(
+  const buildSummaryParams = useCallback(() => {
+    let startDate = '';
+    let endDate = '';
+
+    const year = selectedYear;
+
+    const formatDate = (date) => {
+      const dateYear = date.getFullYear();
+
+      const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
+
+      const dateDay = String(date.getDate()).padStart(2, '0');
+
+      return `${dateYear}-${dateMonth}-${dateDay}`;
+    };
+
+    if (filterType === 'today') {
+      const today = new Date();
+      const todayDate = formatDate(today);
+
+      startDate = `${todayDate}T00:00:00.000+05:00`;
+      endDate = `${todayDate}T23:59:59.999+05:00`;
+    }
+
+    if (filterType === 'month') {
+      const firstDay = new Date(year, selectedMonth, 1);
+
+      const lastDay = new Date(year, selectedMonth + 1, 0);
+
+      startDate = `${formatDate(firstDay)}T00:00:00.000+05:00`;
+      endDate = `${formatDate(lastDay)}T23:59:59.999+05:00`;
+    }
+
+    if (filterType === 'year') {
+      startDate = `${year}-01-01T00:00:00.000+05:00`;
+      endDate = `${year}-12-31T23:59:59.999+05:00`;
+    }
+
+    if (filterType === 'all' || !startDate || !endDate) {
+      return {};
+    }
+
+    return {
+      filterType,
+      startDate,
+      endDate,
+    };
+  }, [filterType, selectedMonth, selectedYear]);
+
+  const loadSummary = useCallback(
     async ({ forceRefresh = false } = {}) => {
       if (!canViewSummaryCards) {
-        return;
+        return null;
       }
 
-      try {
-        setSummaryLoading(true);
+      const params = buildSummaryParams();
 
-        const token = localStorage.getItem('token');
-        const baseUrl = process.env.REACT_APP_API_BASE_URL;
-
-        let startDate = '';
-        let endDate = '';
-
-        const year = selectedYear;
-
-        const formatDate = (date) => {
-          const dateYear = date.getFullYear();
-          const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
-          const dateDay = String(date.getDate()).padStart(2, '0');
-
-          return `${dateYear}-${dateMonth}-${dateDay}`;
-        };
-
-        if (filterType === 'today') {
-          const today = new Date();
-          const todayDate = formatDate(today);
-
-          startDate = `${todayDate}T00:00:00.000+05:00`;
-          endDate = `${todayDate}T23:59:59.999+05:00`;
-        }
-
-        if (filterType === 'month') {
-          const firstDay = new Date(year, selectedMonth, 1);
-          const lastDay = new Date(year, selectedMonth + 1, 0);
-
-          startDate = `${formatDate(firstDay)}T00:00:00.000+05:00`;
-          endDate = `${formatDate(lastDay)}T23:59:59.999+05:00`;
-        }
-
-        if (filterType === 'year') {
-          startDate = `${year}-01-01T00:00:00.000+05:00`;
-          endDate = `${year}-12-31T23:59:59.999+05:00`;
-        }
-
-        const params = new URLSearchParams();
-
-        if (filterType !== 'all' && startDate && endDate) {
-          params.set('filterType', filterType);
-          params.set('startDate', startDate);
-          params.set('endDate', endDate);
-        }
-
-        if (forceRefresh) {
-          params.set('refresh', 'true');
-        }
-
-        const queryString = params.toString();
-
-        const url = `${baseUrl}/api/dashboard-summary${queryString ? `?${queryString}` : ''}`;
-
-        const res = await axios.get(url, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      if (forceRefresh) {
+        return refreshDashboard({
+          params,
         });
-
-        setSummary(res.data);
-      } catch (err) {
-        console.error(t('alerts.dashboardSummaryFetchError'), err);
-      } finally {
-        setSummaryLoading(false);
       }
+
+      return fetchDashboardSummary({
+        params,
+      });
     },
-    [canViewSummaryCards, selectedMonth, selectedYear, filterType]
+    [canViewSummaryCards, buildSummaryParams, fetchDashboardSummary, refreshDashboard]
   );
 
   useEffect(() => {
-    const sessionKey = 'dashboard_summary_loaded_this_session';
+    if (!canViewSummaryCards) {
+      return;
+    }
 
-    const alreadyLoadedThisSession = sessionStorage.getItem(sessionKey) === 'true';
-
-    fetchSummary({
-      forceRefresh: !alreadyLoadedThisSession,
-    }).then(() => {
-      sessionStorage.setItem(sessionKey, 'true');
-    });
-  }, [fetchSummary]);
+    loadSummary();
+  }, [canViewSummaryCards, loadSummary]);
 
   return (
     <div className="space-y-10">
-      {/* Page Title + Toggle */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
           {t('dashboard')}
@@ -147,10 +153,13 @@ const DashboardPage = () => {
 
         {canViewSummaryCards && (
           <div className="flex items-center gap-2">
-            {/* 🔄 Manual Refresh */}
             <button
               type="button"
-              onClick={() => fetchSummary({ forceRefresh: true })}
+              onClick={() =>
+                loadSummary({
+                  forceRefresh: true,
+                })
+              }
               disabled={summaryLoading}
               className="text-xs md:text-sm px-3 rounded-full
 bg-white/80 backdrop-blur-md border border-gray-300
@@ -161,29 +170,32 @@ font-medium h-[36px] disabled:opacity-50 disabled:cursor-not-allowed"
               {summaryLoading ? 'Refreshing...' : '🔄 Refresh'}
             </button>
 
-            {/* 👁 Toggle */}
             <button
+              type="button"
               onClick={() => setShowCards((prev) => !prev)}
-              className="text-xs md:text-sm px-3 rounded-full 
-bg-white/80 backdrop-blur-md border border-gray-300 
-shadow-sm hover:shadow-md hover:bg-gray-100 
-transition-all duration-200 
+              className="text-xs md:text-sm px-3 rounded-full
+bg-white/80 backdrop-blur-md border border-gray-300
+shadow-sm hover:shadow-md hover:bg-gray-100
+transition-all duration-200
 font-medium h-[36px]"
             >
               {showCards ? 'Hide' : 'Show'}
             </button>
 
-            {/* 📅 Month Dropdown */}
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
               className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
             >
               <option value="today">Today</option>
+
               <option value="month">Month</option>
+
               <option value="year">Year</option>
+
               <option value="all">Total</option>
             </select>
+
             {filterType === 'month' && (
               <select
                 value={selectedMonth}
@@ -203,22 +215,23 @@ font-medium h-[36px]"
                   'Oct',
                   'Nov',
                   'Dec',
-                ].map((m, i) => (
-                  <option key={i} value={i}>
-                    {m}
+                ].map((month, index) => (
+                  <option key={index} value={index}>
+                    {month}
                   </option>
                 ))}
               </select>
             )}
+
             {filterType === 'year' && (
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(Number(e.target.value))}
                 className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
               >
-                {[2023, 2024, 2025, 2026].map((y) => (
-                  <option key={y} value={y}>
-                    {y}
+                {[2023, 2024, 2025, 2026].map((year) => (
+                  <option key={year} value={year}>
+                    {year}
                   </option>
                 ))}
               </select>
@@ -227,7 +240,6 @@ font-medium h-[36px]"
         )}
       </div>
 
-      {/* Summary Cards */}
       {canViewSummaryCards && showCards && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
           <DashboardCard
@@ -257,10 +269,11 @@ font-medium h-[36px]"
             accent="bg-indigo-500"
             onClick={() => navigate('/accounts/bank')}
           />
+
           <DashboardCard
             title={t('netProfit')}
             value={summary.netProfit}
-            accent={summary.netProfit >= 0 ? 'bg-green-500' : 'bg-red-500'}
+            accent={Number(summary.netProfit || 0) >= 0 ? 'bg-green-500' : 'bg-red-500'}
             onClick={() => {
               setProfitData(summary);
               setShowProfitModal(true);
@@ -269,7 +282,6 @@ font-medium h-[36px]"
         </div>
       )}
 
-      {/* Quick Actions */}
       <div>
         <h2 className="text-lg font-semibold mb-6 bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">
           {t('quickActions')}
@@ -349,8 +361,6 @@ font-medium h-[36px]"
         </div>
       </div>
 
-      {/* ✅ PROFIT SUMMARY MODAL */}
-
       <ProfitSummaryModal
         isOpen={showProfitModal}
         onClose={() => setShowProfitModal(false)}
@@ -360,15 +370,13 @@ font-medium h-[36px]"
   );
 };
 
-/* Dashboard Card */
-
 const DashboardCard = ({ title, value, onClick, accent }) => {
   return (
     <div
       onClick={onClick}
       className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer border border-gray-200 overflow-hidden"
     >
-      <div className={`h-1 ${accent}`}></div>
+      <div className={`h-1 ${accent}`} />
 
       <div className="p-5">
         <h4 className="text-sm text-gray-500 font-medium">{title}</h4>
@@ -380,8 +388,6 @@ const DashboardCard = ({ title, value, onClick, accent }) => {
     </div>
   );
 };
-
-/* Quick Action */
 
 const QuickAction = ({ label, onClick, icon, gradient }) => {
   return (

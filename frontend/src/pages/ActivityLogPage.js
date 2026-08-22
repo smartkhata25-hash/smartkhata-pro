@@ -83,6 +83,7 @@ const ActivityLogPage = () => {
   });
 
   const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(INITIAL_FILTERS);
   const [pagination, setPagination] = useState(EMPTY_PAGINATION);
 
   const [loading, setLoading] = useState(false);
@@ -98,7 +99,7 @@ const ActivityLogPage = () => {
       setLoading(true);
       setError('');
 
-      const result = await fetchActivities(filters);
+      const result = await fetchActivities(appliedFilters);
 
       setActivities(result.activities || []);
       setPagination(result.pagination || EMPTY_PAGINATION);
@@ -109,7 +110,7 @@ const ActivityLogPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [appliedFilters]);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -146,11 +147,7 @@ const ActivityLogPage = () => {
   }, [loadUsers, loadSummary]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadActivities();
-    }, 300);
-
-    return () => clearTimeout(timer);
+    loadActivities();
   }, [loadActivities]);
 
   const moduleOptions = useMemo(() => {
@@ -178,8 +175,16 @@ const ActivityLogPage = () => {
     }));
   };
 
+  const applyFilters = () => {
+    setAppliedFilters({
+      ...filters,
+      page: 1,
+    });
+  };
+
   const clearFilters = () => {
     setFilters(INITIAL_FILTERS);
+    setAppliedFilters(INITIAL_FILTERS);
   };
 
   const handleViewDetail = async (activityId) => {
@@ -466,6 +471,15 @@ const ActivityLogPage = () => {
 
               <button
                 type="button"
+                onClick={applyFilters}
+                disabled={loading}
+                className="border border-blue-200 bg-blue-50 text-blue-700 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-blue-100 disabled:opacity-50"
+              >
+                Search / Apply
+              </button>
+
+              <button
+                type="button"
                 onClick={clearFilters}
                 className="border border-red-200 bg-red-50 text-red-600 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-red-100"
               >
@@ -583,12 +597,21 @@ const ActivityLogPage = () => {
             <div className="flex items-center gap-2">
               <select
                 value={filters.limit}
-                onChange={(e) =>
-                  updateFilters({
-                    limit: Number(e.target.value),
+                onChange={(e) => {
+                  const nextLimit = Number(e.target.value);
+
+                  setFilters((prev) => ({
+                    ...prev,
+                    limit: nextLimit,
                     page: 1,
-                  })
-                }
+                  }));
+
+                  setAppliedFilters((prev) => ({
+                    ...prev,
+                    limit: nextLimit,
+                    page: 1,
+                  }));
+                }}
                 className="border border-gray-300 rounded-md px-2 py-1.5 text-sm"
               >
                 <option value={10}>10</option>
@@ -600,11 +623,19 @@ const ActivityLogPage = () => {
               <button
                 type="button"
                 disabled={currentPage <= 1 || loading}
-                onClick={() =>
-                  updateFilters({
-                    page: currentPage - 1,
-                  })
-                }
+                onClick={() => {
+                  const nextPage = currentPage - 1;
+
+                  setFilters((prev) => ({
+                    ...prev,
+                    page: nextPage,
+                  }));
+
+                  setAppliedFilters((prev) => ({
+                    ...prev,
+                    page: nextPage,
+                  }));
+                }}
                 className="px-3 py-1.5 rounded-md border border-gray-300 text-sm disabled:opacity-40"
               >
                 Previous
@@ -617,11 +648,19 @@ const ActivityLogPage = () => {
               <button
                 type="button"
                 disabled={loading || totalPages === 0 || currentPage >= totalPages}
-                onClick={() =>
-                  updateFilters({
-                    page: currentPage + 1,
-                  })
-                }
+                onClick={() => {
+                  const nextPage = currentPage + 1;
+
+                  setFilters((prev) => ({
+                    ...prev,
+                    page: nextPage,
+                  }));
+
+                  setAppliedFilters((prev) => ({
+                    ...prev,
+                    page: nextPage,
+                  }));
+                }}
                 className="px-3 py-1.5 rounded-md border border-gray-300 text-sm disabled:opacity-40"
               >
                 Next
@@ -732,10 +771,6 @@ const ActivityDetailModal = ({
 
               <DetailItem label="Description" value={activity.description || '-'} />
 
-              <JsonSection title="Before" value={activity.before} />
-              <JsonSection title="After" value={activity.after} />
-              <JsonSection title="Metadata" value={activity.metadata} />
-
               <div>
                 <div className="text-xs font-semibold text-gray-500 uppercase mb-2">User Agent</div>
 
@@ -757,26 +792,6 @@ const DetailItem = ({ label, value }) => {
       <div className="text-xs font-semibold text-gray-500 uppercase mb-1">{label}</div>
 
       <div className="text-sm text-gray-800 break-all">{value ?? '-'}</div>
-    </div>
-  );
-};
-
-const JsonSection = ({ title, value }) => {
-  if (
-    value === null ||
-    value === undefined ||
-    (typeof value === 'object' && Object.keys(value).length === 0)
-  ) {
-    return null;
-  }
-
-  return (
-    <div>
-      <div className="text-xs font-semibold text-gray-500 uppercase mb-2">{title}</div>
-
-      <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap break-words">
-        {JSON.stringify(value, null, 2)}
-      </pre>
     </div>
   );
 };

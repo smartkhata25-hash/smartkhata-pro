@@ -6,18 +6,147 @@ import Sidebar from './Sidebar';
 import RightPanel from './RightPanel';
 
 const MainLayout = () => {
-  useEffect(() => {
-    setTimeout(() => {
-      const el = document.querySelector('.flex-1.overflow-y-auto');
-      if (el) {
+  const location = useLocation();
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(() => {
+    const savedState = localStorage.getItem('rightPanelOpen');
+
+    try {
+      return savedState !== null ? JSON.parse(savedState) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [dashboardAlerts, setDashboardAlerts] = useState({
+    lowStock: 0,
+    negativeStock: 0,
+    overdueInvoices: 0,
+    pendingPayments: 0,
+  });
+
+  const [dashboardSummary, setDashboardSummary] = useState({
+    totalSales: 0,
+    totalExpenses: 0,
+    netProfit: 0,
+    grossProfit: 0,
+    cogs: 0,
+    totalCash: 0,
+    totalBank: 0,
+    totalReceivable: 0,
+    totalPayable: 0,
+    receivableDetails: [],
+    payableDetails: [],
+  });
+
+  const [dashboardSummaryLoading, setDashboardSummaryLoading] = useState(false);
+
+  const rightPanelRef = useRef(null);
+
+  const isLedgerPage =
+    location.pathname.startsWith('/customer-ledger') ||
+    location.pathname.startsWith('/supplier-ledger') ||
+    location.pathname.startsWith('/party-ledger');
+
+  const isDashboardPage = location.pathname === '/dashboard' || location.pathname === '/';
+
+  const fetchDashboardSummary = useCallback(async (options = {}) => {
+    const { refresh = false, params = {} } = options;
+
+    try {
+      setDashboardSummaryLoading(true);
+
+      const token = localStorage.getItem('token');
+      const baseUrl = process.env.REACT_APP_API_BASE_URL;
+
+      if (!token) {
+        return null;
       }
-    }, 2000);
+
+      const response = await axios.get(`${baseUrl}/api/dashboard-summary`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params: {
+          ...params,
+          ...(refresh ? { refresh: 'true' } : {}),
+        },
+      });
+
+      const data = response.data || {};
+
+      setDashboardSummary((previous) => ({
+        ...previous,
+        ...data,
+        receivableDetails: data.receivableDetails || [],
+        payableDetails: data.payableDetails || [],
+      }));
+
+      return data;
+    } catch (error) {
+      console.error('Dashboard summary fetch failed:', error);
+      return null;
+    } finally {
+      setDashboardSummaryLoading(false);
+    }
   }, []);
+
+  const fetchDashboardAlerts = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const baseUrl = process.env.REACT_APP_API_BASE_URL;
+
+      if (!token) {
+        return null;
+      }
+
+      const response = await axios.get(`${baseUrl}/api/dashboard-alerts`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const summary = response.data?.summary || {};
+
+      setDashboardAlerts({
+        lowStock: Number(summary.lowStock || 0),
+        negativeStock: Number(summary.negativeStock || 0),
+        overdueInvoices: Number(summary.overdueInvoices || 0),
+        pendingPayments: Number(summary.pendingPayments || 0),
+      });
+
+      return summary;
+    } catch (error) {
+      console.error('Dashboard alerts fetch failed:', error);
+      return null;
+    }
+  }, []);
+
+  const refreshDashboard = useCallback(
+    async (options = {}) => {
+      const { params = {} } = options;
+
+      const [summaryResult] = await Promise.all([
+        fetchDashboardSummary({
+          refresh: true,
+          params,
+        }),
+        fetchDashboardAlerts(),
+      ]);
+
+      return summaryResult;
+    },
+    [fetchDashboardSummary, fetchDashboardAlerts]
+  );
+
   useEffect(() => {
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/auth/check-device`)
       .then((res) => {
         if (!res.ok) {
-          // 🔥 PURANA LOGIN DATA CLEAR
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
           localStorage.removeItem('user');
@@ -25,15 +154,11 @@ const MainLayout = () => {
 
           alert('Unauthorized device. Please login again.');
 
-          // 🔥 LOGIN PAGE
           window.location.href = '/#/login';
         }
       })
       .catch(() => {});
   }, []);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
 
   useEffect(() => {
     const handleResize = () => {
@@ -47,47 +172,22 @@ const MainLayout = () => {
     };
   }, []);
 
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(() => {
-    const savedState = localStorage.getItem('rightPanelOpen');
-    return savedState !== null ? JSON.parse(savedState) : true;
-  });
-
-  const [dashboardAlerts, setDashboardAlerts] = useState({
-    lowStock: 0,
-    negativeStock: 0,
-    overdueInvoices: 0,
-    pendingPayments: 0,
-  });
-
-  const fetchDashboardAlerts = useCallback(async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const baseUrl = process.env.REACT_APP_API_BASE_URL;
-
-      const res = await axios.get(`${baseUrl}/api/dashboard-alerts`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      setDashboardAlerts(res.data?.summary || {});
-    } catch (error) {
-      console.error('Dashboard alerts fetch failed:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchDashboardAlerts();
-  }, [fetchDashboardAlerts]);
-
-  const rightPanelRef = useRef(null);
   useEffect(() => {
     localStorage.setItem('rightPanelOpen', JSON.stringify(isRightPanelOpen));
   }, [isRightPanelOpen]);
 
   useEffect(() => {
+    fetchDashboardAlerts();
+  }, [fetchDashboardAlerts]);
+
+  useEffect(() => {
+    if (!isDashboardPage && !isLedgerPage && isRightPanelOpen) {
+      fetchDashboardSummary();
+    }
+  }, [isDashboardPage, isLedgerPage, isRightPanelOpen, fetchDashboardSummary]);
+
+  useEffect(() => {
     const handleClickOutside = (event) => {
-      // Notification icon پر click ہو تو outside-click اسے بند نہ کرے
       if (event.target.closest('[data-right-panel-toggle="true"]')) {
         return;
       }
@@ -109,12 +209,15 @@ const MainLayout = () => {
       document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isRightPanelOpen]);
-  const location = useLocation();
 
-  const isLedgerPage =
-    location.pathname.startsWith('/customer-ledger') ||
-    location.pathname.startsWith('/supplier-ledger') ||
-    location.pathname.startsWith('/party-ledger');
+  const outletContext = {
+    dashboardSummary,
+    dashboardSummaryLoading,
+    fetchDashboardSummary,
+    refreshDashboard,
+    dashboardAlerts,
+    fetchDashboardAlerts,
+  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
@@ -128,31 +231,26 @@ const MainLayout = () => {
         />
       </div>
 
-      {/* 🔹 باڈی */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Mobile overlay */}
         {isSidebarOpen && (
           <div
             className="fixed inset-0 bg-black bg-opacity-40 z-30 md:hidden"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
-        {/* 🔹 Sidebar ledger میں hide */}
+
         {!isLedgerPage && (
           <Sidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
         )}
 
-        {/* 🔹 سینٹر ایریا */}
         <div className="flex flex-col flex-1 overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            <Outlet />
+            <Outlet context={outletContext} />
           </div>
         </div>
 
-        {/* 🔹 Right Panel ledger میں hide */}
         {!isLedgerPage && (
           <>
-            {/* 📱 Mobile */}
             {isMobile && (
               <>
                 {isRightPanelOpen && (
@@ -165,23 +263,25 @@ const MainLayout = () => {
                 <div
                   ref={rightPanelRef}
                   className={`
-            fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
-            transform transition-transform duration-300
-            ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
-            md:hidden
-          `}
+                    fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
+                    transform transition-transform duration-300
+                    ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+                    md:hidden
+                  `}
                 >
                   {isRightPanelOpen && (
                     <RightPanel
                       dashboardAlerts={dashboardAlerts}
                       refreshDashboardAlerts={fetchDashboardAlerts}
+                      dashboardSummary={dashboardSummary}
+                      dashboardSummaryLoading={dashboardSummaryLoading}
+                      refreshDashboard={refreshDashboard}
                     />
                   )}
                 </div>
               </>
             )}
 
-            {/* 💻 Desktop */}
             {!isMobile && (
               <div
                 ref={rightPanelRef}
@@ -193,6 +293,9 @@ const MainLayout = () => {
                   <RightPanel
                     dashboardAlerts={dashboardAlerts}
                     refreshDashboardAlerts={fetchDashboardAlerts}
+                    dashboardSummary={dashboardSummary}
+                    dashboardSummaryLoading={dashboardSummaryLoading}
+                    refreshDashboard={refreshDashboard}
                   />
                 )}
               </div>

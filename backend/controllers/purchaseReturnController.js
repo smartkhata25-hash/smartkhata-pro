@@ -1,10 +1,13 @@
+const mongoose = require("mongoose");
+
 const PurchaseReturn = require("../models/PurchaseReturn");
 const PurchaseInvoice = require("../models/purchaseInvoice");
-
 const JournalEntry = require("../models/JournalEntry");
+const InventoryTransaction = require("../models/InventoryTransaction");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const Account = require("../models/Account");
+
 const {
   createInventoryEntry,
   deleteTransactionsByReference,
@@ -12,12 +15,70 @@ const {
 
 const { createPaymentEntry } = require("../utils/paymentService");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+
 const {
   uploadFile,
   deleteFile,
   getFileUrl,
 } = require("../services/r2FileService");
+
 const { logActivity } = require("../utils/activityLogger");
+
+const getUserId = (req) => req.user?.id || req.userId;
+
+const getAccountId = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "object" && value._id) {
+    return value._id;
+  }
+
+  return value;
+};
+
+const getProductId = (value) => {
+  if (!value) return "";
+
+  if (typeof value === "object" && value._id) {
+    return value._id.toString();
+  }
+
+  return value.toString();
+};
+
+const parseItems = (rawItems) => {
+  try {
+    const parsed = JSON.parse(rawItems || "[]");
+
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const getExplicitOpeningMode = (isOpening) => {
+  return isOpening === true || isOpening === "true";
+};
+
+const getAccountingOpeningMode = ({ explicitOpeningMode, billNo, notes }) => {
+  return (
+    explicitOpeningMode ||
+    billNo === "OPENING" ||
+    String(notes || "")
+      .toLowerCase()
+      .includes("opening")
+  );
+};
+
+const getReturnDateTime = (returnDate, returnTime) => {
+  let dateTime = new Date(`${returnDate}T${returnTime || "00:00"}`);
+
+  if (Number.isNaN(dateTime.getTime())) {
+    dateTime = new Date(returnDate);
+  }
+
+  return dateTime;
+};
 
 function formatPurchaseReturnAttachments(pr) {
   if (pr.attachments?.length > 0) {
@@ -48,50 +109,449 @@ function formatPurchaseReturnAttachments(pr) {
   return [];
 }
 
-async function uploadPurchaseReturnFiles(files, userId) {
-  const attachments = [];
+async function deletePurchaseReturnAttachment(att) {
+  if (!att?.key || !att.key.startsWith("users/")) {
+    return;
+  }
 
-  if (!files || files.length === 0) return attachments;
+  await deleteFile(att.key);
+}
+
+async function deletePurchaseReturnAttachments(attachments = []) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return;
+  }
+
+  await Promise.allSettled(
+    attachments.map((att) => deletePurchaseReturnAttachment(att)),
+  );
+}
+
+async function uploadPurchaseReturnFiles(files, userId) {
+  if (!files?.length) {
+    return [];
+  }
 
   if (files.length > 3) {
     throw new Error("Maximum 3 attachments allowed");
   }
 
-  for (const file of files) {
-    const uploaded = await uploadFile({
-      buffer: file.buffer,
-      userId,
-      moduleName: "purchase-returns",
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-    });
+  const attachments = [];
 
-    attachments.push({
-      key: uploaded.key,
-      type: uploaded.mimeType,
-      size: uploaded.size,
-      originalName: uploaded.originalName,
-    });
-  }
-
-  return attachments;
-}
-
-async function deletePurchaseReturnAttachment(att) {
-  if (!att?.key) return;
-
-  if (att.key.startsWith("users/")) {
-    await deleteFile(att.key);
-  }
-}
-
-/* =========================================================
-   ✅ CREATE PURCHASE RETURN
-========================================================= */
-exports.createPurchaseReturn = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    for (const file of files) {
+      const uploaded = await uploadFile({
+        buffer: file.buffer,
+        userId,
+        moduleName: "purchase-returns",
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+      });
 
+      attachments.push({
+        key: uploaded.key,
+        type: uploaded.mimeType,
+        size: uploaded.size,
+        originalName: uploaded.originalName,
+      });
+    }
+
+    return attachments;
+  } catch (error) {
+    await deletePurchaseReturnAttachments(attachments);
+
+    throw error;
+  }
+}
+
+const validateBasicInput = ({
+  supplierId,
+  partyId,
+  items,
+  explicitOpeningMode,
+  totalAmount,
+  paidAmount,
+  paymentType,
+  accountId,
+}) => {
+  if (!supplierId && !partyId) {
+    return "Supplier is required";
+  }
+
+  if (!explicitOpeningMode && items.length === 0) {
+    return "Supplier and items required";
+  }
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    return "Invalid total amount";
+  }
+
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    return "Invalid paid amount";
+  }
+
+  if (paidAmount > totalAmount) {
+    return "Paid amount cannot exceed total amount";
+  }
+
+  if (paidAmount > 0 && (!paymentType || !accountId)) {
+    return "Payment account is required";
+  }
+
+  if (!explicitOpeningMode) {
+    for (const item of items) {
+      const productId = getProductId(item?.productId);
+      const quantity = Number(item?.quantity || 0);
+
+      if (
+        !mongoose.Types.ObjectId.isValid(productId) ||
+        !Number.isFinite(quantity) ||
+        quantity <= 0
+      ) {
+        return "Invalid purchase return item";
+      }
+    }
+  }
+
+  return null;
+};
+
+const getSupplierOrParty = async ({ userId, supplierId, partyId }) => {
+  if (partyId) {
+    if (!mongoose.Types.ObjectId.isValid(partyId)) {
+      return {
+        supplier: null,
+        party: null,
+      };
+    }
+
+    const party = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    return {
+      supplier: null,
+      party,
+    };
+  }
+
+  if (!supplierId || !mongoose.Types.ObjectId.isValid(supplierId)) {
+    return {
+      supplier: null,
+      party: null,
+    };
+  }
+
+  const supplier = await Supplier.findOne({
+    _id: supplierId,
+    userId,
+    isDeleted: false,
+  });
+
+  return {
+    supplier,
+    party: null,
+  };
+};
+
+const getRequiredAccounts = async ({ userId, accountingOpeningMode }) => {
+  const [purchaseReturnAccount, inventoryAccount, openingBalanceAccount] =
+    await Promise.all([
+      Account.findOne({
+        code: "PURCHASE_RETURN",
+        userId,
+      }),
+
+      Account.findOne({
+        code: "INVENTORY",
+        userId,
+      }),
+
+      accountingOpeningMode
+        ? Account.findOne({
+            code: "OPENING_BALANCE",
+            userId,
+          })
+        : Promise.resolve(null),
+    ]);
+
+  if (
+    !purchaseReturnAccount ||
+    !inventoryAccount ||
+    (accountingOpeningMode && !openingBalanceAccount)
+  ) {
+    return null;
+  }
+
+  return {
+    purchaseReturnAccount,
+    inventoryAccount,
+    openingBalanceAccount,
+  };
+};
+
+const getOwnedOriginalInvoice = async (originalInvoiceId, userId) => {
+  if (!originalInvoiceId) {
+    return null;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(originalInvoiceId)) {
+    return null;
+  }
+
+  return PurchaseInvoice.findOne({
+    _id: originalInvoiceId,
+    userId,
+    isDeleted: false,
+  })
+    .select("items")
+    .lean();
+};
+
+const validateReturnQuantities = async ({
+  originalInvoice,
+  originalInvoiceId,
+  userId,
+  items,
+  excludeReturnId = null,
+}) => {
+  if (!originalInvoice || !originalInvoiceId) {
+    return null;
+  }
+
+  const originalQtyMap = {};
+
+  for (const item of originalInvoice.items || []) {
+    const key = getProductId(item.productId);
+
+    originalQtyMap[key] = Number(item.quantity || 0);
+  }
+
+  const filter = {
+    originalInvoiceId,
+    createdBy: userId,
+    isDeleted: false,
+  };
+
+  if (excludeReturnId) {
+    filter._id = {
+      $ne: excludeReturnId,
+    };
+  }
+
+  const previousReturns = await PurchaseReturn.find(filter)
+    .select("items")
+    .lean();
+
+  const returnedQtyMap = {};
+
+  for (const ret of previousReturns) {
+    for (const item of ret.items || []) {
+      const key = getProductId(item.productId);
+
+      returnedQtyMap[key] =
+        Number(returnedQtyMap[key] || 0) + Number(item.quantity || 0);
+    }
+  }
+
+  for (const item of items) {
+    const key = getProductId(item.productId);
+
+    const originalQty = Number(originalQtyMap[key] || 0);
+    const alreadyReturned = Number(returnedQtyMap[key] || 0);
+    const currentQty = Number(item.quantity || 0);
+
+    if (currentQty + alreadyReturned > originalQty) {
+      return "Return quantity exceeds original invoice quantity";
+    }
+  }
+
+  return null;
+};
+
+const createReturnInventoryEntries = async ({
+  items,
+  originalInvoice,
+  purchaseReturnId,
+  billNo,
+  userId,
+  notePrefix,
+}) => {
+  const rateMap = new Map();
+
+  for (const item of originalInvoice?.items || []) {
+    rateMap.set(getProductId(item.productId), Number(item.price || 0));
+  }
+
+  await Promise.all(
+    items.map((item) =>
+      createInventoryEntry({
+        productId: item.productId,
+        type: "OUT",
+        quantity: Number(item.quantity),
+        note: `${notePrefix} #${billNo}`,
+        invoiceId: purchaseReturnId,
+        invoiceModel: "PurchaseReturn",
+        userId,
+        rate: Number(rateMap.get(getProductId(item.productId)) || 0),
+      }),
+    ),
+  );
+};
+
+const getLinkedJournalFilter = (purchaseReturnId, userId) => ({
+  $or: [
+    {
+      referenceId: purchaseReturnId,
+    },
+    {
+      invoiceId: purchaseReturnId,
+    },
+  ],
+
+  sourceType: {
+    $in: [
+      "purchase_return",
+      "opening_purchase_return",
+      "purchase_return_payment",
+    ],
+  },
+
+  createdBy: userId,
+});
+
+const collectJournalAccountIds = (entries = []) => {
+  const ids = new Set();
+
+  for (const entry of entries) {
+    for (const line of entry.lines || []) {
+      const accountId = getAccountId(line.account);
+
+      if (accountId) {
+        ids.add(accountId.toString());
+      }
+    }
+  }
+
+  return ids;
+};
+
+const recalculateUniqueAccounts = async (accountIds = []) => {
+  const uniqueAccountIds = [
+    ...new Set(
+      accountIds
+        .map((id) => getAccountId(id))
+        .filter(Boolean)
+        .map((id) => id.toString()),
+    ),
+  ];
+
+  if (uniqueAccountIds.length === 0) {
+    return;
+  }
+
+  await Promise.all(
+    uniqueAccountIds.map((accountId) => recalculateAccountBalance(accountId)),
+  );
+};
+
+const restorePurchaseReturnSnapshot = async (purchaseReturnId, snapshot) => {
+  if (!snapshot) {
+    return;
+  }
+
+  const restoreData = {
+    ...snapshot,
+  };
+
+  delete restoreData._id;
+  delete restoreData.__v;
+
+  await PurchaseReturn.updateOne(
+    {
+      _id: purchaseReturnId,
+    },
+    {
+      $set: restoreData,
+    },
+  );
+};
+
+const restoreInventorySnapshot = async ({
+  purchaseReturnId,
+  userId,
+  snapshot,
+}) => {
+  await InventoryTransaction.deleteMany({
+    invoiceId: purchaseReturnId,
+    invoiceModel: "PurchaseReturn",
+    userId,
+  });
+
+  if (!snapshot?.length) {
+    return;
+  }
+
+  const documents = snapshot.map((item) => {
+    const document = {
+      ...item,
+    };
+
+    delete document.__v;
+
+    return document;
+  });
+
+  await InventoryTransaction.insertMany(documents, {
+    ordered: false,
+  });
+};
+
+const rollbackCreatedPurchaseReturn = async ({
+  purchaseReturnId,
+  userId,
+  attachments,
+  affectedAccounts,
+}) => {
+  try {
+    if (purchaseReturnId) {
+      await Promise.all([
+        JournalEntry.deleteMany(
+          getLinkedJournalFilter(purchaseReturnId, userId),
+        ),
+
+        InventoryTransaction.deleteMany({
+          invoiceId: purchaseReturnId,
+          invoiceModel: "PurchaseReturn",
+          userId,
+        }),
+      ]);
+
+      await PurchaseReturn.deleteOne({
+        _id: purchaseReturnId,
+        createdBy: userId,
+      });
+    }
+
+    await deletePurchaseReturnAttachments(attachments);
+
+    await recalculateUniqueAccounts(affectedAccounts);
+  } catch (rollbackError) {
+    console.error("❌ Purchase Return Create Rollback Error:", rollbackError);
+  }
+};
+
+exports.createPurchaseReturn = async (req, res) => {
+  const userId = getUserId(req);
+
+  let uploadedAttachments = [];
+  let createdPurchaseReturnId = null;
+  let affectedAccounts = [];
+
+  try {
     const {
       billNo,
       returnDate,
@@ -99,8 +559,6 @@ exports.createPurchaseReturn = async (req, res) => {
       supplierId,
       partyId,
       supplierPhone,
-      totalAmount,
-      paidAmount = 0,
       paymentType,
       accountId,
       notes,
@@ -108,70 +566,63 @@ exports.createPurchaseReturn = async (req, res) => {
       isOpening,
     } = req.body;
 
-    const items = JSON.parse(req.body.items || "[]");
+    const items = parseItems(req.body.items);
 
-    const attachments = await uploadPurchaseReturnFiles(req.files, userId);
-    const attachmentUrl = attachments[0]?.key || "";
-    const attachmentType = attachments[0]?.type || "";
-
-    /* =============================
-       BASIC VALIDATION
-    ============================== */
-    const openingMode = isOpening === true || isOpening === "true";
-
-    if ((!supplierId && !partyId) || (!openingMode && items.length === 0)) {
+    if (!items) {
       return res.status(400).json({
-        error: "Supplier and items required",
+        error: "Invalid items data",
       });
     }
 
-    if (!totalAmount || totalAmount <= 0) {
+    const totalAmount = Number(req.body.totalAmount);
+    const paidAmount = Number(req.body.paidAmount || 0);
+
+    const explicitOpeningMode = getExplicitOpeningMode(isOpening);
+
+    const accountingOpeningMode = getAccountingOpeningMode({
+      explicitOpeningMode,
+      billNo,
+      notes,
+    });
+
+    const validationError = validateBasicInput({
+      supplierId,
+      partyId,
+      items,
+      explicitOpeningMode,
+      totalAmount,
+      paidAmount,
+      paymentType,
+      accountId,
+    });
+
+    if (validationError) {
       return res.status(400).json({
-        error: "Invalid total amount",
+        error: validationError,
       });
     }
 
-    if (paidAmount > totalAmount) {
-      return res.status(400).json({
-        error: "Paid amount cannot exceed total amount",
+    const { supplier, party } = await getSupplierOrParty({
+      userId,
+      supplierId,
+      partyId,
+    });
+
+    if (partyId && !party) {
+      return res.status(404).json({
+        error: "Party not found",
       });
     }
 
-    let supplier = null;
-    let party = null;
-
-    if (partyId) {
-      party = await Party.findOne({
-        _id: partyId,
-        userId,
-        isDeleted: false,
-        isActive: true,
+    if (!partyId && !supplier) {
+      return res.status(404).json({
+        error: "Supplier not found",
       });
-
-      if (!party) {
-        return res.status(404).json({
-          error: "Party not found",
-        });
-      }
-    } else {
-      supplier = await Supplier.findOne({
-        _id: supplierId,
-        userId,
-        isDeleted: false,
-      });
-
-      if (!supplier) {
-        return res.status(404).json({
-          error: "Supplier not found",
-        });
-      }
     }
 
-    const counterPartyAccountId = party
-      ? party.account
-      : typeof supplier.account === "object"
-        ? supplier.account?._id
-        : supplier.account;
+    const counterPartyAccountId = getAccountId(
+      party ? party.account : supplier?.account,
+    );
 
     if (!counterPartyAccountId) {
       return res.status(400).json({
@@ -179,120 +630,106 @@ exports.createPurchaseReturn = async (req, res) => {
       });
     }
 
-    /* =============================
-       ACCOUNTS VALIDATION
-    ============================== */
-    const purchaseReturnAccount = await Account.findOne({
-      code: "PURCHASE_RETURN",
+    if (paidAmount > 0 && !mongoose.Types.ObjectId.isValid(accountId)) {
+      return res.status(400).json({
+        error: "Invalid payment account",
+      });
+    }
+
+    const accounts = await getRequiredAccounts({
       userId,
+      accountingOpeningMode,
     });
 
-    const inventoryAccount = await Account.findOne({
-      code: "INVENTORY",
-      userId,
-    });
-
-    const openingBalanceAccount = await Account.findOne({
-      code: "OPENING_BALANCE",
-      userId,
-    });
-
-    if (
-      !purchaseReturnAccount ||
-      !inventoryAccount ||
-      (openingMode && !openingBalanceAccount)
-    ) {
+    if (!accounts) {
       return res.status(400).json({
         error: "Required accounts not found",
       });
     }
 
-    const purchaseReturn = new PurchaseReturn({
-      billNo,
-      returnDate,
-      returnTime,
-      supplierId: supplier?._id || null,
-      partyId: party?._id || null,
-      supplierName: supplier?.name || party?.name || "",
-      supplierPhone,
-      originalInvoiceId: originalInvoiceId || null,
-      totalAmount,
-      paidAmount,
-      paymentType,
-      accountId: paymentType ? accountId : null,
-      notes,
-      items,
-      createdBy: userId,
-      attachments,
-      attachmentUrl,
-      attachmentType,
-    });
+    let originalInvoice = null;
 
     if (originalInvoiceId) {
-      const invoice = await PurchaseInvoice.findById(originalInvoiceId);
+      originalInvoice = await getOwnedOriginalInvoice(
+        originalInvoiceId,
+        userId,
+      );
 
-      if (!invoice) {
+      if (!originalInvoice) {
         return res.status(404).json({
           error: "Original invoice not found",
         });
       }
 
-      const originalQtyMap = {};
-      invoice.items.forEach((item) => {
-        originalQtyMap[item.productId.toString()] = item.quantity;
-      });
-
-      const previousReturns = await PurchaseReturn.find({
-        originalInvoiceId,
-      });
-
-      const returnedQtyMap = {};
-
-      previousReturns.forEach((ret) => {
-        ret.items.forEach((item) => {
-          const key =
-            typeof item.productId === "object"
-              ? item.productId._id?.toString()
-              : item.productId.toString();
-          if (!returnedQtyMap[key]) returnedQtyMap[key] = 0;
-          returnedQtyMap[key] += item.quantity;
+      if (!explicitOpeningMode) {
+        const quantityError = await validateReturnQuantities({
+          originalInvoice,
+          originalInvoiceId,
+          userId,
+          items,
         });
-      });
 
-      // 🧪 Validate current items
-      for (const item of items) {
-        const key =
-          typeof item.productId === "object"
-            ? item.productId._id?.toString()
-            : item.productId.toString();
-
-        const originalQty = originalQtyMap[key] || 0;
-        const alreadyReturned = returnedQtyMap[key] || 0;
-
-        if (item.quantity + alreadyReturned > originalQty) {
+        if (quantityError) {
           return res.status(400).json({
-            error: `Return quantity exceeds original quantity for product`,
+            error: quantityError,
           });
         }
       }
     }
 
+    uploadedAttachments = await uploadPurchaseReturnFiles(req.files, userId);
+
+    const attachmentUrl = uploadedAttachments[0]?.key || "";
+
+    const attachmentType = uploadedAttachments[0]?.type || "";
+
+    const purchaseReturn = new PurchaseReturn({
+      billNo,
+      returnDate,
+      returnTime,
+
+      supplierId: supplier?._id || null,
+      partyId: party?._id || null,
+
+      supplierName: supplier?.name || party?.name || "",
+
+      supplierPhone,
+
+      originalInvoiceId: originalInvoiceId || null,
+
+      totalAmount,
+      paidAmount,
+      paymentType,
+
+      accountId: paidAmount > 0 && paymentType && accountId ? accountId : null,
+
+      notes,
+      items,
+
+      createdBy: userId,
+
+      isOpening: accountingOpeningMode,
+
+      attachments: uploadedAttachments,
+      attachmentUrl,
+      attachmentType,
+    });
+
     await purchaseReturn.save();
 
-    /* =============================
-       DATE SAFE HANDLING
-    ============================== */
-    let dateTime = new Date(`${returnDate}T${returnTime}`);
-    if (isNaN(dateTime.getTime())) {
-      dateTime = new Date(returnDate);
-    }
+    createdPurchaseReturnId = purchaseReturn._id;
 
-    const isOpeningReturn =
-      openingMode ||
-      billNo === "OPENING" ||
-      notes?.toLowerCase()?.includes("opening");
+    affectedAccounts = [
+      counterPartyAccountId,
 
-    const lines = isOpeningReturn
+      accountingOpeningMode
+        ? accounts.openingBalanceAccount?._id
+        : accounts.inventoryAccount?._id,
+
+      paidAmount > 0 ? accountId : null,
+    ];
+
+    const lines = accountingOpeningMode
       ? [
           {
             account: counterPartyAccountId,
@@ -300,7 +737,7 @@ exports.createPurchaseReturn = async (req, res) => {
             amount: totalAmount,
           },
           {
-            account: openingBalanceAccount._id,
+            account: accounts.openingBalanceAccount._id,
             type: "credit",
             amount: totalAmount,
           },
@@ -312,80 +749,71 @@ exports.createPurchaseReturn = async (req, res) => {
             amount: totalAmount,
           },
           {
-            account: inventoryAccount._id,
+            account: accounts.inventoryAccount._id,
             type: "credit",
             amount: totalAmount,
           },
         ];
 
     const journal = new JournalEntry({
-      date: dateTime,
-      time: returnTime || "",
-      description: `Purchase Return - ${supplier?.name || party?.name} (Bill# ${billNo})`,
+      date: getReturnDateTime(returnDate, returnTime),
 
-      sourceType: isOpeningReturn
+      time: returnTime || "",
+
+      description: `Purchase Return - ${
+        supplier?.name || party?.name || ""
+      } (Bill# ${billNo})`,
+
+      sourceType: accountingOpeningMode
         ? "opening_purchase_return"
         : "purchase_return",
 
       referenceId: purchaseReturn._id,
       invoiceId: purchaseReturn._id,
+
       billNo,
       createdBy: userId,
+
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
+
       attachmentUrl,
       attachmentType,
+
       lines,
     });
 
     await journal.save();
 
-    await recalculateAccountBalance(counterPartyAccountId);
-
-    if (paidAmount > 0 && paymentType && accountId) {
+    if (paidAmount > 0) {
       await createPaymentEntry({
         userId,
         referenceId: purchaseReturn._id,
         sourceType: "purchase_return_payment",
         billNo: purchaseReturn.billNo,
         accountId,
-        counterPartyAccountId: counterPartyAccountId,
+        counterPartyAccountId,
         amount: paidAmount,
         paymentType,
         description: `Purchase Return Payment - ${purchaseReturn.billNo}`,
         supplierId: supplier?._id || null,
         partyId: party?._id || null,
       });
-
-      await recalculateAccountBalance(counterPartyAccountId);
-      if (accountId) await recalculateAccountBalance(accountId);
     }
 
-    /* =============================
-       STOCK REDUCE + INVENTORY LOG
-    ============================== */
-    const originalInvoice = await PurchaseInvoice.findById(originalInvoiceId);
-
-    if (!isOpeningReturn) {
-      for (const item of items) {
-        const originalItem = originalInvoice?.items.find(
-          (i) => i.productId?.toString() === item.productId?.toString(),
-        );
-
-        await createInventoryEntry({
-          productId: item.productId,
-          type: "OUT",
-          quantity: item.quantity,
-          note: `Purchase Return #${billNo}`,
-          invoiceId: purchaseReturn._id,
-          invoiceModel: "PurchaseReturn",
-          userId,
-
-          // ✅ Historical purchase rate
-          rate: Number(originalItem?.price || 0),
-        });
-      }
+    if (!accountingOpeningMode) {
+      await createReturnInventoryEntries({
+        items,
+        originalInvoice,
+        purchaseReturnId: purchaseReturn._id,
+        billNo,
+        userId,
+        notePrefix: "Purchase Return",
+      });
     }
+
+    await recalculateUniqueAccounts(affectedAccounts);
+
     await logActivity({
       req,
       action: "create",
@@ -395,26 +823,48 @@ exports.createPurchaseReturn = async (req, res) => {
       title: `Purchase Return ${purchaseReturn.billNo}`,
       description: `${purchaseReturn.supplierName} کی Purchase Return بنائی گئی`,
       billNo: purchaseReturn.billNo,
+
       after: {
         supplierName: purchaseReturn.supplierName,
+
         supplierPhone: purchaseReturn.supplierPhone,
+
         returnDate: purchaseReturn.returnDate,
+
         returnTime: purchaseReturn.returnTime,
+
         totalAmount: purchaseReturn.totalAmount,
+
         paidAmount: purchaseReturn.paidAmount,
+
         paymentType: purchaseReturn.paymentType,
+
         accountId: purchaseReturn.accountId,
+
         itemCount: purchaseReturn.items?.length || 0,
-        isOpening: openingMode,
+
+        isOpening: accountingOpeningMode,
       },
     });
 
     return res.status(201).json({
       message: "✅ Purchase Return created successfully",
+
       purchaseReturn,
     });
   } catch (err) {
+    await rollbackCreatedPurchaseReturn({
+      purchaseReturnId: createdPurchaseReturnId,
+
+      userId,
+
+      attachments: uploadedAttachments,
+
+      affectedAccounts,
+    });
+
     console.error("❌ Create Purchase Return Error:", err);
+
     return res.status(500).json({
       error: "Server Error",
       detail: err.message,
@@ -422,15 +872,19 @@ exports.createPurchaseReturn = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GET BY ID
-========================================================= */
 exports.getPurchaseReturnById = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        error: "Invalid Purchase Return ID",
+      });
+    }
 
     const pr = await PurchaseReturn.findOne({
-      _id: req.params.id,
+      _id: id,
       createdBy: userId,
       isDeleted: false,
     });
@@ -441,31 +895,42 @@ exports.getPurchaseReturnById = async (req, res) => {
       });
     }
 
-    let paymentLine = null;
-
     const paymentJournal = await JournalEntry.findOne({
       referenceId: pr._id,
-      sourceType: "purchase_return_payment",
-      createdBy: userId,
-      isDeleted: false,
-    }).populate("lines.account", "name");
 
-    paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
+      sourceType: "purchase_return_payment",
+
+      createdBy: userId,
+
+      isDeleted: false,
+    })
+      .select("lines paymentType")
+      .populate("lines.account", "name");
+
+    const paymentLine = paymentJournal?.lines?.find((line) => line.paymentType);
 
     const attachments = formatPurchaseReturnAttachments(pr);
 
     return res.json({
       ...pr.toObject(),
+
       attachments,
+
       attachmentFullUrl: attachments[0]?.fullUrl || "",
+
       paymentMode: paymentLine?.paymentType || pr.paymentType || "-",
+
       accountId: paymentLine?.account?._id || pr.accountId || "",
+
       accountName: paymentLine?.account?.name || "-",
+
       attachmentUrl: pr.attachmentUrl || "",
+
       attachmentType: pr.attachmentType || "",
     });
   } catch (err) {
     console.error("❌ Get Purchase Return Error:", err);
+
     return res.status(500).json({
       error: "Server Error",
       detail: err.message,
@@ -473,14 +938,10 @@ exports.getPurchaseReturnById = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ GET ALL PURCHASE RETURNS - FAST PAGINATION
-========================================================= */
 exports.getAllPurchaseReturns = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    const userId = getUserId(req);
 
-    // ✅ Pagination
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);
 
     const requestedLimit = parseInt(req.query.limit || "10", 10);
@@ -489,30 +950,40 @@ exports.getAllPurchaseReturns = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // ✅ Filters
     const search = String(req.query.search || "").trim();
+
     const supplier = String(req.query.supplier || "").trim();
+
     const paymentType = String(req.query.paymentType || "").trim();
 
     const fromDate = String(req.query.fromDate || "").trim();
 
     const toDate = String(req.query.toDate || "").trim();
 
-    // ✅ Search کے special characters محفوظ کریں
     const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    // ✅ Main filter
     const filter = {
       createdBy: userId,
       isDeleted: false,
     };
 
-    // ✅ Supplier یا Party filter
     if (supplier) {
-      filter.$or = [{ supplierId: supplier }, { partyId: supplier }];
+      if (!mongoose.Types.ObjectId.isValid(supplier)) {
+        return res.status(400).json({
+          error: "Invalid supplier ID",
+        });
+      }
+
+      filter.$or = [
+        {
+          supplierId: supplier,
+        },
+        {
+          partyId: supplier,
+        },
+      ];
     }
 
-    // ✅ Payment type filter
     if (paymentType === "adjust") {
       filter.paymentType = {
         $in: ["", null],
@@ -521,7 +992,6 @@ exports.getAllPurchaseReturns = async (req, res) => {
       filter.paymentType = paymentType;
     }
 
-    // ✅ Search filter
     if (safeSearch) {
       const searchConditions = [
         {
@@ -550,7 +1020,6 @@ exports.getAllPurchaseReturns = async (req, res) => {
         },
       ];
 
-      // اگر supplier filter پہلے سے موجود ہے
       if (filter.$or) {
         filter.$and = [
           {
@@ -567,23 +1036,36 @@ exports.getAllPurchaseReturns = async (req, res) => {
       }
     }
 
-    // ✅ Date filter
     if (fromDate || toDate) {
       filter.returnDate = {};
 
       if (fromDate) {
-        filter.returnDate.$gte = new Date(`${fromDate}T00:00:00.000Z`);
+        const start = new Date(`${fromDate}T00:00:00.000+05:00`);
+
+        if (Number.isNaN(start.getTime())) {
+          return res.status(400).json({
+            error: "Invalid from date",
+          });
+        }
+
+        filter.returnDate.$gte = start;
       }
 
       if (toDate) {
-        filter.returnDate.$lte = new Date(`${toDate}T23:59:59.999Z`);
+        const end = new Date(`${toDate}T23:59:59.999+05:00`);
+
+        if (Number.isNaN(end.getTime())) {
+          return res.status(400).json({
+            error: "Invalid to date",
+          });
+        }
+
+        filter.returnDate.$lte = end;
       }
     }
 
-    // ✅ List اور total count ایک ساتھ
     const [returns, totalReturns] = await Promise.all([
       PurchaseReturn.find(filter)
-        // ✅ List کے لیے صرف ضروری fields
         .select(
           [
             "billNo",
@@ -622,7 +1104,9 @@ exports.getAllPurchaseReturns = async (req, res) => {
         limit,
         totalReturns,
         totalPages,
+
         hasPreviousPage: page > 1,
+
         hasNextPage: page < totalPages,
       },
     });
@@ -636,12 +1120,26 @@ exports.getAllPurchaseReturns = async (req, res) => {
   }
 };
 
-/* =========================================================
-   ✅ UPDATE PURCHASE RETURN (SAFE PRO VERSION)
-========================================================= */
 exports.updatePurchaseReturn = async (req, res) => {
+  const userId = getUserId(req);
+
+  let pr = null;
+  let oldPurchaseReturnSnapshot = null;
+  let oldJournalEntries = [];
+  let oldInventoryTransactions = [];
+  let newAttachments = [];
+  let removedAttachments = [];
+  let affectedAccountIds = new Set();
+  let changesStarted = false;
+
   try {
-    const userId = req.user?.id || req.userId;
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        error: "Invalid Purchase Return ID",
+      });
+    }
 
     const {
       billNo,
@@ -650,23 +1148,51 @@ exports.updatePurchaseReturn = async (req, res) => {
       supplierId,
       partyId,
       supplierPhone,
-      totalAmount,
-      paidAmount = 0,
       paymentType,
       accountId,
       notes,
       isOpening,
     } = req.body;
 
-    const items = JSON.parse(req.body.items || "[]");
+    const items = parseItems(req.body.items);
 
-    const openingMode = isOpening === true || isOpening === "true";
+    if (!items) {
+      return res.status(400).json({
+        error: "Invalid items data",
+      });
+    }
 
-    /* =============================
-       FIND EXISTING RECORD
-    ============================== */
-    const pr = await PurchaseReturn.findOne({
-      _id: req.params.id,
+    const totalAmount = Number(req.body.totalAmount);
+
+    const paidAmount = Number(req.body.paidAmount || 0);
+
+    const explicitOpeningMode = getExplicitOpeningMode(isOpening);
+
+    const accountingOpeningMode = getAccountingOpeningMode({
+      explicitOpeningMode,
+      billNo,
+      notes,
+    });
+
+    const validationError = validateBasicInput({
+      supplierId,
+      partyId,
+      items,
+      explicitOpeningMode,
+      totalAmount,
+      paidAmount,
+      paymentType,
+      accountId,
+    });
+
+    if (validationError) {
+      return res.status(400).json({
+        error: validationError,
+      });
+    }
+
+    pr = await PurchaseReturn.findOne({
+      _id: id,
       createdBy: userId,
       isDeleted: false,
     });
@@ -676,6 +1202,10 @@ exports.updatePurchaseReturn = async (req, res) => {
         error: "Purchase Return not found",
       });
     }
+
+    oldPurchaseReturnSnapshot = pr.toObject({
+      depopulate: true,
+    });
 
     const beforeUpdate = {
       billNo: pr.billNo,
@@ -694,119 +1224,27 @@ exports.updatePurchaseReturn = async (req, res) => {
       isOpening: pr.isOpening || false,
     };
 
-    const oldSupplier = pr.supplierId
-      ? await Supplier.findById(pr.supplierId)
-      : null;
+    const { supplier, party } = await getSupplierOrParty({
+      userId,
+      supplierId,
+      partyId,
+    });
 
-    const oldParty = pr.partyId ? await Party.findById(pr.partyId) : null;
-
-    const oldSupplierAccount = oldSupplier?.account || null;
-    const oldPartyAccount = oldParty?.account || null;
-    const oldPaymentAccount = pr.accountId || null;
-
-    let attachments = formatPurchaseReturnAttachments(pr).map((att) => ({
-      key: att.key,
-      type: att.type || "",
-      size: att.size || 0,
-      originalName: att.originalName || "",
-    }));
-
-    let keepAttachmentKeys = [];
-
-    try {
-      keepAttachmentKeys = JSON.parse(req.body.keepAttachmentKeys || "[]");
-    } catch (err) {
-      keepAttachmentKeys = [];
+    if (partyId && !party) {
+      return res.status(404).json({
+        error: "Party not found",
+      });
     }
 
-    const removedAttachments = attachments.filter(
-      (att) => !keepAttachmentKeys.includes(att.key),
+    if (!partyId && !supplier) {
+      return res.status(404).json({
+        error: "Supplier not found",
+      });
+    }
+
+    const counterPartyAccountId = getAccountId(
+      party ? party.account : supplier?.account,
     );
-
-    for (const att of removedAttachments) {
-      await deletePurchaseReturnAttachment(att);
-    }
-
-    attachments = attachments.filter((att) =>
-      keepAttachmentKeys.includes(att.key),
-    );
-
-    const newAttachments = await uploadPurchaseReturnFiles(req.files, userId);
-
-    if (attachments.length + newAttachments.length > 3) {
-      for (const att of newAttachments) {
-        await deletePurchaseReturnAttachment(att);
-      }
-
-      return res.status(400).json({
-        error: "Maximum 3 attachments allowed",
-      });
-    }
-
-    attachments = [...attachments, ...newAttachments];
-
-    const attachmentUrl = attachments[0]?.key || "";
-    const attachmentType = attachments[0]?.type || "";
-
-    /* =============================
-       BASIC VALIDATION
-    ============================== */
-    if ((!supplierId && !partyId) || (!openingMode && items.length === 0)) {
-      return res.status(400).json({
-        error: "Supplier and items required",
-      });
-    }
-
-    if (!totalAmount || totalAmount <= 0) {
-      return res.status(400).json({
-        error: "Invalid total amount",
-      });
-    }
-
-    if (paidAmount > totalAmount) {
-      return res.status(400).json({
-        error: "Paid amount cannot exceed total amount",
-      });
-    }
-
-    /* =============================
-       SUPPLIER VALIDATION
-    ============================== */
-    let supplier = null;
-    let party = null;
-
-    if (partyId) {
-      party = await Party.findOne({
-        _id: partyId,
-        userId,
-        isDeleted: false,
-        isActive: true,
-      });
-
-      if (!party) {
-        return res.status(404).json({
-          error: "Party not found",
-        });
-      }
-    } else {
-      supplier = await Supplier.findOne({
-        _id: supplierId,
-        userId,
-        isDeleted: false,
-      });
-
-      if (!supplier) {
-        return res.status(404).json({
-          error: "Supplier not found",
-        });
-      }
-    }
-
-    const counterPartyAccountId = party
-      ? party.account
-      : typeof supplier.account === "object"
-        ? supplier.account?._id
-        : supplier.account;
 
     if (!counterPartyAccountId) {
       return res.status(400).json({
@@ -814,143 +1252,181 @@ exports.updatePurchaseReturn = async (req, res) => {
       });
     }
 
-    /* =============================
-       ACCOUNT VALIDATION
-    ============================== */
-    const inventoryAccount = await Account.findOne({
-      code: "INVENTORY",
-      userId,
-    });
-
-    if (!inventoryAccount) {
+    if (paidAmount > 0 && !mongoose.Types.ObjectId.isValid(accountId)) {
       return res.status(400).json({
-        error: "Inventory account not found",
+        error: "Invalid payment account",
       });
     }
 
-    const openingBalanceAccount = await Account.findOne({
-      code: "OPENING_BALANCE",
+    const accounts = await getRequiredAccounts({
       userId,
+      accountingOpeningMode,
     });
 
-    /* =============================
-       ORIGINAL INVOICE VALIDATION
-    ============================== */
-    if (pr.originalInvoiceId) {
-      const invoice = await PurchaseInvoice.findById(pr.originalInvoiceId);
+    if (!accounts) {
+      return res.status(400).json({
+        error: "Required accounts not found",
+      });
+    }
 
-      if (!invoice) {
+    let originalInvoice = null;
+
+    if (pr.originalInvoiceId) {
+      originalInvoice = await getOwnedOriginalInvoice(
+        pr.originalInvoiceId,
+        userId,
+      );
+
+      if (!originalInvoice) {
         return res.status(404).json({
           error: "Original invoice not found",
         });
       }
 
-      const originalQtyMap = {};
+      if (!explicitOpeningMode) {
+        const quantityError = await validateReturnQuantities({
+          originalInvoice,
 
-      invoice.items.forEach((item) => {
-        originalQtyMap[item.productId.toString()] = item.quantity;
-      });
+          originalInvoiceId: pr.originalInvoiceId,
 
-      const previousReturns = await PurchaseReturn.find({
-        originalInvoiceId: pr.originalInvoiceId,
-        _id: { $ne: pr._id },
-        isDeleted: false,
-      });
+          userId,
+          items,
 
-      const returnedQtyMap = {};
-
-      previousReturns.forEach((ret) => {
-        ret.items.forEach((item) => {
-          const key =
-            typeof item.productId === "object"
-              ? item.productId._id?.toString()
-              : item.productId.toString();
-
-          if (!returnedQtyMap[key]) {
-            returnedQtyMap[key] = 0;
-          }
-
-          returnedQtyMap[key] += item.quantity;
+          excludeReturnId: pr._id,
         });
-      });
 
-      if (!openingMode) {
-        for (const item of items) {
-          const key =
-            typeof item.productId === "object"
-              ? item.productId._id?.toString()
-              : item.productId.toString();
-
-          const originalQty = originalQtyMap[key] || 0;
-
-          const alreadyReturned = returnedQtyMap[key] || 0;
-
-          if (item.quantity + alreadyReturned > originalQty) {
-            return res.status(400).json({
-              error: "Return quantity exceeds original invoice quantity",
-            });
-          }
+        if (quantityError) {
+          return res.status(400).json({
+            error: quantityError,
+          });
         }
       }
     }
-    /* =============================
-       REMOVE OLD STOCK ENTRIES
-    ============================== */
+
+    const existingAttachments = formatPurchaseReturnAttachments(pr).map(
+      (att) => ({
+        key: att.key,
+        type: att.type || "",
+        size: att.size || 0,
+        originalName: att.originalName || "",
+      }),
+    );
+
+    let keepAttachmentKeys = existingAttachments.map((att) => att.key);
+
+    if (req.body.keepAttachmentKeys !== undefined) {
+      try {
+        const parsed = JSON.parse(req.body.keepAttachmentKeys || "[]");
+
+        if (!Array.isArray(parsed)) {
+          return res.status(400).json({
+            error: "Invalid attachment data",
+          });
+        }
+
+        keepAttachmentKeys = parsed;
+      } catch {
+        return res.status(400).json({
+          error: "Invalid attachment data",
+        });
+      }
+    }
+
+    const keptAttachments = existingAttachments.filter((att) =>
+      keepAttachmentKeys.includes(att.key),
+    );
+
+    removedAttachments = existingAttachments.filter(
+      (att) => !keepAttachmentKeys.includes(att.key),
+    );
+
+    const incomingFileCount = req.files?.length || 0;
+
+    if (keptAttachments.length + incomingFileCount > 3) {
+      return res.status(400).json({
+        error: "Maximum 3 attachments allowed",
+      });
+    }
+
+    newAttachments = await uploadPurchaseReturnFiles(req.files, userId);
+
+    const attachments = [...keptAttachments, ...newAttachments];
+
+    const attachmentUrl = attachments[0]?.key || "";
+
+    const attachmentType = attachments[0]?.type || "";
+
+    oldJournalEntries = await JournalEntry.find({
+      ...getLinkedJournalFilter(pr._id, userId),
+
+      isDeleted: false,
+    }).lean();
+
+    oldInventoryTransactions = await InventoryTransaction.find({
+      invoiceId: pr._id,
+      invoiceModel: "PurchaseReturn",
+      userId,
+    }).lean();
+
+    affectedAccountIds = collectJournalAccountIds(oldJournalEntries);
+
+    affectedAccountIds.add(counterPartyAccountId.toString());
+
+    const newMainAccount = accountingOpeningMode
+      ? accounts.openingBalanceAccount?._id
+      : accounts.inventoryAccount?._id;
+
+    if (newMainAccount) {
+      affectedAccountIds.add(newMainAccount.toString());
+    }
+
+    if (paidAmount > 0 && accountId) {
+      affectedAccountIds.add(accountId.toString());
+    }
+
+    changesStarted = true;
+
+    await JournalEntry.updateMany(
+      {
+        ...getLinkedJournalFilter(pr._id, userId),
+
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
     await deleteTransactionsByReference({
       referenceId: pr._id,
       invoiceModel: "PurchaseReturn",
       userId,
     });
 
-    /* =============================
-       SOFT DELETE OLD JOURNALS
-    ============================== */
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
-        sourceType: "purchase_return_payment",
-        createdBy: userId,
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
-        },
-      },
-    );
-
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
-        sourceType: {
-          $in: ["purchase_return", "opening_purchase_return"],
-        },
-        createdBy: userId,
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
-        },
-      },
-    );
-    /* =============================
-       UPDATE MAIN DOCUMENT
-    ============================== */
     pr.billNo = billNo;
     pr.returnDate = returnDate;
     pr.returnTime = returnTime;
+
     pr.supplierId = supplier?._id || null;
+
     pr.partyId = party?._id || null;
+
     pr.supplierName = supplier?.name || party?.name || "";
+
     pr.supplierPhone = supplierPhone;
     pr.totalAmount = totalAmount;
     pr.paidAmount = paidAmount;
     pr.paymentType = paymentType;
-    pr.accountId = paidAmount > 0 && paymentType ? accountId : null;
+
+    pr.accountId =
+      paidAmount > 0 && paymentType && accountId ? accountId : null;
+
     pr.notes = notes;
     pr.items = items;
-    pr.isOpening = openingMode;
+
+    pr.isOpening = accountingOpeningMode;
 
     pr.attachments = attachments;
     pr.attachmentUrl = attachmentUrl;
@@ -958,146 +1434,110 @@ exports.updatePurchaseReturn = async (req, res) => {
 
     await pr.save();
 
-    /* =============================
-       DATE SAFE
-    ============================== */
-    let dateTime = new Date(`${returnDate}T${returnTime}`);
-
-    if (isNaN(dateTime.getTime())) {
-      dateTime = new Date(returnDate);
-    }
-
-    /* =============================
-       CREATE JOURNAL ENTRY
-    ============================== */
-    const isOpeningReturn =
-      openingMode ||
-      billNo === "OPENING" ||
-      notes?.toLowerCase()?.includes("opening");
-
-    const lines = isOpeningReturn
+    const lines = accountingOpeningMode
       ? [
           {
             account: counterPartyAccountId,
+
             type: "debit",
+
             amount: totalAmount,
           },
           {
-            account: openingBalanceAccount._id,
+            account: accounts.openingBalanceAccount._id,
+
             type: "credit",
+
             amount: totalAmount,
           },
         ]
       : [
           {
             account: counterPartyAccountId,
+
             type: "debit",
+
             amount: totalAmount,
           },
           {
-            account: inventoryAccount._id,
+            account: accounts.inventoryAccount._id,
+
             type: "credit",
+
             amount: totalAmount,
           },
         ];
 
     const journal = new JournalEntry({
-      date: dateTime,
-      time: returnTime || "",
-      description: `Purchase Return - ${supplier?.name || party?.name} (Bill# ${billNo})`,
+      date: getReturnDateTime(returnDate, returnTime),
 
-      sourceType: isOpeningReturn
+      time: returnTime || "",
+
+      description: `Purchase Return - ${
+        supplier?.name || party?.name || ""
+      } (Bill# ${billNo})`,
+
+      sourceType: accountingOpeningMode
         ? "opening_purchase_return"
         : "purchase_return",
 
       referenceId: pr._id,
       invoiceId: pr._id,
+
       billNo,
       createdBy: userId,
+
       supplierId: supplier?._id || null,
+
       partyId: party?._id || null,
+
       attachmentUrl: pr.attachmentUrl || "",
+
       attachmentType: pr.attachmentType || "",
+
       lines,
     });
 
     await journal.save();
 
-    /* =============================
-       CREATE PAYMENT ENTRY
-    ============================== */
-    if (paidAmount > 0 && paymentType && accountId) {
+    if (paidAmount > 0) {
       await createPaymentEntry({
         userId,
         referenceId: pr._id,
         sourceType: "purchase_return_payment",
+
         billNo: pr.billNo,
+
         accountId,
-        counterPartyAccountId: counterPartyAccountId,
+
+        counterPartyAccountId,
+
         amount: paidAmount,
+
         paymentType,
+
         description: `Purchase Return Payment - ${pr.billNo}`,
+
         supplierId: supplier?._id || null,
+
         partyId: party?._id || null,
       });
     }
 
-    /* =============================
-       APPLY STOCK OUT
-    ============================== */
-    const originalInvoice = await PurchaseInvoice.findById(
-      pr.originalInvoiceId,
-    );
-
-    if (!isOpeningReturn) {
-      for (const item of items) {
-        const originalItem = originalInvoice?.items.find(
-          (i) => i.productId?.toString() === item.productId?.toString(),
-        );
-
-        await createInventoryEntry({
-          productId: item.productId,
-          type: "OUT",
-          quantity: item.quantity,
-          note: `Updated Purchase Return #${billNo}`,
-          invoiceId: pr._id,
-          invoiceModel: "PurchaseReturn",
-          userId,
-
-          // ✅ Historical purchase rate
-          rate: Number(originalItem?.price || 0),
-        });
-      }
-    }
-    /* =============================
-       RECALCULATE BALANCES
-    ============================== */
-    await recalculateAccountBalance(counterPartyAccountId);
-
-    if (accountId) {
-      await recalculateAccountBalance(accountId);
+    if (!accountingOpeningMode) {
+      await createReturnInventoryEntries({
+        items,
+        originalInvoice,
+        purchaseReturnId: pr._id,
+        billNo,
+        userId,
+        notePrefix: "Updated Purchase Return",
+      });
     }
 
-    if (
-      oldSupplierAccount &&
-      oldSupplierAccount.toString() !== counterPartyAccountId.toString()
-    ) {
-      await recalculateAccountBalance(oldSupplierAccount);
-    }
+    await recalculateUniqueAccounts([...affectedAccountIds]);
 
-    if (
-      oldPartyAccount &&
-      oldPartyAccount.toString() !== counterPartyAccountId.toString()
-    ) {
-      await recalculateAccountBalance(oldPartyAccount);
-    }
-
-    if (
-      oldPaymentAccount &&
-      (!accountId || oldPaymentAccount.toString() !== accountId.toString())
-    ) {
-      await recalculateAccountBalance(oldPaymentAccount);
-    }
+    await deletePurchaseReturnAttachments(removedAttachments);
 
     await logActivity({
       req,
@@ -1106,9 +1546,12 @@ exports.updatePurchaseReturn = async (req, res) => {
       entityType: "PurchaseReturn",
       entityId: pr._id,
       title: `Purchase Return ${pr.billNo}`,
+
       description: `${pr.supplierName} کی Purchase Return Update کی گئی`,
+
       billNo: pr.billNo,
       before: beforeUpdate,
+
       after: {
         billNo: pr.billNo,
         returnDate: pr.returnDate,
@@ -1123,15 +1566,68 @@ exports.updatePurchaseReturn = async (req, res) => {
         accountId: pr.accountId,
         notes: pr.notes,
         itemCount: pr.items?.length || 0,
-        isOpening: pr.isOpening || false,
+        isOpening: accountingOpeningMode,
       },
     });
 
     return res.json({
       message: "✅ Purchase Return updated successfully",
+
       purchaseReturn: pr,
     });
   } catch (err) {
+    if (changesStarted && pr?._id && oldPurchaseReturnSnapshot) {
+      try {
+        const oldJournalIds = oldJournalEntries.map((entry) => entry._id);
+
+        await JournalEntry.deleteMany({
+          ...getLinkedJournalFilter(pr._id, userId),
+
+          ...(oldJournalIds.length > 0
+            ? {
+                _id: {
+                  $nin: oldJournalIds,
+                },
+              }
+            : {}),
+        });
+
+        if (oldJournalIds.length > 0) {
+          await JournalEntry.updateMany(
+            {
+              _id: {
+                $in: oldJournalIds,
+              },
+            },
+            {
+              $set: {
+                isDeleted: false,
+              },
+            },
+          );
+        }
+
+        await restoreInventorySnapshot({
+          purchaseReturnId: pr._id,
+
+          userId,
+
+          snapshot: oldInventoryTransactions,
+        });
+
+        await restorePurchaseReturnSnapshot(pr._id, oldPurchaseReturnSnapshot);
+
+        await recalculateUniqueAccounts([...affectedAccountIds]);
+      } catch (rollbackError) {
+        console.error(
+          "❌ Purchase Return Update Rollback Error:",
+          rollbackError,
+        );
+      }
+    }
+
+    await deletePurchaseReturnAttachments(newAttachments);
+
     console.error("❌ Update Purchase Return Error:", err);
 
     return res.status(500).json({
@@ -1140,16 +1636,27 @@ exports.updatePurchaseReturn = async (req, res) => {
     });
   }
 };
-// ✅ DELETE PURCHASE RETURN (SAFE ACCOUNTING VERSION)
+
 exports.deletePurchaseReturn = async (req, res) => {
+  const userId = getUserId(req);
+
+  let pr = null;
+  let purchaseReturnSnapshot = null;
+  let journalSnapshot = [];
+  let inventorySnapshot = [];
+  let affectedAccountIds = new Set();
+  let changesStarted = false;
+
   try {
-    const userId = req.user?.id || req.userId;
     const { id } = req.params;
 
-    /* =============================
-       FIND RECORD
-    ============================== */
-    const pr = await PurchaseReturn.findOne({
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        error: "Invalid Purchase Return ID",
+      });
+    }
+
+    pr = await PurchaseReturn.findOne({
       _id: id,
       createdBy: userId,
       isDeleted: false,
@@ -1160,6 +1667,10 @@ exports.deletePurchaseReturn = async (req, res) => {
         error: "Purchase Return not found or already deleted",
       });
     }
+
+    purchaseReturnSnapshot = pr.toObject({
+      depopulate: true,
+    });
 
     const beforeDelete = {
       billNo: pr.billNo,
@@ -1178,87 +1689,50 @@ exports.deletePurchaseReturn = async (req, res) => {
       isOpening: pr.isOpening || false,
     };
 
-    /* =============================
-       REVERSE STOCK ENTRIES
-    ============================== */
+    journalSnapshot = await JournalEntry.find({
+      ...getLinkedJournalFilter(pr._id, userId),
+
+      isDeleted: false,
+    }).lean();
+
+    inventorySnapshot = await InventoryTransaction.find({
+      invoiceId: pr._id,
+      invoiceModel: "PurchaseReturn",
+      userId,
+    }).lean();
+
+    affectedAccountIds = collectJournalAccountIds(journalSnapshot);
+
+    changesStarted = true;
+
+    await JournalEntry.updateMany(
+      {
+        ...getLinkedJournalFilter(pr._id, userId),
+
+        isDeleted: false,
+      },
+      {
+        $set: {
+          isDeleted: true,
+        },
+      },
+    );
+
     await deleteTransactionsByReference({
-      referenceId: id,
+      referenceId: pr._id,
       invoiceModel: "PurchaseReturn",
       userId,
     });
 
-    /* =============================
-       SOFT DELETE MAIN JOURNAL
-    ============================== */
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: id }, { invoiceId: id }],
-        sourceType: {
-          $in: ["purchase_return", "opening_purchase_return"],
-        },
-        createdBy: userId,
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
-        },
-      },
-    );
-
-    /* =============================
-       SOFT DELETE PAYMENT JOURNALS
-    ============================== */
-    await JournalEntry.updateMany(
-      {
-        $or: [{ referenceId: pr._id }, { invoiceId: pr._id }],
-        sourceType: "purchase_return_payment",
-        createdBy: userId,
-        isDeleted: false,
-      },
-      {
-        $set: {
-          isDeleted: true,
-        },
-      },
-    );
-
-    /* =============================
-       RECALCULATE PAYMENT ACCOUNT
-    ============================== */
-    if (pr.accountId) {
-      await recalculateAccountBalance(pr.accountId);
-    }
-
-    /* =============================
-       RECALCULATE SUPPLIER ACCOUNT
-    ============================== */
-    const supplier = pr.supplierId
-      ? await Supplier.findById(pr.supplierId)
-      : null;
-
-    const party = pr.partyId ? await Party.findById(pr.partyId) : null;
-
-    if (supplier?.account) {
-      await recalculateAccountBalance(supplier.account);
-    }
-
-    if (party?.account) {
-      await recalculateAccountBalance(party.account);
-    }
-
-    const attachmentsToDelete = formatPurchaseReturnAttachments(pr);
-
-    for (const att of attachmentsToDelete) {
-      await deletePurchaseReturnAttachment(att);
-    }
-
-    /* =============================
-       SOFT DELETE PURCHASE RETURN
-    ============================== */
     pr.isDeleted = true;
 
     await pr.save();
+
+    await recalculateUniqueAccounts([...affectedAccountIds]);
+
+    const attachmentsToDelete = formatPurchaseReturnAttachments(pr);
+
+    await deletePurchaseReturnAttachments(attachmentsToDelete);
 
     await logActivity({
       req,
@@ -1267,9 +1741,12 @@ exports.deletePurchaseReturn = async (req, res) => {
       entityType: "PurchaseReturn",
       entityId: pr._id,
       title: `Purchase Return ${pr.billNo}`,
+
       description: `${pr.supplierName} کی Purchase Return Delete کی گئی`,
+
       billNo: pr.billNo,
       before: beforeDelete,
+
       after: {
         isDeleted: true,
       },
@@ -1279,6 +1756,42 @@ exports.deletePurchaseReturn = async (req, res) => {
       message: "✅ Purchase Return deleted successfully",
     });
   } catch (err) {
+    if (changesStarted && pr?._id && purchaseReturnSnapshot) {
+      try {
+        if (journalSnapshot.length > 0) {
+          await JournalEntry.updateMany(
+            {
+              _id: {
+                $in: journalSnapshot.map((entry) => entry._id),
+              },
+            },
+            {
+              $set: {
+                isDeleted: false,
+              },
+            },
+          );
+        }
+
+        await restoreInventorySnapshot({
+          purchaseReturnId: pr._id,
+
+          userId,
+
+          snapshot: inventorySnapshot,
+        });
+
+        await restorePurchaseReturnSnapshot(pr._id, purchaseReturnSnapshot);
+
+        await recalculateUniqueAccounts([...affectedAccountIds]);
+      } catch (rollbackError) {
+        console.error(
+          "❌ Purchase Return Delete Rollback Error:",
+          rollbackError,
+        );
+      }
+    }
+
     console.error("❌ Delete Purchase Return Error:", err);
 
     return res.status(500).json({

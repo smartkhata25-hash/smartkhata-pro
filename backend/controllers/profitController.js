@@ -1,9 +1,7 @@
 const mongoose = require("mongoose");
 
 const JournalEntry = require("../models/JournalEntry");
-
 const Invoice = require("../models/Invoice");
-
 const RefundInvoice = require("../models/RefundInvoice");
 
 const {
@@ -29,16 +27,19 @@ const getProfitSummaryController = async (req, res) => {
       filterType,
       productId,
       categoryId,
+
+      // Summary میں heavy breakdown arrays نہیں چاہئیں
+      includeBreakdowns: false,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: summary,
     });
   } catch (error) {
     console.error("Profit Summary Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load profit summary",
       error: error.message,
@@ -50,15 +51,26 @@ const getExpenseBreakdown = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
+    const { filterType, startDate, endDate } = req.query;
+
+    const journalDateFilter = buildDateFilter({
+      filterType,
+      startDate,
+      endDate,
+    });
+
     const expenses = await JournalEntry.aggregate([
       {
         $match: {
           createdBy: userId,
           isDeleted: false,
+          ...journalDateFilter,
         },
       },
 
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
 
       {
         $lookup: {
@@ -69,13 +81,17 @@ const getExpenseBreakdown = async (req, res) => {
         },
       },
 
-      { $unwind: "$accountInfo" },
+      {
+        $unwind: "$accountInfo",
+      },
 
       {
         $match: {
           "accountInfo.type": "Expense",
           "lines.type": "debit",
-          "accountInfo.code": { $ne: "COGS" },
+          "accountInfo.code": {
+            $ne: "COGS",
+          },
         },
       },
 
@@ -99,7 +115,7 @@ const getExpenseBreakdown = async (req, res) => {
       },
     ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: expenses.length,
       data: expenses,
@@ -107,7 +123,7 @@ const getExpenseBreakdown = async (req, res) => {
   } catch (error) {
     console.error("Expense Breakdown Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load expense breakdown",
       error: error.message,
@@ -130,6 +146,7 @@ const getCogsBreakdown = async (req, res) => {
       invoiceDateFilter,
       productId,
       categoryId,
+      includeProducts: true,
     });
 
     const cogs = products.map((product) => ({
@@ -144,7 +161,6 @@ const getCogsBreakdown = async (req, res) => {
       refundCost: product.refundCost,
       netCogs: product.netCogs,
 
-      // پرانے Frontend کے ساتھ Compatibility
       total: product.netCogs,
 
       _id: {
@@ -152,7 +168,7 @@ const getCogsBreakdown = async (req, res) => {
       },
     }));
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: cogs.length,
       data: cogs,
@@ -160,30 +176,35 @@ const getCogsBreakdown = async (req, res) => {
   } catch (error) {
     console.error("COGS Breakdown Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load COGS breakdown",
       error: error.message,
     });
   }
 };
+
 const getSalesBreakdown = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
     const { filterType, startDate, endDate, productId, categoryId } = req.query;
 
-    const rawDateFilter = buildDateFilter({
+    const invoiceDateFilter = buildInvoiceDateFilter({
       filterType,
       startDate,
       endDate,
     });
 
-    const dateFilter = {};
+    const validProductId =
+      productId && mongoose.Types.ObjectId.isValid(productId)
+        ? new mongoose.Types.ObjectId(productId)
+        : null;
 
-    if (rawDateFilter.date) {
-      dateFilter.invoiceDate = rawDateFilter.date;
-    }
+    const validCategoryId =
+      categoryId && mongoose.Types.ObjectId.isValid(categoryId)
+        ? new mongoose.Types.ObjectId(categoryId)
+        : null;
 
     const buildPipeline = (isRefund = false) => [
       {
@@ -191,17 +212,19 @@ const getSalesBreakdown = async (req, res) => {
           createdBy: userId,
           isDeleted: false,
           isOpening: false,
-          ...dateFilter,
+          ...invoiceDateFilter,
         },
       },
 
-      { $unwind: "$items" },
+      {
+        $unwind: "$items",
+      },
 
-      ...(productId && mongoose.Types.ObjectId.isValid(productId)
+      ...(validProductId
         ? [
             {
               $match: {
-                "items.productId": new mongoose.Types.ObjectId(productId),
+                "items.productId": validProductId,
               },
             },
           ]
@@ -223,13 +246,11 @@ const getSalesBreakdown = async (req, res) => {
         },
       },
 
-      ...(categoryId && mongoose.Types.ObjectId.isValid(categoryId)
+      ...(validCategoryId
         ? [
             {
               $match: {
-                "productInfo.categoryId": new mongoose.Types.ObjectId(
-                  categoryId,
-                ),
+                "productInfo.categoryId": validCategoryId,
               },
             },
           ]
@@ -245,29 +266,52 @@ const getSalesBreakdown = async (req, res) => {
 
           invoiceDate: "$invoiceDate",
 
-          productName: "$productInfo.name",
+          productName: {
+            $ifNull: ["$productInfo.name", "Unknown Product"],
+          },
 
           qty: isRefund
             ? {
-                $multiply: ["$items.quantity", -1],
+                $multiply: [
+                  {
+                    $ifNull: ["$items.quantity", 0],
+                  },
+                  -1,
+                ],
               }
-            : "$items.quantity",
+            : {
+                $ifNull: ["$items.quantity", 0],
+              },
 
           amount: isRefund
             ? {
-                $multiply: ["$items.total", -1],
+                $multiply: [
+                  {
+                    $ifNull: ["$items.total", 0],
+                  },
+                  -1,
+                ],
               }
-            : "$items.total",
+            : {
+                $ifNull: ["$items.total", 0],
+              },
 
           transactionType: {
             $literal: isRefund ? "refund" : "sale",
           },
         },
       },
+
+      {
+        $sort: {
+          invoiceDate: -1,
+        },
+      },
     ];
 
     const [sales, refunds] = await Promise.all([
       Invoice.aggregate(buildPipeline(false)),
+
       RefundInvoice.aggregate(buildPipeline(true)),
     ]);
 
@@ -275,7 +319,7 @@ const getSalesBreakdown = async (req, res) => {
       (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
     );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: combinedData.length,
       data: combinedData,
@@ -283,7 +327,7 @@ const getSalesBreakdown = async (req, res) => {
   } catch (error) {
     console.error("Sales Breakdown Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load sales breakdown",
       error: error.message,
@@ -306,6 +350,7 @@ const getProductProfitability = async (req, res) => {
       invoiceDateFilter,
       productId,
       categoryId,
+      includeProducts: true,
     });
 
     const data = products.map((product) => ({
@@ -326,6 +371,7 @@ const getProductProfitability = async (req, res) => {
 
       saleCost: product.saleCost,
       refundCost: product.refundCost,
+
       cost: product.netCogs,
       netCogs: product.netCogs,
 
@@ -335,7 +381,7 @@ const getProductProfitability = async (req, res) => {
       margin: product.margin,
     }));
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: data.length,
       data,
@@ -343,7 +389,7 @@ const getProductProfitability = async (req, res) => {
   } catch (error) {
     console.error("Product Profitability Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load product profitability",
       error: error.message,

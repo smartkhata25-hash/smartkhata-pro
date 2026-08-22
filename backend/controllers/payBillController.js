@@ -12,7 +12,9 @@ const {
   deleteFile,
   getFileUrl,
 } = require("../services/r2FileService");
+
 const { logActivity } = require("../utils/activityLogger");
+
 const ALLOWED_PAYMENT_TYPES = ["cash", "online", "cheque"];
 
 function formatPayBillAttachments(bill) {
@@ -81,7 +83,6 @@ async function deletePayBillAttachment(att) {
   }
 }
 
-// ✅ Create Pay Bill
 exports.createPayBill = async (req, res) => {
   try {
     const {
@@ -94,23 +95,30 @@ exports.createPayBill = async (req, res) => {
       paymentEntries,
       discountAmount,
     } = req.body;
+
     const normalizedPaymentType = paymentType?.toLowerCase();
 
     const payments =
       typeof paymentEntries === "string"
         ? JSON.parse(paymentEntries || "[]")
         : paymentEntries || [];
-    // ✅ Per-payment paymentType validation
-    for (const p of payments) {
-      if (!ALLOWED_PAYMENT_TYPES.includes(p.paymentType?.toLowerCase())) {
+
+    for (const payment of payments) {
+      if (!ALLOWED_PAYMENT_TYPES.includes(payment.paymentType?.toLowerCase())) {
         return res.status(400).json({
           error: "Invalid payment type in payment entries",
         });
       }
     }
 
+    if (!ALLOWED_PAYMENT_TYPES.includes(normalizedPaymentType)) {
+      return res.status(400).json({
+        error: "Invalid payment type. Allowed: cash, online, cheque",
+      });
+    }
+
     const totalAmount = payments.reduce(
-      (sum, p) => sum + Number(p.amount || 0),
+      (sum, payment) => sum + Number(payment.amount || 0),
       0,
     );
 
@@ -118,10 +126,14 @@ exports.createPayBill = async (req, res) => {
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+    const parsedDiscount = Number.isFinite(Number(rawDiscount))
+      ? Number(rawDiscount)
+      : 0;
 
     if (totalAmount <= 0) {
-      return res.status(400).json({ error: "Invalid payment amount" });
+      return res.status(400).json({
+        error: "Invalid payment amount",
+      });
     }
 
     if (parsedDiscount < 0) {
@@ -131,11 +143,14 @@ exports.createPayBill = async (req, res) => {
     }
 
     const finalAmount = totalAmount + parsedDiscount;
-    const userId = req.user?.id || req.userId;
-    if (!userId) return res.status(400).json({ error: "User ID is required." });
 
-    const attachments = await uploadPayBillFiles(req.files, userId);
-    const attachmentPath = attachments[0]?.key || "";
+    const userId = req.user?.id || req.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        error: "User ID is required.",
+      });
+    }
 
     let supplierData = null;
     let partyData = null;
@@ -150,7 +165,9 @@ exports.createPayBill = async (req, res) => {
       }).populate("account");
 
       if (!partyData || !partyData.account) {
-        return res.status(404).json({ error: "Party account not found" });
+        return res.status(404).json({
+          error: "Party account not found",
+        });
       }
 
       counterPartyAccountId = partyData.account._id;
@@ -162,15 +179,21 @@ exports.createPayBill = async (req, res) => {
       }).populate("account");
 
       if (!supplierData || !supplierData.account) {
-        return res
-          .status(404)
-          .json({ error: "Supplier or linked account not found" });
+        return res.status(404).json({
+          error: "Supplier or linked account not found",
+        });
       }
 
       counterPartyAccountId = supplierData.account._id;
     }
 
-    const count = await PayBill.countDocuments({ userId });
+    const attachments = await uploadPayBillFiles(req.files, userId);
+
+    const attachmentPath = attachments[0]?.key || "";
+
+    const count = await PayBill.countDocuments({
+      userId,
+    });
 
     const billNo = `PB-${1001 + count}`;
 
@@ -184,30 +207,28 @@ exports.createPayBill = async (req, res) => {
       discountAmount: parsedDiscount,
       finalAmount,
       paymentType: normalizedPaymentType,
-
       description,
       attachments,
       attachment: attachmentPath,
       userId,
     });
 
-    for (const p of payments) {
+    for (const payment of payments) {
       await createPaymentEntry({
         userId,
         referenceId: newBill._id,
         sourceType: "pay_bill",
         billNo,
-        accountId: p.account,
+        accountId: payment.account,
         counterPartyAccountId,
-        amount: Number(p.amount),
-        paymentType: p.paymentType?.toLowerCase() || "cash",
+        amount: Number(payment.amount),
+        paymentType: payment.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
         supplierId: supplierData?._id || null,
         partyId: partyData?._id || null,
       });
     }
 
-    // ✅ Discount Journal Entry
     if (parsedDiscount > 0) {
       let purchaseDiscountAccount = await Account.findOne({
         userId,
@@ -249,6 +270,11 @@ exports.createPayBill = async (req, res) => {
           },
         ],
       });
+
+      await Promise.allSettled([
+        recalculateAccountBalance(counterPartyAccountId),
+        recalculateAccountBalance(purchaseDiscountAccount._id),
+      ]);
     }
 
     await logActivity({
@@ -277,17 +303,19 @@ exports.createPayBill = async (req, res) => {
       },
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "Bill created successfully",
       data: newBill,
     });
   } catch (err) {
     console.error("❌ Pay Bill Save Error:", err);
-    res.status(500).json({ error: "Internal server error" });
+
+    return res.status(500).json({
+      error: "Internal server error",
+    });
   }
 };
 
-// ✅ Get All Pay Bills
 exports.getAllPayBills = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -302,23 +330,37 @@ exports.getAllPayBills = async (req, res) => {
       toDate = "",
     } = req.query;
 
-    const activeSuppliers = await Supplier.find({
-      userId,
-      isDeleted: false,
-    }).select("_id");
+    const [activeSuppliers, activeParties] = await Promise.all([
+      Supplier.find({
+        userId,
+        isDeleted: false,
+      })
+        .select("_id")
+        .lean(),
 
-    const activeParties = await Party.find({
-      userId,
-      isDeleted: false,
-      isActive: true,
-    }).select("_id");
+      Party.find({
+        userId,
+        isDeleted: false,
+        isActive: true,
+      })
+        .select("_id")
+        .lean(),
+    ]);
 
     const filter = {
       userId,
       isDeleted: false,
       $or: [
-        { supplier: { $in: activeSuppliers.map((s) => s._id) } },
-        { partyId: { $in: activeParties.map((p) => p._id) } },
+        {
+          supplier: {
+            $in: activeSuppliers.map((item) => item._id),
+          },
+        },
+        {
+          partyId: {
+            $in: activeParties.map((item) => item._id),
+          },
+        },
       ],
     };
 
@@ -333,8 +375,13 @@ exports.getAllPayBills = async (req, res) => {
     if (fromDate || toDate) {
       filter.date = {};
 
-      if (fromDate) filter.date.$gte = fromDate;
-      if (toDate) filter.date.$lte = toDate;
+      if (fromDate) {
+        filter.date.$gte = fromDate;
+      }
+
+      if (toDate) {
+        filter.date.$lte = toDate;
+      }
     }
 
     if (search) {
@@ -344,37 +391,56 @@ exports.getAllPayBills = async (req, res) => {
       };
     }
 
-    const totalBills = await PayBill.countDocuments(filter);
+    const [totalBills, bills] = await Promise.all([
+      PayBill.countDocuments(filter),
 
-    const bills = await PayBill.find(filter)
-      .populate("supplier", "name")
-      .populate("partyId", "name")
-      .sort({ createdAt: -1 })
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit))
-      .lean();
+      PayBill.find(filter)
+        .populate("supplier", "name")
+        .populate("partyId", "name")
+        .sort({ createdAt: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean(),
+    ]);
 
-    const billIds = bills.map((b) => b._id);
+    const billIds = bills.map((bill) => bill._id);
 
     const journals = await JournalEntry.find({
-      referenceId: { $in: billIds },
+      referenceId: {
+        $in: billIds,
+      },
       sourceType: "pay_bill",
       createdBy: userId,
       isDeleted: false,
-    }).populate("lines.account", "name");
+    })
+      .select("referenceId description lines")
+      .populate("lines.account", "name code")
+      .lean();
 
-    const journalMap = new Map();
+    const paymentLineMap = new Map();
 
-    journals.forEach((journal) => {
-      if (!journalMap.has(String(journal.referenceId))) {
-        journalMap.set(String(journal.referenceId), journal);
+    for (const journal of journals) {
+      if (journal.description === "Pay Bill Discount") {
+        continue;
       }
-    });
+
+      const paymentLine = (journal.lines || []).find((line) => {
+        if (line.type !== "credit") {
+          return false;
+        }
+
+        const accountCode = String(line.account?.code || "").toUpperCase();
+
+        return accountCode !== "PURCHASE_DISCOUNT";
+      });
+
+      if (paymentLine && !paymentLineMap.has(String(journal.referenceId))) {
+        paymentLineMap.set(String(journal.referenceId), paymentLine);
+      }
+    }
 
     const result = bills.map((bill) => {
-      const journal = journalMap.get(String(bill._id));
-
-      const creditLine = journal?.lines?.find((line) => line.type === "credit");
+      const creditLine = paymentLineMap.get(String(bill._id));
 
       const attachments = formatPayBillAttachments(bill);
 
@@ -382,13 +448,13 @@ exports.getAllPayBills = async (req, res) => {
         ...bill,
         attachments,
         attachmentFullUrl: attachments[0]?.fullUrl || "",
-        paymentMode: creditLine?.paymentType || "-",
+        paymentMode: creditLine?.paymentType || bill.paymentType || "-",
         accountName: creditLine?.account?.name || "-",
         supplierName: bill.supplier?.name || bill.partyId?.name || "-",
       };
     });
 
-    res.json({
+    return res.json({
       bills: result,
       pagination: {
         page: Number(page),
@@ -401,13 +467,13 @@ exports.getAllPayBills = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Get Pay Bills Error:", err);
-    res.status(500).json({
+
+    return res.status(500).json({
       error: err.message,
     });
   }
 };
 
-// ✅ Get One Pay Bill
 exports.getPayBillById = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -415,7 +481,9 @@ exports.getPayBillById = async (req, res) => {
     const bill = await PayBill.findOne({
       _id: req.params.id,
       userId,
-      isDeleted: { $ne: true },
+      isDeleted: {
+        $ne: true,
+      },
     })
       .select(
         [
@@ -456,18 +524,33 @@ exports.getPayBillById = async (req, res) => {
       createdBy: userId,
       isDeleted: false,
     })
-      .select("lines")
+      .select("description lines")
+      .populate("lines.account", "name code")
       .lean();
 
     const paymentEntries = [];
 
     for (const journal of journals) {
-      if (!Array.isArray(journal?.lines)) continue;
+      if (!Array.isArray(journal?.lines)) {
+        continue;
+      }
+
+      if (journal.description === "Pay Bill Discount") {
+        continue;
+      }
 
       const entries = journal.lines
-        .filter((line) => line.type === "credit")
+        .filter((line) => {
+          if (line.type !== "credit") {
+            return false;
+          }
+
+          const accountCode = String(line.account?.code || "").toUpperCase();
+
+          return accountCode !== "PURCHASE_DISCOUNT";
+        })
         .map((line) => ({
-          account: line.account,
+          account: line.account?._id || line.account,
           amount: Number(line.amount || 0),
           paymentType: line.paymentType || bill.paymentType || "cash",
         }));
@@ -491,7 +574,7 @@ exports.getPayBillById = async (req, res) => {
     });
   }
 };
-// ✅ Update Pay Bill (CENTRALIZED PAYMENT SERVICE)
+
 exports.updatePayBill = async (req, res) => {
   try {
     const {
@@ -512,9 +595,8 @@ exports.updatePayBill = async (req, res) => {
         ? JSON.parse(paymentEntries || "[]")
         : paymentEntries || [];
 
-    // ✅ Per-payment paymentType validation
-    for (const p of payments) {
-      if (!ALLOWED_PAYMENT_TYPES.includes(p.paymentType?.toLowerCase())) {
+    for (const payment of payments) {
+      if (!ALLOWED_PAYMENT_TYPES.includes(payment.paymentType?.toLowerCase())) {
         return res.status(400).json({
           error: "Invalid payment type in payment entries",
         });
@@ -528,7 +610,7 @@ exports.updatePayBill = async (req, res) => {
     }
 
     const totalAmount = payments.reduce(
-      (sum, p) => sum + Number(p.amount || 0),
+      (sum, payment) => sum + Number(payment.amount || 0),
       0,
     );
 
@@ -536,7 +618,9 @@ exports.updatePayBill = async (req, res) => {
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+    const parsedDiscount = Number.isFinite(Number(rawDiscount))
+      ? Number(rawDiscount)
+      : 0;
 
     if (totalAmount <= 0) {
       return res.status(400).json({
@@ -557,7 +641,9 @@ exports.updatePayBill = async (req, res) => {
     const bill = await PayBill.findOne({
       _id: req.params.id,
       userId,
-      isDeleted: { $ne: true },
+      isDeleted: {
+        $ne: true,
+      },
     });
 
     if (!bill) {
@@ -579,30 +665,16 @@ exports.updatePayBill = async (req, res) => {
       description: bill.description,
     };
 
-    // ✅ Safe recalculation helper
-    const safeRecalculate = async (id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+    const safeRecalculate = async (accountId) => {
+      if (mongoose.Types.ObjectId.isValid(accountId)) {
         try {
-          await recalculateAccountBalance(id);
+          await recalculateAccountBalance(accountId);
         } catch (err) {
           console.warn("⚠️ Error recalculating balance:", err.message);
         }
       }
     };
 
-    // 🔍 Get old supplier account
-    const oldSupplierData = bill.supplier
-      ? await Supplier.findById(bill.supplier).populate("account")
-      : null;
-
-    const oldPartyData = bill.partyId
-      ? await Party.findById(bill.partyId).populate("account")
-      : null;
-
-    const oldSupplierAccountId =
-      oldSupplierData?.account?._id || oldPartyData?.account?._id || null;
-
-    // 🔍 Get new supplier account
     let supplierData = null;
     let partyData = null;
     let counterPartyAccountId = null;
@@ -616,7 +688,9 @@ exports.updatePayBill = async (req, res) => {
       }).populate("account");
 
       if (!partyData || !partyData.account) {
-        return res.status(404).json({ error: "Party account not found" });
+        return res.status(404).json({
+          error: "Party account not found",
+        });
       }
 
       counterPartyAccountId = partyData.account._id;
@@ -638,7 +712,7 @@ exports.updatePayBill = async (req, res) => {
 
     const billNo = bill.billNo || "PB-1001";
 
-    let attachments = formatPayBillAttachments(bill).map((att) => ({
+    const currentAttachments = formatPayBillAttachments(bill).map((att) => ({
       key: att.key,
       type: att.type || "",
       size: att.size || 0,
@@ -653,62 +727,79 @@ exports.updatePayBill = async (req, res) => {
       keepAttachmentKeys = [];
     }
 
-    const removedAttachments = attachments.filter(
-      (att) => !keepAttachmentKeys.includes(att.key),
+    const keptAttachments = currentAttachments.filter((att) =>
+      keepAttachmentKeys.includes(att.key),
     );
 
-    for (const att of removedAttachments) {
-      await deletePayBillAttachment(att);
-    }
-
-    attachments = attachments.filter((att) =>
-      keepAttachmentKeys.includes(att.key),
+    const removedAttachments = currentAttachments.filter(
+      (att) => !keepAttachmentKeys.includes(att.key),
     );
 
     const newAttachments = await uploadPayBillFiles(req.files, userId);
 
-    if (attachments.length + newAttachments.length > 3) {
-      for (const att of newAttachments) {
-        await deletePayBillAttachment(att);
-      }
+    if (keptAttachments.length + newAttachments.length > 3) {
+      await Promise.allSettled(
+        newAttachments.map((att) => deletePayBillAttachment(att)),
+      );
 
       return res.status(400).json({
         error: "Maximum 3 attachments allowed",
       });
     }
 
-    attachments = [...attachments, ...newAttachments];
+    const attachments = [...keptAttachments, ...newAttachments];
 
-    // ✅ Update bill fields
     bill.supplier = supplierData?._id || null;
+
     bill.partyId = partyData?._id || null;
+
     bill.date = date;
     bill.time = time;
-
     bill.amount = totalAmount;
+
     bill.discountAmount = parsedDiscount;
+
     bill.finalAmount = finalAmount;
 
     bill.paymentType = normalizedPaymentType;
+
     bill.billNo = billNo;
+
     bill.description = description;
 
     bill.attachments = attachments;
+
     bill.attachment = attachments[0]?.key || "";
 
-    await bill.save();
+    try {
+      await bill.save();
+    } catch (saveError) {
+      await Promise.allSettled(
+        newAttachments.map((att) => deletePayBillAttachment(att)),
+      );
+
+      throw saveError;
+    }
+
+    await Promise.allSettled(
+      removedAttachments.map((att) => deletePayBillAttachment(att)),
+    );
 
     const oldJournals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
       createdBy: userId,
       isDeleted: false,
-    });
+    })
+      .select("lines")
+      .lean();
 
     const oldAccountIds = [
       ...new Set(
         oldJournals.flatMap((entry) =>
-          entry.lines.map((line) => line.account.toString()),
+          (entry.lines || [])
+            .map((line) => line.account?.toString())
+            .filter(Boolean),
         ),
       ),
     ];
@@ -727,28 +818,26 @@ exports.updatePayBill = async (req, res) => {
       },
     );
 
-    for (const accountId of oldAccountIds) {
-      await safeRecalculate(accountId);
-    }
+    await Promise.all(
+      oldAccountIds.map((accountId) => safeRecalculate(accountId)),
+    );
 
-    // 🔁 Create new payment entries (MULTIPLE SAFE)
-    for (const p of payments) {
+    for (const payment of payments) {
       await createPaymentEntry({
         userId,
         referenceId: bill._id,
         sourceType: "pay_bill",
         billNo,
-        accountId: p.account,
+        accountId: payment.account,
         counterPartyAccountId,
-        amount: Number(p.amount),
-        paymentType: p.paymentType?.toLowerCase() || "cash",
+        amount: Number(payment.amount),
+        paymentType: payment.paymentType?.toLowerCase() || "cash",
         description: description || "Pay Bill",
         supplierId: supplierData?._id || null,
         partyId: partyData?._id || null,
       });
     }
 
-    // ✅ Discount Journal Entry
     if (parsedDiscount > 0) {
       let purchaseDiscountAccount = await Account.findOne({
         userId,
@@ -790,14 +879,12 @@ exports.updatePayBill = async (req, res) => {
           },
         ],
       });
-    }
 
-    // 🔄 Recalculate supplier accounts
-    if (oldSupplierAccountId) {
-      await safeRecalculate(oldSupplierAccountId);
+      await Promise.all([
+        safeRecalculate(counterPartyAccountId),
+        safeRecalculate(purchaseDiscountAccount._id),
+      ]);
     }
-
-    await safeRecalculate(counterPartyAccountId);
 
     await logActivity({
       req,
@@ -827,17 +914,19 @@ exports.updatePayBill = async (req, res) => {
       },
     });
 
-    res.json({
+    return res.json({
       message: "Bill updated successfully",
       data: bill,
     });
   } catch (err) {
     console.error("❌ Update Bill Error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message,
+    });
   }
 };
 
-// ✅ Delete Pay Bill (CENTRALIZED SAFE VERSION)
 exports.deletePayBill = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -845,7 +934,9 @@ exports.deletePayBill = async (req, res) => {
     const bill = await PayBill.findOne({
       _id: req.params.id,
       userId,
-      isDeleted: { $ne: true },
+      isDeleted: {
+        $ne: true,
+      },
     });
 
     if (!bill) {
@@ -867,49 +958,16 @@ exports.deletePayBill = async (req, res) => {
       description: bill.description,
     };
 
-    // 🔍 Supplier account
-    let supplierData = null;
-    let partyData = null;
-    let counterPartyAccountId = null;
-
-    if (bill.partyId) {
-      partyData = await Party.findOne({
-        _id: bill.partyId,
-        userId,
-      }).populate("account");
-
-      if (!partyData || !partyData.account) {
-        return res.status(404).json({ error: "Party account missing" });
-      }
-
-      counterPartyAccountId = partyData.account._id;
-    } else {
-      supplierData = await Supplier.findOne({
-        _id: bill.supplier,
-        userId,
-        isDeleted: false,
-      }).populate("account");
-
-      if (!supplierData || !supplierData.account) {
-        return res.status(404).json({ error: "Supplier or account missing" });
-      }
-
-      counterPartyAccountId = supplierData.account._id;
-    }
-
-    // 🔍 Get ALL related journals (IMPORTANT for multiple payments)
     const journals = await JournalEntry.find({
       referenceId: bill._id,
       sourceType: "pay_bill",
       createdBy: userId,
       isDeleted: false,
-    });
+    })
+      .select("lines")
+      .lean();
 
     const attachmentsToDelete = formatPayBillAttachments(bill);
-
-    for (const att of attachmentsToDelete) {
-      await deletePayBillAttachment(att);
-    }
 
     await JournalEntry.updateMany(
       {
@@ -926,28 +984,36 @@ exports.deletePayBill = async (req, res) => {
     );
 
     bill.isDeleted = true;
+
     await bill.save();
 
-    // ✅ Safe recalculation helper
-    const safeRecalculate = async (id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+    await Promise.allSettled(
+      attachmentsToDelete.map((att) => deletePayBillAttachment(att)),
+    );
+
+    const safeRecalculate = async (accountId) => {
+      if (mongoose.Types.ObjectId.isValid(accountId)) {
         try {
-          await recalculateAccountBalance(id);
+          await recalculateAccountBalance(accountId);
         } catch (err) {
           console.warn("⚠️ Error recalculating balance:", err.message);
         }
       }
     };
 
-    // 🔄 Recalculate ALL involved accounts
-    for (const entry of journals) {
-      for (const line of entry.lines) {
-        await safeRecalculate(line.account);
-      }
-    }
+    const affectedAccountIds = [
+      ...new Set(
+        journals.flatMap((entry) =>
+          (entry.lines || [])
+            .map((line) => line.account?.toString())
+            .filter(Boolean),
+        ),
+      ),
+    ];
 
-    // 🔄 Recalculate supplier account
-    await safeRecalculate(counterPartyAccountId);
+    await Promise.all(
+      affectedAccountIds.map((accountId) => safeRecalculate(accountId)),
+    );
 
     await logActivity({
       req,
@@ -964,11 +1030,14 @@ exports.deletePayBill = async (req, res) => {
       },
     });
 
-    res.json({
+    return res.json({
       message: "Bill deleted successfully",
     });
   } catch (err) {
     console.error("❌ Delete Pay Bill Error:", err);
-    res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message,
+    });
   }
 };

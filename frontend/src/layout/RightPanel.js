@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import BalanceBreakdownModal from '../components/BalanceBreakdownModal';
-const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
 const Section = ({ title, children }) => {
   const [open, setOpen] = useState(true);
@@ -16,6 +15,7 @@ const Section = ({ title, children }) => {
         onClick={() => setOpen(!open)}
       >
         <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{title}</span>
+
         <span className="text-sm">{open ? '▾' : '▸'}</span>
       </div>
 
@@ -60,36 +60,38 @@ const AlertCard = ({ title, count, color, onClick }) => (
   </div>
 );
 
-const RightPanel = ({ dashboardAlerts, refreshDashboardAlerts }) => {
+const RightPanel = ({
+  dashboardAlerts,
+  dashboardSummary,
+  dashboardSummaryLoading,
+  refreshDashboard,
+}) => {
   const canViewRightPanel = hasPermission('dashboard.right_panel');
 
-  const [summary, setSummary] = useState({
+  const [breakdownType, setBreakdownType] = useState(null);
+
+  const navigate = useNavigate();
+
+  const summary = dashboardSummary || {
     totalReceivable: 0,
     totalPayable: 0,
     receivableDetails: [],
     payableDetails: [],
-  });
+  };
 
   const alerts = dashboardAlerts || {
     lowStock: 0,
+    negativeStock: 0,
     overdueInvoices: 0,
     pendingPayments: 0,
   };
 
-  // ✅ receivable یا payable Modal
-  const [breakdownType, setBreakdownType] = useState(null);
-
-  const navigate = useNavigate();
-  const token = localStorage.getItem('token');
-
-  // ✅ Modal کی Row سے متعلقہ Ledger کھولیں
   const handleOpenLedger = useCallback(
     (item) => {
       if (!item?.entityId) {
         return;
       }
 
-      // Modal پہلے بند کریں
       setBreakdownType(null);
 
       if (item.entityType === 'customer') {
@@ -108,45 +110,24 @@ const RightPanel = ({ dashboardAlerts, refreshDashboardAlerts }) => {
     },
     [navigate]
   );
-  // ✅ stable fetch function (no warning)
-  const fetchData = useCallback(async () => {
-    if (!canViewRightPanel) {
-      return;
-    }
-
-    try {
-      const summaryRes = await axios.get(`${baseUrl}/api/dashboard-summary`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      setSummary(summaryRes.data);
-    } catch (err) {
-      console.error(t('alerts.panelLoadError'), err);
-    }
-  }, [token, canViewRightPanel]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   if (!canViewRightPanel) {
     return null;
   }
+
   return (
     <div className="h-full bg-white border-l border-gray-200 p-5 shadow-lg overflow-y-auto">
-      {/* 🔄 Refresh Button */}
       <div className="flex justify-end mb-3">
         <button
-          onClick={async () => {
-            await Promise.all([fetchData(), refreshDashboardAlerts?.()]);
-          }}
-          className="text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100"
+          type="button"
+          onClick={() => refreshDashboard?.()}
+          disabled={dashboardSummaryLoading}
+          className="text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          🔄 {t('common.refresh')}
+          {dashboardSummaryLoading ? 'Refreshing...' : `🔄 ${t('common.refresh')}`}
         </button>
       </div>
 
-      {/* 🔹 Financial Position */}
       <Section title={t('financialPosition')}>
         <StatCard
           label={t('receivables')}
@@ -163,7 +144,6 @@ const RightPanel = ({ dashboardAlerts, refreshDashboardAlerts }) => {
         />
       </Section>
 
-      {/* 🔥 SMART ALERTS (LIVE) */}
       <Section title={t('smartAlerts')}>
         <AlertCard
           title={t('lowStock')}
@@ -187,7 +167,6 @@ const RightPanel = ({ dashboardAlerts, refreshDashboardAlerts }) => {
         />
       </Section>
 
-      {/* ✅ RECEIVABLE / PAYABLE BREAKDOWN MODAL */}
       <BalanceBreakdownModal
         isOpen={Boolean(breakdownType)}
         onClose={() => setBreakdownType(null)}

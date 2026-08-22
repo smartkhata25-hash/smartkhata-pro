@@ -1,4 +1,5 @@
 import React from 'react';
+
 import { t } from '../../i18n/i18n';
 
 const ProfitDetailDrawer = ({
@@ -13,15 +14,25 @@ const ProfitDetailDrawer = ({
 
   const displayTitle = title || t('reports.details');
 
+  const getNumber = (value) => {
+    const number = Number(value || 0);
+
+    return Number.isFinite(number) ? number : 0;
+  };
+
   const renderHeaders = () => {
     switch (type) {
       case 'sales':
         return (
           <tr>
             <th className="p-3 border">{t('reports.transactionType')}</th>
+
             <th className="p-3 border">{t('common.invoice')}</th>
+
             <th className="p-3 border">{t('customer')}</th>
+
             <th className="p-3 border">{t('common.date')}</th>
+
             <th className="p-3 border">{t('common.amount')}</th>
           </tr>
         );
@@ -30,7 +41,9 @@ const ProfitDetailDrawer = ({
         return (
           <tr>
             <th className="p-3 border">{t('account')}</th>
+
             <th className="p-3 border">{t('accounts.code')}</th>
+
             <th className="p-3 border">{t('common.amount')}</th>
           </tr>
         );
@@ -39,10 +52,15 @@ const ProfitDetailDrawer = ({
         return (
           <tr>
             <th className="p-3 border">{t('inventory.product')}</th>
+
             <th className="p-3 border">{t('reports.qtySold')}</th>
+
             <th className="p-3 border">{t('reports.refundQty')}</th>
+
             <th className="p-3 border">{t('reports.saleCost')}</th>
+
             <th className="p-3 border">{t('reports.refundCost')}</th>
+
             <th className="p-3 border">{t('reports.netCogs')}</th>
           </tr>
         );
@@ -51,11 +69,17 @@ const ProfitDetailDrawer = ({
         return (
           <tr>
             <th className="p-3 border">{t('inventory.product')}</th>
+
             <th className="p-3 border">{t('reports.qtySold')}</th>
+
             <th className="p-3 border">{t('reports.refundQty')}</th>
+
             <th className="p-3 border">{t('sales')}</th>
+
             <th className="p-3 border">{t('reports.refundAmount')}</th>
+
             <th className="p-3 border">{t('reports.profit')}</th>
+
             <th className="p-3 border">{t('reports.marginPercent')}</th>
           </tr>
         );
@@ -66,7 +90,7 @@ const ProfitDetailDrawer = ({
   };
 
   const renderRows = () => {
-    if (!data.length) {
+    if (!Array.isArray(data) || data.length === 0) {
       return (
         <tr>
           <td colSpan="10" className="text-center p-6 text-gray-500">
@@ -81,9 +105,11 @@ const ProfitDetailDrawer = ({
         return data.map((item, index) => {
           const isRefund = item.transactionType === 'refund';
 
+          const amount = getNumber(item.amount);
+
           return (
             <tr
-              key={item._id || index}
+              key={`${item._id || 'sale'}-${index}`}
               className={`text-center hover:bg-gray-50 ${isRefund ? 'bg-red-50' : ''}`}
             >
               <td
@@ -107,30 +133,47 @@ const ProfitDetailDrawer = ({
                   isRefund ? 'text-red-600' : 'text-gray-800'
                 }`}
               >
-                {t('currency.rs')} {Number(item.amount || 0).toFixed(0)}
+                {t('currency.rs')} {amount.toFixed(0)}
               </td>
             </tr>
           );
         });
 
       case 'expense':
-        return data.map((item, index) => (
-          <tr key={index} className="text-center hover:bg-gray-50">
-            <td className="p-3 border">{item._id?.accountName || '-'}</td>
+        return data.map((item, index) => {
+          const accountName = item.accountName || item._id?.accountName || '-';
 
-            <td className="p-3 border">{item._id?.accountCode || '-'}</td>
+          const accountCode = item.accountCode || item._id?.accountCode || '-';
 
-            <td className="p-3 border font-semibold text-red-500">
-              {t('currency.rs')} {Number(item.total || 0).toFixed(0)}
-            </td>
-          </tr>
-        ));
+          const amount = getNumber(item.amount ?? item.total);
+
+          return (
+            <tr
+              key={item.accountId || item._id?.accountId || index}
+              className="text-center hover:bg-gray-50"
+            >
+              <td className="p-3 border">{accountName}</td>
+
+              <td className="p-3 border">{accountCode}</td>
+
+              <td className="p-3 border font-semibold text-red-500">
+                {t('currency.rs')} {amount.toFixed(0)}
+              </td>
+            </tr>
+          );
+        });
 
       case 'cogs':
         return data.map((item, index) => {
-          const netCogs = Number(item.netCogs || item.total || 0);
-          const refundQty = Number(item.refundQty || 0);
-          const refundCost = Number(item.refundCost || 0);
+          const soldQty = getNumber(item.soldQty);
+
+          const refundQty = getNumber(item.refundQty);
+
+          const saleCost = getNumber(item.saleCost);
+
+          const refundCost = getNumber(item.refundCost);
+
+          const netCogs = getNumber(item.netCogs ?? item.total);
 
           return (
             <tr key={item.productId || index} className="text-center hover:bg-gray-50">
@@ -138,14 +181,14 @@ const ProfitDetailDrawer = ({
                 {item.productName || item._id?.accountName || '-'}
               </td>
 
-              <td className="p-3 border">{Number(item.soldQty || 0).toFixed(0)}</td>
+              <td className="p-3 border">{soldQty.toFixed(0)}</td>
 
               <td className="p-3 border text-orange-600 font-medium">
                 {refundQty > 0 ? `-${refundQty.toFixed(0)}` : '0'}
               </td>
 
               <td className="p-3 border text-blue-600 font-semibold">
-                {t('currency.rs')} {Number(item.saleCost || 0).toFixed(0)}
+                {t('currency.rs')} {saleCost.toFixed(0)}
               </td>
 
               <td className="p-3 border text-red-500 font-semibold">
@@ -166,39 +209,51 @@ const ProfitDetailDrawer = ({
         });
 
       case 'products':
-        return data.map((item, index) => (
-          <tr key={item.productId || index} className="text-center hover:bg-gray-50">
-            <td className="p-3 border font-medium">{item.productName || '-'}</td>
+        return data.map((item, index) => {
+          const soldQty = getNumber(item.soldQty ?? item.qtySold);
 
-            <td className="p-3 border">{Number(item.qtySold || 0).toFixed(0)}</td>
+          const refundQty = getNumber(item.refundQty);
 
-            <td className="p-3 border text-orange-600 font-medium">
-              {Number(item.refundQty || 0) > 0 ? `-${Number(item.refundQty).toFixed(0)}` : '0'}
-            </td>
+          const grossSales = getNumber(item.grossSales ?? item.sales);
 
-            <td className="p-3 border text-blue-600">
-              {t('currency.rs')} {Number(item.sales || 0).toFixed(0)}
-            </td>
+          const refundAmount = getNumber(item.refundAmount);
 
-            <td className="p-3 border text-red-500 font-medium">
-              {Number(item.refundAmount || 0) > 0
-                ? `-${Number(item.refundAmount).toFixed(0)}`
-                : '0'}
-            </td>
+          const profit = getNumber(item.grossProfit ?? item.profit);
 
-            <td
-              className={`p-3 border font-bold ${
-                item.profit >= 0 ? 'text-green-600' : 'text-red-600'
-              }`}
-            >
-              {t('currency.rs')} {Number(item.profit || 0).toFixed(0)}
-            </td>
+          const margin = getNumber(item.margin);
 
-            <td className="p-3 border font-semibold text-purple-600">
-              {Number(item.margin || 0).toFixed(1)}%
-            </td>
-          </tr>
-        ));
+          return (
+            <tr key={item.productId || index} className="text-center hover:bg-gray-50">
+              <td className="p-3 border font-medium">{item.productName || '-'}</td>
+
+              <td className="p-3 border">{soldQty.toFixed(0)}</td>
+
+              <td className="p-3 border text-orange-600 font-medium">
+                {refundQty > 0 ? `-${refundQty.toFixed(0)}` : '0'}
+              </td>
+
+              <td className="p-3 border text-blue-600">
+                {t('currency.rs')} {grossSales.toFixed(0)}
+              </td>
+
+              <td className="p-3 border text-red-500 font-medium">
+                {refundAmount > 0
+                  ? `-${t('currency.rs')} ${refundAmount.toFixed(0)}`
+                  : `${t('currency.rs')} 0`}
+              </td>
+
+              <td
+                className={`p-3 border font-bold ${
+                  profit >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}
+              >
+                {t('currency.rs')} {profit.toFixed(0)}
+              </td>
+
+              <td className="p-3 border font-semibold text-purple-600">{margin.toFixed(1)}%</td>
+            </tr>
+          );
+        });
 
       default:
         return null;
@@ -230,7 +285,7 @@ const ProfitDetailDrawer = ({
           ) : (
             <div className="overflow-auto border rounded-xl">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-100 sticky top-0">{renderHeaders()}</thead>
+                <thead className="bg-gray-100 sticky top-0 z-10">{renderHeaders()}</thead>
 
                 <tbody>{renderRows()}</tbody>
               </table>

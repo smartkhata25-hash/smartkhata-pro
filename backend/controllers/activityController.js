@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+
 const ActivityLog = require("../models/ActivityLog");
 const User = require("../models/User");
 
@@ -6,9 +7,10 @@ const getOwnerId = (req) =>
   req.user?.businessOwnerId || req.user?.id || req.userId;
 
 const escapeRegex = (value = "") =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// تمام Activity Logs
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
 const getActivities = async (req, res) => {
   try {
     const ownerId = getOwnerId(req);
@@ -24,19 +26,21 @@ const getActivities = async (req, res) => {
       limit = 50,
     } = req.query;
 
-    if (!ownerId) {
+    if (!ownerId || !isValidObjectId(ownerId)) {
       return res.status(401).json({
         message: "Business owner not found",
       });
     }
 
+    const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
+
     const query = {
-      businessOwnerId: ownerId,
+      businessOwnerId: ownerObjectId,
       isDeleted: false,
     };
 
     if (staffId) {
-      if (!mongoose.Types.ObjectId.isValid(staffId)) {
+      if (!isValidObjectId(staffId)) {
         return res.status(400).json({
           message: "Invalid staff ID",
         });
@@ -45,12 +49,20 @@ const getActivities = async (req, res) => {
       query.performedBy = new mongoose.Types.ObjectId(staffId);
     }
 
-    if (action.trim()) {
-      query.action = action.trim().toLowerCase();
+    const cleanAction = String(action || "")
+      .trim()
+      .toLowerCase();
+
+    if (cleanAction) {
+      query.action = cleanAction;
     }
 
-    if (module.trim()) {
-      query.module = module.trim().toLowerCase();
+    const cleanModule = String(module || "")
+      .trim()
+      .toLowerCase();
+
+    if (cleanModule) {
+      query.module = cleanModule;
     }
 
     if (startDate || endDate) {
@@ -59,64 +71,136 @@ const getActivities = async (req, res) => {
       if (startDate) {
         const start = new Date(startDate);
 
-        if (isNaN(start.getTime())) {
+        if (Number.isNaN(start.getTime())) {
           return res.status(400).json({
             message: "Invalid start date",
           });
         }
 
         start.setHours(0, 0, 0, 0);
+
         query.createdAt.$gte = start;
       }
 
       if (endDate) {
         const end = new Date(endDate);
 
-        if (isNaN(end.getTime())) {
+        if (Number.isNaN(end.getTime())) {
           return res.status(400).json({
             message: "Invalid end date",
           });
         }
 
         end.setHours(23, 59, 59, 999);
+
         query.createdAt.$lte = end;
+      }
+
+      if (
+        query.createdAt.$gte &&
+        query.createdAt.$lte &&
+        query.createdAt.$gte > query.createdAt.$lte
+      ) {
+        return res.status(400).json({
+          message: "Start date cannot be after end date",
+        });
       }
     }
 
-    if (search.trim()) {
-      const safeSearch = escapeRegex(search.trim());
+    const cleanSearch = String(search || "").trim();
+
+    if (cleanSearch) {
+      const safeSearch = escapeRegex(cleanSearch);
 
       query.$or = [
-        { title: { $regex: safeSearch, $options: "i" } },
-        { description: { $regex: safeSearch, $options: "i" } },
-        { billNo: { $regex: safeSearch, $options: "i" } },
-        { entityType: { $regex: safeSearch, $options: "i" } },
-        { module: { $regex: safeSearch, $options: "i" } },
+        {
+          title: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          description: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          billNo: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          entityType: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
+        {
+          module: {
+            $regex: safeSearch,
+            $options: "i",
+          },
+        },
       ];
     }
 
-    const safePage = Math.max(Number(page) || 1, 1);
-    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const safePage = Math.max(Number.parseInt(page, 10) || 1, 1);
+
+    const safeLimit = Math.min(
+      Math.max(Number.parseInt(limit, 10) || 50, 1),
+      100,
+    );
+
     const skip = (safePage - 1) * safeLimit;
 
     const [activities, total] = await Promise.all([
       ActivityLog.find(query)
+
+        .select(
+          [
+            "performedBy",
+            "action",
+            "module",
+            "entityType",
+            "entityId",
+            "title",
+            "description",
+            "billNo",
+            "createdAt",
+          ].join(" "),
+        )
+
         .populate("performedBy", "name fullName email mobile accountRole")
-        .sort({ createdAt: -1 })
+
+        .sort({
+          createdAt: -1,
+        })
+
         .skip(skip)
+
         .limit(safeLimit)
+
         .lean(),
 
       ActivityLog.countDocuments(query),
     ]);
 
+    const totalPages = total > 0 ? Math.ceil(total / safeLimit) : 0;
+
     return res.json({
       activities,
+
       pagination: {
         page: safePage,
         limit: safeLimit,
         total,
-        pages: Math.ceil(total / safeLimit),
+        pages: totalPages,
+
+        hasPreviousPage: safePage > 1,
+
+        hasNextPage: safePage < totalPages,
       },
     });
   } catch (error) {
@@ -128,25 +212,35 @@ const getActivities = async (req, res) => {
   }
 };
 
-// ایک Activity کی مکمل تفصیل
 const getActivityById = async (req, res) => {
   try {
     const ownerId = getOwnerId(req);
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!ownerId || !isValidObjectId(ownerId)) {
+      return res.status(401).json({
+        message: "Business owner not found",
+      });
+    }
+
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         message: "Invalid activity ID",
       });
     }
 
     const activity = await ActivityLog.findOne({
-      _id: id,
-      businessOwnerId: ownerId,
+      _id: new mongoose.Types.ObjectId(id),
+
+      businessOwnerId: new mongoose.Types.ObjectId(ownerId),
+
       isDeleted: false,
     })
+
       .populate("performedBy", "name fullName email mobile accountRole")
+
       .populate("businessOwnerId", "name fullName email businessName")
+
       .lean();
 
     if (!activity) {
@@ -167,29 +261,50 @@ const getActivityById = async (req, res) => {
   }
 };
 
-// Activity filters کے لیے Staff list
 const getActivityStaffList = async (req, res) => {
   try {
     const ownerId = getOwnerId(req);
 
-    const staff = await User.find({
-      businessOwnerId: ownerId,
-      accountRole: "staff",
-    })
-      .select("_id name fullName email staffStatus")
-      .sort({ name: 1 })
-      .lean();
+    if (!ownerId || !isValidObjectId(ownerId)) {
+      return res.status(401).json({
+        message: "Business owner not found",
+      });
+    }
 
-    const owner = await User.findById(ownerId)
-      .select("_id name fullName email")
-      .lean();
+    const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
+
+    const [staff, owner] = await Promise.all([
+      User.find({
+        businessOwnerId: ownerObjectId,
+        accountRole: "staff",
+        isDeleted: {
+          $ne: true,
+        },
+      })
+
+        .select("_id name fullName email staffStatus")
+
+        .sort({
+          name: 1,
+        })
+
+        .lean(),
+
+      User.findById(ownerObjectId)
+
+        .select("_id name fullName email")
+
+        .lean(),
+    ]);
 
     const users = [];
 
     if (owner) {
       users.push({
         ...owner,
+
         accountRole: "owner",
+
         staffStatus: "active",
       });
     }
@@ -208,10 +323,15 @@ const getActivityStaffList = async (req, res) => {
   }
 };
 
-// Activity summary
 const getActivitySummary = async (req, res) => {
   try {
     const ownerId = getOwnerId(req);
+
+    if (!ownerId || !isValidObjectId(ownerId)) {
+      return res.status(401).json({
+        message: "Business owner not found",
+      });
+    }
 
     const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
 
@@ -222,6 +342,16 @@ const getActivitySummary = async (req, res) => {
           isDeleted: false,
         },
       },
+
+      {
+        $project: {
+          action: 1,
+          module: 1,
+          performedBy: 1,
+          createdAt: 1,
+        },
+      },
+
       {
         $facet: {
           total: [
@@ -234,12 +364,16 @@ const getActivitySummary = async (req, res) => {
             {
               $group: {
                 _id: "$action",
-                count: { $sum: 1 },
+                count: {
+                  $sum: 1,
+                },
               },
             },
+
             {
               $sort: {
                 count: -1,
+                _id: 1,
               },
             },
           ],
@@ -248,12 +382,16 @@ const getActivitySummary = async (req, res) => {
             {
               $group: {
                 _id: "$module",
-                count: { $sum: 1 },
+                count: {
+                  $sum: 1,
+                },
               },
             },
+
             {
               $sort: {
                 count: -1,
+                _id: 1,
               },
             },
           ],
@@ -262,54 +400,87 @@ const getActivitySummary = async (req, res) => {
             {
               $group: {
                 _id: "$performedBy",
-                count: { $sum: 1 },
-                lastActivity: { $max: "$createdAt" },
+
+                count: {
+                  $sum: 1,
+                },
+
+                lastActivity: {
+                  $max: "$createdAt",
+                },
               },
             },
+
             {
               $sort: {
                 lastActivity: -1,
               },
             },
+
             {
               $limit: 10,
             },
+
             {
               $lookup: {
                 from: "users",
+
                 localField: "_id",
+
                 foreignField: "_id",
+
+                pipeline: [
+                  {
+                    $project: {
+                      name: 1,
+                      fullName: 1,
+                      email: 1,
+                    },
+                  },
+                ],
+
                 as: "user",
               },
             },
+
             {
               $unwind: {
                 path: "$user",
+
                 preserveNullAndEmptyArrays: true,
               },
             },
+
             {
               $project: {
                 _id: 1,
+
                 count: 1,
+
                 lastActivity: 1,
+
                 name: "$user.name",
+
                 fullName: "$user.fullName",
+
                 email: "$user.email",
               },
             },
           ],
         },
       },
-    ]);
+    ]).allowDiskUse(true);
 
-    const data = summary[0] || {};
+    const data = summary?.[0] || {};
 
     return res.json({
-      totalActivities: data.total?.[0]?.count || 0,
-      byAction: data.byAction || [],
-      byModule: data.byModule || [],
-      recentUsers: data.recentUsers || [],
+      totalActivities: Number(data.total?.[0]?.count || 0),
+
+      byAction: Array.isArray(data.byAction) ? data.byAction : [],
+
+      byModule: Array.isArray(data.byModule) ? data.byModule : [],
+
+      recentUsers: Array.isArray(data.recentUsers) ? data.recentUsers : [],
     });
   } catch (error) {
     console.error("Get Activity Summary Error:", error);

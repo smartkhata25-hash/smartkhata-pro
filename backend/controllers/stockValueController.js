@@ -1,203 +1,385 @@
 const mongoose = require("mongoose");
 
 const Product = require("../models/Product");
-const InventoryTransaction = require("../models/InventoryTransaction");
 
-// 📦 STOCK VALUE REPORT
+const escapeRegex = (value = "") => {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const getSafePositiveInteger = (value, fallback, max = null) => {
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  if (max && parsed > max) {
+    return max;
+  }
+
+  return parsed;
+};
 
 exports.getStockValueReport = async (req, res) => {
   try {
-    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const rawUserId = req.user?.id || req.userId;
 
-    const {
-      startDate,
-      endDate,
-      search = "",
-      categoryId,
-      hideZero = "false",
-      negativeOnly = "false",
-    } = req.query;
-
-    //  📅 DATE FILTER
-
-    let transactionDateFilter = {};
-
-    if (startDate || endDate) {
-      transactionDateFilter.date = {};
-
-      if (startDate) {
-        transactionDateFilter.date.$gte = new Date(startDate);
-      }
-
-      if (endDate) {
-        transactionDateFilter.date.$lte = new Date(endDate);
-      }
+    if (!mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user",
+      });
     }
 
-    //📦 PRODUCT FILTER
+    const userId = new mongoose.Types.ObjectId(rawUserId);
 
-    const productFilter = {
+    const {
+      startDate = "",
+      endDate = "",
+      search = "",
+      categoryId = "",
+      hideZero = "false",
+      negativeOnly = "false",
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const currentPage = getSafePositiveInteger(page, 1);
+    const pageLimit = getSafePositiveInteger(limit, 50, 200);
+
+    const productMatch = {
       userId,
     };
 
-    if (search.trim()) {
-      productFilter.name = {
-        $regex: search.trim(),
+    const cleanSearch = String(search || "").trim();
+
+    if (cleanSearch) {
+      productMatch.name = {
+        $regex: escapeRegex(cleanSearch),
         $options: "i",
       };
     }
 
     if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
-      productFilter.categoryId = new mongoose.Types.ObjectId(categoryId);
+      productMatch.categoryId = new mongoose.Types.ObjectId(categoryId);
     }
 
-    //📦 GET PRODUCTS
+    const transactionDateMatch = {};
 
-    const products = await Product.find(productFilter)
-      .populate("categoryId", "name")
-      .lean();
+    if (startDate) {
+      const start = new Date(startDate);
 
-    const productIds = products.map((p) => p._id);
+      if (!Number.isNaN(start.getTime())) {
+        start.setHours(0, 0, 0, 0);
 
-    // 📊 STOCK AGGREGATION
+        transactionDateMatch.$gte = start;
+      }
+    }
 
-    const stockData = await InventoryTransaction.aggregate([
+    if (endDate) {
+      const end = new Date(endDate);
+
+      if (!Number.isNaN(end.getTime())) {
+        end.setHours(23, 59, 59, 999);
+
+        transactionDateMatch.$lte = end;
+      }
+    }
+
+    const inventoryMatchExpr = [
       {
-        $match: {
-          productId: { $in: productIds },
-          userId,
-          ...transactionDateFilter,
+        $eq: ["$productId", "$$productId"],
+      },
+      {
+        $eq: ["$userId", userId],
+      },
+    ];
+
+    if (Object.keys(transactionDateMatch).length > 0) {
+      inventoryMatchExpr.push({
+        $gte: ["$date", transactionDateMatch.$gte || new Date(0)],
+      });
+
+      if (transactionDateMatch.$lte) {
+        inventoryMatchExpr.push({
+          $lte: ["$date", transactionDateMatch.$lte],
+        });
+      }
+    }
+
+    const rowMatch = {};
+
+    if (negativeOnly === "true") {
+      rowMatch.stockQty = {
+        $lt: 0,
+      };
+    } else if (hideZero === "true") {
+      rowMatch.stockQty = {
+        $ne: 0,
+      };
+    }
+
+    const inventoryCollection = mongoose.connection.collection(
+      "inventorytransactions",
+    ).collectionName;
+
+    const categoryCollection =
+      mongoose.connection.collection("categories").collectionName;
+
+    const pipeline = [
+      {
+        $match: productMatch,
+      },
+
+      {
+        $lookup: {
+          from: inventoryCollection,
+          let: {
+            productId: "$_id",
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: inventoryMatchExpr,
+                },
+              },
+            },
+
+            {
+              $group: {
+                _id: null,
+
+                stock: {
+                  $sum: {
+                    $switch: {
+                      branches: [
+                        {
+                          case: {
+                            $in: ["$type", ["IN", "ADJUST_IN"]],
+                          },
+                          then: "$quantity",
+                        },
+
+                        {
+                          case: {
+                            $in: ["$type", ["OUT", "ADJUST_OUT"]],
+                          },
+                          then: {
+                            $multiply: ["$quantity", -1],
+                          },
+                        },
+                      ],
+
+                      default: 0,
+                    },
+                  },
+                },
+              },
+            },
+          ],
+
+          as: "stockData",
         },
       },
 
       {
-        $group: {
-          _id: "$productId",
+        $lookup: {
+          from: categoryCollection,
+          localField: "categoryId",
+          foreignField: "_id",
+          as: "categoryData",
+        },
+      },
 
-          stock: {
-            $sum: {
-              $switch: {
-                branches: [
-                  {
-                    case: {
-                      $in: ["$type", ["IN", "ADJUST_IN"]],
-                    },
-                    then: "$quantity",
-                  },
-
-                  {
-                    case: {
-                      $in: ["$type", ["OUT", "ADJUST_OUT"]],
-                    },
-                    then: {
-                      $multiply: ["$quantity", -1],
-                    },
-                  },
-                ],
-
-                default: 0,
+      {
+        $set: {
+          stockQty: {
+            $ifNull: [
+              {
+                $arrayElemAt: ["$stockData.stock", 0],
               },
+              0,
+            ],
+          },
+
+          unitCost: {
+            $convert: {
+              input: "$unitCost",
+              to: "double",
+              onError: 0,
+              onNull: 0,
             },
+          },
+
+          salePrice: {
+            $convert: {
+              input: "$salePrice",
+              to: "double",
+              onError: 0,
+              onNull: 0,
+            },
+          },
+
+          category: {
+            $ifNull: [
+              {
+                $arrayElemAt: ["$categoryData.name", 0],
+              },
+              "-",
+            ],
           },
         },
       },
-    ]);
-
-    const stockMap = {};
-
-    stockData.forEach((item) => {
-      stockMap[item._id.toString()] = item.stock || 0;
-    });
-
-    let rows = products.map((product) => {
-      const stockQty = stockMap[product._id.toString()] || 0;
-
-      const unitCost = Number(product.unitCost || 0);
-
-      const salePrice = Number(product.salePrice || 0);
-
-      const costValue = stockQty * unitCost;
-
-      const saleValue = stockQty * salePrice;
-
-      return {
-        productId: product._id,
-
-        productName: product.name,
-
-        category: product.categoryId?.name || "-",
-
-        stockQty,
-
-        unitCost,
-
-        salePrice,
-
-        costValue,
-
-        saleValue,
-
-        isNegative: stockQty < 0,
-      };
-    });
-
-    if (hideZero === "true") {
-      rows = rows.filter((row) => row.stockQty !== 0);
-    }
-
-    if (negativeOnly === "true") {
-      rows = rows.filter((row) => row.stockQty < 0);
-    }
-
-    // 📊 SUMMARY
-
-    const summary = rows.reduce(
-      (acc, row) => {
-        acc.totalProducts += 1;
-
-        acc.totalQty += row.stockQty;
-
-        acc.totalCostValue += row.costValue;
-
-        acc.totalSaleValue += row.saleValue;
-
-        if (row.isNegative) {
-          acc.negativeStockValue += row.costValue;
-        }
-
-        return acc;
-      },
 
       {
-        totalProducts: 0,
-        totalQty: 0,
-        totalCostValue: 0,
-        totalSaleValue: 0,
-        negativeStockValue: 0,
-      },
-    );
+        $set: {
+          costValue: {
+            $multiply: ["$stockQty", "$unitCost"],
+          },
 
-    res.json({
+          saleValue: {
+            $multiply: ["$stockQty", "$salePrice"],
+          },
+
+          isNegative: {
+            $lt: ["$stockQty", 0],
+          },
+        },
+      },
+
+      ...(Object.keys(rowMatch).length > 0
+        ? [
+            {
+              $match: rowMatch,
+            },
+          ]
+        : []),
+
+      {
+        $facet: {
+          rows: [
+            {
+              $sort: {
+                costValue: -1,
+                name: 1,
+                _id: 1,
+              },
+            },
+
+            {
+              $skip: (currentPage - 1) * pageLimit,
+            },
+
+            {
+              $limit: pageLimit,
+            },
+
+            {
+              $project: {
+                _id: 0,
+
+                productId: "$_id",
+                productName: "$name",
+                category: 1,
+
+                stockQty: 1,
+                unitCost: 1,
+                salePrice: 1,
+
+                costValue: 1,
+                saleValue: 1,
+                isNegative: 1,
+              },
+            },
+          ],
+
+          summary: [
+            {
+              $group: {
+                _id: null,
+
+                totalProducts: {
+                  $sum: 1,
+                },
+
+                totalQty: {
+                  $sum: "$stockQty",
+                },
+
+                totalCostValue: {
+                  $sum: "$costValue",
+                },
+
+                totalSaleValue: {
+                  $sum: "$saleValue",
+                },
+
+                negativeStockValue: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $lt: ["$stockQty", 0],
+                      },
+                      "$costValue",
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    const result = await Product.aggregate(pipeline);
+
+    const rows = Array.isArray(result?.[0]?.rows) ? result[0].rows : [];
+
+    const rawSummary = result?.[0]?.summary?.[0] || {};
+
+    const totalProducts = Number(rawSummary.totalProducts || 0);
+
+    const totalPages =
+      totalProducts > 0 ? Math.ceil(totalProducts / pageLimit) : 0;
+
+    return res.json({
       success: true,
 
       summary: {
-        totalProducts: Number(summary.totalProducts || 0),
+        totalProducts,
 
-        totalQty: Number(summary.totalQty || 0),
+        totalQty: Number(Number(rawSummary.totalQty || 0).toFixed(2)),
 
-        totalCostValue: Number(summary.totalCostValue.toFixed(2) || 0),
+        totalCostValue: Number(
+          Number(rawSummary.totalCostValue || 0).toFixed(2),
+        ),
 
-        totalSaleValue: Number(summary.totalSaleValue.toFixed(2) || 0),
+        totalSaleValue: Number(
+          Number(rawSummary.totalSaleValue || 0).toFixed(2),
+        ),
 
-        negativeStockValue: Number(summary.negativeStockValue.toFixed(2) || 0),
+        negativeStockValue: Number(
+          Number(rawSummary.negativeStockValue || 0).toFixed(2),
+        ),
       },
 
       rows,
+
+      pagination: {
+        page: currentPage,
+        limit: pageLimit,
+        totalRows: totalProducts,
+        totalPages,
+        hasPreviousPage: currentPage > 1,
+        hasNextPage: currentPage < totalPages,
+      },
     });
   } catch (error) {
     console.error("Stock Value Report Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to generate stock value report",
       error: error.message,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import ProfitDetailDrawer from './ProfitDetailDrawer';
 
@@ -10,7 +10,10 @@ import {
   getProductProfitability,
 } from '../../services/profitService';
 
-import { fetchProducts } from '../../services/inventoryService';
+import {
+  fetchInvoiceFormOptions,
+  getCachedInvoiceFormOptions,
+} from '../../services/invoiceFormOptionsService';
 
 import { getCategories } from '../../services/categoryService';
 
@@ -21,6 +24,8 @@ import CategoryDropdown from '../CategoryDropdown';
 import { t } from '../../i18n/i18n';
 
 const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
+  const summaryRequestIdRef = useRef(0);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const [drawerTitle, setDrawerTitle] = useState('');
@@ -44,16 +49,29 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const [startDate, setStartDate] = useState('');
+
   const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     if (!isOpen) {
       setDrawerOpen(false);
       setDrawerData([]);
+      setDrawerTitle('');
+      setDrawerType('');
     }
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    if (quickFilter === 'custom' && (!startDate || !endDate)) {
+      return;
+    }
+
+    const requestId = ++summaryRequestIdRef.current;
+
     const loadSummary = async () => {
       try {
         const response = await getProfitSummary({
@@ -64,97 +82,160 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
           categoryId: selectedCategory,
         });
 
-        setSummaryData(response.data);
+        if (requestId !== summaryRequestIdRef.current) {
+          return;
+        }
+
+        setSummaryData(response?.data || null);
       } catch (error) {
-        console.error(error);
+        if (requestId !== summaryRequestIdRef.current) {
+          return;
+        }
+
+        console.error('Profit summary load failed:', error);
       }
     };
 
-    if (isOpen) {
-      loadSummary();
-    }
+    loadSummary();
   }, [quickFilter, isOpen, selectedProduct, selectedCategory, startDate, endDate]);
 
   useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const cachedOptions = getCachedInvoiceFormOptions();
+
+    if (cachedOptions?.products?.length && !cancelled) {
+      setProducts(cachedOptions.products);
+    }
+
     const loadFilters = async () => {
       try {
-        const [productsRes, categoriesRes] = await Promise.all([fetchProducts(), getCategories()]);
+        const [optionsResult, categoriesResult] = await Promise.allSettled([
+          fetchInvoiceFormOptions(),
+          getCategories(),
+        ]);
 
-        setProducts(productsRes || []);
-        setCategories(categoriesRes || []);
+        if (cancelled) {
+          return;
+        }
+
+        if (optionsResult.status === 'fulfilled') {
+          setProducts(
+            Array.isArray(optionsResult.value?.products) ? optionsResult.value.products : []
+          );
+        }
+
+        if (categoriesResult.status === 'fulfilled') {
+          setCategories(Array.isArray(categoriesResult.value) ? categoriesResult.value : []);
+        }
       } catch (error) {
-        console.error(error);
+        console.error('Profit filter options load failed:', error);
       }
     };
 
-    if (isOpen) {
-      loadFilters();
-    }
+    loadFilters();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
-  if (!isOpen || !summaryData) return null;
+  useEffect(() => {
+    setDrawerOpen(false);
+    setDrawerData([]);
+    setDrawerTitle('');
+    setDrawerType('');
+  }, [quickFilter, selectedProduct, selectedCategory, startDate, endDate]);
 
-  const isProductMode = selectedProduct || selectedCategory;
+  if (!isOpen || !summaryData) {
+    return null;
+  }
+
+  const isProductMode = Boolean(selectedProduct || selectedCategory);
+
+  const getActiveFilters = () => ({
+    filterType: quickFilter,
+    startDate,
+    endDate,
+    productId: selectedProduct,
+    categoryId: selectedCategory,
+  });
 
   const openDrawer = async (type) => {
+    if (quickFilter === 'custom' && (!startDate || !endDate)) {
+      return;
+    }
+
     try {
       setLoading(true);
       setDrawerOpen(true);
+      setDrawerData([]);
+      setDrawerType(type);
 
-      let response;
+      const activeFilters = getActiveFilters();
+
+      let response = null;
 
       if (type === 'sales') {
-        response = await getSalesBreakdown({
-          filterType: quickFilter,
-          productId: selectedProduct,
-          categoryId: selectedCategory,
-        });
-
         setDrawerTitle(t('reports.salesBreakdown'));
+
+        response = await getSalesBreakdown(activeFilters);
       }
 
       if (type === 'expense') {
-        response = await getExpenseBreakdown({
-          filterType: quickFilter,
-        });
-
         setDrawerTitle(t('reports.expenseBreakdown'));
+
+        response = await getExpenseBreakdown({
+          filterType: activeFilters.filterType,
+          startDate: activeFilters.startDate,
+          endDate: activeFilters.endDate,
+        });
       }
 
       if (type === 'cogs') {
-        response = await getCogsBreakdown({
-          filterType: quickFilter,
-          startDate,
-          endDate,
-          productId: selectedProduct,
-          categoryId: selectedCategory,
-        });
-
         setDrawerTitle(t('reports.cogsBreakdown'));
+
+        response = await getCogsBreakdown(activeFilters);
       }
 
       if (type === 'products') {
-        response = await getProductProfitability({
-          filterType: quickFilter,
-          productId: selectedProduct,
-          categoryId: selectedCategory,
-        });
-
         setDrawerTitle(t('reports.productProfitability'));
+
+        response = await getProductProfitability(activeFilters);
       }
 
-      setDrawerType(type);
-      setDrawerData(response?.data || []);
+      setDrawerData(Array.isArray(response?.data) ? response.data : []);
     } catch (error) {
-      console.error(error);
+      console.error('Profit detail load failed:', error);
+
+      setDrawerData([]);
+
       alert(t('alerts.detailLoadFailed'));
     } finally {
       setLoading(false);
     }
   };
 
+  const clearFilters = () => {
+    setSelectedProduct('');
+    setSelectedCategory('');
+    setQuickFilter('this_month');
+    setStartDate('');
+    setEndDate('');
+
+    setDrawerOpen(false);
+    setDrawerData([]);
+    setDrawerTitle('');
+    setDrawerType('');
+  };
+
   const Row = ({ label, value, color = 'text-gray-800', clickable = false, onClick }) => (
     <button
+      type="button"
       disabled={!clickable}
       onClick={onClick}
       className={`w-full flex items-center justify-between py-3 border-b border-gray-100 transition ${
@@ -181,6 +262,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
             </div>
 
             <button
+              type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition"
             >
@@ -191,21 +273,37 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
           <div className="px-6 pt-4">
             <select
               value={quickFilter}
-              onChange={(e) => setQuickFilter(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+
+                setQuickFilter(value);
+
+                if (value !== 'custom') {
+                  setStartDate('');
+                  setEndDate('');
+                }
+              }}
               className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
             >
               <option value="today">{t('date.today')}</option>
+
               <option value="this_month">{t('date.thisMonth')}</option>
+
               <option value="last_month">{t('date.lastMonth')}</option>
+
               <option value="this_year">{t('date.thisYear')}</option>
+
               <option value="last_year">{t('date.lastYear')}</option>
+
               <option value="custom">{t('date.custom')}</option>
             </select>
+
             {quickFilter === 'custom' && (
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <input
                   type="date"
                   value={startDate}
+                  max={endDate || undefined}
                   onChange={(e) => setStartDate(e.target.value)}
                   className="border rounded-lg px-3 py-2 text-sm outline-none"
                 />
@@ -213,6 +311,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
                 <input
                   type="date"
                   value={endDate}
+                  min={startDate || undefined}
                   onChange={(e) => setEndDate(e.target.value)}
                   className="border rounded-lg px-3 py-2 text-sm outline-none"
                 />
@@ -225,7 +324,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
               <div className="border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
                 <ProductDropdown
                   productList={products}
-                  value={products.find((p) => p._id === selectedProduct)?.name || ''}
+                  value={products.find((product) => product._id === selectedProduct)?.name || ''}
                   onSelect={(product) => {
                     setSelectedProduct(product?._id || '');
                   }}
@@ -241,7 +340,9 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
               <div className="border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
                 <CategoryDropdown
                   categories={categories}
-                  value={categories.find((c) => c._id === selectedCategory)?.name || ''}
+                  value={
+                    categories.find((category) => category._id === selectedCategory)?.name || ''
+                  }
                   onSelect={(category) => {
                     setSelectedCategory(category?._id || '');
                   }}
@@ -249,13 +350,8 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
               </div>
 
               <button
-                onClick={() => {
-                  setSelectedProduct('');
-                  setSelectedCategory('');
-                  setQuickFilter('this_month');
-                  setStartDate('');
-                  setEndDate('');
-                }}
+                type="button"
+                onClick={clearFilters}
                 className="h-full rounded-xl text-white text-sm font-semibold shadow-md transition hover:scale-[1.02] active:scale-[0.98]"
                 style={{
                   background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%)',
@@ -320,7 +416,10 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
 
       <ProfitDetailDrawer
         isOpen={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setDrawerData([]);
+        }}
         title={drawerTitle}
         type={drawerType}
         data={drawerData}

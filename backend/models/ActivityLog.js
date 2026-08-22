@@ -122,28 +122,60 @@ const activityLogSchema = new mongoose.Schema(
   },
 );
 
+// ✅ Main Activity List / Summary
 activityLogSchema.index({
   businessOwnerId: 1,
+  isDeleted: 1,
   createdAt: -1,
 });
 
+// ✅ Staff/User Filter
 activityLogSchema.index({
   businessOwnerId: 1,
+  isDeleted: 1,
   performedBy: 1,
   createdAt: -1,
 });
 
+// ✅ Module Filter
 activityLogSchema.index({
   businessOwnerId: 1,
+  isDeleted: 1,
+  module: 1,
+  createdAt: -1,
+});
+
+// ✅ Action Filter
+activityLogSchema.index({
+  businessOwnerId: 1,
+  isDeleted: 1,
+  action: 1,
+  createdAt: -1,
+});
+
+// ✅ Module + Action Combined Filter
+activityLogSchema.index({
+  businessOwnerId: 1,
+  isDeleted: 1,
   module: 1,
   action: 1,
   createdAt: -1,
 });
 
+// ✅ Entity Detail / History
 activityLogSchema.index({
   businessOwnerId: 1,
+  isDeleted: 1,
   entityType: 1,
   entityId: 1,
+});
+
+// ✅ Bill Number Lookup
+activityLogSchema.index({
+  businessOwnerId: 1,
+  isDeleted: 1,
+  billNo: 1,
+  createdAt: -1,
 });
 
 module.exports = mongoose.model("ActivityLog", activityLogSchema);

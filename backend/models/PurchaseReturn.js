@@ -1,8 +1,5 @@
 const mongoose = require("mongoose");
 
-/* =========================================================
-   ITEM SCHEMA
-========================================================= */
 const PurchaseReturnItemSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -24,9 +21,6 @@ const PurchaseReturnItemSchema = new mongoose.Schema({
   },
 });
 
-/* =========================================================
-   MAIN PURCHASE RETURN SCHEMA
-========================================================= */
 const PurchaseReturnSchema = new mongoose.Schema(
   {
     billNo: {
@@ -142,7 +136,10 @@ const PurchaseReturnSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-
+    isOpening: {
+      type: Boolean,
+      default: false,
+    },
     isDeleted: {
       type: Boolean,
       default: false,

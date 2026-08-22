@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { fetchStockValueReport } from '../services/stockValueService';
 
@@ -6,21 +6,39 @@ import { getCategories } from '../services/categoryService';
 
 import { t } from '../i18n/i18n';
 
+const PAGE_LIMIT = 50;
+
+const EMPTY_SUMMARY = {
+  totalProducts: 0,
+  totalQty: 0,
+  totalCostValue: 0,
+  totalSaleValue: 0,
+  negativeStockValue: 0,
+};
+
+const EMPTY_PAGINATION = {
+  page: 1,
+  limit: PAGE_LIMIT,
+  totalRows: 0,
+  totalPages: 0,
+  hasPreviousPage: false,
+  hasNextPage: false,
+};
+
 const StockValueReportPage = () => {
   const isMobile = window.innerWidth < 768;
+
+  const requestIdRef = useRef(0);
+
   const [loading, setLoading] = useState(false);
 
   const [rows, setRows] = useState([]);
 
   const [categories, setCategories] = useState([]);
 
-  const [summary, setSummary] = useState({
-    totalProducts: 0,
-    totalQty: 0,
-    totalCostValue: 0,
-    totalSaleValue: 0,
-    negativeStockValue: 0,
-  });
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+
+  const [pagination, setPagination] = useState(EMPTY_PAGINATION);
 
   const [filters, setFilters] = useState({
     startDate: '',
@@ -31,41 +49,58 @@ const StockValueReportPage = () => {
     negativeOnly: false,
   });
 
-  /* =========================================================
-     📦 LOAD REPORT
-  ========================================================= */
+  const loadReport = async ({ nextFilters = filters, page = 1 } = {}) => {
+    const requestId = ++requestIdRef.current;
 
-  const loadReport = async () => {
     try {
       setLoading(true);
 
-      const data = await fetchStockValueReport(filters);
+      const data = await fetchStockValueReport({
+        ...nextFilters,
+        page,
+        limit: PAGE_LIMIT,
+      });
 
-      const sortedRows = [...(data.rows || [])].sort((a, b) => b.costValue - a.costValue);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
 
-      setRows(sortedRows);
+      setRows(Array.isArray(data?.rows) ? data.rows : []);
 
-      setSummary(
-        data.summary || {
-          totalProducts: 0,
-          totalQty: 0,
-          totalCostValue: 0,
-          totalSaleValue: 0,
-          negativeStockValue: 0,
-        }
-      );
+      setSummary({
+        totalProducts: Number(data?.summary?.totalProducts || 0),
+        totalQty: Number(data?.summary?.totalQty || 0),
+        totalCostValue: Number(data?.summary?.totalCostValue || 0),
+        totalSaleValue: Number(data?.summary?.totalSaleValue || 0),
+        negativeStockValue: Number(data?.summary?.negativeStockValue || 0),
+      });
+
+      setPagination({
+        page: Number(data?.pagination?.page || page),
+        limit: Number(data?.pagination?.limit || PAGE_LIMIT),
+        totalRows: Number(data?.pagination?.totalRows || 0),
+        totalPages: Number(data?.pagination?.totalPages || 0),
+        hasPreviousPage: Boolean(data?.pagination?.hasPreviousPage),
+        hasNextPage: Boolean(data?.pagination?.hasNextPage),
+      });
     } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       console.error(err);
 
-      alert(err.message || t('alerts.somethingWrong') || 'Failed to load report');
+      setRows([]);
+      setSummary(EMPTY_SUMMARY);
+      setPagination(EMPTY_PAGINATION);
+
+      alert(err?.message || t('alerts.somethingWrong') || 'Failed to load report');
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
-
-    setLoading(false);
   };
-
-  /* =========================================================
-     📂 LOAD CATEGORIES
-  ========================================================= */
 
   const loadCategories = async () => {
     try {
@@ -77,49 +112,17 @@ const StockValueReportPage = () => {
     }
   };
 
-  /* =========================================================
-     🚀 INITIAL LOAD
-  ========================================================= */
-
   useEffect(() => {
     loadCategories();
   }, []);
 
   useEffect(() => {
-    loadReport();
-    // eslint-disable-next-line
+    loadReport({
+      page: 1,
+    });
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /* =========================================================
-     🔄 FILTERED TOTALS
-  ========================================================= */
-
-  const liveTotals = useMemo(() => {
-    return rows.reduce(
-      (acc, row) => {
-        acc.totalProducts += 1;
-
-        acc.totalQty += Number(row.stockQty || 0);
-
-        acc.totalCostValue += Number(row.costValue || 0);
-
-        acc.totalSaleValue += Number(row.saleValue || 0);
-
-        return acc;
-      },
-
-      {
-        totalProducts: 0,
-        totalQty: 0,
-        totalCostValue: 0,
-        totalSaleValue: 0,
-      }
-    );
-  }, [rows]);
-
-  /* =========================================================
-     🔍 HANDLE FILTER CHANGE
-  ========================================================= */
 
   const handleChange = (key, value) => {
     setFilters((prev) => ({
@@ -128,12 +131,11 @@ const StockValueReportPage = () => {
     }));
   };
 
-  /* =========================================================
-     🔎 APPLY FILTERS
-  ========================================================= */
-
   const handleApplyFilters = () => {
-    loadReport();
+    loadReport({
+      nextFilters: filters,
+      page: 1,
+    });
   };
 
   const handleClearFilters = () => {
@@ -148,46 +150,55 @@ const StockValueReportPage = () => {
 
     setFilters(resetFilters);
 
-    setTimeout(() => {
-      loadReport();
-    }, 0);
+    loadReport({
+      nextFilters: resetFilters,
+      page: 1,
+    });
   };
 
-  /* =========================================================
-     🖨 PRINT
-  ========================================================= */
+  const handlePageChange = (nextPage) => {
+    if (
+      loading ||
+      nextPage < 1 ||
+      nextPage > pagination.totalPages ||
+      nextPage === pagination.page
+    ) {
+      return;
+    }
+
+    loadReport({
+      nextFilters: filters,
+      page: nextPage,
+    });
+  };
 
   const handlePrint = () => {
     window.print();
   };
 
-  /* =========================================================
-     🎨 SUMMARY CARDS
-  ========================================================= */
-
   const headerCards = (
     <div className="flex flex-wrap gap-2">
       <SummaryCard
         title="Products"
-        value={liveTotals.totalProducts}
+        value={Number(summary.totalProducts || 0).toLocaleString()}
         gradient="linear-gradient(135deg, #2563eb, #1d4ed8)"
       />
 
       <SummaryCard
         title="Qty"
-        value={Number(liveTotals.totalQty || 0).toLocaleString()}
+        value={Number(summary.totalQty || 0).toLocaleString()}
         gradient="linear-gradient(135deg, #7c3aed, #6d28d9)"
       />
 
       <SummaryCard
         title="Cost Value"
-        value={`Rs. ${Number(liveTotals.totalCostValue || 0).toLocaleString()}`}
+        value={`Rs. ${Number(summary.totalCostValue || 0).toLocaleString()}`}
         gradient="linear-gradient(135deg, #059669, #047857)"
       />
 
       <SummaryCard
         title="Sale Value"
-        value={`Rs. ${Number(liveTotals.totalSaleValue || 0).toLocaleString()}`}
+        value={`Rs. ${Number(summary.totalSaleValue || 0).toLocaleString()}`}
         gradient="linear-gradient(135deg, #ea580c, #c2410c)"
       />
 
@@ -198,10 +209,6 @@ const StockValueReportPage = () => {
       />
     </div>
   );
-
-  /* =========================================================
-     🎛 FILTERS
-  ========================================================= */
 
   const headerContent = (
     <div
@@ -214,12 +221,16 @@ const StockValueReportPage = () => {
       }}
     >
       <div className={`flex flex-wrap items-center ${isMobile ? 'gap-1' : 'gap-3'}`}>
-        {/* SEARCH */}
         <div className={isMobile ? 'min-w-[95px] flex-1' : 'min-w-[220px] flex-1'}>
           <input
             type="text"
             value={filters.search}
             onChange={(e) => handleChange('search', e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleApplyFilters();
+              }
+            }}
             placeholder={isMobile ? '🔍' : 'Search product...'}
             style={{
               ...inputStyle,
@@ -230,7 +241,6 @@ const StockValueReportPage = () => {
           />
         </div>
 
-        {/* CATEGORY */}
         <div className={isMobile ? 'w-[85px]' : 'min-w-[180px]'}>
           <select
             value={filters.categoryId}
@@ -252,7 +262,6 @@ const StockValueReportPage = () => {
           </select>
         </div>
 
-        {/* CHECKBOXES */}
         <div className={`flex ${isMobile ? 'flex-row gap-1' : 'flex-col gap-2'}`}>
           <label
             className="flex items-center gap-1 text-gray-700"
@@ -269,6 +278,7 @@ const StockValueReportPage = () => {
                 height: isMobile ? 12 : 16,
               }}
             />
+
             {isMobile ? '0' : 'Hide Zero'}
           </label>
 
@@ -287,11 +297,11 @@ const StockValueReportPage = () => {
                 height: isMobile ? 12 : 16,
               }}
             />
+
             {isMobile ? '-' : 'Negative'}
           </label>
         </div>
 
-        {/* START DATE */}
         <div>
           <input
             type="date"
@@ -309,7 +319,6 @@ const StockValueReportPage = () => {
           />
         </div>
 
-        {/* END DATE */}
         <div>
           <input
             type="date"
@@ -327,39 +336,47 @@ const StockValueReportPage = () => {
           />
         </div>
 
-        {/* BUTTONS */}
         <div className={`flex ${isMobile ? 'gap-1' : 'gap-2'}`}>
           <button
+            type="button"
             onClick={handleApplyFilters}
+            disabled={loading}
             style={{
               ...primaryBtn,
               height: isMobile ? 28 : 42,
               padding: isMobile ? '0 8px' : '10px 18px',
               fontSize: isMobile ? 11 : 14,
+              opacity: loading ? 0.65 : 1,
             }}
           >
             🔎
           </button>
 
           <button
+            type="button"
             onClick={handlePrint}
+            disabled={loading}
             style={{
               ...printBtn,
               height: isMobile ? 28 : 42,
               padding: isMobile ? '0 8px' : '10px 18px',
               fontSize: isMobile ? 11 : 14,
+              opacity: loading ? 0.65 : 1,
             }}
           >
             🖨
           </button>
 
           <button
+            type="button"
             onClick={handleClearFilters}
+            disabled={loading}
             style={{
               ...clearBtn,
               height: isMobile ? 28 : 42,
               padding: isMobile ? '0 8px' : '10px 18px',
               fontSize: isMobile ? 11 : 14,
+              opacity: loading ? 0.65 : 1,
             }}
           >
             ✖
@@ -379,7 +396,6 @@ const StockValueReportPage = () => {
         minHeight: 0,
       }}
     >
-      {/* 🔹 ROW 1 — SUMMARY CARDS */}
       <div
         style={{
           padding: '12px 12px 6px 12px',
@@ -388,7 +404,6 @@ const StockValueReportPage = () => {
         {headerCards}
       </div>
 
-      {/* 🔹 ROW 2 — FILTERS */}
       <div
         style={{
           padding: '0px 12px 0px 12px',
@@ -396,9 +411,6 @@ const StockValueReportPage = () => {
       >
         {headerContent}
       </div>
-      {/* =========================================================
-         📦 MAIN CONTENT
-      ========================================================= */}
 
       <div
         style={{
@@ -409,10 +421,6 @@ const StockValueReportPage = () => {
           padding: '0px 12px 0px 12px',
         }}
       >
-        {/* =========================================================
-           📋 TABLE
-        ========================================================= */}
-
         <div
           style={{
             flex: 1,
@@ -498,9 +506,7 @@ const StockValueReportPage = () => {
                     <td
                       style={{
                         ...tdStyle,
-
                         fontWeight: 700,
-
                         color: row.stockQty < 0 ? '#dc2626' : '#111827',
                       }}
                     >
@@ -512,9 +518,7 @@ const StockValueReportPage = () => {
                     <td
                       style={{
                         ...tdStyle,
-
                         fontWeight: 700,
-
                         color: '#047857',
                       }}
                     >
@@ -526,9 +530,7 @@ const StockValueReportPage = () => {
                     <td
                       style={{
                         ...tdStyle,
-
                         fontWeight: 700,
-
                         color: '#c2410c',
                       }}
                     >
@@ -538,16 +540,10 @@ const StockValueReportPage = () => {
                 ))}
               </tbody>
 
-              {/* =========================================================
-                 📊 FOOTER TOTALS
-              ========================================================= */}
-
               <tfoot
                 style={{
                   background: 'linear-gradient(135deg, #111827, #1f2937)',
-
                   color: '#fff',
-
                   fontWeight: 700,
                 }}
               >
@@ -556,32 +552,78 @@ const StockValueReportPage = () => {
 
                   <td style={footerStyle}>-</td>
 
-                  <td style={footerStyle}>{Number(liveTotals.totalQty || 0).toLocaleString()}</td>
+                  <td style={footerStyle}>{Number(summary.totalQty || 0).toLocaleString()}</td>
 
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {Number(liveTotals.totalCostValue || 0).toLocaleString()}
+                    Rs. {Number(summary.totalCostValue || 0).toLocaleString()}
                   </td>
 
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {Number(liveTotals.totalSaleValue || 0).toLocaleString()}
+                    Rs. {Number(summary.totalSaleValue || 0).toLocaleString()}
                   </td>
                 </tr>
               </tfoot>
             </table>
           )}
         </div>
+
+        {pagination.totalPages > 1 && (
+          <div
+            className="no-print"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              padding: isMobile ? '6px 2px' : '8px 2px',
+            }}
+          >
+            <button
+              type="button"
+              disabled={loading || !pagination.hasPreviousPage}
+              onClick={() => handlePageChange(pagination.page - 1)}
+              style={{
+                ...paginationBtn,
+                opacity: loading || !pagination.hasPreviousPage ? 0.45 : 1,
+              }}
+            >
+              ←
+            </button>
+
+            <div
+              style={{
+                fontSize: isMobile ? 11 : 13,
+                color: '#4b5563',
+                textAlign: 'center',
+                fontWeight: 600,
+              }}
+            >
+              Page {pagination.page} of {pagination.totalPages}
+              {' • '}
+              {Number(pagination.totalRows || 0).toLocaleString()} Products
+            </div>
+
+            <button
+              type="button"
+              disabled={loading || !pagination.hasNextPage}
+              onClick={() => handlePageChange(pagination.page + 1)}
+              style={{
+                ...paginationBtn,
+                opacity: loading || !pagination.hasNextPage ? 0.45 : 1,
+              }}
+            >
+              →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 };
-
-/* =========================================================
-   🎨 SUMMARY CARD
-========================================================= */
 
 const SummaryCard = ({ title, value, gradient }) => {
   const isMobile = window.innerWidth < 768;
@@ -620,10 +662,6 @@ const SummaryCard = ({ title, value, gradient }) => {
     </div>
   );
 };
-
-/* =========================================================
-   🎨 STYLES
-========================================================= */
 
 const inputStyle = {
   width: '100%',
@@ -683,6 +721,18 @@ const printBtn = {
 
   fontWeight: 600,
 
+  cursor: 'pointer',
+};
+
+const paginationBtn = {
+  minWidth: 42,
+  height: 32,
+  border: '1px solid #d1d5db',
+  borderRadius: 8,
+  background: '#fff',
+  color: '#111827',
+  fontSize: 17,
+  fontWeight: 700,
   cursor: 'pointer',
 };
 

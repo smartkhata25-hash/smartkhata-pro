@@ -3,9 +3,6 @@ const mongoose = require("mongoose");
 const Invoice = require("../../models/Invoice");
 const RefundInvoice = require("../../models/RefundInvoice");
 
-/**
- * Number کو محفوظ طریقے سے دو Decimal تک Round کرتا ہے۔
- */
 const roundAmount = (value) => {
   const number = Number(value || 0);
 
@@ -16,12 +13,25 @@ const roundAmount = (value) => {
   return Number(number.toFixed(2));
 };
 
-const buildProductPipeline = ({
-  userId,
-  invoiceDateFilter = {},
-  productId,
-  categoryId,
-}) => {
+const createEmptyTotals = () => ({
+  soldQty: 0,
+  refundQty: 0,
+  netQty: 0,
+
+  grossSales: 0,
+  refundAmount: 0,
+  netSales: 0,
+
+  saleCost: 0,
+  refundCost: 0,
+  netCogs: 0,
+
+  grossProfit: 0,
+
+  margin: 0,
+});
+
+const getValidFilterIds = ({ productId, categoryId }) => {
   const validProductId =
     productId && mongoose.Types.ObjectId.isValid(productId)
       ? new mongoose.Types.ObjectId(productId)
@@ -31,6 +41,23 @@ const buildProductPipeline = ({
     categoryId && mongoose.Types.ObjectId.isValid(categoryId)
       ? new mongoose.Types.ObjectId(categoryId)
       : null;
+
+  return {
+    validProductId,
+    validCategoryId,
+  };
+};
+
+const buildProductPipeline = ({
+  userId,
+  invoiceDateFilter = {},
+  productId,
+  categoryId,
+}) => {
+  const { validProductId, validCategoryId } = getValidFilterIds({
+    productId,
+    categoryId,
+  });
 
   return [
     {
@@ -121,56 +148,123 @@ const buildProductPipeline = ({
   ];
 };
 
-const calculateProfitMetrics = async ({
+const buildTotalsPipeline = ({
   userId,
   invoiceDateFilter = {},
   productId,
   categoryId,
 }) => {
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-    throw new Error("Valid userId is required");
+  const { validProductId, validCategoryId } = getValidFilterIds({
+    productId,
+    categoryId,
+  });
+
+  const pipeline = [
+    {
+      $match: {
+        createdBy: userId,
+        isDeleted: false,
+        isOpening: false,
+        ...invoiceDateFilter,
+      },
+    },
+
+    {
+      $unwind: "$items",
+    },
+
+    ...(validProductId
+      ? [
+          {
+            $match: {
+              "items.productId": validProductId,
+            },
+          },
+        ]
+      : []),
+  ];
+
+  if (validCategoryId) {
+    pipeline.push(
+      {
+        $lookup: {
+          from: "products",
+          localField: "items.productId",
+          foreignField: "_id",
+          as: "productInfo",
+        },
+      },
+
+      {
+        $unwind: {
+          path: "$productInfo",
+          preserveNullAndEmptyArrays: false,
+        },
+      },
+
+      {
+        $match: {
+          "productInfo.categoryId": validCategoryId,
+        },
+      },
+    );
   }
 
-  const objectUserId = new mongoose.Types.ObjectId(userId);
+  pipeline.push({
+    $group: {
+      _id: null,
 
-  const salesPipeline = buildProductPipeline({
-    userId: objectUserId,
-    invoiceDateFilter,
-    productId,
-    categoryId,
+      quantity: {
+        $sum: {
+          $ifNull: ["$items.quantity", 0],
+        },
+      },
+
+      amount: {
+        $sum: {
+          $ifNull: ["$items.total", 0],
+        },
+      },
+
+      cost: {
+        $sum: {
+          $multiply: [
+            {
+              $ifNull: ["$items.costPrice", 0],
+            },
+            {
+              $ifNull: ["$items.quantity", 0],
+            },
+          ],
+        },
+      },
+    },
   });
 
-  const refundPipeline = buildProductPipeline({
-    userId: objectUserId,
-    invoiceDateFilter,
-    productId,
-    categoryId,
-  });
+  return pipeline;
+};
 
-  const [salesData, refundData] = await Promise.all([
-    Invoice.aggregate(salesPipeline),
-    RefundInvoice.aggregate(refundPipeline),
-  ]);
-
+const buildProductMetrics = (salesData = [], refundData = []) => {
   const productMap = new Map();
 
-  /**
-   * Sales کو Product Map میں شامل کریں۔
-   */
   salesData.forEach((sale) => {
     const productKey = sale._id?.toString() || "unknown";
 
     productMap.set(productKey, {
       productId: sale._id || null,
+
       productName: sale.productName || "Unknown Product",
 
       soldQty: Number(sale.quantity || 0),
+
       refundQty: 0,
 
       grossSales: Number(sale.amount || 0),
+
       refundAmount: 0,
 
       saleCost: Number(sale.cost || 0),
+
       refundCost: 0,
     });
   });
@@ -182,7 +276,9 @@ const calculateProfitMetrics = async ({
 
     if (existingProduct) {
       existingProduct.refundQty += Number(refund.quantity || 0);
+
       existingProduct.refundAmount += Number(refund.amount || 0);
+
       existingProduct.refundCost += Number(refund.cost || 0);
 
       return;
@@ -190,15 +286,19 @@ const calculateProfitMetrics = async ({
 
     productMap.set(productKey, {
       productId: refund._id || null,
+
       productName: refund.productName || "Unknown Product",
 
       soldQty: 0,
+
       refundQty: Number(refund.quantity || 0),
 
       grossSales: 0,
+
       refundAmount: Number(refund.amount || 0),
 
       saleCost: 0,
+
       refundCost: Number(refund.cost || 0),
     });
   });
@@ -217,25 +317,33 @@ const calculateProfitMetrics = async ({
 
     return {
       productId: item.productId,
+
       productName: item.productName,
 
       soldQty: roundAmount(item.soldQty),
+
       refundQty: roundAmount(item.refundQty),
+
       netQty: roundAmount(netQty),
 
       grossSales: roundAmount(item.grossSales),
+
       refundAmount: roundAmount(item.refundAmount),
+
       netSales: roundAmount(netSales),
 
       saleCost: roundAmount(item.saleCost),
+
       refundCost: roundAmount(item.refundCost),
+
       netCogs: roundAmount(netCogs),
 
       grossProfit: roundAmount(grossProfit),
 
-      // پرانے Frontend کے ساتھ Compatibility
       sales: roundAmount(item.grossSales),
+
       cost: roundAmount(netCogs),
+
       profit: roundAmount(grossProfit),
 
       margin,
@@ -244,42 +352,36 @@ const calculateProfitMetrics = async ({
 
   products.sort((first, second) => second.grossProfit - first.grossProfit);
 
-  /**
-   * تمام Products کے Totals۔
-   */
+  return products;
+};
+
+const calculateTotalsFromProducts = (products = []) => {
   const totals = products.reduce(
     (result, product) => {
-      result.soldQty += product.soldQty;
-      result.refundQty += product.refundQty;
-      result.netQty += product.netQty;
+      result.soldQty += Number(product.soldQty || 0);
 
-      result.grossSales += product.grossSales;
-      result.refundAmount += product.refundAmount;
-      result.netSales += product.netSales;
+      result.refundQty += Number(product.refundQty || 0);
 
-      result.saleCost += product.saleCost;
-      result.refundCost += product.refundCost;
-      result.netCogs += product.netCogs;
+      result.netQty += Number(product.netQty || 0);
 
-      result.grossProfit += product.grossProfit;
+      result.grossSales += Number(product.grossSales || 0);
+
+      result.refundAmount += Number(product.refundAmount || 0);
+
+      result.netSales += Number(product.netSales || 0);
+
+      result.saleCost += Number(product.saleCost || 0);
+
+      result.refundCost += Number(product.refundCost || 0);
+
+      result.netCogs += Number(product.netCogs || 0);
+
+      result.grossProfit += Number(product.grossProfit || 0);
 
       return result;
     },
-    {
-      soldQty: 0,
-      refundQty: 0,
-      netQty: 0,
 
-      grossSales: 0,
-      refundAmount: 0,
-      netSales: 0,
-
-      saleCost: 0,
-      refundCost: 0,
-      netCogs: 0,
-
-      grossProfit: 0,
-    },
+    createEmptyTotals(),
   );
 
   Object.keys(totals).forEach((key) => {
@@ -291,8 +393,134 @@ const calculateProfitMetrics = async ({
       ? roundAmount((totals.grossProfit / totals.netSales) * 100)
       : 0;
 
+  return totals;
+};
+
+const calculateTotalsFromSummary = (salesSummary = {}, refundSummary = {}) => {
+  const soldQty = Number(salesSummary.quantity || 0);
+
+  const refundQty = Number(refundSummary.quantity || 0);
+
+  const grossSales = Number(salesSummary.amount || 0);
+
+  const refundAmount = Number(refundSummary.amount || 0);
+
+  const saleCost = Number(salesSummary.cost || 0);
+
+  const refundCost = Number(refundSummary.cost || 0);
+
+  const netQty = soldQty - refundQty;
+
+  const netSales = grossSales - refundAmount;
+
+  const netCogs = saleCost - refundCost;
+
+  const grossProfit = netSales - netCogs;
+
+  const totals = {
+    soldQty: roundAmount(soldQty),
+
+    refundQty: roundAmount(refundQty),
+
+    netQty: roundAmount(netQty),
+
+    grossSales: roundAmount(grossSales),
+
+    refundAmount: roundAmount(refundAmount),
+
+    netSales: roundAmount(netSales),
+
+    saleCost: roundAmount(saleCost),
+
+    refundCost: roundAmount(refundCost),
+
+    netCogs: roundAmount(netCogs),
+
+    grossProfit: roundAmount(grossProfit),
+
+    margin: 0,
+  };
+
+  totals.margin =
+    totals.netSales !== 0
+      ? roundAmount((totals.grossProfit / totals.netSales) * 100)
+      : 0;
+
+  return totals;
+};
+
+const calculateProfitMetrics = async ({
+  userId,
+  invoiceDateFilter = {},
+  productId,
+  categoryId,
+  includeProducts = true,
+}) => {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Valid userId is required");
+  }
+
+  const objectUserId = new mongoose.Types.ObjectId(userId);
+
+  if (includeProducts) {
+    const salesPipeline = buildProductPipeline({
+      userId: objectUserId,
+      invoiceDateFilter,
+      productId,
+      categoryId,
+    });
+
+    const refundPipeline = buildProductPipeline({
+      userId: objectUserId,
+      invoiceDateFilter,
+      productId,
+      categoryId,
+    });
+
+    const [salesData, refundData] = await Promise.all([
+      Invoice.aggregate(salesPipeline),
+
+      RefundInvoice.aggregate(refundPipeline),
+    ]);
+
+    const products = buildProductMetrics(salesData, refundData);
+
+    const totals = calculateTotalsFromProducts(products);
+
+    return {
+      products,
+      totals,
+    };
+  }
+
+  const salesTotalsPipeline = buildTotalsPipeline({
+    userId: objectUserId,
+    invoiceDateFilter,
+    productId,
+    categoryId,
+  });
+
+  const refundTotalsPipeline = buildTotalsPipeline({
+    userId: objectUserId,
+    invoiceDateFilter,
+    productId,
+    categoryId,
+  });
+
+  const [salesSummaryData, refundSummaryData] = await Promise.all([
+    Invoice.aggregate(salesTotalsPipeline),
+
+    RefundInvoice.aggregate(refundTotalsPipeline),
+  ]);
+
+  const salesSummary = salesSummaryData?.[0] || {};
+
+  const refundSummary = refundSummaryData?.[0] || {};
+
+  const totals = calculateTotalsFromSummary(salesSummary, refundSummary);
+
   return {
-    products,
+    products: [],
     totals,
   };
 };

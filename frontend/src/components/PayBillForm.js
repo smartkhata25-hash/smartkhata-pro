@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AttachmentViewerModal from './AttachmentViewerModal';
-import { fetchSuppliers as getSuppliers, fetchSupplierLedger } from '../services/supplierService';
-import { fetchPurchaseParties } from '../services/partyService';
+import { fetchSupplierLedger } from '../services/supplierService';
 import { getPartyLedger } from '../services/partyLedgerService';
-import { getValidPaymentAccounts } from '../services/accountService';
+import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { createPayBill, updatePayBill, getPayBillById } from '../services/payBillService';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -57,6 +56,7 @@ const PayBillForm = () => {
   const loadLedger = useCallback(async (recordId, type = 'supplier') => {
     if (!recordId) {
       setSupplierLedger([]);
+      setLedgerLoading(false);
       return;
     }
 
@@ -73,9 +73,12 @@ const PayBillForm = () => {
 
       const res = await fetchSupplierLedger(recordId);
 
-      setSupplierLedger(Array.isArray(res?.entries) ? res.entries : []);
+      setSupplierLedger(
+        Array.isArray(res?.entries) ? res.entries : Array.isArray(res?.ledger) ? res.ledger : []
+      );
     } catch (error) {
       console.error('❌ Supplier ledger load error:', error);
+
       setSupplierLedger([]);
     } finally {
       setLedgerLoading(false);
@@ -204,57 +207,25 @@ const PayBillForm = () => {
 
     let cancelled = false;
 
-    const loadFormOptions = async () => {
-      const results = await Promise.allSettled([
-        getSuppliers({
-          status: 'active',
-        }),
-        fetchPurchaseParties(),
-        getValidPaymentAccounts(),
-      ]);
+    const applyOptions = (options) => {
+      if (!options || cancelled) return;
 
-      if (cancelled) return;
+      const supplierList = Array.isArray(options.suppliers) ? options.suppliers : [];
 
-      const [supplierResult, partyResult, accountResult] = results;
+      const partyList = Array.isArray(options.parties) ? options.parties : [];
 
-      const safeSuppliers =
-        supplierResult.status === 'fulfilled' && Array.isArray(supplierResult.value)
-          ? supplierResult.value
-          : [];
+      const paymentAccounts = Array.isArray(options.paymentAccounts) ? options.paymentAccounts : [];
 
-      const safeParties =
-        partyResult.status === 'fulfilled' && Array.isArray(partyResult.value)
-          ? partyResult.value
-          : [];
-
-      const safeAccounts =
-        accountResult.status === 'fulfilled' && Array.isArray(accountResult.value)
-          ? accountResult.value
-          : [];
-
-      setSuppliers(safeSuppliers);
-      setParties(safeParties);
-      setAccounts(safeAccounts);
-
-      if (supplierResult.status === 'rejected') {
-        console.error('Suppliers load failed:', supplierResult.reason);
-      }
-
-      if (partyResult.status === 'rejected') {
-        console.error('Purchase parties load failed:', partyResult.reason);
-      }
-
-      if (accountResult.status === 'rejected') {
-        console.error('Payment accounts load failed:', accountResult.reason);
-      }
+      setSuppliers(supplierList);
+      setParties(partyList);
+      setAccounts(paymentAccounts);
 
       if (!id) {
-        const handCash = safeAccounts.find(
+        const handCash = paymentAccounts.find(
           (account) =>
             account.name?.trim().toLowerCase() === 'hand cash' ||
             account.name?.trim().toLowerCase() === 'handcash' ||
-            account.category?.toLowerCase() === 'cash' ||
-            account.type?.toLowerCase() === 'cash'
+            account.category?.toLowerCase() === 'cash'
         );
 
         setPaymentEntries((previousEntries) => {
@@ -275,6 +246,22 @@ const PayBillForm = () => {
             },
           ];
         });
+      }
+    };
+
+    const cachedOptions = purchaseInvoiceService.getCachedPurchaseInvoiceFormOptions();
+
+    if (cachedOptions) {
+      applyOptions(cachedOptions);
+    }
+
+    const loadFormOptions = async () => {
+      try {
+        const options = await purchaseInvoiceService.fetchPurchaseInvoiceFormOptions();
+
+        applyOptions(options);
+      } catch (error) {
+        console.error('Pay Bill form options load failed:', error);
       }
     };
 
@@ -315,6 +302,7 @@ const PayBillForm = () => {
 
     if (!selectedId) {
       setSupplierLedger([]);
+      setLedgerLoading(false);
     }
   };
 
@@ -445,11 +433,6 @@ const PayBillForm = () => {
                       : 'Cash',
               },
             ]
-      );
-
-      await loadLedger(
-        supplierType === 'party' ? existingPartyId : existingSupplierId,
-        supplierType
       );
     } catch (error) {
       console.error('❌ Pay Bill revert error:', error);

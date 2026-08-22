@@ -1,9 +1,7 @@
 const JournalEntry = require("../models/JournalEntry");
-const Account = require("../models/Account");
 const mongoose = require("mongoose");
 const Invoice = require("../models/Invoice");
 const Product = require("../models/Product");
-const { getProductStock } = require("../utils/stockHelper");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
@@ -66,17 +64,15 @@ const getDashboardSummary = async (req, res) => {
       };
     }
 
-    const profitData = await getProfitSummary({
-      userId,
-      startDate,
-      endDate,
-      filterType,
-    });
+    const [profitData, activeCustomers, activeSuppliers, activeParties] =
+      await Promise.all([
+        getProfitSummary({
+          userId,
+          startDate,
+          endDate,
+          filterType,
+        }),
 
-    const { netSales, netProfit, grossProfit, cogs } = profitData;
-
-    const [activeCustomers, activeSuppliers, activeParties] = await Promise.all(
-      [
         Customer.find({
           createdBy: userId,
           isActive: true,
@@ -98,8 +94,9 @@ const getDashboardSummary = async (req, res) => {
         })
           .select("_id name account")
           .lean(),
-      ],
-    );
+      ]);
+
+    const { netSales, netProfit, grossProfit, cogs } = profitData;
 
     const activeCustomerAccountIds = activeCustomers
       .map((customer) => customer.account)

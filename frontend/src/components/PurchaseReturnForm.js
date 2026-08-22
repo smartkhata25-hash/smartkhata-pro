@@ -5,10 +5,6 @@ import {
   getPurchaseReturnById,
 } from '../services/purchaseReturnService';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
-import { fetchSuppliers } from '../services/supplierService';
-import { fetchPurchaseParties } from '../services/partyService';
-import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
-import { getValidPaymentAccounts } from '../services/accountService';
 import { useNavigate, useParams } from 'react-router-dom';
 import ProductDropdown from './ProductDropdown';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
@@ -156,43 +152,77 @@ const PurchaseReturnForm = ({ token }) => {
   }, [id, token, populateForm, canViewPurchaseReturns, canEditPurchaseReturns, navigate]);
 
   useEffect(() => {
-    getProducts(token).then(setProductList);
-    fetchSuppliers().then(setSuppliers);
-    fetchPurchaseParties().then(setParties);
+    let active = true;
 
-    getValidPaymentAccounts().then((paymentAccounts) => {
-      setAccounts(Array.isArray(paymentAccounts) ? paymentAccounts : []);
-    });
-  }, [token]);
+    const applyOptions = (options) => {
+      if (!active || !options) return;
 
-  // 📊 منتخب Product اور Supplier کی Purchase History
+      setProductList(Array.isArray(options.products) ? options.products : []);
+      setSuppliers(Array.isArray(options.suppliers) ? options.suppliers : []);
+      setParties(Array.isArray(options.parties) ? options.parties : []);
+      setAccounts(
+        Array.isArray(options.paymentAccounts)
+          ? options.paymentAccounts
+          : Array.isArray(options.accounts)
+            ? options.accounts
+            : []
+      );
+    };
+
+    const loadFormOptions = async () => {
+      try {
+        const cachedOptions = purchaseInvoiceService.getCachedPurchaseInvoiceFormOptions?.();
+
+        if (cachedOptions) {
+          applyOptions(cachedOptions);
+        }
+
+        const options = await purchaseInvoiceService.fetchPurchaseInvoiceFormOptions();
+
+        applyOptions(options);
+      } catch (err) {
+        console.error(
+          'Purchase return form options load failed:',
+          err?.response?.data || err.message
+        );
+      }
+    };
+
+    loadFormOptions();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
+    let active = true;
+
     const loadPurchaseHistory = async () => {
       if (!selectedProductId || !supplierId) {
         setItemHistory([]);
+        setLoadingHistory(false);
         return;
       }
 
       try {
         setLoadingHistory(true);
 
-        const filters =
-          selectedSupplierType === 'party'
-            ? {
-                partyId: supplierId,
-              }
-            : {
-                supplierId,
-              };
+        const filters = selectedSupplierType === 'party' ? { partyId: supplierId } : { supplierId };
 
         const history = await purchaseInvoiceService.getItemPurchaseHistory(
           selectedProductId,
           filters
         );
 
-        setItemHistory(Array.isArray(history) ? history : []);
-        if (Array.isArray(history) && history.length > 0) {
-          const latestRate = Number(history[0].price || 0);
+        if (!active) return;
+
+        const safeHistory = Array.isArray(history) ? history : [];
+
+        setItemHistory(safeHistory);
+
+        if (safeHistory.length > 0) {
+          const latestRate = Number(safeHistory[0].price || 0);
 
           setItems((prev) =>
             prev.map((row) => {
@@ -209,14 +239,23 @@ const PurchaseReturnForm = ({ token }) => {
           );
         }
       } catch (err) {
-        console.error('❌ Purchase history load failed:', err);
+        if (!active) return;
+
+        console.error('Purchase history load failed:', err?.response?.data || err.message);
+
         setItemHistory([]);
       } finally {
-        setLoadingHistory(false);
+        if (active) {
+          setLoadingHistory(false);
+        }
       }
     };
 
     loadPurchaseHistory();
+
+    return () => {
+      active = false;
+    };
   }, [selectedProductId, supplierId, selectedSupplierType]);
 
   // 🔁 Auto select cash account when method changes
@@ -533,11 +572,15 @@ const PurchaseReturnForm = ({ token }) => {
     if (id) {
       await updatePurchaseReturn(id, formData, token);
 
+      purchaseInvoiceService.invalidatePurchaseInvoiceFormOptionsCache?.();
+
       alert(t('alerts.invoiceUpdated'));
     } else {
       await createPurchaseReturn(formData, token);
 
       clear();
+
+      purchaseInvoiceService.invalidatePurchaseInvoiceFormOptionsCache?.();
 
       alert(t('alerts.invoiceSaved'));
     }

@@ -9,8 +9,8 @@ const {
   deletePurchaseInvoice,
   searchPurchaseInvoices,
   getItemPurchaseHistory,
+  getPurchaseInvoiceFormOptions,
 } = require("../controllers/purchaseInvoiceController");
-
 const upload = require("../middleware/uploadMiddleware");
 const protect = require("../middleware/authMiddleware");
 
@@ -39,6 +39,13 @@ router.get(
   protect,
   requirePermission("purchases.view"),
   searchPurchaseInvoices,
+);
+
+router.get(
+  "/form-options",
+  protect,
+  requirePermission("purchases.view"),
+  getPurchaseInvoiceFormOptions,
 );
 
 // Get All Purchase Invoices

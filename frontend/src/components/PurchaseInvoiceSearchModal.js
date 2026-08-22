@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { searchPurchaseInvoices } from '../services/purchaseInvoiceService';
-import { fetchSuppliers } from '../services/supplierService';
+import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { t } from '../i18n/i18n';
 
 const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
@@ -17,9 +17,32 @@ const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [selectedSupplierIndex, setSelectedSupplierIndex] = useState(-1);
 
-  // 🔄 Load Suppliers
   useEffect(() => {
-    fetchSuppliers().then(setAllSuppliers);
+    let cancelled = false;
+
+    const loadSuppliers = async () => {
+      const cachedOptions = purchaseInvoiceService.getCachedPurchaseInvoiceFormOptions();
+
+      if (cachedOptions?.suppliers?.length && !cancelled) {
+        setAllSuppliers(cachedOptions.suppliers);
+      }
+
+      try {
+        const options = await purchaseInvoiceService.fetchPurchaseInvoiceFormOptions();
+
+        if (!cancelled) {
+          setAllSuppliers(Array.isArray(options.suppliers) ? options.suppliers : []);
+        }
+      } catch (error) {
+        console.error('Purchase invoice search suppliers load failed:', error);
+      }
+    };
+
+    loadSuppliers();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 🧠 Generic change
@@ -36,9 +59,17 @@ const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
       setSupplierSuggestions([]);
       setSelectedSupplierIndex(-1);
     } else {
-      const filtered = allSuppliers.filter(
-        (s) => s.name.toLowerCase().includes(value.toLowerCase()) || s.phone?.includes(value)
-      );
+      const searchValue = value.toLowerCase();
+
+      const filtered = allSuppliers
+        .filter((supplier) => {
+          const name = String(supplier?.name || '').toLowerCase();
+
+          const phone = String(supplier?.phone || '');
+
+          return name.includes(searchValue) || phone.includes(value);
+        })
+        .slice(0, 50);
       setSupplierSuggestions(filtered);
       setSelectedSupplierIndex(-1);
     }
@@ -78,7 +109,7 @@ const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
 
       if (!searchString) return alert(t('alerts.searchFieldRequired'));
 
-      const data = await searchPurchaseInvoices(searchString);
+      const data = await searchPurchaseInvoices(searchString, 25);
       setResults(data);
     } catch (err) {
       console.error('Search error:', err);

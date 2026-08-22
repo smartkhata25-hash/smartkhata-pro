@@ -118,47 +118,64 @@ async function calculateBalanceSnapshot({
   beforeCreatedAt = null,
   excludeReferenceId = null,
 }) {
-  if (!accountId || !userId) return 0;
+  if (
+    !mongoose.Types.ObjectId.isValid(accountId) ||
+    !mongoose.Types.ObjectId.isValid(userId)
+  ) {
+    return 0;
+  }
 
-  const filter = {
-    createdBy: userId,
+  const objectAccountId = new mongoose.Types.ObjectId(accountId);
+  const objectUserId = new mongoose.Types.ObjectId(userId);
+
+  const match = {
+    createdBy: objectUserId,
     isDeleted: false,
     sourceType: { $ne: "reversal" },
-    "lines.account": accountId,
+    "lines.account": objectAccountId,
   };
 
   if (beforeCreatedAt) {
-    filter.createdAt = {
+    match.createdAt = {
       $lt: beforeCreatedAt,
     };
   }
 
   if (excludeReferenceId) {
-    filter.referenceId = {
+    match.referenceId = {
       $ne: excludeReferenceId,
     };
   }
 
-  const journals = await JournalEntry.find(filter).select("lines").lean();
+  const result = await JournalEntry.aggregate([
+    {
+      $match: match,
+    },
+    {
+      $unwind: "$lines",
+    },
+    {
+      $match: {
+        "lines.account": objectAccountId,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        balance: {
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "debit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
+        },
+      },
+    },
+  ]);
 
-  let debit = 0;
-  let credit = 0;
-
-  journals.forEach((journal) => {
-    journal.lines?.forEach((line) => {
-      if (String(line.account) === String(accountId)) {
-        if (line.type === "debit") {
-          debit += Number(line.amount || 0);
-        }
-
-        if (line.type === "credit") {
-          credit += Number(line.amount || 0);
-        }
-      }
-    });
-  });
-
-  return debit - credit;
+  return Number(result[0]?.balance || 0);
 }
 // CREATE RECEIVE PAYMENT
 
@@ -203,13 +220,7 @@ exports.createReceivePayment = async (req, res) => {
       return res.status(400).json({ error: "Invalid payment amount" });
     }
 
-    const uploadedAttachments = await uploadReceivePaymentFiles(
-      req.files,
-      userId,
-    );
-
     const cleanPaymentType = paymentType?.toLowerCase() || "";
-
     let customerData = null;
     let partyData = null;
     let counterPartyAccountId = null;
@@ -242,6 +253,11 @@ exports.createReceivePayment = async (req, res) => {
 
       counterPartyAccountId = customerData.account._id;
     }
+
+    const uploadedAttachments = await uploadReceivePaymentFiles(
+      req.files,
+      userId,
+    );
 
     const previousBalance = await calculateBalanceSnapshot({
       accountId: counterPartyAccountId,
@@ -874,7 +890,11 @@ exports.updateReceivePayment = async (req, res) => {
     const existingJournal = await JournalEntry.findOne({
       referenceId: payment._id,
       sourceType: "receive_payment",
-    });
+      createdBy: userId,
+      isDeleted: false,
+    })
+      .select("billNo")
+      .lean();
 
     const billNo = existingJournal?.billNo || payment.billNo || "RCV-1001";
 
@@ -956,8 +976,6 @@ exports.updateReceivePayment = async (req, res) => {
         entryTime: time || payment.time || "00:00",
       });
     }
-
-    await safeRecalculate(counterPartyAccountId);
 
     await logActivity({
       req,
@@ -1057,11 +1075,19 @@ exports.deleteReceivePayment = async (req, res) => {
       },
     );
 
-    for (const entry of journals) {
-      for (const line of entry.lines) {
-        await safeRecalculate(line.account);
-      }
-    }
+    const affectedAccountIds = [
+      ...new Set(
+        journals.flatMap((entry) =>
+          (entry.lines || [])
+            .map((line) => line.account?.toString())
+            .filter(Boolean),
+        ),
+      ),
+    ];
+
+    await Promise.all(
+      affectedAccountIds.map((accountId) => safeRecalculate(accountId)),
+    );
 
     payment.isDeleted = true;
     await payment.save();

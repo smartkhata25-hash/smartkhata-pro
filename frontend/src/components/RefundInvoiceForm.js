@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRefund, updateRefund, getRefundById } from '../services/refundService';
-import { fetchCustomers } from '../services/customerService';
-import { fetchSaleParties } from '../services/partyService';
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
-import { getPartyLedger } from '../services/partyLedgerService';
+import { getCustomerBalance } from '../services/customerLedgerService';
+import { getPartyBalance } from '../services/partyLedgerService';
+import {
+  fetchInvoiceFormOptions,
+  getCachedInvoiceFormOptions,
+} from '../services/invoiceFormOptionsService';
 import InvoiceSearchModal from './InvoiceSearchModal';
-import { fetchProductsWithToken as getProducts } from '../services/inventoryService';
-import { getValidPaymentAccounts } from '../services/accountService';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   getPrintSettings,
@@ -269,69 +269,31 @@ const RefundInvoiceForm = ({
 
     let cancelled = false;
 
-    /*
-    Cached products پہلے فوراً دکھائیں۔
-  */
-    try {
-      const cachedProducts = localStorage.getItem('products');
+    const applyOptions = (data) => {
+      if (!data || cancelled) return;
 
-      if (cachedProducts) {
-        const parsedProducts = JSON.parse(cachedProducts);
+      setCustomers(Array.isArray(data.customers) ? data.customers : []);
 
-        if (Array.isArray(parsedProducts)) {
-          setProductList(parsedProducts);
-        }
-      }
-    } catch (err) {
-      console.error('Cached products read failed:', err);
+      setParties(Array.isArray(data.parties) ? data.parties : []);
+
+      setProductList(Array.isArray(data.products) ? data.products : []);
+
+      setAccounts(Array.isArray(data.paymentAccounts) ? data.paymentAccounts : []);
+    };
+
+    const cachedOptions = getCachedInvoiceFormOptions();
+
+    if (cachedOptions) {
+      applyOptions(cachedOptions);
     }
 
     const loadFormOptions = async () => {
-      const results = await Promise.allSettled([
-        getProducts(token),
-        fetchCustomers(token),
-        fetchSaleParties(),
-        getValidPaymentAccounts(),
-      ]);
+      try {
+        const options = await fetchInvoiceFormOptions();
 
-      if (cancelled) return;
-
-      const [productResult, customerResult, partyResult, accountResult] = results;
-
-      if (productResult.status === 'fulfilled') {
-        const products = Array.isArray(productResult.value) ? productResult.value : [];
-
-        setProductList(products);
-
-        localStorage.setItem('products', JSON.stringify(products));
-      } else {
-        console.error('Products load failed:', productResult.reason);
-      }
-
-      if (customerResult.status === 'fulfilled') {
-        const customerData = customerResult.value;
-
-        setCustomers(
-          Array.isArray(customerData)
-            ? customerData
-            : Array.isArray(customerData?.customers)
-              ? customerData.customers
-              : []
-        );
-      } else {
-        console.error('Customers load failed:', customerResult.reason);
-      }
-
-      if (partyResult.status === 'fulfilled') {
-        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
-      } else {
-        console.error('Sale parties load failed:', partyResult.reason);
-      }
-
-      if (accountResult.status === 'fulfilled') {
-        setAccounts(Array.isArray(accountResult.value) ? accountResult.value : []);
-      } else {
-        console.error('Payment accounts load failed:', accountResult.reason);
+        applyOptions(options);
+      } catch (error) {
+        console.error('Refund invoice form options load failed:', error);
       }
     };
 
@@ -468,28 +430,30 @@ const RefundInvoiceForm = ({
         let result;
 
         if (selectedCustomerType === 'party') {
-          result = await getPartyLedger(customerId);
+          result = await getPartyBalance(customerId);
         } else {
           const customer = customers.find((item) => String(item._id) === String(customerId));
 
           const customerAccountId = customer?.account?._id || customer?.account;
 
           if (!customerAccountId) {
+            if (!cancelled) {
+              setCustomerBalance(0);
+            }
+
             return;
           }
 
-          result = await getLedgerByCustomerAccount(customerAccountId);
+          result = await getCustomerBalance(customerAccountId);
         }
 
         if (cancelled) return;
 
-        const ledger = Array.isArray(result?.ledger) ? result.ledger : [];
+        const balance = Number(
+          result?.balance ?? result?.closingBalance ?? result?.currentBalance ?? 0
+        );
 
-        const lastEntry = ledger.length > 0 ? ledger[ledger.length - 1] : null;
-
-        const closingBalance = Number(lastEntry?.runningBalance ?? lastEntry?.balance ?? 0);
-
-        setCustomerBalance(closingBalance);
+        setCustomerBalance(balance);
       } catch (err) {
         if (cancelled) return;
 
@@ -507,7 +471,6 @@ const RefundInvoiceForm = ({
       cancelled = true;
     };
   }, [id, customerId, selectedCustomerType, customers]);
-
   const totalAmount = isOpeningRefund
     ? Number(openingRefundAmount || 0)
     : items.reduce((acc, item) => acc + (parseFloat(item.total) || 0), 0);
@@ -856,9 +819,16 @@ const RefundInvoiceForm = ({
         selectType: 'party',
       }));
 
-      const filtered = [...customerResults, ...partyResults].filter(
-        (c) => c.name.toLowerCase().includes(value.toLowerCase()) || (c.phone || '').includes(value)
-      );
+      const searchValue = value.toLowerCase();
+
+      const filtered = [...customerResults, ...partyResults]
+        .filter((item) => {
+          const name = String(item?.name || '').toLowerCase();
+          const phone = String(item?.phone || '');
+
+          return name.includes(searchValue) || phone.includes(value);
+        })
+        .slice(0, 50);
 
       setCustomerSuggestions(filtered);
       setSelectedCustomerIndex(-1);
@@ -884,8 +854,8 @@ const RefundInvoiceForm = ({
   };
 
   const handleCustomerSelect = async (name, phone, id, type = 'customer') => {
-    setCustomerName(name);
-    setCustomerPhone(phone);
+    setCustomerName(name || '');
+    setCustomerPhone(phone || '');
     setCustomerId(id);
     setSelectedCustomerType(type);
 
@@ -898,29 +868,28 @@ const RefundInvoiceForm = ({
       let result;
 
       if (type === 'party') {
-        result = await getPartyLedger(id);
+        result = await getPartyBalance(id);
       } else {
-        const selectedCustomer = customers.find((c) => c._id === id);
+        const selectedCustomer = customers.find((customer) => String(customer?._id) === String(id));
 
-        const accountId = selectedCustomer?.account?._id || selectedCustomer?.account;
+        const selectedAccountId = selectedCustomer?.account?._id || selectedCustomer?.account;
 
-        if (!accountId) {
+        if (!selectedAccountId) {
           setCustomerBalance(0);
           return;
         }
 
-        result = await getLedgerByCustomerAccount(accountId);
+        result = await getCustomerBalance(selectedAccountId);
       }
 
-      const ledger = result?.ledger || [];
+      const balance = Number(
+        result?.balance ?? result?.closingBalance ?? result?.currentBalance ?? 0
+      );
 
-      const lastEntry = ledger.length > 0 ? ledger[ledger.length - 1] : null;
-
-      const closingBalance = Number(lastEntry?.runningBalance ?? lastEntry?.balance ?? 0);
-
-      setCustomerBalance(closingBalance);
+      setCustomerBalance(balance);
     } catch (err) {
       console.error('Refund customer balance load failed:', err);
+
       setCustomerBalance(0);
     }
   };

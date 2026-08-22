@@ -4,11 +4,13 @@ const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const {
-  createInventoryEntry,
   deleteTransactionsByReference,
+  getMultipleProductsStock,
 } = require("../utils/stockHelper");
 
 const Product = require("../models/Product");
+const InventoryTransaction = require("../models/InventoryTransaction");
+const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
 const { logActivity } = require("../utils/activityLogger");
@@ -110,6 +112,295 @@ async function deletePurchaseAttachment(att) {
     }
   }
 }
+
+const getVersionSnapshot = async (Model, match) => {
+  const rows = await Model.aggregate([
+    {
+      $match: match,
+    },
+    {
+      $group: {
+        _id: null,
+        count: { $sum: 1 },
+        latest: {
+          $max: {
+            $ifNull: ["$updatedAt", "$createdAt"],
+          },
+        },
+      },
+    },
+  ]);
+
+  const row = rows[0] || {};
+
+  const timestamp = row.latest ? new Date(row.latest).getTime() : 0;
+
+  return `${Number(row.count || 0)}:${timestamp}`;
+};
+
+const getPurchaseFormVersions = async (userId) => {
+  const [
+    suppliersVersion,
+    partiesVersion,
+    productsVersion,
+    inventoryVersion,
+    accountsVersion,
+  ] = await Promise.all([
+    getVersionSnapshot(Supplier, {
+      userId,
+      isDeleted: false,
+    }),
+
+    getVersionSnapshot(Party, {
+      userId,
+      isDeleted: false,
+      isActive: true,
+      role: { $in: ["supplier", "both"] },
+    }),
+
+    getVersionSnapshot(Product, {
+      userId,
+    }),
+
+    getVersionSnapshot(InventoryTransaction, {
+      userId,
+    }),
+
+    getVersionSnapshot(Account, {
+      userId,
+      isActive: { $ne: false },
+      type: "Asset",
+      category: {
+        $in: ["cash", "bank", "online", "cheque"],
+      },
+    }),
+  ]);
+
+  return {
+    suppliers: suppliersVersion,
+    parties: partiesVersion,
+    products: `${productsVersion}|${inventoryVersion}`,
+    paymentAccounts: accountsVersion,
+  };
+};
+
+const applyPurchaseStockBatch = async ({
+  items,
+  invoiceId,
+  billNo,
+  userId,
+  updated = false,
+}) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return;
+  }
+
+  const safeItems = items.map((item) => {
+    const quantity = Number(item.quantity || 0);
+    const rate = Number(item.price || 0);
+    const salePrice = Number(item.salePrice || 0);
+
+    if (
+      !mongoose.Types.ObjectId.isValid(item.productId) ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      !Number.isFinite(rate) ||
+      rate < 0
+    ) {
+      throw new Error("Invalid purchase inventory item");
+    }
+
+    return {
+      productId: item.productId,
+      quantity,
+      rate,
+      salePrice,
+    };
+  });
+
+  const productOperations = safeItems.map((item) => ({
+    updateOne: {
+      filter: {
+        _id: item.productId,
+        userId,
+      },
+      update: {
+        $set: {
+          unitCost: item.rate,
+          salePrice: item.salePrice,
+        },
+      },
+    },
+  }));
+
+  if (productOperations.length > 0) {
+    await Product.bulkWrite(productOperations, {
+      ordered: false,
+    });
+  }
+
+  const inventoryRows = safeItems.map((item) => ({
+    productId: item.productId,
+    type: "IN",
+    quantity: item.quantity,
+    rate: item.rate,
+    note: `${updated ? "Updated " : ""}Purchase Invoice #${billNo}`,
+    invoiceId,
+    invoiceModel: "PurchaseInvoice",
+    userId,
+  }));
+
+  await InventoryTransaction.insertMany(inventoryRows, {
+    ordered: false,
+  });
+};
+
+const getPurchaseInvoiceFormOptions = asyncHandler(async (req, res) => {
+  const rawUserId = req.user?.id || req.userId;
+
+  if (!mongoose.Types.ObjectId.isValid(rawUserId)) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid user",
+    });
+  }
+
+  const userId = new mongoose.Types.ObjectId(rawUserId);
+
+  const versions = await getPurchaseFormVersions(userId);
+
+  const clientVersions = {
+    suppliers: String(req.query.suppliersVersion || ""),
+    parties: String(req.query.partiesVersion || ""),
+    products: String(req.query.productsVersion || ""),
+    paymentAccounts: String(req.query.paymentAccountsVersion || ""),
+  };
+
+  const changed = {
+    suppliers:
+      !clientVersions.suppliers ||
+      clientVersions.suppliers !== versions.suppliers,
+
+    parties:
+      !clientVersions.parties || clientVersions.parties !== versions.parties,
+
+    products:
+      !clientVersions.products || clientVersions.products !== versions.products,
+
+    paymentAccounts:
+      !clientVersions.paymentAccounts ||
+      clientVersions.paymentAccounts !== versions.paymentAccounts,
+  };
+
+  if (
+    !changed.suppliers &&
+    !changed.parties &&
+    !changed.products &&
+    !changed.paymentAccounts
+  ) {
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+
+    return res.json({
+      success: true,
+      notModified: true,
+      versions,
+      changed,
+    });
+  }
+
+  const data = {};
+
+  const tasks = [];
+
+  if (changed.suppliers) {
+    tasks.push(
+      Supplier.find({
+        userId,
+        isDeleted: false,
+      })
+        .select("name phone account supplierType")
+        .sort({ name: 1, _id: 1 })
+        .lean()
+        .then((rows) => {
+          data.suppliers = rows;
+        }),
+    );
+  }
+
+  if (changed.parties) {
+    tasks.push(
+      Party.find({
+        userId,
+        isDeleted: false,
+        isActive: true,
+        role: {
+          $in: ["supplier", "both"],
+        },
+      })
+        .select("name phone account role")
+        .sort({ name: 1, _id: 1 })
+        .lean()
+        .then((rows) => {
+          data.parties = rows;
+        }),
+    );
+  }
+
+  if (changed.paymentAccounts) {
+    tasks.push(
+      Account.find({
+        userId,
+        isActive: { $ne: false },
+        type: "Asset",
+        category: {
+          $in: ["cash", "bank", "online", "cheque"],
+        },
+      })
+        .select("name code category type")
+        .sort({ category: 1, name: 1, _id: 1 })
+        .lean()
+        .then((rows) => {
+          data.paymentAccounts = rows;
+        }),
+    );
+  }
+
+  if (changed.products) {
+    tasks.push(
+      Product.find({
+        userId,
+      })
+        .select(
+          "name description unit uom unitCost salePrice lowStockThreshold categoryId",
+        )
+        .populate("categoryId", "name")
+        .sort({ name: 1, _id: 1 })
+        .lean()
+        .then(async (products) => {
+          const productIds = products.map((product) => product._id);
+
+          const stockMap = await getMultipleProductsStock(productIds, userId);
+
+          data.products = products.map((product) => ({
+            ...product,
+            stock: Number(stockMap[String(product._id)] || 0),
+          }));
+        }),
+    );
+  }
+
+  await Promise.all(tasks);
+
+  res.setHeader("Cache-Control", "private, no-store, max-age=0");
+
+  return res.json({
+    success: true,
+    notModified: false,
+    versions,
+    changed,
+    data,
+  });
+});
 
 // ✅ Create Purchase Invoice
 const addPurchaseInvoice = asyncHandler(async (req, res) => {
@@ -352,26 +643,14 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  // 📦 Stock via stockHelper
   if (!(isOpening === true || isOpening === "true")) {
-    for (const item of parsedItems) {
-      await Product.findByIdAndUpdate(item.productId, {
-        unitCost: item.price || 0,
-        salePrice: item.salePrice || 0,
-      });
-
-      // ✅ Inventory Entry
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "IN",
-        quantity: item.quantity,
-        note: `Purchase Invoice #${billNo}`,
-        invoiceId: invoice._id,
-        invoiceModel: "PurchaseInvoice",
-        userId,
-        rate: item.price || 0,
-      });
-    }
+    await applyPurchaseStockBatch({
+      items: parsedItems,
+      invoiceId: invoice._id,
+      billNo,
+      userId,
+      updated: false,
+    });
   }
 
   await recalculateAccountBalance(counterPartyAccountId);
@@ -795,30 +1074,15 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  // RE-APPLY STOCK
-
   if (!(isOpening === true || isOpening === "true")) {
-    for (const item of parsedItems) {
-      await Product.findByIdAndUpdate(item.productId, {
-        unitCost: item.price || 0,
-        salePrice: item.salePrice || 0,
-      });
-
-      // ✅ Re-Apply Stock
-      await createInventoryEntry({
-        productId: item.productId,
-        type: "IN",
-        quantity: item.quantity,
-        note: `Updated Purchase Invoice #${billNo}`,
-        invoiceId: invoice._id,
-        invoiceModel: "PurchaseInvoice",
-        userId,
-        rate: item.price || 0,
-      });
-    }
+    await applyPurchaseStockBatch({
+      items: parsedItems,
+      invoiceId: invoice._id,
+      billNo,
+      userId,
+      updated: true,
+    });
   }
-
-  // RECALCULATE NEW ACCOUNTS
 
   await recalculateAccountBalance(counterPartyAccountId);
 
@@ -1307,92 +1571,174 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
 // ✅ SEARCH Purchase Invoices
 const searchPurchaseInvoices = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
-  const { query } = req.query;
+  const queryText = String(req.query.query || "").trim();
 
-  // ✅ ONLY ACTIVE SUPPLIERS
-  const activeSuppliers = await Supplier.find({
-    userId,
-    isDeleted: false,
-  }).select("_id");
-  const activeSupplierIds = activeSuppliers.map((s) => s._id);
-
-  const activeParties = await Party.find({
-    userId,
-    isDeleted: false,
-    isActive: true,
-  }).select("_id");
-
-  const activePartyIds = activeParties.map((p) => p._id);
-
-  if (!query || !query.trim()) {
+  if (!queryText) {
     return res.status(400).json({
       message: "Search query required",
     });
   }
 
-  const conditions = query
-    .split(" ")
-    .map((pair) => {
-      const [key, value] = pair.split(":");
+  const requestedLimit = Number.parseInt(req.query.limit || "25", 10);
 
-      if (!value) return null;
+  const limit = Math.min(
+    Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 25, 1),
+    50,
+  );
 
-      switch (key) {
-        case "billNo":
-          return { billNo: { $regex: value, $options: "i" } };
+  const escapeRegex = (value) =>
+    String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-        case "supplierName":
-          return { supplierName: { $regex: value, $options: "i" } };
+  const conditions = [];
 
-        case "supplierPhone":
-          return { supplierPhone: { $regex: value, $options: "i" } };
+  const matcher =
+    /(billNo|supplierName|supplierPhone|startDate|endDate):(.+?)(?=\s+(?:billNo|supplierName|supplierPhone|startDate|endDate):|$)/g;
 
-        case "startDate":
-          return {
-            invoiceDate: {
-              $gte: new Date(value),
-            },
-          };
+  let match;
 
-        case "endDate":
-          return {
-            invoiceDate: {
-              $lte: new Date(value + "T23:59:59.999Z"),
-            },
-          };
+  while ((match = matcher.exec(queryText)) !== null) {
+    const key = match[1];
+    const value = String(match[2] || "").trim();
 
-        default:
-          return null;
+    if (!value) continue;
+
+    if (key === "billNo") {
+      conditions.push({
+        billNo: {
+          $regex: escapeRegex(value),
+          $options: "i",
+        },
+      });
+    }
+
+    if (key === "supplierName") {
+      conditions.push({
+        supplierName: {
+          $regex: escapeRegex(value),
+          $options: "i",
+        },
+      });
+    }
+
+    if (key === "supplierPhone") {
+      conditions.push({
+        supplierPhone: {
+          $regex: escapeRegex(value),
+          $options: "i",
+        },
+      });
+    }
+
+    if (key === "startDate") {
+      const date = new Date(`${value}T00:00:00`);
+
+      if (!Number.isNaN(date.getTime())) {
+        conditions.push({
+          invoiceDate: {
+            $gte: date,
+          },
+        });
       }
-    })
-    .filter(Boolean);
+    }
+
+    if (key === "endDate") {
+      const date = new Date(`${value}T23:59:59.999`);
+
+      if (!Number.isNaN(date.getTime())) {
+        conditions.push({
+          invoiceDate: {
+            $lte: date,
+          },
+        });
+      }
+    }
+  }
+
+  if (conditions.length === 0) {
+    return res.status(400).json({
+      message: "Invalid search query",
+    });
+  }
+
+  const [activeSupplierIds, activePartyIds] = await Promise.all([
+    Supplier.distinct("_id", {
+      userId,
+      isDeleted: false,
+    }),
+
+    Party.distinct("_id", {
+      userId,
+      isDeleted: false,
+      isActive: true,
+    }),
+  ]);
 
   const invoices = await PurchaseInvoice.find({
     userId,
     isDeleted: false,
 
     $or: [
-      { supplier: { $in: activeSupplierIds } },
-      { partyId: { $in: activePartyIds } },
+      {
+        supplier: {
+          $in: activeSupplierIds,
+        },
+      },
+      {
+        partyId: {
+          $in: activePartyIds,
+        },
+      },
     ],
 
     $and: conditions,
   })
-    .populate("items.productId")
-    .sort({ createdAt: -1 });
+    .select(
+      [
+        "billNo",
+        "invoiceDate",
+        "invoiceTime",
+        "supplier",
+        "partyId",
+        "supplierName",
+        "supplierPhone",
+        "items",
+        "totalAmount",
+        "discountPercent",
+        "discountAmount",
+        "grandTotal",
+        "paidAmount",
+        "paymentType",
+        "accountId",
+        "attachments",
+        "attachment",
+        "attachmentType",
+        "isOpening",
+        "createdAt",
+      ].join(" "),
+    )
+    .populate({
+      path: "items.productId",
+      select: "name description salePrice unitCost",
+    })
+    .sort({
+      invoiceDate: -1,
+      createdAt: -1,
+      _id: -1,
+    })
+    .limit(limit)
+    .lean();
 
-  const formatted = invoices.map((inv) => {
-    const obj = inv.toObject ? inv.toObject() : inv;
-    const attachments = formatPurchaseAttachments(obj);
+  const formatted = invoices.map((invoice) => {
+    const attachments = formatPurchaseAttachments(invoice);
 
     return {
-      ...obj,
+      ...invoice,
       attachments,
       attachmentFullUrl: attachments[0]?.fullUrl || "",
     };
   });
 
-  res.status(200).json(formatted);
+  return res.status(200).json(formatted);
 });
 
 const getItemPurchaseHistory = asyncHandler(async (req, res) => {
@@ -1509,4 +1855,5 @@ module.exports = {
   deletePurchaseInvoice,
   searchPurchaseInvoices,
   getItemPurchaseHistory,
+  getPurchaseInvoiceFormOptions,
 };

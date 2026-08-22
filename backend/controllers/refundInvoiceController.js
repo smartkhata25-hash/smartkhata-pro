@@ -161,6 +161,8 @@ exports.createRefundInvoice = async (req, res) => {
       }
     }
 
+    let originalInvoice = null;
+
     // ✅ Save Refund Invoice
     const refundInvoice = new RefundInvoice({
       billNo: refundBillNo,
@@ -183,7 +185,11 @@ exports.createRefundInvoice = async (req, res) => {
     });
 
     if (originalInvoiceId) {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
+      originalInvoice = await Invoice.findOne({
+        _id: originalInvoiceId,
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      }).lean();
 
       if (!originalInvoice) {
         return res.status(404).json({
@@ -191,35 +197,45 @@ exports.createRefundInvoice = async (req, res) => {
         });
       }
 
-      // اصل quantity محفوظ کریں
       const originalQtyMap = {};
-      originalInvoice.items.forEach((item) => {
-        originalQtyMap[item.productId.toString()] = item.quantity;
-      });
 
-      // پہلے کتنے ریفنڈ ہو چکے
+      for (const item of originalInvoice.items || []) {
+        if (!item.productId) continue;
+
+        originalQtyMap[item.productId.toString()] = Number(item.quantity || 0);
+      }
+
       const previousRefunds = await RefundInvoice.find({
         originalInvoiceId,
-      });
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      })
+        .select("items.productId items.quantity")
+        .lean();
 
       const refundedQtyMap = {};
 
-      previousRefunds.forEach((ref) => {
-        ref.items.forEach((item) => {
-          const key = item.productId.toString();
-          if (!refundedQtyMap[key]) refundedQtyMap[key] = 0;
-          refundedQtyMap[key] += item.quantity;
-        });
-      });
+      for (const ref of previousRefunds) {
+        for (const item of ref.items || []) {
+          if (!item.productId) continue;
 
-      // اب نیا ریفنڈ چیک کریں
+          const key = item.productId.toString();
+
+          refundedQtyMap[key] =
+            Number(refundedQtyMap[key] || 0) + Number(item.quantity || 0);
+        }
+      }
+
       for (const item of items) {
+        if (!item.productId) continue;
+
         const key = item.productId.toString();
 
-        const originalQty = originalQtyMap[key] || 0;
-        const alreadyRefunded = refundedQtyMap[key] || 0;
+        const originalQty = Number(originalQtyMap[key] || 0);
+        const alreadyRefunded = Number(refundedQtyMap[key] || 0);
+        const refundQty = Number(item.quantity || 0);
 
-        if (item.quantity + alreadyRefunded > originalQty) {
+        if (refundQty + alreadyRefunded > originalQty) {
           return res.status(400).json({
             error: "Refund quantity exceeds original sold quantity",
           });
@@ -239,14 +255,8 @@ exports.createRefundInvoice = async (req, res) => {
     let totalRefundCost = 0;
     const refundCostMap = {};
 
-    if (!openingRefund || openingRefund === "false") {
-      let originalInvoice = null;
-
-      if (originalInvoiceId) {
-        originalInvoice = await Invoice.findById(originalInvoiceId);
-      }
-
-      const productIds = items.map((i) => i.productId).filter(Boolean);
+    if (!openingRefund) {
+      const productIds = items.map((item) => item.productId).filter(Boolean);
 
       const products = await Product.find({
         _id: { $in: productIds },
@@ -374,15 +384,8 @@ exports.createRefundInvoice = async (req, res) => {
       if (accountId) await recalculateAccountBalance(accountId);
     }
 
-    // ✅ Inventory transactions
-    if (!openingRefund || openingRefund === "false") {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
-
+    if (!openingRefund) {
       for (const item of items) {
-        const originalItem = originalInvoice?.items.find(
-          (i) => i.productId?.toString() === item.productId?.toString(),
-        );
-
         await createInventoryEntry({
           productId: item.productId,
           type: "IN",
@@ -391,8 +394,6 @@ exports.createRefundInvoice = async (req, res) => {
           invoiceId: refundInvoice._id,
           invoiceModel: "RefundInvoice",
           userId,
-
-          // ✅ Historical refund rate
           rate: Number(refundCostMap[item.productId?.toString()] || 0),
         });
       }
@@ -560,6 +561,8 @@ exports.updateRefundInvoice = async (req, res) => {
       });
     }
 
+    const wasOpeningRefund = Boolean(refund.isOpening);
+
     const beforeUpdate = {
       billNo: refund.billNo,
       invoiceDate: refund.invoiceDate,
@@ -599,6 +602,8 @@ exports.updateRefundInvoice = async (req, res) => {
       typeof req.body.items === "string"
         ? JSON.parse(req.body.items || "[]")
         : req.body.items || [];
+
+    let originalInvoice = null;
 
     let attachments = refund.attachments?.length
       ? refund.attachments.map((att) => ({
@@ -761,7 +766,11 @@ exports.updateRefundInvoice = async (req, res) => {
     refund.attachmentType = attachments.length > 0 ? attachments[0].type : "";
 
     if (originalInvoiceId) {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
+      originalInvoice = await Invoice.findOne({
+        _id: originalInvoiceId,
+        createdBy: userId,
+        isDeleted: { $ne: true },
+      }).lean();
 
       if (!originalInvoice) {
         return res.status(404).json({
@@ -769,43 +778,52 @@ exports.updateRefundInvoice = async (req, res) => {
         });
       }
 
-      // اصل quantity map
       const originalQtyMap = {};
-      originalInvoice.items.forEach((item) => {
-        originalQtyMap[item.productId.toString()] = item.quantity;
-      });
+
+      for (const item of originalInvoice.items || []) {
+        if (!item.productId) continue;
+
+        originalQtyMap[item.productId.toString()] = Number(item.quantity || 0);
+      }
 
       const previousRefunds = await RefundInvoice.find({
         originalInvoiceId,
+        createdBy: userId,
+        isDeleted: { $ne: true },
         _id: { $ne: refund._id },
-      });
+      })
+        .select("items.productId items.quantity")
+        .lean();
 
       const refundedQtyMap = {};
 
-      previousRefunds.forEach((ref) => {
-        ref.items.forEach((item) => {
-          const key = item.productId.toString();
-          if (!refundedQtyMap[key]) refundedQtyMap[key] = 0;
-          refundedQtyMap[key] += item.quantity;
-        });
-      });
+      for (const ref of previousRefunds) {
+        for (const item of ref.items || []) {
+          if (!item.productId) continue;
 
-      // نیا ریفنڈ چیک کریں
+          const key = item.productId.toString();
+
+          refundedQtyMap[key] =
+            Number(refundedQtyMap[key] || 0) + Number(item.quantity || 0);
+        }
+      }
+
       for (const item of items) {
+        if (!item.productId) continue;
+
         const key = item.productId.toString();
 
-        const originalQty = originalQtyMap[key] || 0;
-        const alreadyRefunded = refundedQtyMap[key] || 0;
+        const originalQty = Number(originalQtyMap[key] || 0);
+        const alreadyRefunded = Number(refundedQtyMap[key] || 0);
+        const refundQty = Number(item.quantity || 0);
 
-        if (item.quantity + alreadyRefunded > originalQty) {
+        if (refundQty + alreadyRefunded > originalQty) {
           return res.status(400).json({
             error: "Refund quantity exceeds original sold quantity",
           });
         }
       }
     }
-
-    // Refund بعد میں Save ہوگی
 
     // ✅ Delete old journal
     await JournalEntry.updateMany(
@@ -823,7 +841,7 @@ exports.updateRefundInvoice = async (req, res) => {
     );
 
     // ✅ Delete old inventory transactions
-    if (!refund.isOpening) {
+    if (!wasOpeningRefund) {
       await deleteTransactionsByReference({
         referenceId: refund._id,
         invoiceModel: "RefundInvoice",
@@ -842,13 +860,7 @@ exports.updateRefundInvoice = async (req, res) => {
     const refundCostMap = {};
 
     if (!openingRefund) {
-      let originalInvoice = null;
-
-      if (originalInvoiceId) {
-        originalInvoice = await Invoice.findById(originalInvoiceId);
-      }
-
-      const productIds = items.map((i) => i.productId).filter(Boolean);
+      const productIds = items.map((item) => item.productId).filter(Boolean);
 
       const products = await Product.find({
         _id: { $in: productIds },
@@ -979,13 +991,7 @@ exports.updateRefundInvoice = async (req, res) => {
 
     // ✅ New inventory transactions
     if (!openingRefund) {
-      const originalInvoice = await Invoice.findById(originalInvoiceId);
-
       for (const item of items) {
-        const originalItem = originalInvoice?.items.find(
-          (i) => i.productId?.toString() === item.productId?.toString(),
-        );
-
         await createInventoryEntry({
           productId: item.productId,
           type: "IN",
@@ -994,8 +1000,6 @@ exports.updateRefundInvoice = async (req, res) => {
           invoiceId: refund._id,
           invoiceModel: "RefundInvoice",
           userId,
-
-          // ✅ Historical refund rate
           rate: Number(refundCostMap[item.productId?.toString()] || 0),
         });
       }

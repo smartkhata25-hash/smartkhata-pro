@@ -1,7 +1,3 @@
-/* =========================================================
-   HELPER FUNCTIONS
-========================================================= */
-
 const formatDate = (date) => {
   if (!date) return "";
   const d = new Date(date);
@@ -30,22 +26,13 @@ const generateReceiptNo = (payment) => {
 
   return `RCV-${Date.now().toString().slice(-6)}`;
 };
-/* =========================================================
-   MAIN BUILDER
-========================================================= */
 
 const buildReceivePaymentPrint = (
   payment = {},
   paymentEntries = [],
   options = {},
 ) => {
-  const {
-    company = {},
-    pageWidth = "standard", // standard | narrow | thermal
-    previousBalance = 0,
-  } = options;
-
-  /* ================= SAFE PAYMENT ================= */
+  const { company = {}, pageWidth = "standard", previousBalance = 0 } = options;
 
   const safePayment = payment || {};
 
@@ -61,8 +48,6 @@ const buildReceivePaymentPrint = (
 
   const remainingBalance = prevBalance - receivedAmount - discountAmount;
 
-  /* ================= PAYMENTS ================= */
-
   const payments = (paymentEntries || []).map((entry, index) => ({
     index: index + 1,
     accountName:
@@ -70,8 +55,6 @@ const buildReceivePaymentPrint = (
     paymentType: formatPaymentType(entry.paymentType),
     amount: safeNumber(entry.amount),
   }));
-
-  /* ================= EMPTY PAYMENT ROW ================= */
 
   if (payments.length === 0) {
     payments.push({
@@ -82,12 +65,8 @@ const buildReceivePaymentPrint = (
     });
   }
 
-  /* ================= RETURN OBJECT ================= */
-
   return {
     documentTitle: "Receive Payment Receipt",
-
-    /* ================= HEADER ================= */
 
     header: {
       companyName: company.companyName || "",
@@ -97,15 +76,11 @@ const buildReceivePaymentPrint = (
       showLogo: company.showLogo || false,
     },
 
-    /* ================= DOCUMENT INFO ================= */
-
     documentInfo: {
       receiptNo: receiptNo,
       date: formatDate(safePayment.date),
       time: safePayment.time || "",
     },
-
-    /* ================= CUSTOMER ================= */
 
     party: {
       label: "Customer",
@@ -113,11 +88,7 @@ const buildReceivePaymentPrint = (
       phone: safePayment.customer?.phone || safePayment.customerPhone || "",
     },
 
-    /* ================= PAYMENTS ================= */
-
     payments: payments,
-
-    /* ================= TOTALS ================= */
 
     totals: {
       previousBalance: prevBalance,
@@ -127,31 +98,21 @@ const buildReceivePaymentPrint = (
       totalAmount: receivedAmount + discountAmount,
     },
 
-    /* ================= EXTRA INFO ================= */
-
     extra: {
       description: safePayment.description || "",
       attachment: safePayment.attachment || "",
     },
-
-    /* ================= FOOTER ================= */
 
     footer: {
       message: "Thank you for your business!",
       showStamp: false,
     },
 
-    /* ================= PAGE SETTINGS ================= */
-
     page: {
-      pageWidth: pageWidth, // thermal | narrow | standard
+      pageWidth: pageWidth,
     },
   };
 };
-
-/* =========================================================
-   EXPORT
-========================================================= */
 
 module.exports = {
   buildReceivePaymentPrint,

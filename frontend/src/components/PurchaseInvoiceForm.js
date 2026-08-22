@@ -2,11 +2,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { fetchSuppliers } from '../services/supplierService';
-import { fetchPurchaseParties } from '../services/partyService';
-import { fetchProductsWithToken } from '../services/inventoryService';
-import { getValidPaymentAccounts } from '../services/accountService';
-
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -118,42 +113,31 @@ const PurchaseInvoiceForm = () => {
 
     let cancelled = false;
 
+    const applyOptions = (data) => {
+      if (!data || cancelled) return;
+
+      setSuppliers(Array.isArray(data.suppliers) ? data.suppliers : []);
+
+      setParties(Array.isArray(data.parties) ? data.parties : []);
+
+      setProducts(Array.isArray(data.products) ? data.products : []);
+
+      setAccounts(Array.isArray(data.paymentAccounts) ? data.paymentAccounts : []);
+    };
+
+    const cachedOptions = purchaseInvoiceService.getCachedPurchaseInvoiceFormOptions();
+
+    if (cachedOptions) {
+      applyOptions(cachedOptions);
+    }
+
     const loadFormOptions = async () => {
-      const results = await Promise.allSettled([
-        fetchSuppliers({
-          status: 'active',
-        }),
-        fetchPurchaseParties(token),
-        fetchProductsWithToken(token),
-        getValidPaymentAccounts(),
-      ]);
+      try {
+        const options = await purchaseInvoiceService.fetchPurchaseInvoiceFormOptions();
 
-      if (cancelled) return;
-
-      const [supplierResult, partyResult, productResult, accountResult] = results;
-
-      if (supplierResult.status === 'fulfilled') {
-        setSuppliers(Array.isArray(supplierResult.value) ? supplierResult.value : []);
-      } else {
-        console.error('Suppliers load failed:', supplierResult.reason);
-      }
-
-      if (partyResult.status === 'fulfilled') {
-        setParties(Array.isArray(partyResult.value) ? partyResult.value : []);
-      } else {
-        console.error('Purchase parties load failed:', partyResult.reason);
-      }
-
-      if (productResult.status === 'fulfilled') {
-        setProducts(Array.isArray(productResult.value) ? productResult.value : []);
-      } else {
-        console.error('Products load failed:', productResult.reason);
-      }
-
-      if (accountResult.status === 'fulfilled') {
-        setAccounts(Array.isArray(accountResult.value) ? accountResult.value : []);
-      } else {
-        console.error('Accounts load failed:', accountResult.reason);
+        applyOptions(options);
+      } catch (error) {
+        console.error('Purchase invoice form options load failed:', error);
       }
     };
 
@@ -366,14 +350,29 @@ const PurchaseInvoiceForm = () => {
         return;
       }
 
-      setSupplierName(data.name);
+      setSupplierName(data.name || '');
       setSupplierPhone(data.phone || '');
 
       setSelectedSupplierId(data._id || '');
       setSelectedSupplierType('supplier');
 
-      const updatedSuppliers = await fetchSuppliers();
-      setSuppliers(updatedSuppliers);
+      setSuppliers((previousSuppliers) => {
+        const exists = previousSuppliers.some(
+          (supplier) => String(supplier?._id) === String(data?._id)
+        );
+
+        if (exists) {
+          return previousSuppliers.map((supplier) =>
+            String(supplier?._id) === String(data?._id) ? { ...supplier, ...data } : supplier
+          );
+        }
+
+        return [...previousSuppliers, data].sort((a, b) =>
+          String(a?.name || '').localeCompare(String(b?.name || ''))
+        );
+      });
+
+      purchaseInvoiceService.invalidatePurchaseInvoiceFormOptionsSections(['suppliers']);
 
       setSupplierSuggestions([]);
       setSelectedSupplierIndex(-1);
@@ -381,6 +380,7 @@ const PurchaseInvoiceForm = () => {
 
       setTimeout(() => {
         const firstItemInput = document.querySelector('input[placeholder="Search Item..."]');
+
         firstItemInput?.focus();
       }, 0);
     } catch (err) {
@@ -388,7 +388,6 @@ const PurchaseInvoiceForm = () => {
       alert(t('alerts.quickAddFailed'));
     }
   };
-
   const clearOnFocus = (e) => {
     if (e.target.value === '0') e.target.select();
   };
@@ -1803,16 +1802,31 @@ const PurchaseInvoiceForm = () => {
                 return;
               }
 
-              // ✅ Auto select supplier
-              setSupplierName(newSupplier.name);
+              setSupplierName(newSupplier.name || '');
               setSupplierPhone(newSupplier.phone || '');
 
               setSelectedSupplierId(newSupplier._id || '');
               setSelectedSupplierType('supplier');
 
-              // ✅ Refresh suppliers list
-              const updatedSuppliers = await fetchSuppliers();
-              setSuppliers(updatedSuppliers);
+              setSuppliers((previousSuppliers) => {
+                const exists = previousSuppliers.some(
+                  (supplier) => String(supplier?._id) === String(newSupplier?._id)
+                );
+
+                if (exists) {
+                  return previousSuppliers.map((supplier) =>
+                    String(supplier?._id) === String(newSupplier?._id)
+                      ? { ...supplier, ...newSupplier }
+                      : supplier
+                  );
+                }
+
+                return [...previousSuppliers, newSupplier].sort((a, b) =>
+                  String(a?.name || '').localeCompare(String(b?.name || ''))
+                );
+              });
+
+              purchaseInvoiceService.invalidatePurchaseInvoiceFormOptionsSections(['suppliers']);
 
               setShowSupplierForm(false);
 

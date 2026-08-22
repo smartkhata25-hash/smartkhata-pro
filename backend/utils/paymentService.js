@@ -3,6 +3,20 @@ const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("./accountHelper");
 const Account = require("../models/Account");
 
+const recalculateUniqueAccounts = async (lines = []) => {
+  const uniqueAccounts = [
+    ...new Set(lines.map((line) => line?.account?.toString()).filter(Boolean)),
+  ];
+
+  if (uniqueAccounts.length === 0) {
+    return;
+  }
+
+  await Promise.all(
+    uniqueAccounts.map((accountId) => recalculateAccountBalance(accountId)),
+  );
+};
+
 const createPaymentEntry = async ({
   userId,
   referenceId,
@@ -138,13 +152,7 @@ const createPaymentEntry = async ({
   }
 
   if (!session) {
-    const uniqueAccounts = [
-      ...new Set(lines.map((line) => line.account.toString())),
-    ];
-
-    for (const accId of uniqueAccounts) {
-      await recalculateAccountBalance(accId);
-    }
+    await recalculateUniqueAccounts(lines);
   }
 
   return journal;
@@ -278,13 +286,7 @@ const createDiscountEntry = async ({
   }
 
   if (!session) {
-    const uniqueAccounts = [
-      ...new Set(lines.map((line) => line.account.toString())),
-    ];
-
-    for (const accId of uniqueAccounts) {
-      await recalculateAccountBalance(accId);
-    }
+    await recalculateUniqueAccounts(lines);
   }
 
   return journal;
@@ -397,13 +399,7 @@ const createReceivePaymentDiscountEntry = async ({
   }
 
   if (!session) {
-    const uniqueAccounts = [
-      ...new Set(lines.map((line) => line.account.toString())),
-    ];
-
-    for (const accId of uniqueAccounts) {
-      await recalculateAccountBalance(accId);
-    }
+    await recalculateUniqueAccounts(lines);
   }
 
   return journal;

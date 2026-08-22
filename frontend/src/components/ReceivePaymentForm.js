@@ -6,11 +6,14 @@ import {
   updateReceivePayment,
   getReceivePaymentById,
 } from '../services/receivePaymentService';
-import { getValidPaymentAccounts } from '../services/accountService';
-import { fetchCustomers } from '../services/customerService';
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
-import { fetchSaleParties } from '../services/partyService';
-import { getPartyLedger } from '../services/partyLedgerService';
+import { getLedgerByCustomerAccount, getCustomerBalance } from '../services/customerLedgerService';
+
+import { getPartyLedger, getPartyBalance } from '../services/partyLedgerService';
+
+import {
+  fetchInvoiceFormOptions,
+  getCachedInvoiceFormOptions,
+} from '../services/invoiceFormOptionsService';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
@@ -27,6 +30,7 @@ const ReceivePaymentForm = () => {
   const [customerName, setCustomerName] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [customerLedger, setCustomerLedger] = useState([]);
+  const [customerBalance, setCustomerBalance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -72,49 +76,16 @@ const ReceivePaymentForm = () => {
   useEffect(() => {
     let cancelled = false;
 
-    // ✅ Customers Cache
-    try {
-      const cachedCustomers = localStorage.getItem('customers');
+    const cachedOptions = getCachedInvoiceFormOptions();
 
-      if (cachedCustomers) {
-        const parsed = JSON.parse(cachedCustomers);
+    if (cachedOptions) {
+      setCustomers(Array.isArray(cachedOptions.customers) ? cachedOptions.customers : []);
 
-        if (Array.isArray(parsed)) {
-          setCustomers(parsed);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      setParties(Array.isArray(cachedOptions.parties) ? cachedOptions.parties : []);
 
-    // ✅ Parties Cache
-    try {
-      const cachedParties = localStorage.getItem('saleParties');
-
-      if (cachedParties) {
-        const parsed = JSON.parse(cachedParties);
-
-        if (Array.isArray(parsed)) {
-          setParties(parsed);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-
-    // ✅ Accounts Cache
-    try {
-      const cachedAccounts = localStorage.getItem('paymentAccounts');
-
-      if (cachedAccounts) {
-        const parsed = JSON.parse(cachedAccounts);
-
-        if (Array.isArray(parsed)) {
-          setAccounts(parsed);
-        }
-      }
-    } catch (err) {
-      console.error(err);
+      setAccounts(
+        Array.isArray(cachedOptions.paymentAccounts) ? cachedOptions.paymentAccounts : []
+      );
     }
 
     const normalizePaymentType = (value) => {
@@ -214,78 +185,60 @@ const ReceivePaymentForm = () => {
   useEffect(() => {
     let cancelled = false;
 
-    const loadFormOptions = async () => {
-      const results = await Promise.allSettled([
-        fetchCustomers(null, {}, true),
-        fetchSaleParties(null, true),
-        getValidPaymentAccounts(true),
-      ]);
+    const applyOptions = (options) => {
+      if (!options || cancelled) return;
 
-      if (cancelled) return;
+      const customerList = Array.isArray(options.customers) ? options.customers : [];
 
-      const [customerResult, partyResult, accountResult] = results;
+      const partyList = Array.isArray(options.parties) ? options.parties : [];
 
-      if (customerResult.status === 'fulfilled') {
-        const customerData = customerResult.value;
+      const paymentAccounts = Array.isArray(options.paymentAccounts) ? options.paymentAccounts : [];
 
-        const customerList = Array.isArray(customerData)
-          ? customerData
-          : Array.isArray(customerData?.customers)
-            ? customerData.customers
-            : [];
+      setCustomers(customerList);
+      setParties(partyList);
+      setAccounts(paymentAccounts);
 
-        setCustomers(customerList);
+      if (!id) {
+        const handCashAccount = paymentAccounts.find(
+          (account) => account.name?.toLowerCase() === 'handcash' || account.category === 'cash'
+        );
 
-        localStorage.setItem('customers', JSON.stringify(customerList));
-      } else {
-        console.error('Customers load failed:', customerResult.reason);
-      }
+        if (handCashAccount) {
+          setPaymentEntries((previousEntries) => {
+            const isBlankDefault =
+              previousEntries.length === 1 &&
+              !previousEntries[0]?.amount &&
+              !previousEntries[0]?.account;
 
-      if (partyResult.status === 'fulfilled') {
-        const partyList = Array.isArray(partyResult.value) ? partyResult.value : [];
+            if (!isBlankDefault) {
+              return previousEntries;
+            }
 
-        setParties(partyList);
-
-        localStorage.setItem('saleParties', JSON.stringify(partyList));
-      } else {
-        console.error('Sale parties load failed:', partyResult.reason);
-      }
-
-      if (accountResult.status === 'fulfilled') {
-        const paymentAccounts = Array.isArray(accountResult.value) ? accountResult.value : [];
-
-        setAccounts(paymentAccounts);
-
-        localStorage.setItem('paymentAccounts', JSON.stringify(paymentAccounts));
-
-        if (!id) {
-          const handCashAccount = paymentAccounts.find(
-            (account) => account.name?.toLowerCase() === 'handcash' || account.category === 'cash'
-          );
-
-          if (handCashAccount) {
-            setPaymentEntries((previousEntries) => {
-              const isBlankDefault =
-                previousEntries.length === 1 &&
-                !previousEntries[0]?.amount &&
-                !previousEntries[0]?.account;
-
-              if (!isBlankDefault) {
-                return previousEntries;
-              }
-
-              return [
-                {
-                  account: handCashAccount._id,
-                  amount: '',
-                  paymentType: 'Cash',
-                },
-              ];
-            });
-          }
+            return [
+              {
+                account: handCashAccount._id,
+                amount: '',
+                paymentType: 'Cash',
+              },
+            ];
+          });
         }
-      } else {
-        console.error('Payment accounts load failed:', accountResult.reason);
+      }
+    };
+
+    const cachedOptions = getCachedInvoiceFormOptions();
+
+    if (cachedOptions) {
+      applyOptions(cachedOptions);
+    }
+
+    const loadFormOptions = async () => {
+      try {
+        const options = await fetchInvoiceFormOptions();
+
+        applyOptions(options);
+      } catch (error) {
+        console.error('Receive Payment form options load failed:', error);
       }
     };
 
@@ -300,19 +253,26 @@ const ReceivePaymentForm = () => {
 
     if (!selectedId) {
       setCustomerLedger([]);
+      setCustomerBalance(0);
+      setLedgerLoading(false);
       return;
     }
 
     let cancelled = false;
 
-    const loadSelectedLedger = async () => {
+    const loadSelectedData = async () => {
       try {
         setLedgerLoading(true);
 
-        let ledgerResponse;
+        let balanceResponse = null;
+        let ledgerResponse = null;
 
         if (selectedCustomerType === 'party') {
-          ledgerResponse = await getPartyLedger(selectedId);
+          balanceResponse = await getPartyBalance(selectedId);
+
+          if (!isMobile) {
+            ledgerResponse = await getPartyLedger(selectedId);
+          }
         } else {
           const customerObject = customers.find(
             (customer) => String(customer._id) === String(selectedId)
@@ -322,23 +282,42 @@ const ReceivePaymentForm = () => {
 
           if (!accountId) {
             if (!cancelled) {
+              setCustomerBalance(0);
               setCustomerLedger([]);
             }
 
             return;
           }
 
-          ledgerResponse = await getLedgerByCustomerAccount(accountId);
+          balanceResponse = await getCustomerBalance(accountId);
+
+          if (!isMobile) {
+            ledgerResponse = await getLedgerByCustomerAccount(accountId);
+          }
         }
 
         if (cancelled) return;
 
-        setCustomerLedger(Array.isArray(ledgerResponse?.ledger) ? ledgerResponse.ledger : []);
+        const balance = Number(
+          balanceResponse?.balance ??
+            balanceResponse?.closingBalance ??
+            balanceResponse?.currentBalance ??
+            0
+        );
+
+        setCustomerBalance(balance);
+
+        if (!isMobile) {
+          setCustomerLedger(Array.isArray(ledgerResponse?.ledger) ? ledgerResponse.ledger : []);
+        } else {
+          setCustomerLedger([]);
+        }
       } catch (err) {
         if (cancelled) return;
 
-        console.error('Receive Payment ledger load failed:', err);
+        console.error('Receive Payment customer data load failed:', err);
 
+        setCustomerBalance(0);
         setCustomerLedger([]);
       } finally {
         if (!cancelled) {
@@ -348,49 +327,13 @@ const ReceivePaymentForm = () => {
     };
 
     if (selectedCustomerType === 'party' || customers.length > 0) {
-      loadSelectedLedger();
+      loadSelectedData();
     }
 
     return () => {
       cancelled = true;
     };
-  }, [selectedCustomerType, formData.customer, formData.partyId, customers]);
-  const loadLedger = async (recordId, type = selectedCustomerType) => {
-    if (!recordId) {
-      setCustomerLedger([]);
-      return;
-    }
-
-    try {
-      setLedgerLoading(true);
-
-      if (type === 'party') {
-        const res = await getPartyLedger(recordId);
-
-        setCustomerLedger(Array.isArray(res?.ledger) ? res.ledger : []);
-
-        return;
-      }
-
-      const customer = customers.find((item) => String(item._id) === String(recordId));
-
-      const accountId = customer?.account?._id || customer?.account;
-
-      if (!accountId) {
-        setCustomerLedger([]);
-        return;
-      }
-
-      const res = await getLedgerByCustomerAccount(accountId);
-
-      setCustomerLedger(Array.isArray(res?.ledger) ? res.ledger : []);
-    } catch (err) {
-      console.error('Customer ledger load failed:', err);
-      setCustomerLedger([]);
-    } finally {
-      setLedgerLoading(false);
-    }
-  };
+  }, [selectedCustomerType, formData.customer, formData.partyId, customers, isMobile]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -521,8 +464,6 @@ const ReceivePaymentForm = () => {
         const selectedParty = parties.find((party) => String(party._id) === String(partyId));
 
         setCustomerName(selectedParty?.name || existing.partyId?.name || '');
-
-        await loadLedger(partyId, 'party');
       } else {
         setSelectedCustomerType('customer');
 
@@ -537,8 +478,6 @@ const ReceivePaymentForm = () => {
         );
 
         setCustomerName(selectedCustomer?.name || existing.customer?.name || '');
-
-        await loadLedger(customerId, 'customer');
       }
     } catch (err) {
       console.error('Revert error:', err);
@@ -911,9 +850,7 @@ const ReceivePaymentForm = () => {
       return;
     }
 
-    const totalDebit = customerLedger.reduce((sum, e) => sum + (e.debit || 0), 0);
-    const totalCredit = customerLedger.reduce((sum, e) => sum + (e.credit || 0), 0);
-    const currentBalance = totalDebit - totalCredit;
+    const currentBalance = Number(customerBalance || 0);
 
     const totalAmount = paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
@@ -993,7 +930,9 @@ const ReceivePaymentForm = () => {
   const totalCredit = customerLedger.reduce((sum, e) => sum + (e.credit || 0), 0);
 
   const closingBalance =
-    customerLedger.length > 0 ? customerLedger[customerLedger.length - 1].runningBalance || 0 : 0;
+    customerLedger.length > 0
+      ? Number(customerLedger[customerLedger.length - 1]?.runningBalance || 0)
+      : Number(customerBalance || 0);
 
   return (
     <>

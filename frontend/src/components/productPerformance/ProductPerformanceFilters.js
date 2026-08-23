@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import axios from 'axios';
-
 import { t } from '../../i18n/i18n';
-
+import { getCategories } from '../../services/categoryService';
 const SORT_OPTIONS = Object.freeze([
   { value: 'performanceScore', labelKey: 'productPerformance.sort.performanceScore' },
   { value: 'productName', labelKey: 'productPerformance.sort.productName' },
@@ -95,58 +93,47 @@ const ProductPerformanceFilters = ({
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
 
-  const baseUrl = process.env.REACT_APP_API_BASE_URL;
-
   const selectedQuickDate = useMemo(
     () => detectQuickDateRange(filters.startDate, filters.endDate),
     [filters.startDate, filters.endDate]
   );
 
-  const loadCategories = useCallback(
-    async (signal) => {
-      try {
-        setCategoriesLoading(true);
-        if (!baseUrl) throw new Error('REACT_APP_API_BASE_URL is not configured.');
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Authentication token is missing.');
+  const loadCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
 
-        const response = await axios.get(`${baseUrl}/api/categories`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal,
-        });
+      const responseData = await getCategories();
 
-        const responseData = response?.data;
-        const categoryList = Array.isArray(responseData)
-          ? responseData
-          : Array.isArray(responseData?.categories)
-            ? responseData.categories
-            : [];
+      const categoryList = Array.isArray(responseData)
+        ? responseData
+        : Array.isArray(responseData?.categories)
+          ? responseData.categories
+          : [];
 
-        const normalizedCategories = categoryList
-          .filter((category) => category?._id)
-          .map((category) => ({
-            id: category._id,
-            name: category.name || '-',
-          }))
-          .sort((first, second) =>
-            first.name.localeCompare(second.name, undefined, { numeric: true, sensitivity: 'base' })
-          );
+      const normalizedCategories = categoryList
+        .filter((category) => category?._id)
+        .map((category) => ({
+          id: category._id,
+          name: category.name || '-',
+        }))
+        .sort((first, second) =>
+          first.name.localeCompare(second.name, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        );
 
-        setCategories(normalizedCategories);
-      } catch (error) {
-        if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return;
-        setCategories([]);
-      } finally {
-        if (!signal.aborted) setCategoriesLoading(false);
-      }
-    },
-    [baseUrl]
-  );
+      setCategories(normalizedCategories);
+    } catch (error) {
+      console.error('Failed to load product performance categories:', error);
+      setCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    loadCategories(controller.signal);
-    return () => controller.abort();
+    loadCategories();
   }, [loadCategories]);
 
   useEffect(() => {

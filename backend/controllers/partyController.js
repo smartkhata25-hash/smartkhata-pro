@@ -609,6 +609,7 @@ exports.getParties = async (req, res) => {
       status = "active",
       limit = 0,
       page = 1,
+      includeBalance = "true",
     } = req.query;
 
     const query = {
@@ -662,6 +663,18 @@ exports.getParties = async (req, res) => {
 
     if (parties.length === 0) {
       return res.json([]);
+    }
+
+    const shouldIncludeBalance =
+      String(includeBalance).trim().toLowerCase() !== "false";
+
+    if (!shouldIncludeBalance) {
+      return res.json(
+        parties.map((party) => ({
+          ...party,
+          balance: 0,
+        })),
+      );
     }
 
     const accountIds = parties

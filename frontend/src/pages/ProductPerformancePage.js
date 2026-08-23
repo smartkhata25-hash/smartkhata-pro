@@ -144,7 +144,7 @@ const ProductPerformancePage = () => {
   const [drawerState, setDrawerState] = useState(createInitialDrawerState);
 
   const [loading, setLoading] = useState(true);
-  const [, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
   const reportRequestIdRef = useRef(0);
@@ -192,7 +192,9 @@ const ProductPerformancePage = () => {
           setLoading(true);
         }
 
-        const response = await fetchProductPerformanceReport(normalizedFilters);
+        const response = await fetchProductPerformanceReport(normalizedFilters, {
+          forceRefresh: showRefreshLoader,
+        });
 
         if (requestId !== reportRequestIdRef.current) {
           return;
@@ -426,6 +428,8 @@ const ProductPerformancePage = () => {
           value={normalizedFilters.view}
           summary={report.summary}
           disabled={loading}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
           onChange={handleViewChange}
         />
 

@@ -4,7 +4,6 @@ const Product = require("../../models/Product");
 const Invoice = require("../../models/Invoice");
 const RefundInvoice = require("../../models/RefundInvoice");
 const InventoryTransaction = require("../../models/InventoryTransaction");
-
 const {
   PERFORMANCE_VIEWS,
   PERFORMANCE_DEFAULTS,
@@ -17,6 +16,9 @@ const {
   roundAmount,
   toSafeNumber,
 } = require("../../utils/productPerformanceRules");
+const {
+  executeProductPerformanceCached,
+} = require("./productPerformanceCacheService");
 
 // BASIC HELPERS
 
@@ -1159,115 +1161,131 @@ const buildSummary = (rows = []) => {
 };
 
 // 📊 MAIN REPORT SERVICE
-
-const getProductPerformanceReport = async ({ userId, filters = {} }) => {
+const getProductPerformanceReport = async ({
+  userId,
+  filters = {},
+  forceRefresh = false,
+}) => {
   const userObjectId = toObjectId(userId, "userId");
 
   const {
     view = PERFORMANCE_DEFAULTS.VIEW,
-
     page = PERFORMANCE_DEFAULTS.PAGE,
-
     limit = PERFORMANCE_DEFAULTS.LIMIT,
-
     sortBy = PERFORMANCE_DEFAULTS.SORT_BY,
-
     sortOrder = PERFORMANCE_DEFAULTS.SORT_ORDER,
-
     deadAfterDays = PERFORMANCE_DEFAULTS.DEAD_AFTER_DAYS,
-
     hideZeroStock = PERFORMANCE_DEFAULTS.HIDE_ZERO_STOCK,
-
     inStockOnly = PERFORMANCE_DEFAULTS.IN_STOCK_ONLY,
-
     includeNegativeStock = PERFORMANCE_DEFAULTS.INCLUDE_NEGATIVE_STOCK,
-
     search = "",
-
     categoryId = null,
-
     startDate = null,
-
     endDate = null,
   } = filters;
 
-  const products = await getFilteredProducts({
-    userId: userObjectId,
-    search,
-    categoryId,
-  });
-
-  const allRows = await buildPerformanceRows({
-    userId: userObjectId,
-    products,
-    startDate,
-    endDate,
+  const normalizedFilters = {
+    view,
+    page,
+    limit,
+    sortBy,
+    sortOrder,
     deadAfterDays,
-  });
-
-  const generallyFilteredRows = applyGeneralFilters(allRows, {
     hideZeroStock,
     inStockOnly,
     includeNegativeStock,
+    search,
+    categoryId,
+    startDate,
+    endDate,
+  };
+
+  const cachedResult = await executeProductPerformanceCached({
+    userId: userObjectId,
+    filters: normalizedFilters,
+    forceRefresh,
+
+    executor: async () => {
+      const products = await getFilteredProducts({
+        userId: userObjectId,
+        search,
+        categoryId,
+      });
+
+      const allRows = await buildPerformanceRows({
+        userId: userObjectId,
+        products,
+        startDate,
+        endDate,
+        deadAfterDays,
+      });
+
+      const generallyFilteredRows = applyGeneralFilters(allRows, {
+        hideZeroStock,
+        inStockOnly,
+        includeNegativeStock,
+      });
+
+      const summary = buildSummary(generallyFilteredRows);
+
+      const viewRows = applyViewFilter(generallyFilteredRows, view);
+
+      const sortedRows = sortRows(viewRows, sortBy, sortOrder);
+
+      const safePage = Math.max(Number(page) || 1, 1);
+
+      const safeLimit = Math.min(
+        Math.max(Number(limit) || 25, 1),
+        PERFORMANCE_DEFAULTS.MAX_LIMIT,
+      );
+
+      const totalRows = sortedRows.length;
+
+      const totalPages = Math.max(Math.ceil(totalRows / safeLimit), 1);
+
+      const normalizedPage = Math.min(safePage, totalPages);
+
+      const skip = (normalizedPage - 1) * safeLimit;
+
+      const paginatedRows = sortedRows.slice(skip, skip + safeLimit);
+
+      return {
+        success: true,
+
+        filters: {
+          view,
+          search,
+          categoryId,
+          startDate,
+          endDate,
+          deadAfterDays,
+          hideZeroStock,
+          inStockOnly,
+          includeNegativeStock,
+          sortBy,
+          sortOrder,
+        },
+
+        summary,
+
+        rows: paginatedRows,
+
+        pagination: {
+          page: normalizedPage,
+          limit: safeLimit,
+          totalRows,
+          totalPages,
+          hasPreviousPage: normalizedPage > 1,
+          hasNextPage: normalizedPage < totalPages,
+        },
+
+        generatedAt: new Date(),
+      };
+    },
   });
 
-  const summary = buildSummary(generallyFilteredRows);
-
-  const viewRows = applyViewFilter(generallyFilteredRows, view);
-
-  const sortedRows = sortRows(viewRows, sortBy, sortOrder);
-
-  const safePage = Math.max(Number(page) || 1, 1);
-
-  const safeLimit = Math.min(
-    Math.max(Number(limit) || 25, 1),
-    PERFORMANCE_DEFAULTS.MAX_LIMIT,
-  );
-
-  const totalRows = sortedRows.length;
-
-  const totalPages = Math.max(Math.ceil(totalRows / safeLimit), 1);
-
-  const normalizedPage = Math.min(safePage, totalPages);
-
-  const skip = (normalizedPage - 1) * safeLimit;
-
-  const paginatedRows = sortedRows.slice(skip, skip + safeLimit);
-
-  return {
-    success: true,
-
-    filters: {
-      view,
-      search,
-      categoryId,
-      startDate,
-      endDate,
-      deadAfterDays,
-      hideZeroStock,
-      inStockOnly,
-      includeNegativeStock,
-      sortBy,
-      sortOrder,
-    },
-
-    summary,
-
-    rows: paginatedRows,
-
-    pagination: {
-      page: normalizedPage,
-      limit: safeLimit,
-      totalRows,
-      totalPages,
-      hasPreviousPage: normalizedPage > 1,
-      hasNextPage: normalizedPage < totalPages,
-    },
-
-    generatedAt: new Date(),
-  };
+  return cachedResult.data;
 };
-
 //🔍 SINGLE PRODUCT DETAILS
 
 const getProductPerformanceDetails = async ({ userId, productId }) => {

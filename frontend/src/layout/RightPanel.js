@@ -12,7 +12,7 @@ const Section = ({ title, children }) => {
     <div className="mb-5 border rounded-lg bg-white shadow-sm">
       <div
         className="flex justify-between items-center px-3 py-2 cursor-pointer bg-gray-50"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((prev) => !prev)}
       >
         <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{title}</span>
 
@@ -51,13 +51,14 @@ const StatCard = ({ label, value, color, onClick }) => (
 );
 
 const AlertCard = ({ title, count, color, onClick }) => (
-  <div
+  <button
+    type="button"
     onClick={onClick}
-    className={`p-3 rounded-lg text-sm font-medium border border-gray-200 cursor-pointer hover:shadow transition flex justify-between items-center ${color}`}
+    className={`w-full p-3 rounded-lg text-sm font-medium border border-gray-200 cursor-pointer hover:shadow transition flex justify-between items-center text-left ${color}`}
   >
     <span>{title}</span>
     <span className="font-bold">{count}</span>
-  </div>
+  </button>
 );
 
 const RightPanel = ({
@@ -111,6 +112,14 @@ const RightPanel = ({
     [navigate]
   );
 
+  const handleRefresh = useCallback(async () => {
+    if (!refreshDashboard || dashboardSummaryLoading) {
+      return;
+    }
+
+    await refreshDashboard();
+  }, [refreshDashboard, dashboardSummaryLoading]);
+
   if (!canViewRightPanel) {
     return null;
   }
@@ -120,7 +129,7 @@ const RightPanel = ({
       <div className="flex justify-end mb-3">
         <button
           type="button"
-          onClick={() => refreshDashboard?.()}
+          onClick={handleRefresh}
           disabled={dashboardSummaryLoading}
           className="text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
         >

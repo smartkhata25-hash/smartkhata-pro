@@ -1114,34 +1114,71 @@ const getCustomerDetailedLedger = async (req, res) => {
     const { id: customerId } = req.params;
     const { startDate, endDate } = req.query;
 
-    // 1️⃣ Customer + account
-    const customer = await Customer.findOne({
-      _id: customerId,
-      createdBy: userId,
-    }).populate("account");
-
-    if (!customer || !customer.account) {
-      return res.status(404).json({ message: "Customer not found" });
+    if (
+      !userId ||
+      !mongoose.Types.ObjectId.isValid(userId) ||
+      !mongoose.Types.ObjectId.isValid(customerId)
+    ) {
+      return res.status(400).json({
+        message: "Invalid customer or user",
+      });
     }
 
-    const accountId = customer.account._id.toString();
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+    const customerObjectId = new mongoose.Types.ObjectId(customerId);
+
+    const customer = await Customer.findOne({
+      _id: customerObjectId,
+      createdBy: userObjectId,
+    })
+      .populate("account")
+      .lean();
+
+    if (!customer || !customer.account) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
+    }
+
+    const accountObjectId =
+      customer.account?._id instanceof mongoose.Types.ObjectId
+        ? customer.account._id
+        : new mongoose.Types.ObjectId(customer.account);
+
+    const accountId = accountObjectId.toString();
 
     let openingBalance = 0;
 
     if (startDate) {
+      const start = new Date(startDate);
+
+      if (Number.isNaN(start.getTime())) {
+        return res.status(400).json({
+          message: "Invalid start date",
+        });
+      }
+
+      start.setHours(0, 0, 0, 0);
+
       const result = await JournalEntry.aggregate([
         {
           $match: {
-            createdBy: userId,
+            createdBy: userObjectId,
+            customerId: customerObjectId,
             isDeleted: false,
-            "lines.account": customer.account._id,
-            date: { $lt: new Date(startDate) },
+            sourceType: { $ne: "reversal" },
+            "lines.account": accountObjectId,
+            date: {
+              $lt: start,
+            },
           },
         },
-        { $unwind: "$lines" },
+        {
+          $unwind: "$lines",
+        },
         {
           $match: {
-            "lines.account": customer.account._id,
+            "lines.account": accountObjectId,
           },
         },
         {
@@ -1150,9 +1187,13 @@ const getCustomerDetailedLedger = async (req, res) => {
             balance: {
               $sum: {
                 $cond: [
-                  { $eq: ["$lines.type", "debit"] },
+                  {
+                    $eq: ["$lines.type", "debit"],
+                  },
                   "$lines.amount",
-                  { $multiply: ["$lines.amount", -1] },
+                  {
+                    $multiply: ["$lines.amount", -1],
+                  },
                 ],
               },
             },
@@ -1160,30 +1201,58 @@ const getCustomerDetailedLedger = async (req, res) => {
         },
       ]);
 
-      openingBalance = result[0]?.balance || 0;
+      openingBalance = Number(result[0]?.balance || 0);
     }
 
     const match = {
-      createdBy: userId,
-      customerId: customer._id,
+      createdBy: userObjectId,
+      customerId: customerObjectId,
       isDeleted: false,
+      sourceType: { $ne: "reversal" },
+      "lines.account": accountObjectId,
     };
 
-    if (startDate && endDate) {
-      const s = new Date(startDate);
-      s.setHours(0, 0, 0, 0);
+    if (startDate || endDate) {
+      match.date = {};
 
-      const e = new Date(endDate);
-      e.setHours(23, 59, 59, 999);
+      if (startDate) {
+        const start = new Date(startDate);
 
-      match.date = { $gte: s, $lte: e };
+        if (Number.isNaN(start.getTime())) {
+          return res.status(400).json({
+            message: "Invalid start date",
+          });
+        }
+
+        start.setHours(0, 0, 0, 0);
+
+        match.date.$gte = start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+
+        if (Number.isNaN(end.getTime())) {
+          return res.status(400).json({
+            message: "Invalid end date",
+          });
+        }
+
+        end.setHours(23, 59, 59, 999);
+
+        match.date.$lte = end;
+      }
     }
 
     const journals = await JournalEntry.find(match)
       .select(
         "date time billNo description sourceType lines invoiceId referenceId",
       )
-      .sort({ date: 1, time: 1 })
+      .sort({
+        date: 1,
+        time: 1,
+        _id: 1,
+      })
       .lean();
 
     let balance = openingBalance;
@@ -1192,32 +1261,50 @@ const getCustomerDetailedLedger = async (req, res) => {
 
     const ledger = [];
 
+    const saleInvoiceIds = new Set();
+    const refundInvoiceIds = new Set();
+
     for (const entry of journals) {
+      if (!Array.isArray(entry.lines)) {
+        continue;
+      }
+
       const customerLines = entry.lines.filter(
-        (l) => l.account?.toString() === accountId,
+        (line) => line.account?.toString() === accountId,
       );
 
-      if (customerLines.length === 0) continue;
+      if (customerLines.length === 0) {
+        continue;
+      }
 
       let debit = 0;
       let credit = 0;
 
       for (const line of customerLines) {
-        if (line.type === "debit") debit += line.amount;
-        if (line.type === "credit") credit += line.amount;
+        const amount = Number(line.amount || 0);
+
+        if (line.type === "debit") {
+          debit += amount;
+        }
+
+        if (line.type === "credit") {
+          credit += amount;
+        }
       }
 
       totalDebit += debit;
       totalCredit += credit;
+
       balance += debit - credit;
 
       const row = {
         _id: entry._id,
         referenceId: entry.referenceId || entry._id,
+        invoiceId: entry.invoiceId || null,
         date: entry.date,
         time: entry.time || "",
         billNo: entry.billNo || "",
-        sourceType: entry.sourceType,
+        sourceType: entry.sourceType || "",
         description: entry.description || "",
         debit,
         credit,
@@ -1225,63 +1312,124 @@ const getCustomerDetailedLedger = async (req, res) => {
         items: [],
       };
 
-      // 🟡 SALE INVOICE (RESTORED)
       if (
-        (entry.sourceType === "sale_invoice" ||
-          entry.sourceType === "opening_sale_invoice") &&
+        ["sale_invoice", "opening_sale_invoice"].includes(entry.sourceType) &&
         entry.invoiceId
       ) {
-        const invoice = await Invoice.findById(entry.invoiceId).populate(
-          "items.productId",
-          "name",
-        );
-
-        if (invoice) {
-          row.invoiceTotal = invoice.totalAmount;
-          row.items = invoice.items.map((it) => ({
-            productName: it.productId?.name || "Product",
-            quantity: it.quantity,
-            rate: it.price,
-            total: it.total,
-          }));
-        }
+        saleInvoiceIds.add(entry.invoiceId.toString());
       }
 
-      // 🔴 REFUND INVOICE (RESTORED)
       if (
-        (entry.sourceType === "refund_invoice" ||
-          entry.sourceType === "opening_refund_invoice") &&
+        ["refund_invoice", "opening_refund_invoice"].includes(
+          entry.sourceType,
+        ) &&
         entry.invoiceId
       ) {
-        const refund = await RefundInvoice.findById(entry.invoiceId).populate(
-          "items.productId",
-          "name",
-        );
-
-        if (refund) {
-          row.invoiceTotal = refund.totalAmount;
-          row.items = refund.items.map((it) => ({
-            productName: it.productId?.name || "Product",
-            quantity: it.quantity,
-            rate: it.price,
-            total: it.total,
-          }));
-        }
+        refundInvoiceIds.add(entry.invoiceId.toString());
       }
 
       ledger.push(row);
     }
 
-    res.json({
-      customerName: customer.name,
-      openingBalance,
-      totalDebit,
-      totalCredit,
-      closingBalance: balance,
+    const saleIds = Array.from(saleInvoiceIds);
+    const refundIds = Array.from(refundInvoiceIds);
+
+    const [invoices, refunds] = await Promise.all([
+      saleIds.length
+        ? Invoice.find({
+            _id: {
+              $in: saleIds,
+            },
+            createdBy: userObjectId,
+            isDeleted: { $ne: true },
+          })
+            .select("items totalAmount")
+            .populate("items.productId", "name")
+            .lean()
+        : [],
+
+      refundIds.length
+        ? RefundInvoice.find({
+            _id: {
+              $in: refundIds,
+            },
+            createdBy: userObjectId,
+            isDeleted: { $ne: true },
+          })
+            .select("items totalAmount")
+            .populate("items.productId", "name")
+            .lean()
+        : [],
+    ]);
+
+    const invoiceMap = new Map();
+    const refundMap = new Map();
+
+    for (const invoice of invoices) {
+      invoiceMap.set(invoice._id.toString(), invoice);
+    }
+
+    for (const refund of refunds) {
+      refundMap.set(refund._id.toString(), refund);
+    }
+
+    for (const row of ledger) {
+      if (
+        ["sale_invoice", "opening_sale_invoice"].includes(row.sourceType) &&
+        row.invoiceId
+      ) {
+        const invoice = invoiceMap.get(row.invoiceId.toString());
+
+        if (invoice) {
+          row.invoiceTotal = Number(invoice.totalAmount || 0);
+
+          row.items = Array.isArray(invoice.items)
+            ? invoice.items.map((item) => ({
+                productName: item.productId?.name || "Product",
+                quantity: Number(item.quantity || 0),
+                rate: Number(item.price || 0),
+                total: Number(item.total || 0),
+              }))
+            : [];
+        }
+      }
+
+      if (
+        ["refund_invoice", "opening_refund_invoice"].includes(row.sourceType) &&
+        row.invoiceId
+      ) {
+        const refund = refundMap.get(row.invoiceId.toString());
+
+        if (refund) {
+          row.invoiceTotal = Number(refund.totalAmount || 0);
+
+          row.items = Array.isArray(refund.items)
+            ? refund.items.map((item) => ({
+                productName: item.productId?.name || "Product",
+                quantity: Number(item.quantity || 0),
+                rate: Number(item.price || 0),
+                total: Number(item.total || 0),
+              }))
+            : [];
+        }
+      }
+    }
+
+    return res.json({
+      customerName: customer.name || "-",
+      openingBalance: Number(openingBalance || 0),
+      totalDebit: Number(totalDebit || 0),
+      totalCredit: Number(totalCredit || 0),
+      closingBalance: Number(balance || 0),
       ledger,
     });
   } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    console.error("Customer Detailed Ledger Error:", error);
+
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 

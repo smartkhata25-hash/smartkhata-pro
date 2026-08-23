@@ -5,6 +5,58 @@ import TopHeader from './TopHeader';
 import Sidebar from './Sidebar';
 import RightPanel from './RightPanel';
 
+const EMPTY_DASHBOARD_SUMMARY = {
+  totalSales: 0,
+  totalExpenses: 0,
+  netProfit: 0,
+  grossProfit: 0,
+  cogs: 0,
+  totalCash: 0,
+  totalBank: 0,
+  totalReceivable: 0,
+  totalPayable: 0,
+  receivableDetails: [],
+  payableDetails: [],
+};
+
+const buildSummaryKey = (params = {}) => {
+  return JSON.stringify({
+    filterType: params.filterType || '',
+    startDate: params.startDate || '',
+    endDate: params.endDate || '',
+  });
+};
+
+const getSessionCacheKey = () => {
+  const userId = localStorage.getItem('userId') || 'default';
+
+  return `dashboard_summary_session_cache_${userId}`;
+};
+
+const readSessionCache = () => {
+  try {
+    const raw = sessionStorage.getItem(getSessionCacheKey());
+
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveSessionCache = (cache = {}) => {
+  try {
+    sessionStorage.setItem(getSessionCacheKey(), JSON.stringify(cache));
+  } catch {
+    // Session cache failure should never break dashboard.
+  }
+};
+
 const MainLayout = () => {
   const location = useLocation();
 
@@ -29,75 +81,109 @@ const MainLayout = () => {
     pendingPayments: 0,
   });
 
-  const [dashboardSummary, setDashboardSummary] = useState({
-    totalSales: 0,
-    totalExpenses: 0,
-    netProfit: 0,
-    grossProfit: 0,
-    cogs: 0,
-    totalCash: 0,
-    totalBank: 0,
-    totalReceivable: 0,
-    totalPayable: 0,
-    receivableDetails: [],
-    payableDetails: [],
-  });
+  const [dashboardSummary, setDashboardSummary] = useState(EMPTY_DASHBOARD_SUMMARY);
 
   const [dashboardSummaryLoading, setDashboardSummaryLoading] = useState(false);
 
   const rightPanelRef = useRef(null);
+
+  const summaryCacheRef = useRef(readSessionCache());
+
+  const activeRequestsRef = useRef(new Map());
 
   const isLedgerPage =
     location.pathname.startsWith('/customer-ledger') ||
     location.pathname.startsWith('/supplier-ledger') ||
     location.pathname.startsWith('/party-ledger');
 
-  const isDashboardPage = location.pathname === '/dashboard' || location.pathname === '/';
-
   const fetchDashboardSummary = useCallback(async (options = {}) => {
     const { refresh = false, params = {} } = options;
 
-    try {
-      setDashboardSummaryLoading(true);
+    const requestKey = buildSummaryKey(params);
 
-      const token = localStorage.getItem('token');
-      const baseUrl = process.env.REACT_APP_API_BASE_URL;
+    if (!refresh) {
+      const cachedData = summaryCacheRef.current[requestKey];
 
-      if (!token) {
-        return null;
+      if (cachedData) {
+        setDashboardSummary({
+          ...EMPTY_DASHBOARD_SUMMARY,
+          ...cachedData,
+          receivableDetails: cachedData.receivableDetails || [],
+          payableDetails: cachedData.payableDetails || [],
+        });
+
+        return cachedData;
       }
 
-      const response = await axios.get(`${baseUrl}/api/dashboard-summary`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        params: {
-          ...params,
-          ...(refresh ? { refresh: 'true' } : {}),
-        },
-      });
+      const activeRequest = activeRequestsRef.current.get(requestKey);
 
-      const data = response.data || {};
-
-      setDashboardSummary((previous) => ({
-        ...previous,
-        ...data,
-        receivableDetails: data.receivableDetails || [],
-        payableDetails: data.payableDetails || [],
-      }));
-
-      return data;
-    } catch (error) {
-      console.error('Dashboard summary fetch failed:', error);
-      return null;
-    } finally {
-      setDashboardSummaryLoading(false);
+      if (activeRequest) {
+        return activeRequest;
+      }
     }
+
+    const requestPromise = (async () => {
+      try {
+        setDashboardSummaryLoading(true);
+
+        const token = localStorage.getItem('token');
+
+        const baseUrl = process.env.REACT_APP_API_BASE_URL;
+
+        if (!token) {
+          return null;
+        }
+
+        const response = await axios.get(`${baseUrl}/api/dashboard-summary`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+
+          params: {
+            ...params,
+            ...(refresh ? { refresh: 'true' } : {}),
+          },
+        });
+
+        const data = response.data || {};
+
+        const normalizedData = {
+          ...EMPTY_DASHBOARD_SUMMARY,
+          ...data,
+          receivableDetails: data.receivableDetails || [],
+          payableDetails: data.payableDetails || [],
+        };
+
+        summaryCacheRef.current = {
+          ...summaryCacheRef.current,
+          [requestKey]: normalizedData,
+        };
+
+        saveSessionCache(summaryCacheRef.current);
+
+        setDashboardSummary(normalizedData);
+
+        return normalizedData;
+      } catch (error) {
+        console.error('Dashboard summary fetch failed:', error);
+
+        return null;
+      } finally {
+        setDashboardSummaryLoading(false);
+
+        activeRequestsRef.current.delete(requestKey);
+      }
+    })();
+
+    activeRequestsRef.current.set(requestKey, requestPromise);
+
+    return requestPromise;
   }, []);
 
   const fetchDashboardAlerts = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
+
       const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
       if (!token) {
@@ -114,14 +200,18 @@ const MainLayout = () => {
 
       setDashboardAlerts({
         lowStock: Number(summary.lowStock || 0),
+
         negativeStock: Number(summary.negativeStock || 0),
+
         overdueInvoices: Number(summary.overdueInvoices || 0),
+
         pendingPayments: Number(summary.pendingPayments || 0),
       });
 
       return summary;
     } catch (error) {
       console.error('Dashboard alerts fetch failed:', error);
+
       return null;
     }
   }, []);
@@ -135,6 +225,7 @@ const MainLayout = () => {
           refresh: true,
           params,
         }),
+
         fetchDashboardAlerts(),
       ]);
 
@@ -181,12 +272,6 @@ const MainLayout = () => {
   }, [fetchDashboardAlerts]);
 
   useEffect(() => {
-    if (!isDashboardPage && !isLedgerPage && isRightPanelOpen) {
-      fetchDashboardSummary();
-    }
-  }, [isDashboardPage, isLedgerPage, isRightPanelOpen, fetchDashboardSummary]);
-
-  useEffect(() => {
     const handleClickOutside = (event) => {
       if (event.target.closest('[data-right-panel-toggle="true"]')) {
         return;
@@ -202,10 +287,12 @@ const MainLayout = () => {
     };
 
     document.addEventListener('mousedown', handleClickOutside);
+
     document.addEventListener('touchstart', handleClickOutside);
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+
       document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isRightPanelOpen]);
@@ -272,7 +359,6 @@ const MainLayout = () => {
                   {isRightPanelOpen && (
                     <RightPanel
                       dashboardAlerts={dashboardAlerts}
-                      refreshDashboardAlerts={fetchDashboardAlerts}
                       dashboardSummary={dashboardSummary}
                       dashboardSummaryLoading={dashboardSummaryLoading}
                       refreshDashboard={refreshDashboard}
@@ -292,7 +378,6 @@ const MainLayout = () => {
                 {isRightPanelOpen && (
                   <RightPanel
                     dashboardAlerts={dashboardAlerts}
-                    refreshDashboardAlerts={fetchDashboardAlerts}
                     dashboardSummary={dashboardSummary}
                     dashboardSummaryLoading={dashboardSummaryLoading}
                     refreshDashboard={refreshDashboard}

@@ -89,13 +89,17 @@ const normalizeApiError = (error, fallbackMessage) => {
   });
 };
 
-export const fetchProductPerformanceReport = async (filters = {}) => {
+export const fetchProductPerformanceReport = async (filters = {}, options = {}) => {
   try {
     validateApiConfiguration();
 
     const response = await axios.get(PRODUCT_PERFORMANCE_API, {
       headers: getAuthorizationHeaders(),
-      params: buildQueryParams(filters),
+
+      params: {
+        ...buildQueryParams(filters),
+        ...(options.forceRefresh ? { refresh: 'true' } : {}),
+      },
     });
 
     if (!response?.data) {

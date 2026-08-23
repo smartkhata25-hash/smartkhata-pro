@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCustomerDetailedLedger } from '../services/customerDetailLedgerService';
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+
 import { t } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
@@ -107,57 +107,22 @@ export default function CustomerDetailLedgerPage() {
         return;
       }
 
-      const accountId =
-        typeof customer.account === 'object' ? customer.account?._id : customer.account;
-
-      if (!accountId) {
-        return;
-      }
-
       setLoading(true);
 
       try {
-        const [master, detail] = await Promise.all([
-          getLedgerByCustomerAccount(accountId, s || '', e || ''),
-
-          getCustomerDetailedLedger(cid, s || '', e || ''),
-        ]);
-
-        const opening = Number(master?.openingBalance || 0);
-
-        const rows = Array.isArray(master?.ledger) ? master.ledger : [];
-
-        const closing = rows.length > 0 ? Number(rows[rows.length - 1].balance || 0) : opening;
+        const detail = await getCustomerDetailedLedger(cid, s || '', e || '');
 
         const detailRows = Array.isArray(detail?.ledger) ? detail.ledger : [];
-
-        const customerOpening = detailRows
-          .filter((row) =>
-            ['opening_sale_invoice', 'opening_refund_invoice'].includes(row.sourceType)
-          )
-          .reduce((sum, row) => sum + Number(row.debit || 0) - Number(row.credit || 0), 0);
-
-        const businessDebit = rows
-          .filter(
-            (row) => !['opening_sale_invoice', 'opening_refund_invoice'].includes(row.sourceType)
-          )
-          .reduce((sum, row) => sum + Number(row.debit || 0), 0);
-
-        const businessCredit = rows
-          .filter(
-            (row) => !['opening_sale_invoice', 'opening_refund_invoice'].includes(row.sourceType)
-          )
-          .reduce((sum, row) => sum + Number(row.credit || 0), 0);
 
         setSelectedCustomerId(cid);
 
         setCustomerName(detail?.customerName || customer.name || '');
 
         setSummary({
-          opening: customerOpening || opening,
-          debit: businessDebit,
-          credit: businessCredit,
-          closing,
+          opening: Number(detail?.openingBalance || 0),
+          debit: Number(detail?.totalDebit || 0),
+          credit: Number(detail?.totalCredit || 0),
+          closing: Number(detail?.closingBalance || 0),
         });
 
         setBlocks(buildBlocks(detailRows));

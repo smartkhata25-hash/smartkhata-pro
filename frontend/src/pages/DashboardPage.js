@@ -6,6 +6,12 @@ import { t } from '../i18n/i18n';
 import PermissionGuard from '../components/PermissionGuard';
 import { hasPermission } from '../utils/permissionHelper';
 
+const getCardsSessionKey = () => {
+  const userId = localStorage.getItem('userId') || 'default';
+
+  return `showDashboardCards_session_${userId}`;
+};
+
 const DashboardPage = () => {
   const navigate = useNavigate();
 
@@ -14,18 +20,11 @@ const DashboardPage = () => {
 
   const canViewSummaryCards = hasPermission('dashboard.summary_cards');
 
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-
   const [showCards, setShowCards] = useState(() => {
-    const key =
-      window.innerWidth <= 768 ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
-
-    const saved = localStorage.getItem(key);
-
     try {
-      return saved !== null ? JSON.parse(saved) : true;
+      return sessionStorage.getItem(getCardsSessionKey()) === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -49,22 +48,12 @@ const DashboardPage = () => {
   const summaryLoading = Boolean(dashboardSummaryLoading);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  useEffect(() => {
-    const key = isMobile ? 'showDashboardCards_mobile' : 'showDashboardCards_desktop';
-
-    localStorage.setItem(key, JSON.stringify(showCards));
-  }, [showCards, isMobile]);
+    try {
+      sessionStorage.setItem(getCardsSessionKey(), String(showCards));
+    } catch {
+      // Session storage failure should not break dashboard.
+    }
+  }, [showCards]);
 
   const buildSummaryParams = useCallback(() => {
     let startDate = '';
@@ -117,7 +106,7 @@ const DashboardPage = () => {
 
   const loadSummary = useCallback(
     async ({ forceRefresh = false } = {}) => {
-      if (!canViewSummaryCards) {
+      if (!canViewSummaryCards || !showCards) {
         return null;
       }
 
@@ -133,16 +122,20 @@ const DashboardPage = () => {
         params,
       });
     },
-    [canViewSummaryCards, buildSummaryParams, fetchDashboardSummary, refreshDashboard]
+    [canViewSummaryCards, showCards, buildSummaryParams, fetchDashboardSummary, refreshDashboard]
   );
 
   useEffect(() => {
-    if (!canViewSummaryCards) {
+    if (!canViewSummaryCards || !showCards) {
       return;
     }
 
     loadSummary();
-  }, [canViewSummaryCards, loadSummary]);
+  }, [canViewSummaryCards, showCards, loadSummary]);
+
+  const handleToggleCards = () => {
+    setShowCards((previous) => !previous);
+  };
 
   return (
     <div className="space-y-10">
@@ -153,26 +146,28 @@ const DashboardPage = () => {
 
         {canViewSummaryCards && (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                loadSummary({
-                  forceRefresh: true,
-                })
-              }
-              disabled={summaryLoading}
-              className="text-xs md:text-sm px-3 rounded-full
+            {showCards && (
+              <button
+                type="button"
+                onClick={() =>
+                  loadSummary({
+                    forceRefresh: true,
+                  })
+                }
+                disabled={summaryLoading}
+                className="text-xs md:text-sm px-3 rounded-full
 bg-white/80 backdrop-blur-md border border-gray-300
 shadow-sm hover:shadow-md hover:bg-gray-100
 transition-all duration-200
 font-medium h-[36px] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {summaryLoading ? 'Refreshing...' : '🔄 Refresh'}
-            </button>
+              >
+                {summaryLoading ? 'Refreshing...' : '🔄 Refresh'}
+              </button>
+            )}
 
             <button
               type="button"
-              onClick={() => setShowCards((prev) => !prev)}
+              onClick={handleToggleCards}
               className="text-xs md:text-sm px-3 rounded-full
 bg-white/80 backdrop-blur-md border border-gray-300
 shadow-sm hover:shadow-md hover:bg-gray-100
@@ -182,59 +177,63 @@ font-medium h-[36px]"
               {showCards ? 'Hide' : 'Show'}
             </button>
 
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
-            >
-              <option value="today">Today</option>
+            {showCards && (
+              <>
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                  className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
+                >
+                  <option value="today">Today</option>
 
-              <option value="month">Month</option>
+                  <option value="month">Month</option>
 
-              <option value="year">Year</option>
+                  <option value="year">Year</option>
 
-              <option value="all">Total</option>
-            </select>
+                  <option value="all">Total</option>
+                </select>
 
-            {filterType === 'month' && (
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
-              >
-                {[
-                  'Jan',
-                  'Feb',
-                  'Mar',
-                  'Apr',
-                  'May',
-                  'Jun',
-                  'Jul',
-                  'Aug',
-                  'Sep',
-                  'Oct',
-                  'Nov',
-                  'Dec',
-                ].map((month, index) => (
-                  <option key={index} value={index}>
-                    {month}
-                  </option>
-                ))}
-              </select>
-            )}
+                {filterType === 'month' && (
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                    className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
+                  >
+                    {[
+                      'Jan',
+                      'Feb',
+                      'Mar',
+                      'Apr',
+                      'May',
+                      'Jun',
+                      'Jul',
+                      'Aug',
+                      'Sep',
+                      'Oct',
+                      'Nov',
+                      'Dec',
+                    ].map((month, index) => (
+                      <option key={index} value={index}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                )}
 
-            {filterType === 'year' && (
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
-              >
-                {[2023, 2024, 2025, 2026].map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
+                {filterType === 'year' && (
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    className="text-xs md:text-sm px-3 rounded-full border border-gray-300 bg-white h-[36px]"
+                  >
+                    {[2023, 2024, 2025, 2026].map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
             )}
           </div>
         )}

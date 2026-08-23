@@ -16,9 +16,15 @@ exports.getProductPerformanceReport = async (req, res) => {
 
     const filters = req.productPerformanceFilters || {};
 
+    const forceRefresh =
+      String(req.query.refresh || "")
+        .trim()
+        .toLowerCase() === "true";
+
     const result = await getProductPerformanceReport({
       userId,
       filters,
+      forceRefresh,
     });
 
     return res.status(200).json(result);

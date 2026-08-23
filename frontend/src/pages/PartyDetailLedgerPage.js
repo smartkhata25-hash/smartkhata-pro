@@ -206,7 +206,10 @@ const PartyDetailLedgerPage = () => {
     [startDate, endDate, buildBlocks, setSelectedPartyId, setPartyName]
   );
   useEffect(() => {
-    fetchParties()
+    fetchParties({
+      status: 'active',
+      includeBalance: 'false',
+    })
       .then((data) => {
         setParties(Array.isArray(data) ? data : []);
       })

@@ -179,8 +179,11 @@ const MetricCard = ({ label, value, currency = 'PKR', isCount = false, tone = 'c
   };
 
   return (
-    <div className={`rounded-xl border px-3 py-3 shadow-sm ${toneClasses[tone] || toneClasses.cyan}`}>
+    <div
+      className={`rounded-xl border px-3 py-3 shadow-sm ${toneClasses[tone] || toneClasses.cyan}`}
+    >
       <p className="text-[11px] font-extrabold uppercase text-slate-500">{label}</p>
+
       <p className="mt-1 truncate text-lg font-black">
         {isCount ? Number(value || 0).toLocaleString('en-GB') : formatTravelMoney(value, currency)}
       </p>
@@ -204,17 +207,29 @@ const ReportTable = ({ columns, rows, emptyMessage }) => (
           <thead className="bg-slate-100 text-xs font-extrabold uppercase text-slate-600">
             <tr>
               {columns.map((column) => (
-                <th key={column.key} className={`border border-slate-300 px-3 py-3 ${column.className || ''}`}>
+                <th
+                  key={column.key}
+                  className={`border border-slate-300 px-3 py-3 ${column.className || ''}`}
+                >
                   {column.label}
                 </th>
               ))}
             </tr>
           </thead>
+
           <tbody>
             {rows.map((row, index) => (
-              <tr key={row._id || row.customerId || row.vendorId || index} className="odd:bg-white even:bg-slate-50/50">
+              <tr
+                key={row._id || row.customerId || row.vendorId || index}
+                className="odd:bg-white even:bg-slate-50/50"
+              >
                 {columns.map((column) => (
-                  <td key={column.key} className={`border border-slate-200 px-3 py-2.5 align-top ${column.cellClassName || ''}`}>
+                  <td
+                    key={column.key}
+                    className={`border border-slate-200 px-3 py-2.5 align-top ${
+                      column.cellClassName || ''
+                    }`}
+                  >
                     {column.render ? column.render(row) : row[column.key] || '-'}
                   </td>
                 ))}
@@ -235,11 +250,8 @@ const TravelReportsPage = () => {
   const activeReportView = useMemo(() => getReportViewFromParams(searchParams), [searchParams]);
 
   const [report, setReport] = useState(EMPTY_REPORT);
-
   const [loading, setLoading] = useState(false);
-
   const [pageError, setPageError] = useState('');
-
   const [profitModalOpen, setProfitModalOpen] = useState(false);
 
   const currency = report.currency || 'PKR';
@@ -302,7 +314,6 @@ const TravelReportsPage = () => {
             ...(filters.preset === 'custom'
               ? {
                   startDate: filters.startDate,
-
                   endDate: filters.endDate,
                 }
               : {}),
@@ -333,7 +344,6 @@ const TravelReportsPage = () => {
         });
       } catch (error) {
         console.error('Travel report load failed:', error);
-
         setPageError(t('travel.reports.loadFailed'));
       } finally {
         setLoading(false);
@@ -355,6 +365,7 @@ const TravelReportsPage = () => {
   const serviceSales = Array.isArray(charts.serviceSales) ? charts.serviceSales : [];
 
   const cashMovement = Array.isArray(charts.cashMovement) ? charts.cashMovement : [];
+
   const businessValue = report.businessValue || {};
   const totals = report.totals || {};
   const revenueBreakdown = report.revenueBreakdown || {};
@@ -363,20 +374,24 @@ const TravelReportsPage = () => {
   const payments = report.payments || {};
   const receivables = report.receivables || {};
   const payables = report.payables || {};
+
   const refundTrend = Array.isArray(charts.refundTrend) ? charts.refundTrend : [];
-  const receivablePayable = Array.isArray(charts.receivablePayable)
-    ? charts.receivablePayable
-    : [];
+
+  const receivablePayable = Array.isArray(charts.receivablePayable) ? charts.receivablePayable : [];
+
   const receivableRows = Array.isArray(receivables.customers) ? receivables.customers : [];
+
   const payableRows = Array.isArray(payables.vendors) ? payables.vendors : [];
+
   const refundRows = Array.isArray(refunds.recent) ? refunds.recent : [];
 
   const hasRevenueTrend = revenueProfitTrend.length > 0;
-
   const hasServiceSales = serviceSales.length > 0;
 
   const hasCashMovement = cashMovement.some((row) => Number(row.amount || 0) !== 0);
+
   const hasReceivablePayable = receivablePayable.some((row) => Number(row.amount || 0) !== 0);
+
   const hasRefundTrend = refundTrend.some((row) => Number(row.refunds || 0) !== 0);
 
   const periodText = report.filters?.hasDateRange
@@ -446,10 +461,26 @@ const TravelReportsPage = () => {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={revenueProfitTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-              <YAxis tickFormatter={compactMoney} width={65} tick={{ fontSize: 11 }} />
+
+              <XAxis
+                dataKey="period"
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
+              <YAxis
+                tickFormatter={compactMoney}
+                width={65}
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
               <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
+
               <Legend />
+
               <Line
                 type="monotone"
                 dataKey="netRevenue"
@@ -458,6 +489,7 @@ const TravelReportsPage = () => {
                 strokeWidth={3}
                 dot={false}
               />
+
               <Line
                 type="monotone"
                 dataKey="grossProfit"
@@ -486,10 +518,27 @@ const TravelReportsPage = () => {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={serviceSales}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} />
-              <YAxis tickFormatter={compactMoney} width={65} tick={{ fontSize: 11 }} />
+
+              <XAxis
+                dataKey="label"
+                tick={{
+                  fontSize: 10,
+                }}
+                interval={0}
+              />
+
+              <YAxis
+                tickFormatter={compactMoney}
+                width={65}
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
               <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
+
               <Legend />
+
               <Bar
                 dataKey="netSales"
                 name={t('travel.reports.metrics.netSales')}
@@ -516,10 +565,26 @@ const TravelReportsPage = () => {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={cashMovement}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tickFormatter={compactMoney} width={65} tick={{ fontSize: 11 }} />
+
+              <XAxis
+                dataKey="label"
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
+              <YAxis
+                tickFormatter={compactMoney}
+                width={65}
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
               <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
+
               <Legend />
+
               <Bar
                 dataKey="amount"
                 name={t('travel.reports.metrics.amount')}
@@ -546,9 +611,24 @@ const TravelReportsPage = () => {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={receivablePayable}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tickFormatter={compactMoney} width={65} tick={{ fontSize: 11 }} />
+
+              <XAxis
+                dataKey="label"
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
+              <YAxis
+                tickFormatter={compactMoney}
+                width={65}
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
               <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
+
               <Bar
                 dataKey="amount"
                 name={t('travel.reports.metrics.amount')}
@@ -575,16 +655,33 @@ const TravelReportsPage = () => {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={refundTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-              <YAxis tickFormatter={compactMoney} width={65} tick={{ fontSize: 11 }} />
+
+              <XAxis
+                dataKey="period"
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
+              <YAxis
+                tickFormatter={compactMoney}
+                width={65}
+                tick={{
+                  fontSize: 11,
+                }}
+              />
+
               <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
+
               <Legend />
+
               <Bar
                 dataKey="refunds"
                 name={t('travel.reports.metrics.grossRefunds')}
                 fill="#e11d48"
                 radius={[5, 5, 0, 0]}
               />
+
               <Bar
                 dataKey="penalties"
                 name={t('travel.reports.metrics.customerPenalties')}
@@ -603,14 +700,51 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           {profitSummaryAction}
+
           <MetricGrid>
-            <MetricCard label={t('travel.reports.cards.netRevenue')} value={totals.netRevenue} currency={currency} tone="cyan" />
-            <MetricCard label={t('travel.reports.cards.travelCost')} value={totals.netTravelCost} currency={currency} tone="amber" />
-            <MetricCard label={t('travel.reports.cards.grossProfit')} value={totals.grossProfit} currency={currency} tone="emerald" />
-            <MetricCard label={t('travel.reports.cards.expenses')} value={totals.travelExpenses} currency={currency} tone="rose" />
-            <MetricCard label={t('travel.reports.cards.netProfit')} value={totals.netProfit} currency={currency} tone="violet" />
-            <MetricCard label={t('travel.reports.table.invoices')} value={totals.invoiceCount} isCount tone="slate" />
+            <MetricCard
+              label={t('travel.reports.cards.netRevenue')}
+              value={totals.netRevenue}
+              currency={currency}
+              tone="cyan"
+            />
+
+            <MetricCard
+              label={t('travel.reports.cards.travelCost')}
+              value={totals.netTravelCost}
+              currency={currency}
+              tone="amber"
+            />
+
+            <MetricCard
+              label={t('travel.reports.cards.grossProfit')}
+              value={totals.grossProfit}
+              currency={currency}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={t('travel.reports.cards.expenses')}
+              value={totals.travelExpenses}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
+              label={t('travel.reports.cards.netProfit')}
+              value={totals.netProfit}
+              currency={currency}
+              tone="violet"
+            />
+
+            <MetricCard
+              label={t('travel.reports.table.invoices')}
+              value={totals.invoiceCount}
+              isCount
+              tone="slate"
+            />
           </MetricGrid>
+
           {revenueProfitChart}
           {serviceSalesChart}
         </div>
@@ -621,13 +755,49 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           <MetricGrid>
-            <MetricCard label={t('travel.reports.metrics.grossSales')} value={revenueBreakdown.grossSales} currency={currency} tone="cyan" />
-            <MetricCard label={t('travel.reports.metrics.discounts')} value={revenueBreakdown.discounts} currency={currency} tone="amber" />
-            <MetricCard label={t('travel.reports.metrics.grossRefunds')} value={revenueBreakdown.grossRefunds} currency={currency} tone="rose" />
-            <MetricCard label={t('travel.reports.metrics.customerPenalties')} value={revenueBreakdown.customerPenalties} currency={currency} tone="violet" />
-            <MetricCard label={t('travel.reports.metrics.netRevenue')} value={revenueBreakdown.netRevenue} currency={currency} tone="emerald" />
-            <MetricCard label={t('travel.reports.table.invoices')} value={totals.invoiceCount} isCount tone="slate" />
+            <MetricCard
+              label={t('travel.reports.metrics.grossSales')}
+              value={revenueBreakdown.grossSales}
+              currency={currency}
+              tone="cyan"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.discounts')}
+              value={revenueBreakdown.discounts}
+              currency={currency}
+              tone="amber"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.grossRefunds')}
+              value={revenueBreakdown.grossRefunds}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.customerPenalties')}
+              value={revenueBreakdown.customerPenalties}
+              currency={currency}
+              tone="violet"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.netRevenue')}
+              value={revenueBreakdown.netRevenue}
+              currency={currency}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={t('travel.reports.table.invoices')}
+              value={totals.invoiceCount}
+              isCount
+              tone="slate"
+            />
           </MetricGrid>
+
           {revenueProfitChart}
           {serviceSalesChart}
         </div>
@@ -638,20 +808,62 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           <MetricGrid>
-            <MetricCard label={t('travel.reports.cards.customerReceivables')} value={receivables.totalReceivable} currency={currency} tone="amber" />
-            <MetricCard label="Customer Credit" value={receivables.totalCredit} currency={currency} tone="cyan" />
+            <MetricCard
+              label={t('travel.reports.cards.customerReceivables')}
+              value={receivables.totalReceivable}
+              currency={currency}
+              tone="amber"
+            />
+
+            <MetricCard
+              label="Customer Credit"
+              value={receivables.totalCredit}
+              currency={currency}
+              tone="cyan"
+            />
           </MetricGrid>
+
           {receivablePayableChart}
+
           <ReportTable
             rows={receivableRows}
             emptyMessage="No customer receivable rows found"
             columns={[
-              { key: 'customer', label: 'Customer', className: 'w-[24%]', render: (row) => row.customer?.name || '-' },
-              { key: 'invoiceCount', label: t('travel.reports.table.invoices'), className: 'w-[12%]' },
-              { key: 'invoiceAmount', label: t('travel.reports.metrics.netSales'), className: 'w-[16%]', render: (row) => renderMoney(row.invoiceAmount, 'text-cyan-700') },
-              { key: 'payments', label: t('travel.reports.metrics.received'), className: 'w-[16%]', render: (row) => renderMoney(row.payments, 'text-emerald-700') },
-              { key: 'refundCredit', label: t('travel.reports.metrics.refundCredit'), className: 'w-[16%]', render: (row) => renderMoney(row.refundCredit, 'text-rose-700') },
-              { key: 'currentDue', label: t('travel.reports.cards.customerReceivables'), className: 'w-[16%]', render: (row) => renderMoney(row.currentDue, 'text-amber-700') },
+              {
+                key: 'customer',
+                label: 'Customer',
+                className: 'w-[24%]',
+                render: (row) => row.customer?.name || '-',
+              },
+              {
+                key: 'invoiceCount',
+                label: t('travel.reports.table.invoices'),
+                className: 'w-[12%]',
+              },
+              {
+                key: 'invoiceAmount',
+                label: t('travel.reports.metrics.netSales'),
+                className: 'w-[16%]',
+                render: (row) => renderMoney(row.invoiceAmount, 'text-cyan-700'),
+              },
+              {
+                key: 'payments',
+                label: t('travel.reports.metrics.received'),
+                className: 'w-[16%]',
+                render: (row) => renderMoney(row.payments, 'text-emerald-700'),
+              },
+              {
+                key: 'refundCredit',
+                label: t('travel.reports.metrics.refundCredit'),
+                className: 'w-[16%]',
+                render: (row) => renderMoney(row.refundCredit, 'text-rose-700'),
+              },
+              {
+                key: 'currentDue',
+                label: t('travel.reports.cards.customerReceivables'),
+                className: 'w-[16%]',
+                render: (row) => renderMoney(row.currentDue, 'text-amber-700'),
+              },
             ]}
           />
         </div>
@@ -662,20 +874,64 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           <MetricGrid>
-            <MetricCard label={t('travel.reports.cards.vendorPayables')} value={payables.totalPayable} currency={currency} tone="rose" />
-            <MetricCard label="Vendor Credit" value={payables.totalCredit} currency={currency} tone="cyan" />
-            <MetricCard label={t('travel.reports.metrics.travelCost')} value={costBreakdown.netTravelCost} currency={currency} tone="amber" />
+            <MetricCard
+              label={t('travel.reports.cards.vendorPayables')}
+              value={payables.totalPayable}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
+              label="Vendor Credit"
+              value={payables.totalCredit}
+              currency={currency}
+              tone="cyan"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.travelCost')}
+              value={costBreakdown.netTravelCost}
+              currency={currency}
+              tone="amber"
+            />
           </MetricGrid>
+
           {receivablePayableChart}
+
           <ReportTable
             rows={payableRows}
             emptyMessage="No vendor payable rows found"
             columns={[
-              { key: 'vendor', label: 'Vendor', className: 'w-[24%]', render: (row) => row.vendor?.name || '-' },
-              { key: 'costs', label: t('travel.reports.metrics.costs'), className: 'w-[19%]', render: (row) => renderMoney(row.costs, 'text-amber-700') },
-              { key: 'payments', label: t('travel.reports.metrics.vendorPayments'), className: 'w-[19%]', render: (row) => renderMoney(row.payments, 'text-emerald-700') },
-              { key: 'recoveriesReturns', label: t('travel.reports.metrics.recoveriesReturns'), className: 'w-[19%]', render: (row) => renderMoney(row.recoveriesReturns, 'text-cyan-700') },
-              { key: 'currentPayable', label: t('travel.reports.cards.vendorPayables'), className: 'w-[19%]', render: (row) => renderMoney(row.currentPayable, 'text-rose-700') },
+              {
+                key: 'vendor',
+                label: 'Vendor',
+                className: 'w-[24%]',
+                render: (row) => row.vendor?.name || '-',
+              },
+              {
+                key: 'costs',
+                label: t('travel.reports.metrics.costs'),
+                className: 'w-[19%]',
+                render: (row) => renderMoney(row.costs, 'text-amber-700'),
+              },
+              {
+                key: 'payments',
+                label: t('travel.reports.metrics.vendorPayments'),
+                className: 'w-[19%]',
+                render: (row) => renderMoney(row.payments, 'text-emerald-700'),
+              },
+              {
+                key: 'recoveriesReturns',
+                label: t('travel.reports.metrics.recoveriesReturns'),
+                className: 'w-[19%]',
+                render: (row) => renderMoney(row.recoveriesReturns, 'text-cyan-700'),
+              },
+              {
+                key: 'currentPayable',
+                label: t('travel.reports.cards.vendorPayables'),
+                className: 'w-[19%]',
+                render: (row) => renderMoney(row.currentPayable, 'text-rose-700'),
+              },
             ]}
           />
         </div>
@@ -686,24 +942,89 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           <MetricGrid>
-            <MetricCard label={t('travel.reports.tabs.refunds')} value={refunds.totals?.count} isCount tone="slate" />
-            <MetricCard label={t('travel.reports.metrics.grossRefunds')} value={refunds.totals?.grossRefund} currency={currency} tone="rose" />
-            <MetricCard label={t('travel.reports.metrics.customerPenalties')} value={refunds.totals?.customerPenalties} currency={currency} tone="amber" />
-            <MetricCard label={t('travel.reports.metrics.customerRefund')} value={refunds.totals?.customerRefund} currency={currency} tone="cyan" />
-            <MetricCard label={t('travel.reports.metrics.paidBack')} value={refunds.totals?.paidBack} currency={currency} tone="emerald" />
-            <MetricCard label={t('travel.reports.metrics.vendorRecoveries')} value={refunds.totals?.vendorRecovery} currency={currency} tone="violet" />
+            <MetricCard
+              label={t('travel.reports.tabs.refunds')}
+              value={refunds.totals?.count}
+              isCount
+              tone="slate"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.grossRefunds')}
+              value={refunds.totals?.grossRefund}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.customerPenalties')}
+              value={refunds.totals?.customerPenalties}
+              currency={currency}
+              tone="amber"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.customerRefund')}
+              value={refunds.totals?.customerRefund}
+              currency={currency}
+              tone="cyan"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.paidBack')}
+              value={refunds.totals?.paidBack}
+              currency={currency}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.vendorRecoveries')}
+              value={refunds.totals?.vendorRecovery}
+              currency={currency}
+              tone="violet"
+            />
           </MetricGrid>
+
           {refundTrendChart}
+
           <ReportTable
             rows={refundRows}
             emptyMessage="No recent refunds found"
             columns={[
-              { key: 'refundNumber', label: 'Refund No', className: 'w-[16%]' },
-              { key: 'originalInvoiceNumber', label: 'Invoice', className: 'w-[16%]' },
-              { key: 'customer', label: 'Customer', className: 'w-[22%]', render: (row) => row.customer?.name || '-' },
-              { key: 'grossRefund', label: t('travel.reports.metrics.grossRefunds'), className: 'w-[16%]', render: (row) => renderMoney(row.grossRefund, 'text-rose-700') },
-              { key: 'paidBack', label: t('travel.reports.metrics.paidBack'), className: 'w-[15%]', render: (row) => renderMoney(row.paidBack, 'text-emerald-700') },
-              { key: 'outstandingCustomerCredit', label: t('travel.reports.metrics.outstandingCredit'), className: 'w-[15%]', render: (row) => renderMoney(row.outstandingCustomerCredit, 'text-amber-700') },
+              {
+                key: 'refundNumber',
+                label: 'Refund No',
+                className: 'w-[16%]',
+              },
+              {
+                key: 'originalInvoiceNumber',
+                label: 'Invoice',
+                className: 'w-[16%]',
+              },
+              {
+                key: 'customer',
+                label: 'Customer',
+                className: 'w-[22%]',
+                render: (row) => row.customer?.name || '-',
+              },
+              {
+                key: 'grossRefund',
+                label: t('travel.reports.metrics.grossRefunds'),
+                className: 'w-[16%]',
+                render: (row) => renderMoney(row.grossRefund, 'text-rose-700'),
+              },
+              {
+                key: 'paidBack',
+                label: t('travel.reports.metrics.paidBack'),
+                className: 'w-[15%]',
+                render: (row) => renderMoney(row.paidBack, 'text-emerald-700'),
+              },
+              {
+                key: 'outstandingCustomerCredit',
+                label: t('travel.reports.metrics.outstandingCredit'),
+                className: 'w-[15%]',
+                render: (row) => renderMoney(row.outstandingCustomerCredit, 'text-amber-700'),
+              },
             ]}
           />
         </div>
@@ -714,13 +1035,49 @@ const TravelReportsPage = () => {
       return (
         <div className="space-y-4">
           <MetricGrid>
-            <MetricCard label={t('travel.reports.cards.received')} value={payments.receivedTotal} currency={currency} tone="emerald" />
-            <MetricCard label={t('travel.reports.cards.vendorPayments')} value={payments.vendorPaymentTotal} currency={currency} tone="rose" />
-            <MetricCard label={t('travel.reports.metrics.refundPaid')} value={payments.refundPaidTotal} currency={currency} tone="amber" />
-            <MetricCard label={t('travel.reports.metrics.vendorReturnCashReceived')} value={payments.vendorReturnReceiptTotal} currency={currency} tone="cyan" />
-            <MetricCard label={t('travel.reports.metrics.travelExpensePaid')} value={payments.travelExpensePaidTotal} currency={currency} tone="violet" />
-            <MetricCard label={t('travel.reports.metrics.netCashMovement')} value={payments.netCashMovement} currency={currency} tone="slate" />
+            <MetricCard
+              label={t('travel.reports.cards.received')}
+              value={payments.receivedTotal}
+              currency={currency}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={t('travel.reports.cards.vendorPayments')}
+              value={payments.vendorPaymentTotal}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.refundPaid')}
+              value={payments.refundPaidTotal}
+              currency={currency}
+              tone="amber"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.vendorReturnCashReceived')}
+              value={payments.vendorReturnReceiptTotal}
+              currency={currency}
+              tone="cyan"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.travelExpensePaid')}
+              value={payments.travelExpensePaidTotal}
+              currency={currency}
+              tone="violet"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.netCashMovement')}
+              value={payments.netCashMovement}
+              currency={currency}
+              tone="slate"
+            />
           </MetricGrid>
+
           {cashMovementChart}
         </div>
       );
@@ -731,6 +1088,7 @@ const TravelReportsPage = () => {
         {profitSummaryAction}
         {businessValueLink}
         {revenueProfitChart}
+
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {serviceSalesChart}
           {cashMovementChart}
@@ -837,174 +1195,7 @@ const TravelReportsPage = () => {
         </div>
       )}
 
-      <Link
-        to="/travel/business-value"
-        className="mb-4 flex flex-col gap-3 rounded-xl border border-cyan-200 bg-white px-4 py-3 shadow-sm transition hover:border-cyan-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between"
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700">
-            <FaChartBar aria-hidden="true" />
-          </span>
-
-          <span className="min-w-0">
-            <span className="block text-sm font-extrabold text-slate-900">
-              {t('travel.reports.businessValue.title')}
-            </span>
-
-            <span className="block truncate text-xs font-semibold text-slate-500">
-              {t('travel.reports.businessValue.subtitle')}
-            </span>
-          </span>
-        </span>
-
-        <span className="text-left sm:text-right">
-          <span className="block text-lg font-black text-cyan-800">
-            {formatTravelMoney(businessValue.netBusinessValue || 0, currency)}
-          </span>
-
-          <span className="text-xs font-bold text-cyan-600">
-            {t('travel.reports.businessValue.open')}
-          </span>
-        </span>
-      </Link>
-
-      <div className="space-y-4">
-        <ChartCard
-          title="Sales & Profit Trend"
-          subtitle="See how travel sales and gross profit are moving"
-          icon={FaChartLine}
-        >
-          {!hasRevenueTrend ? (
-            <EmptyChart message="No sales or profit data found for this period" />
-          ) : (
-            <div className="h-72 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={revenueProfitTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-
-                  <XAxis
-                    dataKey="period"
-                    tick={{
-                      fontSize: 11,
-                    }}
-                  />
-
-                  <YAxis
-                    tickFormatter={compactMoney}
-                    width={65}
-                    tick={{
-                      fontSize: 11,
-                    }}
-                  />
-
-                  <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
-
-                  <Legend />
-
-                  <Line
-                    type="monotone"
-                    dataKey="netRevenue"
-                    name="Total Sales"
-                    stroke="#2563eb"
-                    strokeWidth={3}
-                    dot={false}
-                  />
-
-                  <Line
-                    type="monotone"
-                    dataKey="grossProfit"
-                    name="Gross Profit"
-                    stroke="#059669"
-                    strokeWidth={3}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </ChartCard>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartCard
-            title="Service Performance"
-            subtitle="Which travel services are generating more sales"
-            icon={FaPlaneDeparture}
-          >
-            {!hasServiceSales ? (
-              <EmptyChart message="No service sales data found" />
-            ) : (
-              <div className="h-72 min-w-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={serviceSales}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-
-                    <XAxis
-                      dataKey="label"
-                      tick={{
-                        fontSize: 10,
-                      }}
-                      interval={0}
-                    />
-
-                    <YAxis
-                      tickFormatter={compactMoney}
-                      width={65}
-                      tick={{
-                        fontSize: 11,
-                      }}
-                    />
-
-                    <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
-
-                    <Legend />
-
-                    <Bar dataKey="netSales" name="Net Sales" fill="#0891b2" radius={[5, 5, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </ChartCard>
-
-          <ChartCard
-            title="Cash Movement"
-            subtitle="Travel cash received versus cash paid"
-            icon={FaMoneyBillWave}
-          >
-            {!hasCashMovement ? (
-              <EmptyChart message="No cash movement found for this period" />
-            ) : (
-              <div className="h-72 min-w-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={cashMovement}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-
-                    <XAxis
-                      dataKey="label"
-                      tick={{
-                        fontSize: 11,
-                      }}
-                    />
-
-                    <YAxis
-                      tickFormatter={compactMoney}
-                      width={65}
-                      tick={{
-                        fontSize: 11,
-                      }}
-                    />
-
-                    <Tooltip formatter={(value) => formatTravelMoney(value, currency)} />
-
-                    <Legend />
-
-                    <Bar dataKey="amount" name="Amount" fill="#7c3aed" radius={[5, 5, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </ChartCard>
-        </div>
-      </div>
+      {activeReportContent}
 
       <TravelProfitSummaryModal
         isOpen={profitModalOpen}

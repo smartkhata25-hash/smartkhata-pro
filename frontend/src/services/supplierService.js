@@ -108,6 +108,7 @@ export const fetchSupplierLedger = (id, filters = {}) =>
         startDate: filters.startDate || filters.start || '',
         endDate: filters.endDate || filters.end || '',
         type: filters.type || '',
+        ...(filters.moduleScope ? { moduleScope: filters.moduleScope } : {}),
       },
     })
     .then((r) => r.data)

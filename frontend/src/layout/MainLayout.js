@@ -1,9 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { Outlet, useLocation } from 'react-router-dom';
+import { FaChevronLeft, FaChevronRight } from 'react-icons/fa';
+
 import TopHeader from './TopHeader';
 import Sidebar from './Sidebar';
 import RightPanel from './RightPanel';
+import TravelRightPanel from '../components/travel/layout/TravelRightPanel';
+import TravelReminderCenter from '../components/travel/reminders/TravelReminderCenter';
+
+import { EMPTY_TRAVEL_DASHBOARD_SUMMARY } from '../components/travel/dashboard/travelDashboardConfig';
+
+import { fetchTravelDashboardSummary as fetchTravelDashboardWorkspaceSummary } from '../services/travelMasterService';
+import { fetchTravelReminderSummary as fetchTravelReminderWorkspaceSummary } from '../services/travelReminderService';
+
+import { isTravelContext } from '../utils/travelContext';
+import { t } from '../i18n/i18n';
 
 const EMPTY_DASHBOARD_SUMMARY = {
   totalSales: 0,
@@ -17,6 +29,21 @@ const EMPTY_DASHBOARD_SUMMARY = {
   totalPayable: 0,
   receivableDetails: [],
   payableDetails: [],
+};
+
+const EMPTY_DASHBOARD_ALERTS = {
+  lowStock: 0,
+  negativeStock: 0,
+  overdueInvoices: 0,
+  pendingPayments: 0,
+};
+
+const EMPTY_TRAVEL_REMINDER_SUMMARY = {
+  attentionCount: 0,
+  dueCount: 0,
+  upcomingCount: 0,
+  failedEmailCount: 0,
+  nextReminder: null,
 };
 
 const buildSummaryKey = (params = {}) => {
@@ -57,10 +84,41 @@ const saveSessionCache = (cache = {}) => {
   }
 };
 
+const getSavedDesktopSidebarVisibility = () => {
+  try {
+    const savedState = localStorage.getItem('desktopSidebarVisible');
+
+    if (savedState === null) {
+      return true;
+    }
+
+    return JSON.parse(savedState) !== false;
+  } catch {
+    return true;
+  }
+};
+
 const MainLayout = () => {
   const location = useLocation();
 
+  /*
+   * Mobile sidebar state.
+   * Existing mobile behavior remains unchanged.
+   */
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  /*
+   * Desktop sidebar preference.
+   *
+   * First use:
+   * visible by default.
+   *
+   * After user hides/shows it:
+   * preference is saved in localStorage.
+   */
+  const [isDesktopSidebarVisible, setIsDesktopSidebarVisible] = useState(
+    getSavedDesktopSidebarVisibility
+  );
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
 
@@ -83,7 +141,27 @@ const MainLayout = () => {
 
   const [dashboardSummary, setDashboardSummary] = useState(EMPTY_DASHBOARD_SUMMARY);
 
+  const [travelDashboardSummary, setTravelDashboardSummary] = useState(
+    EMPTY_TRAVEL_DASHBOARD_SUMMARY
+  );
+
   const [dashboardSummaryLoading, setDashboardSummaryLoading] = useState(false);
+
+  const [travelDashboardSummaryLoading, setTravelDashboardSummaryLoading] = useState(false);
+
+  const [travelDashboardSummaryLoadedAt, setTravelDashboardSummaryLoadedAt] = useState(0);
+
+  const [travelReminderSummary, setTravelReminderSummary] = useState(
+    EMPTY_TRAVEL_REMINDER_SUMMARY
+  );
+
+  const [travelReminderSummaryLoading, setTravelReminderSummaryLoading] = useState(false);
+
+  const [travelReminderSummaryLoadedAt, setTravelReminderSummaryLoadedAt] = useState(0);
+
+  const [isTravelReminderCenterOpen, setIsTravelReminderCenterOpen] = useState(false);
+
+  const [showTravelReminderBanner, setShowTravelReminderBanner] = useState(false);
 
   const rightPanelRef = useRef(null);
 
@@ -91,10 +169,26 @@ const MainLayout = () => {
 
   const activeRequestsRef = useRef(new Map());
 
+  const activeTravelDashboardRequestRef = useRef(null);
+
+  const activeTravelReminderRequestRef = useRef(null);
+
   const isLedgerPage =
     location.pathname.startsWith('/customer-ledger') ||
     location.pathname.startsWith('/supplier-ledger') ||
     location.pathname.startsWith('/party-ledger');
+
+  const isTravelWorkspace = isTravelContext(location);
+
+  const hideWorkspacePanels = isLedgerPage && !isTravelWorkspace;
+
+  /*
+   * Actual desktop sidebar rendering state.
+   *
+   * Mobile ignores this preference because mobile
+   * continues using the normal hamburger sidebar.
+   */
+  const showSidebar = !hideWorkspacePanels && (isMobile || isDesktopSidebarVisible);
 
   const fetchDashboardSummary = useCallback(async (options = {}) => {
     const { refresh = false, params = {} } = options;
@@ -216,6 +310,105 @@ const MainLayout = () => {
     }
   }, []);
 
+  const fetchTravelDashboardSummary = useCallback(async (options = {}) => {
+    const forceRefresh = Boolean(options.forceRefresh || options.refresh);
+
+    if (!forceRefresh && activeTravelDashboardRequestRef.current) {
+      return activeTravelDashboardRequestRef.current;
+    }
+
+    const requestPromise = (async () => {
+      try {
+        setTravelDashboardSummaryLoading(true);
+
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+          return null;
+        }
+
+        const data = await fetchTravelDashboardWorkspaceSummary({
+          forceRefresh,
+        });
+
+        const normalizedData = {
+          ...EMPTY_TRAVEL_DASHBOARD_SUMMARY,
+          ...(data || {}),
+
+          cashAccounts: Array.isArray(data?.cashAccounts) ? data.cashAccounts : [],
+
+          bankAccounts: Array.isArray(data?.bankAccounts) ? data.bankAccounts : [],
+
+          upcomingBookings: Array.isArray(data?.upcomingBookings) ? data.upcomingBookings : [],
+        };
+
+        setTravelDashboardSummary(normalizedData);
+
+        setTravelDashboardSummaryLoadedAt(Date.now());
+
+        return normalizedData;
+      } catch (error) {
+        console.error('Travel dashboard summary fetch failed:', error);
+
+        return null;
+      } finally {
+        setTravelDashboardSummaryLoading(false);
+
+        activeTravelDashboardRequestRef.current = null;
+      }
+    })();
+
+    activeTravelDashboardRequestRef.current = requestPromise;
+
+    return requestPromise;
+  }, []);
+
+  const fetchTravelReminderSummary = useCallback(async (options = {}) => {
+    const forceRefresh = Boolean(options.forceRefresh || options.refresh);
+
+    if (!forceRefresh && activeTravelReminderRequestRef.current) {
+      return activeTravelReminderRequestRef.current;
+    }
+
+    const requestPromise = (async () => {
+      try {
+        setTravelReminderSummaryLoading(true);
+
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+          return null;
+        }
+
+        const data = await fetchTravelReminderWorkspaceSummary({
+          forceRefresh,
+        });
+
+        const normalizedData = {
+          ...EMPTY_TRAVEL_REMINDER_SUMMARY,
+          ...(data || {}),
+        };
+
+        setTravelReminderSummary(normalizedData);
+        setTravelReminderSummaryLoadedAt(Date.now());
+
+        return normalizedData;
+      } catch (error) {
+        console.error('Travel reminder summary fetch failed:', error);
+
+        return null;
+      } finally {
+        setTravelReminderSummaryLoading(false);
+
+        activeTravelReminderRequestRef.current = null;
+      }
+    })();
+
+    activeTravelReminderRequestRef.current = requestPromise;
+
+    return requestPromise;
+  }, []);
+
   const refreshDashboard = useCallback(
     async (options = {}) => {
       const { params = {} } = options;
@@ -234,14 +427,25 @@ const MainLayout = () => {
     [fetchDashboardSummary, fetchDashboardAlerts]
   );
 
+  /*
+   * Device authorization check.
+   */
   useEffect(() => {
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/auth/check-device`)
       .then((res) => {
         if (!res.ok) {
           localStorage.removeItem('token');
+
           localStorage.removeItem('userId');
+
           localStorage.removeItem('user');
+
           localStorage.removeItem('mode');
+
+          /*
+           * desktopSidebarVisible intentionally
+           * remains untouched.
+           */
 
           alert('Unauthorized device. Please login again.');
 
@@ -251,6 +455,9 @@ const MainLayout = () => {
       .catch(() => {});
   }, []);
 
+  /*
+   * Responsive state.
+   */
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -263,14 +470,71 @@ const MainLayout = () => {
     };
   }, []);
 
+  /*
+   * Persist Right Panel preference.
+   */
   useEffect(() => {
     localStorage.setItem('rightPanelOpen', JSON.stringify(isRightPanelOpen));
   }, [isRightPanelOpen]);
 
+  /*
+   * Persist Desktop Sidebar preference.
+   */
   useEffect(() => {
-    fetchDashboardAlerts();
-  }, [fetchDashboardAlerts]);
+    localStorage.setItem('desktopSidebarVisible', JSON.stringify(isDesktopSidebarVisible));
+  }, [isDesktopSidebarVisible]);
 
+  /*
+   * Travel mobile screen should not automatically
+   * keep the Right Panel covering the workspace.
+   */
+  useEffect(() => {
+    if (isTravelWorkspace && isMobile) {
+      setIsRightPanelOpen(false);
+    }
+  }, [isTravelWorkspace, isMobile]);
+
+  /*
+   * Load correct dashboard data according
+   * to active workspace.
+   */
+  useEffect(() => {
+    if (isTravelWorkspace) {
+      fetchTravelDashboardSummary();
+      fetchTravelReminderSummary();
+      return;
+    }
+
+    fetchDashboardAlerts();
+  }, [
+    fetchDashboardAlerts,
+    fetchTravelDashboardSummary,
+    fetchTravelReminderSummary,
+    isTravelWorkspace,
+  ]);
+
+  useEffect(() => {
+    if (!isTravelWorkspace || Number(travelReminderSummary.attentionCount || 0) <= 0) {
+      setShowTravelReminderBanner(false);
+      return;
+    }
+
+    const seen = sessionStorage.getItem('travelReminderAttentionSeen');
+
+    if (!seen) {
+      setShowTravelReminderBanner(true);
+    }
+  }, [isTravelWorkspace, travelReminderSummary.attentionCount]);
+
+  const openTravelReminderCenter = useCallback(() => {
+    sessionStorage.setItem('travelReminderAttentionSeen', 'true');
+    setShowTravelReminderBanner(false);
+    setIsTravelReminderCenterOpen(true);
+  }, []);
+
+  /*
+   * Right Panel outside-click handling.
+   */
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (event.target.closest('[data-right-panel-toggle="true"]')) {
@@ -302,47 +566,168 @@ const MainLayout = () => {
     dashboardSummaryLoading,
     fetchDashboardSummary,
     refreshDashboard,
+
     dashboardAlerts,
     fetchDashboardAlerts,
+
+    travelDashboardSummary,
+    travelDashboardSummaryLoading,
+    travelDashboardSummaryLoadedAt,
+    fetchTravelDashboardSummary,
+
+    travelReminderSummary,
+    travelReminderSummaryLoading,
+    travelReminderSummaryLoadedAt,
+    fetchTravelReminderSummary,
+    openTravelReminderCenter,
+  };
+
+  const visibleDashboardAlerts = isTravelWorkspace ? EMPTY_DASHBOARD_ALERTS : dashboardAlerts;
+
+  const rightPanelWidthClass = isTravelWorkspace ? 'w-80 max-w-[86vw]' : 'w-64';
+
+  const rightPanelDesktopWidthClass = isTravelWorkspace ? 'w-72' : 'w-64';
+
+  const renderRightPanel = () => {
+    if (isTravelWorkspace) {
+      return (
+        <TravelRightPanel
+          summary={travelDashboardSummary}
+          loading={travelDashboardSummaryLoading}
+          reminderSummary={travelReminderSummary}
+          onOpenReminderCenter={openTravelReminderCenter}
+          onRefresh={() =>
+            fetchTravelDashboardSummary({
+              forceRefresh: true,
+            })
+          }
+        />
+      );
+    }
+
+    return (
+      <RightPanel
+        dashboardAlerts={dashboardAlerts}
+        dashboardSummary={dashboardSummary}
+        dashboardSummaryLoading={dashboardSummaryLoading}
+        refreshDashboard={refreshDashboard}
+      />
+    );
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
-      <div className="flex-shrink-0 z-50">
+    <div className="flex h-screen flex-col bg-gray-100">
+      {/* ================= TOP HEADER ================= */}
+      <div className="z-50 flex-shrink-0">
         <TopHeader
           isRightPanelOpen={isRightPanelOpen}
           setIsRightPanelOpen={setIsRightPanelOpen}
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
-          dashboardAlerts={dashboardAlerts}
+          dashboardAlerts={visibleDashboardAlerts}
+          travelReminderSummary={travelReminderSummary}
+          onOpenTravelReminderCenter={openTravelReminderCenter}
         />
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {isSidebarOpen && (
+      {showTravelReminderBanner && (
+        <div className="fixed right-4 top-16 z-[70] max-w-[320px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800 shadow-lg">
+          <div className="flex items-start justify-between gap-3">
+            <button
+              type="button"
+              onClick={openTravelReminderCenter}
+              className="min-w-0 flex-1 text-left"
+            >
+              {t('travel.reminders.banner').replace(
+                '{{count}}',
+                Number(travelReminderSummary.attentionCount || 0).toLocaleString('en-GB')
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sessionStorage.setItem('travelReminderAttentionSeen', 'true');
+                setShowTravelReminderBanner(false);
+              }}
+              className="text-amber-700"
+              aria-label={t('travel.common.close')}
+              title={t('travel.common.close')}
+            >
+              x
+            </button>
+          </div>
+        </div>
+      )}
+
+      <TravelReminderCenter
+        isOpen={isTravelReminderCenterOpen}
+        onClose={() => setIsTravelReminderCenterOpen(false)}
+        summary={travelReminderSummary}
+        onSummaryRefresh={fetchTravelReminderSummary}
+      />
+
+      {/* ================= WORKSPACE ================= */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* MOBILE SIDEBAR OVERLAY */}
+        {isSidebarOpen && isMobile && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-40 z-30 md:hidden"
+            className="fixed inset-0 z-30 bg-black bg-opacity-40 md:hidden"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
 
-        {!isLedgerPage && (
+        {/* ================= SIDEBAR ================= */}
+        {showSidebar && (
           <Sidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
         )}
 
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex-1 overflow-y-auto">
+        {/* ================= DESKTOP SIDEBAR TOGGLE ================= */}
+        {!hideWorkspacePanels && !isMobile && (
+          <button
+            type="button"
+            onClick={() => setIsDesktopSidebarVisible((previous) => !previous)}
+            title={isDesktopSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar'}
+            aria-label={isDesktopSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar'}
+            className="
+                absolute top-2 z-40 hidden
+                h-9 w-7 items-center justify-center
+                rounded-r-lg
+                border border-l-0 border-slate-300
+                bg-gradient-to-b from-white to-slate-100
+                text-slate-600 shadow-md
+                transition-all duration-300
+                hover:bg-white hover:text-cyan-700
+                focus:outline-none focus:ring-2 focus:ring-cyan-300
+                md:flex
+              "
+            style={{
+              left: isDesktopSidebarVisible ? (isTravelWorkspace ? '14rem' : '12rem') : '0',
+            }}
+          >
+            {isDesktopSidebarVisible ? (
+              <FaChevronLeft aria-hidden="true" className="text-xs" />
+            ) : (
+              <FaChevronRight aria-hidden="true" className="text-xs" />
+            )}
+          </button>
+        )}
+
+        {/* ================= MAIN CONTENT ================= */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-y-auto">
             <Outlet context={outletContext} />
           </div>
         </div>
 
-        {!isLedgerPage && (
+        {/* ================= RIGHT PANEL ================= */}
+        {!hideWorkspacePanels && (
           <>
+            {/* MOBILE RIGHT PANEL */}
             {isMobile && (
               <>
                 {isRightPanelOpen && (
                   <div
-                    className="fixed inset-0 bg-black bg-opacity-40 z-30 md:hidden"
+                    className="fixed inset-0 z-30 bg-black bg-opacity-40 md:hidden"
                     onClick={() => setIsRightPanelOpen(false)}
                   />
                 )}
@@ -350,39 +735,29 @@ const MainLayout = () => {
                 <div
                   ref={rightPanelRef}
                   className={`
-                    fixed top-0 right-0 h-full z-40 w-64 bg-white shadow-lg
-                    transform transition-transform duration-300
+                    fixed right-0 top-0 z-40 h-full
+                    ${rightPanelWidthClass}
+                    bg-white shadow-lg
+                    transform
+                    transition-transform duration-300
                     ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
                     md:hidden
                   `}
                 >
-                  {isRightPanelOpen && (
-                    <RightPanel
-                      dashboardAlerts={dashboardAlerts}
-                      dashboardSummary={dashboardSummary}
-                      dashboardSummaryLoading={dashboardSummaryLoading}
-                      refreshDashboard={refreshDashboard}
-                    />
-                  )}
+                  {isRightPanelOpen && renderRightPanel()}
                 </div>
               </>
             )}
 
+            {/* DESKTOP RIGHT PANEL */}
             {!isMobile && (
               <div
                 ref={rightPanelRef}
-                className={`hidden md:block transition-all duration-300 ${
-                  isRightPanelOpen ? 'w-64' : 'w-0'
-                } overflow-hidden`}
+                className={`hidden overflow-hidden transition-all duration-300 md:block ${
+                  isRightPanelOpen ? rightPanelDesktopWidthClass : 'w-0'
+                }`}
               >
-                {isRightPanelOpen && (
-                  <RightPanel
-                    dashboardAlerts={dashboardAlerts}
-                    dashboardSummary={dashboardSummary}
-                    dashboardSummaryLoading={dashboardSummaryLoading}
-                    refreshDashboard={refreshDashboard}
-                  />
-                )}
+                {isRightPanelOpen && renderRightPanel()}
               </div>
             )}
           </>

@@ -12,6 +12,8 @@ const PermissionRoute = ({
   allPermissions = [],
   ownerOnly = false,
   systemAdminOnly = false,
+  moduleKey = null,
+  module = null,
   redirectTo = '/dashboard',
   fallback = null,
 }) => {
@@ -46,6 +48,8 @@ const PermissionRoute = ({
     allPermissions,
     ownerOnly,
     systemAdminOnly,
+    moduleKey,
+    module,
     user,
   });
 

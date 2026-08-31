@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCustomerDetailedLedger } from '../services/customerDetailLedgerService';
 
@@ -8,6 +8,8 @@ import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
+import { fetchTravelCustomers } from '../services/travelMasterService';
+import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const CUSTOMER_DETAIL_LEDGER_DEFAULTS = {
@@ -21,7 +23,9 @@ const CUSTOMER_DETAIL_LEDGER_DEFAULTS = {
 export default function CustomerDetailLedgerPage() {
   const { customerId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const token = localStorage.getItem('token');
+  const isTravelLedger = isTravelContext(location);
 
   const [blocks, setBlocks] = useState([]);
 
@@ -42,7 +46,9 @@ export default function CustomerDetailLedgerPage() {
   const handledRouteCustomerRef = useRef('');
 
   const { state: pageMemory, updateField: updatePageField } = usePageMemory(
-    'customer_detail_ledger_page_state',
+    isTravelLedger
+      ? 'travel_customer_detail_ledger_page_state'
+      : 'customer_detail_ledger_page_state',
     CUSTOMER_DETAIL_LEDGER_DEFAULTS,
     {
       expiryHours: 24,
@@ -80,6 +86,19 @@ export default function CustomerDetailLedgerPage() {
   // ✅ Print Size (Default A5, Remembered)
   const [printSize, setPrintSize] = useState(localStorage.getItem('detailLedgerPrintSize') || 'A5');
 
+  const buildPrintQuery = React.useCallback(
+    (params = {}) => {
+      const query = new URLSearchParams(params);
+
+      if (isTravelLedger) {
+        query.set('moduleScope', 'travel');
+      }
+
+      return query.toString();
+    },
+    [isTravelLedger]
+  );
+
   useEffect(() => {
     localStorage.setItem('detailLedgerPrintSize', printSize);
   }, [printSize]);
@@ -110,7 +129,9 @@ export default function CustomerDetailLedgerPage() {
       setLoading(true);
 
       try {
-        const detail = await getCustomerDetailedLedger(cid, s || '', e || '');
+        const detail = await getCustomerDetailedLedger(cid, s || '', e || '', {
+          moduleScope: isTravelLedger ? 'travel' : '',
+        });
 
         const detailRows = Array.isArray(detail?.ledger) ? detail.ledger : [];
 
@@ -141,7 +162,7 @@ export default function CustomerDetailLedgerPage() {
         setLoading(false);
       }
     },
-    [customers, startDate, endDate, setSelectedCustomerId, setCustomerName]
+    [customers, startDate, endDate, isTravelLedger, setSelectedCustomerId, setCustomerName]
   );
   useEffect(() => {
     if (!customerId) return;
@@ -175,6 +196,18 @@ export default function CustomerDetailLedgerPage() {
     loadData(selectedCustomerId, startDate, endDate);
   }, [customerId, selectedCustomerId, customers, startDate, endDate, loadData]);
   useEffect(() => {
+    if (isTravelLedger) {
+      fetchTravelCustomers({ includeBalance: 'true' }, { forceRefresh: true })
+        .then((data) => {
+          setCustomers(Array.isArray(data) ? data : []);
+        })
+        .catch(() => {
+          setCustomers([]);
+        });
+
+      return;
+    }
+
     fetch(`${API}/api/customers`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -187,7 +220,7 @@ export default function CustomerDetailLedgerPage() {
       .catch(() => {
         setCustomers([]);
       });
-  }, []);
+  }, [isTravelLedger]);
 
   // 🔹 Journal rows → Invoice-style blocks (WITH ITEMS)
   const buildBlocks = (ledger = []) => {
@@ -203,7 +236,8 @@ export default function CustomerDetailLedgerPage() {
           date: row.date,
           sourceType: row.sourceType,
           sourceLabel:
-            row.sourceType === 'opening_sale_invoice'
+            row.sourceLabel ||
+            (row.sourceType === 'opening_sale_invoice'
               ? 'Opening Sale Invoice'
               : row.sourceType === 'sale_invoice'
                 ? t('saleInvoice')
@@ -211,7 +245,7 @@ export default function CustomerDetailLedgerPage() {
                   ? t('refund.sale')
                   : row.sourceType === 'receive_payment'
                     ? t('receivePayment')
-                    : '-',
+                    : '-'),
           items: [],
           debit: 0,
           credit: 0,
@@ -404,9 +438,15 @@ export default function CustomerDetailLedgerPage() {
                         setSelectedCustomerId(c._id);
                         setShowSuggestions(false);
 
-                        navigate(`/customer-ledger/${c._id}/detail`, {
-                          replace: true,
-                        });
+                        navigate(
+                          `/customer-ledger/${c._id}/detail${isTravelLedger ? '?moduleScope=travel' : ''}`,
+                          {
+                            replace: true,
+                            state: isTravelLedger
+                              ? buildTravelRouteState('/travel/customers')
+                              : undefined,
+                          }
+                        );
 
                         loadData(c._id, startDate, endDate);
                       }}
@@ -482,12 +522,12 @@ export default function CustomerDetailLedgerPage() {
             onClick={async () => {
               if (!selectedCustomerId) return;
 
-              const query = new URLSearchParams({
+              const query = buildPrintQuery({
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
                 lang: localStorage.getItem('lang') || 'ur',
-              }).toString();
+              });
 
               try {
                 const response = await fetch(
@@ -548,12 +588,12 @@ export default function CustomerDetailLedgerPage() {
             onClick={async () => {
               if (!selectedCustomerId) return;
 
-              const query = new URLSearchParams({
+              const query = buildPrintQuery({
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
                 lang: localStorage.getItem('lang') || 'ur',
-              }).toString();
+              });
 
               try {
                 setPdfLoading(true);
@@ -823,12 +863,12 @@ export default function CustomerDetailLedgerPage() {
 
           const selectedCustomer = customers.find((c) => c._id === selectedCustomerId);
 
-          const query = new URLSearchParams({
+          const query = buildPrintQuery({
             startDate: startDate || '',
             endDate: endDate || '',
             size: printSize,
             lang: localStorage.getItem('lang') || 'ur',
-          }).toString();
+          });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-detail-ledger/${selectedCustomerId}/pdf?${query}`;
 

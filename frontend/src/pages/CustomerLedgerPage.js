@@ -1,7 +1,7 @@
 // 📁 src/pages/CustomerLedgerPage.js
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 import PageLayout from '../components/PageLayout';
@@ -14,6 +14,8 @@ import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
+import { fetchTravelCustomers } from '../services/travelMasterService';
+import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
 
 const CUSTOMER_LEDGER_DEFAULTS = {
   search: '',
@@ -23,10 +25,18 @@ const CUSTOMER_LEDGER_DEFAULTS = {
   end: `${new Date().getFullYear()}-12-31`,
 };
 
+const TRAVEL_CUSTOMER_LEDGER_DEFAULTS = {
+  ...CUSTOMER_LEDGER_DEFAULTS,
+  start: '',
+  end: '',
+};
+
 export default function CustomerLedgerPage() {
   const { customerId } = useParams();
   const token = localStorage.getItem('token');
   const navigate = useNavigate();
+  const location = useLocation();
+  const isTravelLedger = isTravelContext(location);
 
   const [customers, setCustomers] = useState([]);
 
@@ -44,8 +54,8 @@ export default function CustomerLedgerPage() {
   const handledRouteCustomerRef = useRef('');
 
   const { state: pageMemory, updateField: updatePageField } = usePageMemory(
-    'customer_ledger_page_state',
-    CUSTOMER_LEDGER_DEFAULTS,
+    isTravelLedger ? 'travel_customer_ledger_page_state' : 'customer_ledger_page_state',
+    isTravelLedger ? TRAVEL_CUSTOMER_LEDGER_DEFAULTS : CUSTOMER_LEDGER_DEFAULTS,
     {
       expiryHours: 24,
       delay: 350,
@@ -68,6 +78,19 @@ export default function CustomerLedgerPage() {
   const setEnd = useCallback((value) => updatePageField('end', value), [updatePageField]);
 
   const [printSize, setPrintSize] = useState(localStorage.getItem('ledgerPrintSize') || 'A5');
+
+  const buildPrintQuery = useCallback(
+    (params = {}) => {
+      const query = new URLSearchParams(params);
+
+      if (isTravelLedger) {
+        query.set('moduleScope', 'travel');
+      }
+
+      return query.toString();
+    },
+    [isTravelLedger]
+  );
 
   useEffect(() => {
     localStorage.setItem('ledgerPrintSize', printSize);
@@ -105,13 +128,24 @@ export default function CustomerLedgerPage() {
   }
 
   useEffect(() => {
+    if (isTravelLedger) {
+      fetchTravelCustomers({ includeBalance: 'true' }, { forceRefresh: true })
+        .then((data) => setCustomers(Array.isArray(data) ? data : []))
+        .catch((error) => {
+          console.error(error);
+          setCustomers([]);
+        });
+
+      return;
+    }
+
     axios
       .get(`${process.env.REACT_APP_API_BASE_URL}/api/customers`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => setCustomers(res.data))
       .catch(console.error);
-  }, [token]);
+  }, [isTravelLedger, token]);
 
   const load = useCallback(
     async (id = cid, s = start, e = end) => {
@@ -140,7 +174,9 @@ export default function CustomerLedgerPage() {
       setLoading(true);
 
       try {
-        const data = await getLedgerByCustomerAccount(accountId, s || '', e || '');
+        const data = await getLedgerByCustomerAccount(accountId, s || '', e || '', {
+          moduleScope: isTravelLedger ? 'travel' : '',
+        });
 
         const ledgerRows = Array.isArray(data?.ledger) ? data.ledger : [];
 
@@ -158,7 +194,7 @@ export default function CustomerLedgerPage() {
         setLoading(false);
       }
     },
-    [cid, start, end, customers, setCid, setCustomerName]
+    [cid, start, end, customers, isTravelLedger, setCid, setCustomerName]
   );
 
   useEffect(() => {
@@ -204,12 +240,12 @@ export default function CustomerLedgerPage() {
   const print = async () => {
     if (!cid) return;
 
-    const query = new URLSearchParams({
+    const query = buildPrintQuery({
       startDate: start || '',
       endDate: end || '',
       size: printSize,
       lang: getCurrentLanguage(),
-    }).toString();
+    });
     try {
       const response = await fetch(
         `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-ledger/${cid}/html?${query}`,
@@ -251,6 +287,32 @@ export default function CustomerLedgerPage() {
   };
   const handleRowClick = (entry) => {
     if (!entry || entry.isOpening) return;
+
+    const type = entry.sourceType?.toLowerCase();
+
+    if (type === 'travel_booking' && entry.referenceId) {
+      navigate(`/travel/bookings/${entry.referenceId}`);
+
+      return;
+    }
+
+    if (type === 'travel_refund' && entry.referenceId) {
+      navigate(`/travel/refunds/${entry.referenceId}`);
+
+      return;
+    }
+
+    if (type === 'receive_payment' && entry.originModule === 'travel_invoice' && entry.referenceId) {
+      navigate(`/travel/bookings/${entry.referenceId}`);
+
+      return;
+    }
+
+    if (type === 'refund_payment' && entry.originModule === 'travel_refund' && entry.referenceId) {
+      navigate(`/travel/refunds/${entry.referenceId}`);
+
+      return;
+    }
 
     if (
       ['sale_invoice', 'invoice', 'opening_sale_invoice'].includes(entry.sourceType) &&
@@ -442,9 +504,15 @@ export default function CustomerLedgerPage() {
                           setCid(c._id);
                           setShowSuggestions(false);
 
-                          navigate(`/customer-ledger/${c._id}`, {
-                            replace: true,
-                          });
+                          navigate(
+                            `/customer-ledger/${c._id}${isTravelLedger ? '?moduleScope=travel' : ''}`,
+                            {
+                              replace: true,
+                              state: isTravelLedger
+                                ? buildTravelRouteState('/travel/customers')
+                                : undefined,
+                            }
+                          );
                         }}
                         style={{
                           padding: '8px 10px',
@@ -493,12 +561,12 @@ export default function CustomerLedgerPage() {
               onClick={async () => {
                 if (!cid) return;
 
-                const query = new URLSearchParams({
+                const query = buildPrintQuery({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize,
                   lang: getCurrentLanguage(),
-                }).toString();
+                });
 
                 try {
                   setPdfLoading(true);
@@ -552,7 +620,16 @@ export default function CustomerLedgerPage() {
                 transition: 'all 0.2s ease',
               }}
               disabled={!cid}
-              onClick={() => navigate(`/customer-ledger/${cid}/detail`)}
+              onClick={() =>
+                navigate(
+                  `/customer-ledger/${cid}/detail${isTravelLedger ? '?moduleScope=travel' : ''}`,
+                  {
+                    state: isTravelLedger
+                      ? buildTravelRouteState('/travel/customers')
+                      : undefined,
+                  }
+                )
+              }
             >
               {t('ledger.detailLedger')}
             </button>
@@ -690,6 +767,30 @@ export default function CustomerLedgerPage() {
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
 
+              if (type === 'travel_booking' && entry.referenceId) {
+                navigate(`/travel/bookings/${entry.referenceId}`);
+
+                return;
+              }
+
+              if (type === 'travel_refund' && entry.referenceId) {
+                navigate(`/travel/refunds/${entry.referenceId}`);
+
+                return;
+              }
+
+              if (type === 'receive_payment' && entry.originModule === 'travel_invoice' && entry.referenceId) {
+                navigate(`/travel/bookings/${entry.referenceId}`);
+
+                return;
+              }
+
+              if (type === 'refund_payment' && entry.originModule === 'travel_refund' && entry.referenceId) {
+                navigate(`/travel/refunds/${entry.referenceId}`);
+
+                return;
+              }
+
               // ✅ Sale Invoice + Opening Sale Invoice
               if (
                 ['sale_invoice', 'invoice', 'opening_sale_invoice'].includes(type) &&
@@ -747,12 +848,12 @@ export default function CustomerLedgerPage() {
 
           const selectedCustomer = customers.find((c) => c._id === cid);
 
-          const query = new URLSearchParams({
+          const query = buildPrintQuery({
             startDate: start || '',
             endDate: end || '',
             size: printSize,
             lang: getCurrentLanguage(),
-          }).toString();
+          });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-ledger/${cid}/pdf?${query}`;
 

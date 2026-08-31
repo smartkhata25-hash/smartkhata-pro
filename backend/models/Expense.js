@@ -38,6 +38,12 @@ const expenseSchema = new mongoose.Schema(
       enum: ["Cash", "Cheque", "Bank"],
       required: true,
     },
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "both"],
+      default: "trading",
+      index: true,
+    },
     account: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
@@ -56,6 +62,39 @@ const expenseSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    deleteReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    isReversed: {
+      type: Boolean,
+      default: false,
+    },
+    reversedAt: {
+      type: Date,
+      default: null,
+    },
+    reversedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    reversalJournalEntryIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "JournalEntry",
+      },
+    ],
     // ✅ New Field: JournalEntry linkage
     journalEntryId: {
       type: mongoose.Schema.Types.ObjectId,

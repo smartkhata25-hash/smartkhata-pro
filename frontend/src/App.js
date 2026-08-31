@@ -4,6 +4,7 @@ import { HashRouter as Router, Route, Routes, useLocation } from 'react-router-d
 
 import { getCurrentLanguage } from './i18n/i18n';
 import { navigationService } from './utils/navigationService';
+import { MODULE_KEYS } from './utils/moduleConfig';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import PermissionRoute from './components/PermissionRoute';
@@ -45,6 +46,7 @@ const PurchaseInvoicePage = lazy(() => import('./pages/PurchaseInvoicePage'));
 const PurchaseReturnPage = lazy(() => import('./pages/PurchaseReturnPage'));
 const RefundPage = lazy(() => import('./pages/RefundPage'));
 const PrintSettingsPage = lazy(() => import('./pages/PrintSettingsPage'));
+const WhatsAppSettingsPage = lazy(() => import('./pages/WhatsAppSettingsPage'));
 const BackupPage = lazy(() => import('./pages/BackupPage'));
 const PrintInvoicePage = lazy(() => import('./pages/PrintInvoicePage'));
 const InviteUser = lazy(() => import('./pages/InviteUser'));
@@ -59,6 +61,33 @@ const StaffFormPage = lazy(() => import('./pages/StaffFormPage'));
 const StaffPermissionsPage = lazy(() => import('./pages/StaffPermissionsPage'));
 const ActivityLogPage = lazy(() => import('./pages/ActivityLogPage'));
 const ImportDataPage = lazy(() => import('./pages/ImportDataPage'));
+const TravelDashboardPage = lazy(() => import('./pages/travel/TravelDashboardPage'));
+const TravelBusinessValuePage = lazy(() => import('./pages/travel/TravelBusinessValuePage'));
+const TravelReportsPage = lazy(() => import('./pages/travel/TravelReportsPage'));
+const TravelExpensesPage = lazy(() => import('./pages/travel/TravelExpensesPage'));
+const TravelBookingsPage = lazy(() => import('./pages/travel/TravelBookingsPage'));
+const TravelBookingFormPage = lazy(() => import('./pages/travel/TravelBookingFormPage'));
+const TravelBookingDetailPage = lazy(() => import('./pages/travel/TravelBookingDetailPage'));
+const TravelRefundsPage = lazy(() => import('./pages/travel/TravelRefundsPage'));
+const TravelRefundFormPage = lazy(() => import('./pages/travel/TravelRefundFormPage'));
+const TravelRefundDetailPage = lazy(() => import('./pages/travel/TravelRefundDetailPage'));
+const TravelersPage = lazy(() => import('./pages/travel/TravelersPage'));
+const TravelServicesPage = lazy(() => import('./pages/travel/TravelServicesPage'));
+const TravelHotelsPage = lazy(() => import('./pages/travel/TravelHotelsPage'));
+const TravelAirlinesPage = lazy(() => import('./pages/travel/TravelAirlinesPage'));
+const TravelAirportsPage = lazy(() => import('./pages/travel/TravelAirportsPage'));
+const TravelTripPlannerPage = lazy(() => import('./pages/travel/TravelTripPlannerPage'));
+const TravelUmrahCalculatorPage = lazy(() => import('./pages/travel/TravelUmrahCalculatorPage'));
+const TravelCustomersPage = lazy(() => import('./pages/travel/TravelCustomersPage'));
+const TravelVendorsPage = lazy(() => import('./pages/travel/TravelVendorsPage'));
+const TravelPaymentHistoryPage = lazy(() => import('./pages/travel/TravelPaymentHistoryPage'));
+const TravelReceivePaymentPage = lazy(() => import('./pages/travel/TravelReceivePaymentPage'));
+const TravelVendorPaymentPage = lazy(() => import('./pages/travel/TravelVendorPaymentPage'));
+const TravelVendorReturnsPage = lazy(() => import('./pages/travel/TravelVendorReturnsPage'));
+const TravelVendorReturnDetailPage = lazy(
+  () => import('./pages/travel/TravelVendorReturnDetailPage')
+);
+const TravelSettingsPage = lazy(() => import('./pages/travel/TravelSettingsPage'));
 
 const SalesInvoiceList = lazy(() => import('./components/SalesInvoiceList'));
 const PurchaseInvoiceList = lazy(() => import('./components/PurchaseInvoiceList'));
@@ -86,6 +115,9 @@ function NavigationTracker() {
 function App() {
   useEffect(() => {
     const lang = getCurrentLanguage();
+
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ur' ? 'rtl' : 'ltr';
 
     if (lang === 'ur') {
       document.body.classList.add('urdu-mode');
@@ -170,6 +202,40 @@ function App() {
 
     return () => {
       window.removeEventListener('beforeunload', handleAppClose);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleNumberWheel = (event) => {
+      const target = event.target;
+
+      if (
+        target instanceof HTMLInputElement &&
+        target.type === 'number' &&
+        document.activeElement === target
+      ) {
+        target.blur();
+      }
+    };
+
+    const handleNumberArrowKeys = (event) => {
+      const target = event.target;
+
+      if (
+        target instanceof HTMLInputElement &&
+        target.type === 'number' &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener('wheel', handleNumberWheel, true);
+    document.addEventListener('keydown', handleNumberArrowKeys, true);
+
+    return () => {
+      document.removeEventListener('wheel', handleNumberWheel, true);
+      document.removeEventListener('keydown', handleNumberArrowKeys, true);
     };
   }, []);
 
@@ -259,6 +325,344 @@ function App() {
             }
           >
             <Route path="/dashboard" element={<DashboardPage />} />
+
+            <Route
+              path="/travel/dashboard"
+              element={
+                <PermissionRoute permission="travel.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelDashboardPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/reports"
+              element={
+                <PermissionRoute permission="travel.reports" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelReportsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/business-value"
+              element={
+                <PermissionRoute permission="business_value.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelBusinessValuePage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/expenses"
+              element={
+                <PermissionRoute permission="expenses.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelExpensesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/expenses/new"
+              element={
+                <PermissionRoute permission="expenses.create" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <ExpenseForm />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/expenses/:id/edit"
+              element={
+                <PermissionRoute permission="expenses.edit" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <ExpenseForm />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/bookings"
+              element={
+                <PermissionRoute permission="travel.bookings.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelBookingsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/bookings/new"
+              element={
+                <PermissionRoute permission="travel.bookings.create" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelBookingFormPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/bookings/:id"
+              element={
+                <PermissionRoute permission="travel.bookings.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelBookingDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/bookings/:id/edit"
+              element={
+                <PermissionRoute permission="travel.bookings.edit" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelBookingFormPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/refunds"
+              element={
+                <PermissionRoute permission="travel.bookings.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelRefundsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/refunds/new"
+              element={
+                <PermissionRoute permission="travel.bookings.edit" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelRefundFormPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/refunds/:id"
+              element={
+                <PermissionRoute permission="travel.bookings.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelRefundDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/travelers"
+              element={
+                <PermissionRoute permission="travel.travelers.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/services"
+              element={
+                <PermissionRoute permission="travel.services.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelServicesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/hotels"
+              element={
+                <PermissionRoute permission="travel.hotels.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelHotelsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/airlines"
+              element={
+                <PermissionRoute permission="travel.airlines.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelAirlinesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/airports"
+              element={
+                <PermissionRoute permission="travel.airports.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelAirportsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/trip-planner"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.bookings.create', 'travel.bookings.view']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelTripPlannerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/umrah-calculator"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.bookings.create', 'travel.bookings.view']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelUmrahCalculatorPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/customers"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.bookings.view', 'travel.customers', 'travel.payments']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelCustomersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/vendors"
+              element={
+                <PermissionRoute permission="travel.vendors.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelVendorsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/payments/receive"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'travel.bookings.view',
+                    'travel.bookings.edit',
+                    'travel.payments',
+                  ]}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelReceivePaymentPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/payments/received"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.bookings.view', 'travel.payments']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelPaymentHistoryPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/vendor-payments/new"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'travel.vendors.view',
+                    'travel.vendors.manage',
+                    'travel.payments',
+                  ]}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelVendorPaymentPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/payments/vendors"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.vendors.view', 'travel.payments']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelPaymentHistoryPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/vendor-returns"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.vendors.view', 'travel.vendors.manage']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelVendorReturnsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/vendor-returns/new"
+              element={
+                <PermissionRoute permission="travel.vendors.manage" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelVendorReturnsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/vendor-returns/:id"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.vendors.view', 'travel.vendors.manage']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelVendorReturnDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/accounts"
+              element={
+                <PermissionRoute permission="accounts.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <ChartOfAccountsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/accounts/cash"
+              element={
+                <PermissionRoute
+                  permission="accounts.view_transactions"
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <AccountDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/accounts/bank"
+              element={
+                <PermissionRoute
+                  permission="accounts.view_transactions"
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <AccountDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/settings"
+              element={
+                <PermissionRoute permission="travel.settings" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelSettingsPage />
+                </PermissionRoute>
+              }
+            />
 
             <Route
               path="/import"
@@ -542,7 +946,7 @@ function App() {
             <Route
               path="/monthly-sales"
               element={
-                <PermissionRoute permission="reports.monthly_sales">
+                <PermissionRoute permission="reports.monthly_sales" moduleKey={MODULE_KEYS.TRADING}>
                   <MonthlySalesPage />
                 </PermissionRoute>
               }
@@ -551,7 +955,7 @@ function App() {
             <Route
               path="/stock-value-report"
               element={
-                <PermissionRoute permission="reports.stock_value">
+                <PermissionRoute permission="reports.stock_value" moduleKey={MODULE_KEYS.TRADING}>
                   <StockValueReportPage />
                 </PermissionRoute>
               }
@@ -560,7 +964,10 @@ function App() {
             <Route
               path="/product-performance"
               element={
-                <PermissionRoute permission="reports.product_performance">
+                <PermissionRoute
+                  permission="reports.product_performance"
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <ProductPerformancePage />
                 </PermissionRoute>
               }
@@ -578,7 +985,10 @@ function App() {
             <Route
               path="/inventory"
               element={
-                <PermissionRoute anyPermissions={['products.view', 'inventory.view']}>
+                <PermissionRoute
+                  anyPermissions={['products.view', 'inventory.view']}
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <InventoryPage />
                 </PermissionRoute>
               }
@@ -587,7 +997,10 @@ function App() {
             <Route
               path="/stock-history"
               element={
-                <PermissionRoute permission="inventory.view_history">
+                <PermissionRoute
+                  permission="inventory.view_history"
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <StockHistoryPage />
                 </PermissionRoute>
               }
@@ -596,7 +1009,7 @@ function App() {
             <Route
               path="/inventory-adjust"
               element={
-                <PermissionRoute permission="inventory.adjust">
+                <PermissionRoute permission="inventory.adjust" moduleKey={MODULE_KEYS.TRADING}>
                   <InventoryAdjustPage />
                 </PermissionRoute>
               }
@@ -605,7 +1018,10 @@ function App() {
             <Route
               path="/inventory-adjust-list"
               element={
-                <PermissionRoute permission="inventory.view_history">
+                <PermissionRoute
+                  permission="inventory.view_history"
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <InventoryAdjustListPage />
                 </PermissionRoute>
               }
@@ -614,7 +1030,10 @@ function App() {
             <Route
               path="/categories"
               element={
-                <PermissionRoute permission="inventory.manage_categories">
+                <PermissionRoute
+                  permission="inventory.manage_categories"
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <CategoryManagement />
                 </PermissionRoute>
               }
@@ -623,7 +1042,7 @@ function App() {
             <Route
               path="/product-ledger/:productId"
               element={
-                <PermissionRoute permission="products.view">
+                <PermissionRoute permission="products.view" moduleKey={MODULE_KEYS.TRADING}>
                   <ProductLedgerPage />
                 </PermissionRoute>
               }
@@ -632,7 +1051,7 @@ function App() {
             <Route
               path="/product-ledger"
               element={
-                <PermissionRoute permission="products.view">
+                <PermissionRoute permission="products.view" moduleKey={MODULE_KEYS.TRADING}>
                   <ProductLedgerPage />
                 </PermissionRoute>
               }
@@ -641,7 +1060,7 @@ function App() {
             <Route
               path="/add-product"
               element={
-                <PermissionRoute permission="products.create">
+                <PermissionRoute permission="products.create" moduleKey={MODULE_KEYS.TRADING}>
                   <ProductForm />
                 </PermissionRoute>
               }
@@ -650,7 +1069,7 @@ function App() {
             <Route
               path="/sales"
               element={
-                <PermissionRoute permission="sales.create">
+                <PermissionRoute permission="sales.create" moduleKey={MODULE_KEYS.TRADING}>
                   <SalesPage />
                 </PermissionRoute>
               }
@@ -659,7 +1078,7 @@ function App() {
             <Route
               path="/create-sale"
               element={
-                <PermissionRoute permission="sales.create">
+                <PermissionRoute permission="sales.create" moduleKey={MODULE_KEYS.TRADING}>
                   <SalesPage />
                 </PermissionRoute>
               }
@@ -668,7 +1087,7 @@ function App() {
             <Route
               path="/sales-invoices"
               element={
-                <PermissionRoute permission="sales.view">
+                <PermissionRoute permission="sales.view" moduleKey={MODULE_KEYS.TRADING}>
                   <SalesInvoiceList />
                 </PermissionRoute>
               }
@@ -677,7 +1096,7 @@ function App() {
             <Route
               path="/refunds"
               element={
-                <PermissionRoute permission="refunds.view">
+                <PermissionRoute permission="refunds.view" moduleKey={MODULE_KEYS.TRADING}>
                   <RefundInvoiceList />
                 </PermissionRoute>
               }
@@ -686,7 +1105,7 @@ function App() {
             <Route
               path="/refunds/new"
               element={
-                <PermissionRoute permission="refunds.create">
+                <PermissionRoute permission="refunds.create" moduleKey={MODULE_KEYS.TRADING}>
                   <RefundPage />
                 </PermissionRoute>
               }
@@ -695,7 +1114,7 @@ function App() {
             <Route
               path="/refunds/edit/:id"
               element={
-                <PermissionRoute permission="refunds.edit">
+                <PermissionRoute permission="refunds.edit" moduleKey={MODULE_KEYS.TRADING}>
                   <RefundPage />
                 </PermissionRoute>
               }
@@ -704,7 +1123,7 @@ function App() {
             <Route
               path="/purchase-invoice"
               element={
-                <PermissionRoute permission="purchases.create">
+                <PermissionRoute permission="purchases.create" moduleKey={MODULE_KEYS.TRADING}>
                   <PurchaseInvoicePage />
                 </PermissionRoute>
               }
@@ -713,7 +1132,7 @@ function App() {
             <Route
               path="/purchase-invoice/:id"
               element={
-                <PermissionRoute permission="purchases.edit">
+                <PermissionRoute permission="purchases.edit" moduleKey={MODULE_KEYS.TRADING}>
                   <PurchaseInvoicePage />
                 </PermissionRoute>
               }
@@ -722,7 +1141,7 @@ function App() {
             <Route
               path="/purchase-invoices"
               element={
-                <PermissionRoute permission="purchases.view">
+                <PermissionRoute permission="purchases.view" moduleKey={MODULE_KEYS.TRADING}>
                   <PurchaseInvoiceList />
                 </PermissionRoute>
               }
@@ -731,7 +1150,7 @@ function App() {
             <Route
               path="/purchase-returns"
               element={
-                <PermissionRoute permission="purchase_returns.view">
+                <PermissionRoute permission="purchase_returns.view" moduleKey={MODULE_KEYS.TRADING}>
                   <PurchaseReturnList />
                 </PermissionRoute>
               }
@@ -740,7 +1159,10 @@ function App() {
             <Route
               path="/purchase-returns/new"
               element={
-                <PermissionRoute permission="purchase_returns.create">
+                <PermissionRoute
+                  permission="purchase_returns.create"
+                  moduleKey={MODULE_KEYS.TRADING}
+                >
                   <PurchaseReturnPage />
                 </PermissionRoute>
               }
@@ -749,7 +1171,7 @@ function App() {
             <Route
               path="/purchase-returns/edit/:id"
               element={
-                <PermissionRoute permission="purchase_returns.edit">
+                <PermissionRoute permission="purchase_returns.edit" moduleKey={MODULE_KEYS.TRADING}>
                   <PurchaseReturnPage />
                 </PermissionRoute>
               }
@@ -841,6 +1263,15 @@ function App() {
               element={
                 <PermissionRoute permission="settings.print">
                   <PrintSettingsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/whatsapp-settings"
+              element={
+                <PermissionRoute permission="settings.print">
+                  <WhatsAppSettingsPage />
                 </PermissionRoute>
               }
             />

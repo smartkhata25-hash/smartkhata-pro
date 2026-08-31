@@ -1,5 +1,11 @@
 import axios from 'axios';
 
+import {
+  appendBusinessValueModuleScopeParam,
+  getBusinessValueModuleScopeParams,
+  withBusinessValueModuleScope,
+} from './businessValueModuleScope';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const getAuthConfig = () => {
@@ -24,6 +30,8 @@ const buildCategoryQuery = (filters = {}) => {
   if (filters.includeInactive) {
     params.append('includeInactive', 'true');
   }
+
+  appendBusinessValueModuleScopeParam(params, filters.moduleScope);
 
   return params.toString();
 };
@@ -54,7 +62,7 @@ export const fetchBusinessAssetCategories = async (filters = {}) => {
   }
 };
 
-export const fetchBusinessAssetCategoryById = async (categoryId) => {
+export const fetchBusinessAssetCategoryById = async (categoryId, options = {}) => {
   try {
     if (!categoryId) {
       throw new Error('Category ID is required');
@@ -62,7 +70,10 @@ export const fetchBusinessAssetCategoryById = async (categoryId) => {
 
     const response = await axios.get(
       `${BASE_URL}/api/business-asset-categories/${categoryId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -73,9 +84,12 @@ export const fetchBusinessAssetCategoryById = async (categoryId) => {
   }
 };
 
-export const createBusinessAssetCategory = async (categoryData) => {
+export const createBusinessAssetCategory = async (categoryData, options = {}) => {
   try {
-    const payload = normalizeCategoryPayload(categoryData);
+    const payload = withBusinessValueModuleScope(
+      normalizeCategoryPayload(categoryData),
+      options.moduleScope || categoryData?.moduleScope
+    );
 
     const response = await axios.post(
       `${BASE_URL}/api/business-asset-categories`,
@@ -91,13 +105,16 @@ export const createBusinessAssetCategory = async (categoryData) => {
   }
 };
 
-export const updateBusinessAssetCategory = async (categoryId, categoryData) => {
+export const updateBusinessAssetCategory = async (categoryId, categoryData, options = {}) => {
   try {
     if (!categoryId) {
       throw new Error('Category ID is required');
     }
 
-    const payload = normalizeCategoryPayload(categoryData);
+    const payload = withBusinessValueModuleScope(
+      normalizeCategoryPayload(categoryData),
+      options.moduleScope || categoryData?.moduleScope
+    );
 
     const response = await axios.put(
       `${BASE_URL}/api/business-asset-categories/${categoryId}`,
@@ -113,7 +130,7 @@ export const updateBusinessAssetCategory = async (categoryId, categoryData) => {
   }
 };
 
-export const deleteBusinessAssetCategory = async (categoryId) => {
+export const deleteBusinessAssetCategory = async (categoryId, options = {}) => {
   try {
     if (!categoryId) {
       throw new Error('Category ID is required');
@@ -121,7 +138,10 @@ export const deleteBusinessAssetCategory = async (categoryId) => {
 
     const response = await axios.delete(
       `${BASE_URL}/api/business-asset-categories/${categoryId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -132,7 +152,7 @@ export const deleteBusinessAssetCategory = async (categoryId) => {
   }
 };
 
-export const restoreBusinessAssetCategory = async (categoryId) => {
+export const restoreBusinessAssetCategory = async (categoryId, options = {}) => {
   try {
     if (!categoryId) {
       throw new Error('Category ID is required');
@@ -141,7 +161,10 @@ export const restoreBusinessAssetCategory = async (categoryId) => {
     const response = await axios.patch(
       `${BASE_URL}/api/business-asset-categories/${categoryId}/restore`,
       {},
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;

@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { normalizeModuleConfig } = require("../utils/moduleConfig");
 
 const protect = async (req, res, next) => {
   try {
@@ -16,7 +17,7 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id).select(
-      "_id role accountRole businessOwnerId staffStatus permissions isDeleted",
+      "_id role accountRole businessOwnerId staffStatus permissions isDeleted enabledModules defaultModule",
     );
 
     // Deleted یا موجود نہ ہونے والا User
@@ -47,11 +48,13 @@ const protect = async (req, res, next) => {
     }
 
     // Staff کے Business Owner کو بھی Verify کریں
+    let businessOwner = null;
+
     if (accountRole === "staff") {
-      const businessOwner = await User.findOne({
+      businessOwner = await User.findOne({
         _id: businessOwnerId,
         isDeleted: { $ne: true },
-      }).select("_id accountRole");
+      }).select("_id accountRole enabledModules defaultModule");
 
       if (!businessOwner) {
         return res.status(403).json({
@@ -59,6 +62,10 @@ const protect = async (req, res, next) => {
         });
       }
     }
+
+    const moduleConfig = normalizeModuleConfig(
+      accountRole === "staff" ? businessOwner : user,
+    );
 
     // اصل Logged-in User
     req.actorId = user._id;
@@ -70,6 +77,8 @@ const protect = async (req, res, next) => {
       permissions: user.permissions || [],
       businessOwnerId,
       actorId: user._id,
+      enabledModules: moduleConfig.enabledModules,
+      defaultModule: moduleConfig.defaultModule,
     };
 
     // پرانے Controllers کے لیے Business Owner ID

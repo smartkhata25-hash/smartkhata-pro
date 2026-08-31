@@ -9,6 +9,13 @@ const businessReceivableLoanSchema = new mongoose.Schema(
       index: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     title: {
       type: String,
       required: true,
@@ -118,18 +125,21 @@ businessReceivableLoanSchema.pre("save", function (next) {
 
 businessReceivableLoanSchema.index({
   userId: 1,
+  moduleScope: 1,
   isDeleted: 1,
   status: 1,
 });
 
 businessReceivableLoanSchema.index({
   userId: 1,
+  moduleScope: 1,
   borrowerName: 1,
   isDeleted: 1,
 });
 
 businessReceivableLoanSchema.index({
   userId: 1,
+  moduleScope: 1,
   startDate: -1,
 });
 

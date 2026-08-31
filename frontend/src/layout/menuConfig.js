@@ -1,6 +1,9 @@
+import { MODULE_KEYS } from '../utils/moduleConfig';
+
 const menuConfig = [
   {
     label: 'sales',
+    module: MODULE_KEYS.TRADING,
     sections: [
       {
         title: 'menu.create',
@@ -21,6 +24,7 @@ const menuConfig = [
 
   {
     label: 'purchases',
+    module: MODULE_KEYS.TRADING,
     sections: [
       {
         title: 'menu.create',
@@ -42,6 +46,14 @@ const menuConfig = [
   {
     label: 'items',
     path: '/inventory',
+    module: MODULE_KEYS.TRADING,
+  },
+
+  {
+    label: 'travel.nav.travel',
+    path: '/travel/dashboard',
+    module: MODULE_KEYS.TRAVEL,
+    permission: 'travel.view',
   },
 
   {
@@ -107,6 +119,7 @@ const menuConfig = [
 
   {
     label: 'inventory',
+    module: MODULE_KEYS.TRADING,
     sections: [
       {
         title: 'menu.stock',
@@ -169,11 +182,20 @@ const menuConfig = [
         title: 'menu.analytics',
         items: [
           { label: 'dashboard.monthlyCashFlow', path: '/cashflow' },
-          { label: 'dashboard.monthlySales', path: '/monthly-sales' },
-          { label: 'stockValueReport', path: '/stock-value-report' },
+          {
+            label: 'dashboard.monthlySales',
+            path: '/monthly-sales',
+            module: MODULE_KEYS.TRADING,
+          },
+          {
+            label: 'stockValueReport',
+            path: '/stock-value-report',
+            module: MODULE_KEYS.TRADING,
+          },
           {
             label: 'productPerformance.menuLabel',
             path: '/product-performance',
+            module: MODULE_KEYS.TRADING,
           },
           {
             label: 'businessValue.menuLabel',

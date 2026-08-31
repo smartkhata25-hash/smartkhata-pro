@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 
 import { t } from '../../i18n/i18n';
+import { getValidPaymentAccounts } from '../../services/accountService';
 
 import {
   BUSINESS_RECEIVABLE_BORROWER_TYPES,
@@ -10,8 +10,6 @@ import {
   getEmptyBusinessReceivableLoan,
   updateBusinessReceivableLoan,
 } from '../../services/businessReceivableLoanService';
-
-const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const PAYMENT_METHODS = [
   {
@@ -63,16 +61,6 @@ const BORROWER_TYPES = [
   },
 ];
 
-const getAuthConfig = () => {
-  const token = localStorage.getItem('token');
-
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-};
-
 const getToday = () => {
   const now = new Date();
 
@@ -99,7 +87,13 @@ const formatDateForInput = (value) => {
   return `${year}-${month}-${day}`;
 };
 
-const BusinessReceivableLoanForm = ({ isOpen = false, loan = null, onClose, onSaved }) => {
+const BusinessReceivableLoanForm = ({
+  isOpen = false,
+  loan = null,
+  onClose,
+  onSaved,
+  moduleScope,
+}) => {
   const isEditing = Boolean(loan?._id);
 
   const [form, setForm] = useState({
@@ -169,24 +163,14 @@ const BusinessReceivableLoanForm = ({ isOpen = false, loan = null, onClose, onSa
       try {
         setAccountsLoading(true);
 
-        const response = await axios.get(
-          `${BASE_URL}/api/accounts?filter=payment`,
-          getAuthConfig()
-        );
+        const loadedAccounts = await getValidPaymentAccounts({
+          forceRefresh: true,
+          moduleScope,
+        });
 
         if (!active) return;
 
-        const data = response.data;
-
-        setAccounts(
-          Array.isArray(data)
-            ? data
-            : Array.isArray(data?.accounts)
-              ? data.accounts
-              : Array.isArray(data?.data)
-                ? data.data
-                : []
-        );
+        setAccounts(Array.isArray(loadedAccounts) ? loadedAccounts : []);
       } catch (loadError) {
         console.error('Receivable Loan Payment Accounts Load Error:', loadError);
 
@@ -206,7 +190,7 @@ const BusinessReceivableLoanForm = ({ isOpen = false, loan = null, onClose, onSa
     return () => {
       active = false;
     };
-  }, [isOpen, isEditing]);
+  }, [isOpen, isEditing, moduleScope]);
 
   useEffect(() => {
     if (!isOpen || isEditing) return;
@@ -320,7 +304,7 @@ const BusinessReceivableLoanForm = ({ isOpen = false, loan = null, onClose, onSa
           startDate: form.startDate,
           dueDate: form.dueDate,
           notes: form.notes,
-        });
+        }, { moduleScope });
       } else {
         result = await createBusinessReceivableLoan({
           title: form.title,
@@ -332,7 +316,7 @@ const BusinessReceivableLoanForm = ({ isOpen = false, loan = null, onClose, onSa
           notes: form.notes,
           paymentMethod: form.paymentMethod,
           accountId: form.accountId,
-        });
+        }, { moduleScope });
       }
 
       if (onSaved) {

@@ -1,12 +1,68 @@
 const Supplier = require("../models/Supplier");
 const JournalEntry = require("../models/JournalEntry");
 const mongoose = require("mongoose");
+const {
+  getTravelVendorJournalFilter,
+} = require("../services/travel/travelAccountingMetricsService");
+
+const resolveSupplierSourceLabel = (entry) => {
+  if (
+    entry.sourceType === "pay_bill" &&
+    ["travel_invoice", "travel_vendor_payment"].includes(entry.originModule)
+  ) {
+    return "Travel Vendor Payment";
+  }
+
+  if (
+    entry.originModule === "travel_vendor_return" &&
+    entry.sourceType === "purchase_return_payment"
+  ) {
+    return "Travel Vendor Return Receipt";
+  }
+
+  if (entry.sourceType === "travel_vendor_return") {
+    return "Travel Vendor Return/Credit";
+  }
+
+  if (entry.sourceType === "travel_vendor_cost") {
+    return "Travel Vendor Cost";
+  }
+
+  if (entry.sourceType === "travel_refund") {
+    return "Travel Vendor Recovery";
+  }
+
+  if (entry.sourceType === "opening_purchase_invoice") {
+    return "Opening Purchase Invoice";
+  }
+
+  if (entry.sourceType === "opening_purchase_return") {
+    return "Opening Purchase Return";
+  }
+
+  if (entry.sourceType === "purchase_discount") {
+    return "Purchase Discount";
+  }
+
+  return entry.description || "";
+};
 
 // ✅ Get Supplier Ledger with running balance from Journal
 exports.getSupplierLedger = async (req, res) => {
   try {
     const { id } = req.params;
-    const { start = "", end = "", type = "" } = req.query;
+    const {
+      start = "",
+      end = "",
+      startDate = "",
+      endDate = "",
+      type = "",
+      moduleScope = "",
+    } = req.query;
+    const fromDate = start || startDate;
+    const toDate = end || endDate;
+    const travelJournalFilter =
+      moduleScope === "travel" ? getTravelVendorJournalFilter() : {};
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid supplier ID" });
@@ -34,10 +90,12 @@ exports.getSupplierLedger = async (req, res) => {
       "lines.account": new mongoose.Types.ObjectId(accountId),
       isDeleted: false,
       createdBy: req.user.id,
+      ...travelJournalFilter,
     };
 
-    if (start) query.date = { ...(query.date || {}), $gte: new Date(start) };
-    if (end) query.date = { ...(query.date || {}), $lte: new Date(end) };
+    if (fromDate)
+      query.date = { ...(query.date || {}), $gte: new Date(fromDate) };
+    if (toDate) query.date = { ...(query.date || {}), $lte: new Date(toDate) };
     if (type) query.sourceType = type;
 
     const entries = await JournalEntry.find(query)
@@ -51,12 +109,13 @@ exports.getSupplierLedger = async (req, res) => {
 
     let balance = 0;
 
-    if (start) {
+    if (fromDate) {
       const openingEntries = await JournalEntry.find({
         "lines.account": new mongoose.Types.ObjectId(accountId),
         createdBy: req.user.id,
         isDeleted: false,
-        date: { $lt: new Date(start) },
+        ...travelJournalFilter,
+        date: { $lt: new Date(fromDate) },
       }).lean();
 
       for (const entry of openingEntries) {
@@ -69,6 +128,7 @@ exports.getSupplierLedger = async (req, res) => {
       }
     }
 
+    const openingBalance = balance;
     const formattedEntries = [];
 
     for (const entry of entries) {
@@ -85,15 +145,10 @@ exports.getSupplierLedger = async (req, res) => {
             _id: entry._id,
             date: entry.date,
             time: entry.time || "",
-            description:
-              entry.sourceType === "opening_purchase_invoice"
-                ? "Opening Purchase Invoice"
-                : entry.sourceType === "opening_purchase_return"
-                  ? "Opening Purchase Return"
-                  : entry.sourceType === "purchase_discount"
-                    ? "Purchase Discount"
-                    : entry.description || "",
+            description: entry.description || resolveSupplierSourceLabel(entry),
             sourceType: entry.sourceType || "",
+            originModule: entry.originModule || "",
+            sourceLabel: resolveSupplierSourceLabel(entry),
             billNo: entry.billNo || "",
             paymentType: line.paymentType || entry.paymentType || "-",
             referenceId: entry.referenceId || "",
@@ -123,7 +178,10 @@ exports.getSupplierLedger = async (req, res) => {
       hiddenReason: supplier.hiddenReason || null,
 
       openingBalance:
-        balance - formattedEntries.reduce((s, e) => s + e.debit - e.credit, 0),
+        moduleScope === "travel"
+          ? openingBalance
+          : balance -
+            formattedEntries.reduce((s, e) => s + e.debit - e.credit, 0),
 
       ledger: formattedEntries,
     });

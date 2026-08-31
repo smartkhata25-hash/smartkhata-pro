@@ -5,6 +5,17 @@ const BusinessLiabilityPayment = require("../models/BusinessLiabilityPayment");
 
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
+const {
+  applyBusinessValueScopeFilter,
+  getControllerStatusCode,
+  getScopedBusinessValueAccountConfig,
+  getScopedBusinessValueOrigin,
+  requireBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+} = require("../utils/moduleScope");
 
 const PAYMENT_METHOD_CATEGORIES = {
   cash: ["cash"],
@@ -76,19 +87,32 @@ const getCurrentRemaining = (liability) => {
   return getSafeNumber(liability.originalAmount);
 };
 
-const getOrCreateLiabilityAccount = async (userId, liabilityCategory) => {
-  const config =
+const getOrCreateLiabilityAccount = async (
+  userId,
+  liabilityCategory,
+  moduleScope,
+) => {
+  const baseConfig =
     LIABILITY_ACCOUNT_CONFIG[liabilityCategory] ||
     LIABILITY_ACCOUNT_CONFIG.other;
+  const config = getScopedBusinessValueAccountConfig(baseConfig, moduleScope);
+  const query = {
+    userId,
+    code: config.code,
+  };
+
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    query.moduleScope = MODULE_SCOPES.TRAVEL;
+  } else {
+    applyModuleScopeFilter(query, MODULE_SCOPES.TRADING);
+  }
 
   const account = await Account.findOneAndUpdate(
-    {
-      userId,
-      code: config.code,
-    },
+    query,
     {
       $setOnInsert: {
         userId,
+        moduleScope: config.moduleScope,
         name: config.name,
         type: "Liability",
         category: config.category,
@@ -118,6 +142,7 @@ exports.createLiabilityPayment = async (req, res) => {
 
   try {
     const userId = getBusinessUserId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
     const actorId = getActorId(req);
 
     const { liabilityId } = req.params;
@@ -179,10 +204,15 @@ exports.createLiabilityPayment = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const liabilityQuery = {
       _id: liabilityId,
       userId,
-    });
+      isDeleted: false,
+    };
+
+    applyBusinessValueScopeFilter(liabilityQuery, moduleScope);
+
+    const liability = await BusinessLiability.findOne(liabilityQuery);
 
     if (!liability) {
       return res.status(404).json({
@@ -209,12 +239,16 @@ exports.createLiabilityPayment = async (req, res) => {
       });
     }
 
-    const paymentAccount = await Account.findOne({
+    const accountQuery = {
       _id: accountId,
       userId,
       type: "Asset",
       isActive: { $ne: false },
-    });
+    };
+
+    applyModuleScopeFilter(accountQuery, moduleScope);
+
+    const paymentAccount = await Account.findOne(accountQuery);
 
     if (!paymentAccount) {
       return res.status(404).json({
@@ -239,6 +273,7 @@ exports.createLiabilityPayment = async (req, res) => {
     const liabilityAccount = await getOrCreateLiabilityAccount(
       userId,
       liability.category,
+      moduleScope,
     );
 
     const remainingAfter = Number(
@@ -273,7 +308,10 @@ exports.createLiabilityPayment = async (req, res) => {
 
       sourceType: "payment",
 
-      originModule: "business_liability_payment",
+      originModule: getScopedBusinessValueOrigin(
+        "business_liability_payment",
+        moduleScope,
+      ),
 
       referenceId: liability._id,
 
@@ -282,6 +320,7 @@ exports.createLiabilityPayment = async (req, res) => {
 
     createdPayment = await BusinessLiabilityPayment.create({
       userId,
+      moduleScope,
 
       liabilityId: liability._id,
 
@@ -342,6 +381,7 @@ exports.createLiabilityPayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Business Liability Payment Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
     try {
       if (liabilityUpdated && createdPayment?.liabilityId) {
@@ -364,7 +404,7 @@ exports.createLiabilityPayment = async (req, res) => {
       console.error("Liability Payment Rollback Error:", rollbackError);
     }
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to record liability payment",
       error: error.message,
@@ -387,10 +427,15 @@ exports.getLiabilityPayments = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const liabilityQuery = {
       _id: liabilityId,
       userId,
-    }).lean();
+      isDeleted: false,
+    };
+
+    applyBusinessValueScopeFilter(liabilityQuery, moduleScope);
+
+    const liability = await BusinessLiability.findOne(liabilityQuery).lean();
 
     if (!liability) {
       return res.status(404).json({
@@ -399,10 +444,14 @@ exports.getLiabilityPayments = async (req, res) => {
       });
     }
 
-    const payments = await BusinessLiabilityPayment.find({
+    const paymentQuery = {
       userId,
       liabilityId,
-    })
+    };
+
+    applyBusinessValueScopeFilter(paymentQuery, moduleScope);
+
+    const payments = await BusinessLiabilityPayment.find(paymentQuery)
       .populate("accountId", "name code category")
       .sort({
         paymentDate: -1,
@@ -455,8 +504,9 @@ exports.getLiabilityPayments = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Liability Payments Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to load liability payment history",
       error: error.message,
@@ -471,6 +521,7 @@ exports.reverseLiabilityPayment = async (req, res) => {
 
   try {
     const userId = getBusinessUserId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const { liabilityId, paymentId } = req.params;
 
@@ -484,11 +535,15 @@ exports.reverseLiabilityPayment = async (req, res) => {
       });
     }
 
-    const payment = await BusinessLiabilityPayment.findOne({
+    const paymentQuery = {
       _id: paymentId,
       liabilityId,
       userId,
-    });
+    };
+
+    applyBusinessValueScopeFilter(paymentQuery, moduleScope);
+
+    const payment = await BusinessLiabilityPayment.findOne(paymentQuery);
 
     if (!payment) {
       return res.status(404).json({
@@ -504,10 +559,15 @@ exports.reverseLiabilityPayment = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const liabilityQuery = {
       _id: liabilityId,
       userId,
-    });
+      isDeleted: false,
+    };
+
+    applyBusinessValueScopeFilter(liabilityQuery, moduleScope);
+
+    const liability = await BusinessLiability.findOne(liabilityQuery);
 
     if (!liability) {
       return res.status(404).json({
@@ -520,6 +580,10 @@ exports.reverseLiabilityPayment = async (req, res) => {
       ? await JournalEntry.findOne({
           _id: payment.journalEntryId,
           createdBy: userId,
+          originModule: getScopedBusinessValueOrigin(
+            "business_liability_payment",
+            moduleScope,
+          ),
           isDeleted: { $ne: true },
         })
       : null;
@@ -558,7 +622,10 @@ exports.reverseLiabilityPayment = async (req, res) => {
 
       sourceType: "reversal",
 
-      originModule: "business_liability_payment_reversal",
+      originModule: getScopedBusinessValueOrigin(
+        "business_liability_payment_reversal",
+        moduleScope,
+      ),
 
       referenceId: payment._id,
 
@@ -609,6 +676,7 @@ exports.reverseLiabilityPayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Reverse Liability Payment Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
     if (reversalJournal?._id) {
       try {
@@ -618,7 +686,7 @@ exports.reverseLiabilityPayment = async (req, res) => {
       }
     }
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to reverse liability payment",
       error: error.message,

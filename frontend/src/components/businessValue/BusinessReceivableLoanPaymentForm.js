@@ -1,15 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 
 import { t } from '../../i18n/i18n';
+import { getValidPaymentAccounts } from '../../services/accountService';
 
 import {
   BUSINESS_RECEIVABLE_PAYMENT_METHODS,
   formatReceivableLoanAmount,
   receiveBusinessReceivableLoanPayment,
 } from '../../services/businessReceivableLoanService';
-
-const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const PAYMENT_METHODS = [
   {
@@ -38,16 +36,6 @@ const PAYMENT_METHODS = [
   },
 ];
 
-const getAuthConfig = () => {
-  const token = localStorage.getItem('token');
-
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-};
-
 const getToday = () => {
   const now = new Date();
 
@@ -63,6 +51,7 @@ const BusinessReceivableLoanPaymentForm = ({
   loan = null,
   onClose,
   onReceived,
+  moduleScope,
 }) => {
   const [form, setForm] = useState({
     amount: '',
@@ -131,22 +120,12 @@ const BusinessReceivableLoanPaymentForm = ({
       try {
         setAccountsLoading(true);
 
-        const response = await axios.get(
-          `${BASE_URL}/api/accounts?filter=payment`,
-          getAuthConfig()
-        );
+        const loadedAccounts = await getValidPaymentAccounts({
+          forceRefresh: true,
+          moduleScope,
+        });
 
         if (!active) return;
-
-        const data = response.data;
-
-        const loadedAccounts = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.accounts)
-            ? data.accounts
-            : Array.isArray(data?.data)
-              ? data.data
-              : [];
 
         setAccounts(loadedAccounts);
       } catch (loadError) {
@@ -168,7 +147,7 @@ const BusinessReceivableLoanPaymentForm = ({
     return () => {
       active = false;
     };
-  }, [isOpen]);
+  }, [isOpen, moduleScope]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -273,7 +252,7 @@ const BusinessReceivableLoanPaymentForm = ({
         accountId: form.accountId,
         referenceNo: form.referenceNo,
         note: form.note,
-      });
+      }, { moduleScope });
 
       if (onReceived) {
         await onReceived(result);

@@ -6,6 +6,17 @@ const BusinessReceivableLoanPayment = require("../models/BusinessReceivableLoanP
 
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
+const {
+  applyBusinessValueScopeFilter,
+  getControllerStatusCode,
+  getScopedBusinessValueAccountConfig,
+  getScopedBusinessValueOrigin,
+  requireBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+} = require("../utils/moduleScope");
 
 const ALLOWED_BORROWER_TYPES = [
   "person",
@@ -44,20 +55,41 @@ const getJournalPaymentType = (paymentMethod) => {
   return undefined;
 };
 
-const getOrCreateLoanReceivableAccount = async (userId) => {
+const LOAN_RECEIVABLE_ACCOUNT_CONFIG = {
+  name: "Loan Receivable",
+  type: "Asset",
+  category: "receivable",
+  code: "LOAN_RECEIVABLE",
+  normalBalance: "debit",
+};
+
+const getOrCreateLoanReceivableAccount = async (userId, moduleScope) => {
+  const config = getScopedBusinessValueAccountConfig(
+    LOAN_RECEIVABLE_ACCOUNT_CONFIG,
+    moduleScope,
+  );
+  const query = {
+    userId,
+    code: config.code,
+  };
+
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    query.moduleScope = MODULE_SCOPES.TRAVEL;
+  } else {
+    applyModuleScopeFilter(query, MODULE_SCOPES.TRADING);
+  }
+
   return Account.findOneAndUpdate(
-    {
-      userId,
-      code: "LOAN_RECEIVABLE",
-    },
+    query,
     {
       $setOnInsert: {
         userId,
-        name: "Loan Receivable",
-        type: "Asset",
-        category: "receivable",
-        code: "LOAN_RECEIVABLE",
-        normalBalance: "debit",
+        moduleScope: config.moduleScope,
+        name: config.name,
+        type: config.type,
+        category: config.category,
+        code: config.code,
+        normalBalance: config.normalBalance,
         openingBalance: 0,
         isSystem: true,
         isActive: true,
@@ -71,19 +103,28 @@ const getOrCreateLoanReceivableAccount = async (userId) => {
   );
 };
 
-const getPaymentAccount = async ({ userId, accountId, paymentMethod }) => {
+const getPaymentAccount = async ({
+  userId,
+  accountId,
+  paymentMethod,
+  moduleScope,
+}) => {
   if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
     return {
       error: "Please select a valid payment account",
     };
   }
 
-  const paymentAccount = await Account.findOne({
+  const query = {
     _id: accountId,
     userId,
     type: "Asset",
     isActive: { $ne: false },
-  });
+  };
+
+  applyModuleScopeFilter(query, moduleScope);
+
+  const paymentAccount = await Account.findOne(query);
 
   if (!paymentAccount) {
     return {
@@ -112,6 +153,7 @@ exports.createReceivableLoan = async (req, res) => {
 
   try {
     const userId = getBusinessUserId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
     const actorId = getActorId(req);
 
     if (!userId) {
@@ -207,6 +249,7 @@ exports.createReceivableLoan = async (req, res) => {
       userId,
       accountId,
       paymentMethod,
+      moduleScope,
     });
 
     if (paymentAccountResult.error) {
@@ -218,10 +261,14 @@ exports.createReceivableLoan = async (req, res) => {
 
     const paymentAccount = paymentAccountResult.account;
 
-    const receivableAccount = await getOrCreateLoanReceivableAccount(userId);
+    const receivableAccount = await getOrCreateLoanReceivableAccount(
+      userId,
+      moduleScope,
+    );
 
     createdLoan = await BusinessReceivableLoan.create({
       userId,
+      moduleScope,
 
       title: cleanTitle,
 
@@ -281,7 +328,10 @@ exports.createReceivableLoan = async (req, res) => {
 
       sourceType: "payment",
 
-      originModule: "business_receivable_loan",
+      originModule: getScopedBusinessValueOrigin(
+        "business_receivable_loan",
+        moduleScope,
+      ),
 
       referenceId: createdLoan._id,
 
@@ -299,6 +349,7 @@ exports.createReceivableLoan = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Business Receivable Loan Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
     try {
       if (createdJournal?._id) {
@@ -312,7 +363,7 @@ exports.createReceivableLoan = async (req, res) => {
       console.error("Receivable Loan Rollback Error:", rollbackError);
     }
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to create receivable loan",
       error: error.message,
@@ -325,6 +376,7 @@ exports.createReceivableLoan = async (req, res) => {
 exports.getReceivableLoans = async (req, res) => {
   try {
     const userId = getBusinessUserId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const {
       search = "",
@@ -339,6 +391,8 @@ exports.getReceivableLoans = async (req, res) => {
       userId,
       isDeleted: false,
     };
+
+    applyBusinessValueScopeFilter(filter, moduleScope);
 
     if (search.trim()) {
       const query = search.trim();
@@ -440,8 +494,9 @@ exports.getReceivableLoans = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Receivable Loans Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to load receivable loans",
       error: error.message,
@@ -454,6 +509,7 @@ exports.getReceivableLoans = async (req, res) => {
 exports.getReceivableLoanById = async (req, res) => {
   try {
     const userId = getBusinessUserId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const { id } = req.params;
 
@@ -464,11 +520,15 @@ exports.getReceivableLoanById = async (req, res) => {
       });
     }
 
-    const loan = await BusinessReceivableLoan.findOne({
+    const query = {
       _id: id,
       userId,
       isDeleted: false,
-    }).lean();
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const loan = await BusinessReceivableLoan.findOne(query).lean();
 
     if (!loan) {
       return res.status(404).json({
@@ -483,8 +543,9 @@ exports.getReceivableLoanById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Receivable Loan Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to load receivable loan",
       error: error.message,
@@ -499,6 +560,7 @@ exports.updateReceivableLoan = async (req, res) => {
     const userId = getBusinessUserId(req);
 
     const actorId = getActorId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const { id } = req.params;
 
@@ -509,11 +571,15 @@ exports.updateReceivableLoan = async (req, res) => {
       });
     }
 
-    const loan = await BusinessReceivableLoan.findOne({
+    const query = {
       _id: id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const loan = await BusinessReceivableLoan.findOne(query);
 
     if (!loan) {
       return res.status(404).json({
@@ -621,8 +687,9 @@ exports.updateReceivableLoan = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Receivable Loan Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to update receivable loan",
       error: error.message,
@@ -639,6 +706,7 @@ exports.deleteReceivableLoan = async (req, res) => {
     const userId = getBusinessUserId(req);
 
     const actorId = getActorId(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const { id } = req.params;
 
@@ -649,11 +717,15 @@ exports.deleteReceivableLoan = async (req, res) => {
       });
     }
 
-    const loan = await BusinessReceivableLoan.findOne({
+    const query = {
       _id: id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const loan = await BusinessReceivableLoan.findOne(query);
 
     if (!loan) {
       return res.status(404).json({
@@ -662,11 +734,16 @@ exports.deleteReceivableLoan = async (req, res) => {
       });
     }
 
-    const hasPaymentHistory = await BusinessReceivableLoanPayment.exists({
+    const paymentQuery = {
       userId,
       loanId: loan._id,
       isReversed: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(paymentQuery, moduleScope);
+
+    const hasPaymentHistory =
+      await BusinessReceivableLoanPayment.exists(paymentQuery);
 
     if (hasPaymentHistory) {
       return res.status(400).json({
@@ -679,7 +756,10 @@ exports.deleteReceivableLoan = async (req, res) => {
     const originalJournal = await JournalEntry.findOne({
       createdBy: userId,
       referenceId: loan._id,
-      originModule: "business_receivable_loan",
+      originModule: getScopedBusinessValueOrigin(
+        "business_receivable_loan",
+        moduleScope,
+      ),
       isDeleted: {
         $ne: true,
       },
@@ -720,7 +800,10 @@ exports.deleteReceivableLoan = async (req, res) => {
 
         sourceType: "reversal",
 
-        originModule: "business_receivable_loan_reversal",
+        originModule: getScopedBusinessValueOrigin(
+          "business_receivable_loan_reversal",
+          moduleScope,
+        ),
 
         referenceId: loan._id,
 
@@ -748,6 +831,7 @@ exports.deleteReceivableLoan = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete Receivable Loan Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
     if (reversalJournal?._id) {
       try {
@@ -757,7 +841,7 @@ exports.deleteReceivableLoan = async (req, res) => {
       }
     }
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: "Failed to delete receivable loan",
       error: error.message,

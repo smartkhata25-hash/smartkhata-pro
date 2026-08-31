@@ -70,7 +70,13 @@ const buildSupplierLedgerPrint = ({
 
         source:
           entry.sourceLabel ||
-          (entry.sourceType === "purchase_invoice"
+          (entry.sourceType === "travel_vendor_return"
+            ? "Travel Vendor Return/Credit"
+            : entry.sourceType === "travel_vendor_cost"
+            ? "Travel Vendor Cost"
+            : entry.sourceType === "travel_refund"
+              ? "Travel Vendor Recovery"
+              : entry.sourceType === "purchase_invoice"
             ? "Purchase Invoice"
             : entry.sourceType === "pay_bill"
               ? "Payment"

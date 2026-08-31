@@ -1,14 +1,67 @@
 const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
+const {
+  getTravelCustomerJournalFilter,
+} = require("../services/travel/travelAccountingMetricsService");
 
 // 🧾 Get Ledger for a Specific Customer (journal-based)
+
+const resolveCustomerSourceLabel = (entry) => {
+  if (entry.originModule === "travel_receive_payment" && entry.sourceType === "receive_payment") {
+    return "Travel Payment";
+  }
+
+  if (entry.originModule === "travel_invoice" && entry.sourceType === "receive_payment") {
+    return "Travel Invoice Payment";
+  }
+
+  if (entry.originModule === "travel_refund" && entry.sourceType === "refund_payment") {
+    return "Travel Refund Payment";
+  }
+
+  if (entry.sourceType === "travel_booking") {
+    return "Travel Invoice";
+  }
+
+  if (entry.sourceType === "travel_refund") {
+    return "Travel Refund";
+  }
+
+  return entry.sourceType === "sale_invoice"
+    ? entry.description?.includes("Discount")
+      ? "Discount"
+      : entry.description?.includes("Payment")
+        ? "Payment"
+        : "Sale Invoice"
+    : entry.sourceType === "opening_sale_invoice"
+      ? "Opening Balance"
+      : entry.sourceType === "receive_payment"
+        ? "Receive Payment"
+        : entry.sourceType === "receive_payment_discount"
+          ? "Receive Payment Discount"
+          : entry.sourceType === "refund_invoice"
+            ? "Refund Invoice"
+            : entry.sourceType === "opening_refund_invoice"
+              ? "Opening Balance"
+              : entry.sourceType === "purchase_invoice"
+                ? "Purchase Invoice"
+                : entry.sourceType === "opening_purchase_invoice"
+                  ? "Opening Balance"
+                  : entry.sourceType === "purchase_return"
+                    ? "Purchase Return"
+                    : entry.sourceType === "opening_purchase_return"
+                      ? "Opening Balance"
+                      : entry.sourceType === "pay_bill"
+                        ? "Pay Bill"
+                        : "-";
+};
 
 const getCustomerLedger = async (req, res) => {
   try {
     const { customerId } = req.params;
 
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, moduleScope = "" } = req.query;
 
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
@@ -37,6 +90,8 @@ const getCustomerLedger = async (req, res) => {
     const accountId = account.toString();
 
     const objectId = new mongoose.Types.ObjectId(accountId);
+    const travelJournalFilter =
+      moduleScope === "travel" ? getTravelCustomerJournalFilter() : {};
 
     // ✅ Step 3: Build filter
     const matchFilter = {
@@ -44,6 +99,7 @@ const getCustomerLedger = async (req, res) => {
       isDeleted: false,
       sourceType: { $ne: "reversal" },
       "lines.account": objectId,
+      ...travelJournalFilter,
     };
 
     if (startDate && endDate) {
@@ -78,6 +134,7 @@ const getCustomerLedger = async (req, res) => {
             isDeleted: false,
             sourceType: { $ne: "reversal" },
             "lines.account": objectId,
+            ...travelJournalFilter,
             date: {
               $lt: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
             },
@@ -127,34 +184,7 @@ const getCustomerLedger = async (req, res) => {
             description: entry.description || "",
             sourceType: entry.sourceType || "",
             originModule: entry.originModule || "",
-            sourceLabel:
-              entry.sourceType === "sale_invoice"
-                ? entry.description?.includes("Discount")
-                  ? "Discount"
-                  : entry.description?.includes("Payment")
-                    ? "Payment"
-                    : "Sale Invoice"
-                : entry.sourceType === "opening_sale_invoice"
-                  ? "Opening Balance"
-                  : entry.sourceType === "receive_payment"
-                    ? "Receive Payment"
-                    : entry.sourceType === "receive_payment_discount"
-                      ? "Receive Payment Discount"
-                      : entry.sourceType === "refund_invoice"
-                        ? "Refund Invoice"
-                        : entry.sourceType === "opening_refund_invoice"
-                          ? "Opening Balance"
-                          : entry.sourceType === "purchase_invoice"
-                            ? "Purchase Invoice"
-                            : entry.sourceType === "opening_purchase_invoice"
-                              ? "Opening Balance"
-                              : entry.sourceType === "purchase_return"
-                                ? "Purchase Return"
-                                : entry.sourceType === "opening_purchase_return"
-                                  ? "Opening Balance"
-                                  : entry.sourceType === "pay_bill"
-                                    ? "Pay Bill"
-                                    : "-",
+            sourceLabel: resolveCustomerSourceLabel(entry),
             debit,
             credit,
 

@@ -17,8 +17,11 @@ import BusinessReceivableLoanPaymentForm from '../components/businessValue/Busin
 import BusinessReceivableLoanPaymentHistory from '../components/businessValue/BusinessReceivableLoanPaymentHistory';
 
 import {
+  BUSINESS_VALUE_MODULE_SCOPES,
   BUSINESS_VALUE_PRESETS,
   DEFAULT_COMPLETE_COMPONENTS,
+  TRAVEL_BUSINESS_VALUE_COMPONENTS,
+  TRAVEL_DEFAULT_COMPLETE_COMPONENTS,
   fetchBusinessValue,
   getPresetComponents,
 } from '../services/businessValueService';
@@ -47,7 +50,46 @@ const TABS = {
   LIABILITIES: 'liabilities',
 };
 
-const BusinessValuePage = () => {
+const TRAVEL_PRESET_OPTIONS = [
+  {
+    key: BUSINESS_VALUE_PRESETS.STOCK_ASSETS,
+    labelKey: 'businessValue.assets',
+    icon: 'BA',
+  },
+  {
+    key: BUSINESS_VALUE_PRESETS.OPERATIONAL,
+    labelKey: 'businessValue.presetOperational',
+    icon: 'OP',
+  },
+  {
+    key: BUSINESS_VALUE_PRESETS.COMPLETE,
+    labelKey: 'businessValue.presetComplete',
+    icon: 'BV',
+  },
+  {
+    key: BUSINESS_VALUE_PRESETS.CUSTOM,
+    labelKey: 'businessValue.presetCustom',
+    icon: 'CS',
+  },
+];
+
+const BusinessValuePage = ({ moduleScope = '' }) => {
+  const isTravelScope = moduleScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL;
+  const serviceScope = useMemo(
+    () =>
+      isTravelScope
+        ? {
+            moduleScope: BUSINESS_VALUE_MODULE_SCOPES.TRAVEL,
+          }
+        : {},
+    [isTravelScope]
+  );
+  const defaultCompleteComponents = isTravelScope
+    ? TRAVEL_DEFAULT_COMPLETE_COMPONENTS
+    : DEFAULT_COMPLETE_COMPONENTS;
+  const availableComponentKeys = isTravelScope ? TRAVEL_BUSINESS_VALUE_COMPONENTS : null;
+  const presetOptions = isTravelScope ? TRAVEL_PRESET_OPTIONS : undefined;
+
   const canViewBusinessValue = hasPermission('business_value.view');
   const canViewAssets = hasPermission('business_assets.view');
   const canViewLiabilities = hasPermission('business_liabilities.view');
@@ -58,11 +100,11 @@ const BusinessValuePage = () => {
 
   const [preset, setPreset] = useState(BUSINESS_VALUE_PRESETS.COMPLETE);
 
-  const [selectedComponents, setSelectedComponents] = useState(DEFAULT_COMPLETE_COMPONENTS);
+  const [selectedComponents, setSelectedComponents] = useState(defaultCompleteComponents);
 
   const [appliedPreset, setAppliedPreset] = useState(BUSINESS_VALUE_PRESETS.COMPLETE);
 
-  const [appliedComponents, setAppliedComponents] = useState(DEFAULT_COMPLETE_COMPONENTS);
+  const [appliedComponents, setAppliedComponents] = useState(defaultCompleteComponents);
 
   const [businessValueData, setBusinessValueData] = useState(null);
 
@@ -156,6 +198,7 @@ const BusinessValuePage = () => {
         const result = await fetchBusinessValue({
           preset: nextPreset,
           components: nextComponents,
+          ...serviceScope,
         });
 
         setBusinessValueData(result);
@@ -167,7 +210,7 @@ const BusinessValuePage = () => {
         }
       }
     },
-    [appliedComponents, appliedPreset, canViewBusinessValue]
+    [appliedComponents, appliedPreset, canViewBusinessValue, serviceScope]
   );
 
   const loadAssets = useCallback(
@@ -183,6 +226,7 @@ const BusinessValuePage = () => {
           includeInactive: true,
           page: 1,
           limit: 500,
+          ...serviceScope,
         });
 
         setAssets(result.assets || []);
@@ -194,7 +238,7 @@ const BusinessValuePage = () => {
         }
       }
     },
-    [canViewAssets]
+    [canViewAssets, serviceScope]
   );
 
   const loadCategories = useCallback(async () => {
@@ -203,25 +247,26 @@ const BusinessValuePage = () => {
     try {
       const result = await fetchBusinessAssetCategories({
         includeInactive: true,
+        ...serviceScope,
       });
 
       setCategories(sortBusinessAssetCategories(result.categories || []));
     } catch (error) {
       setPageError(error.message || t('businessValue.assetCategoriesLoadFailed'));
     }
-  }, [canViewAssets]);
+  }, [canViewAssets, serviceScope]);
 
   const loadAssetTitles = useCallback(async () => {
     if (!canViewAssets) return;
 
     try {
-      const result = await fetchAssetTitles();
+      const result = await fetchAssetTitles(serviceScope);
 
       setAssetTitles(result.titles || []);
     } catch (error) {
       setPageError(error.message || t('businessValue.assetTitlesLoadFailed'));
     }
-  }, [canViewAssets]);
+  }, [canViewAssets, serviceScope]);
 
   const loadReceivableLoans = useCallback(
     async ({ showLoader = true } = {}) => {
@@ -236,6 +281,7 @@ const BusinessValuePage = () => {
           includeClosed: true,
           page: 1,
           limit: 500,
+          ...serviceScope,
         });
 
         setReceivableLoans(result.loans || []);
@@ -247,7 +293,7 @@ const BusinessValuePage = () => {
         }
       }
     },
-    [canViewReceivableLoans]
+    [canViewReceivableLoans, serviceScope]
   );
 
   const loadLiabilities = useCallback(
@@ -263,6 +309,7 @@ const BusinessValuePage = () => {
           includeClosed: true,
           page: 1,
           limit: 500,
+          ...serviceScope,
         });
 
         setLiabilities(result.liabilities || []);
@@ -274,20 +321,20 @@ const BusinessValuePage = () => {
         }
       }
     },
-    [canViewLiabilities]
+    [canViewLiabilities, serviceScope]
   );
 
   const loadLiabilityTitles = useCallback(async () => {
     if (!canViewLiabilities) return;
 
     try {
-      const result = await fetchLiabilityTitles();
+      const result = await fetchLiabilityTitles(serviceScope);
 
       setLiabilityTitles(result.titles || []);
     } catch (error) {
       setPageError(error.message || t('businessValue.liabilityTitlesLoadFailed'));
     }
-  }, [canViewLiabilities]);
+  }, [canViewLiabilities, serviceScope]);
 
   const loadInitialData = useCallback(async () => {
     setPageError('');
@@ -298,7 +345,7 @@ const BusinessValuePage = () => {
       tasks.push(
         loadBusinessValue({
           nextPreset: BUSINESS_VALUE_PRESETS.COMPLETE,
-          nextComponents: DEFAULT_COMPLETE_COMPONENTS,
+          nextComponents: defaultCompleteComponents,
         })
       );
     }
@@ -331,6 +378,7 @@ const BusinessValuePage = () => {
     loadCategories,
     loadLiabilities,
     loadLiabilityTitles,
+    defaultCompleteComponents,
   ]);
 
   useEffect(() => {
@@ -344,7 +392,7 @@ const BusinessValuePage = () => {
       return;
     }
 
-    setSelectedComponents(getPresetComponents(nextPreset));
+    setSelectedComponents(getPresetComponents(nextPreset, serviceScope));
   };
 
   const handleComponentsChange = (nextComponents) => {
@@ -549,6 +597,8 @@ const BusinessValuePage = () => {
                   preset={preset}
                   selectedComponents={selectedComponents}
                   loading={summaryLoading}
+                  availableComponentKeys={availableComponentKeys}
+                  presetOptions={presetOptions}
                   onPresetChange={handlePresetChange}
                   onComponentsChange={handleComponentsChange}
                   onApply={handleApplyFilters}
@@ -590,6 +640,7 @@ const BusinessValuePage = () => {
             onAdd={openNewAssetForm}
             onEdit={openEditAssetForm}
             onDeleted={handleAssetDeleted}
+            moduleScope={serviceScope.moduleScope}
           />
         )}
 
@@ -602,6 +653,7 @@ const BusinessValuePage = () => {
             onReceive={openReceivableLoanPayment}
             onHistory={openReceivableLoanPaymentHistory}
             onDeleted={handleReceivableLoanDeleted}
+            moduleScope={serviceScope.moduleScope}
           />
         )}
 
@@ -614,6 +666,7 @@ const BusinessValuePage = () => {
             onDeleted={handleLiabilityDeleted}
             onPay={openPaymentForm}
             onHistory={openPaymentHistory}
+            moduleScope={serviceScope.moduleScope}
           />
         )}
       </div>
@@ -632,6 +685,7 @@ const BusinessValuePage = () => {
           setAssetFormOpen(false);
           setCategoryManagerOpen(true);
         }}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessLiabilityForm
@@ -643,6 +697,7 @@ const BusinessValuePage = () => {
           setSelectedLiability(null);
         }}
         onSaved={handleLiabilitySaved}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessLiabilityPaymentForm
@@ -653,6 +708,7 @@ const BusinessValuePage = () => {
           setSelectedLiability(null);
         }}
         onSaved={handleLiabilitySaved}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessLiabilityPaymentHistory
@@ -663,6 +719,7 @@ const BusinessValuePage = () => {
           setSelectedLiability(null);
         }}
         onChanged={handleLiabilitySaved}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessReceivableLoanForm
@@ -673,6 +730,7 @@ const BusinessValuePage = () => {
           setSelectedReceivableLoan(null);
         }}
         onSaved={handleReceivableLoanChanged}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessReceivableLoanPaymentForm
@@ -683,6 +741,7 @@ const BusinessValuePage = () => {
           setSelectedReceivableLoan(null);
         }}
         onReceived={handleReceivableLoanChanged}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <BusinessReceivableLoanPaymentHistory
@@ -693,12 +752,14 @@ const BusinessValuePage = () => {
           setSelectedReceivableLoan(null);
         }}
         onChanged={handleReceivableLoanChanged}
+        moduleScope={serviceScope.moduleScope}
       />
 
       <AssetCategoryManager
         isOpen={categoryManagerOpen}
         onClose={() => setCategoryManagerOpen(false)}
         onChanged={handleCategoriesChanged}
+        moduleScope={serviceScope.moduleScope}
       />
     </div>
   );

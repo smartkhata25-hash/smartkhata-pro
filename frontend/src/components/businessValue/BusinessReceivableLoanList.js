@@ -19,6 +19,7 @@ const BusinessReceivableLoanList = ({
   onReceive,
   onHistory,
   onDeleted,
+  moduleScope,
 }) => {
   const canCreate = hasPermission('business_receivable_loans.create');
   const canEdit = hasPermission('business_receivable_loans.edit');
@@ -93,7 +94,7 @@ const BusinessReceivableLoanList = ({
     try {
       setDeletingId(loan._id);
 
-      await deleteBusinessReceivableLoan(loan._id);
+      await deleteBusinessReceivableLoan(loan._id, { moduleScope });
 
       if (onDeleted) {
         await onDeleted(loan._id);

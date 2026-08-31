@@ -25,6 +25,34 @@ app.use("/api/customers", require("./routes/customerRoutes"));
 app.use("/api/customer-ledger", require("./routes/ledgerRoutes"));
 app.use("/api/suppliers", require("./routes/supplierRoutes"));
 app.use("/api/parties", require("./routes/partyRoutes"));
+app.use("/api/travel/travelers", require("./routes/travelTravelerRoutes"));
+app.use(
+  "/api/travel/service-categories",
+  require("./routes/travelServiceCategoryRoutes"),
+);
+app.use("/api/travel/services", require("./routes/travelServiceRoutes"));
+app.use("/api/travel/hotels", require("./routes/travelHotelRoutes"));
+
+app.use("/api/travel/airlines", require("./routes/travelAirlineRoutes"));
+
+app.use("/api/travel/airports", require("./routes/travelAirportRoutes"));
+
+app.use(
+  "/api/travel/currency-settings",
+
+  require("./routes/travelCurrencyRoutes"),
+);
+app.use("/api", require("./routes/travelDashboardRoutes"));
+app.use("/api/travel/bookings", require("./routes/travelBookingRoutes"));
+app.use("/api/travel/print", require("./routes/travelPrintRoutes"));
+app.use("/api/travel/refunds", require("./routes/travelRefundRoutes"));
+app.use("/api/travel/payments", require("./routes/travelPaymentRoutes"));
+app.use("/api/travel/reminders", require("./routes/travelReminderRoutes"));
+app.use("/api/travel/reports", require("./routes/travelReportRoutes"));
+app.use(
+  "/api/travel/vendor-returns",
+  require("./routes/travelVendorReturnRoutes"),
+);
 app.use("/api/party-ledger", require("./routes/partyLedgerRoutes"));
 app.use("/api/aging", require("./routes/agingRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
@@ -83,6 +111,7 @@ app.use("/api/activities", require("./routes/activityRoutes"));
 
 app.use("/api", require("./routes/salesHistoryRoutes"));
 app.use("/api/print-settings", require("./routes/printSettingRoutes"));
+app.use("/api/whatsapp-templates", require("./routes/whatsAppTemplateRoutes"));
 app.use("/api/print", require("./routes/printRoutes"));
 app.use("/api/print", require("./routes/ledgerPrintRoutes"));
 

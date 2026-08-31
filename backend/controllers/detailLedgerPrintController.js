@@ -7,6 +7,9 @@ const RefundInvoice = require("../models/RefundInvoice");
 
 const buildCustomerDetailLedgerPrint = require("../services/customerDetailLedgerPrintBuilder");
 const generateCustomerDetailLedgerHTML = require("../templates/customerDetailLedgerTemplate");
+const {
+  getTravelCustomerJournalFilter,
+} = require("../services/travel/travelAccountingMetricsService");
 
 const { generatePdfFromHtml } = require("../services/pdfService");
 
@@ -34,8 +37,26 @@ const getEndOfDay = (value) => {
   return date;
 };
 
-const resolveSourceLabel = (sourceType) => {
+const resolveSourceLabel = (sourceType, originModule = "") => {
+  if (originModule === "travel_receive_payment" && sourceType === "receive_payment") {
+    return "Travel Payment";
+  }
+
+  if (originModule === "travel_invoice" && sourceType === "receive_payment") {
+    return "Travel Invoice Payment";
+  }
+
+  if (originModule === "travel_refund" && sourceType === "refund_payment") {
+    return "Travel Refund Payment";
+  }
+
   switch (sourceType) {
+    case "travel_booking":
+      return "Travel Invoice";
+
+    case "travel_refund":
+      return "Travel Refund";
+
     case "opening_sale_invoice":
       return "Opening Balance";
 
@@ -67,6 +88,7 @@ const fetchCustomerDetailedLedgerData = async ({
   userId,
   startDate,
   endDate,
+  moduleScope = "",
 }) => {
   if (!mongoose.Types.ObjectId.isValid(customerId)) {
     throw new Error("Invalid customer ID");
@@ -99,6 +121,8 @@ const fetchCustomerDetailedLedgerData = async ({
 
   const start = getStartOfDay(startDate);
   const end = getEndOfDay(endDate);
+  const travelJournalFilter =
+    moduleScope === "travel" ? getTravelCustomerJournalFilter() : {};
 
   let openingBalance = 0;
 
@@ -111,6 +135,7 @@ const fetchCustomerDetailedLedgerData = async ({
           isDeleted: false,
           sourceType: { $ne: "reversal" },
           "lines.account": accountObjectId,
+          ...travelJournalFilter,
           date: {
             $lt: start,
           },
@@ -153,6 +178,7 @@ const fetchCustomerDetailedLedgerData = async ({
     isDeleted: false,
     sourceType: { $ne: "reversal" },
     "lines.account": accountObjectId,
+    ...travelJournalFilter,
   };
 
   if (start || end) {
@@ -175,6 +201,7 @@ const fetchCustomerDetailedLedgerData = async ({
         "billNo",
         "description",
         "sourceType",
+        "originModule",
         "lines.account",
         "lines.type",
         "lines.amount",
@@ -239,7 +266,7 @@ const fetchCustomerDetailedLedgerData = async ({
 
       sourceType: entry.sourceType || "",
 
-      sourceLabel: resolveSourceLabel(entry.sourceType),
+      sourceLabel: resolveSourceLabel(entry.sourceType, entry.originModule),
 
       debit,
 
@@ -362,13 +389,14 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
 
     const { customerId } = req.params;
 
-    const { startDate, endDate, size, lang } = req.query;
+    const { startDate, endDate, size, lang, moduleScope = "" } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
       customerId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildCustomerDetailLedgerPrint({
@@ -401,13 +429,14 @@ const generateCustomerDetailLedgerPdf = async (req, res) => {
 
     const { customerId } = req.params;
 
-    const { startDate, endDate, size, lang } = req.query;
+    const { startDate, endDate, size, lang, moduleScope = "" } = req.query;
 
     const rawData = await fetchCustomerDetailedLedgerData({
       customerId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildCustomerDetailLedgerPrint({

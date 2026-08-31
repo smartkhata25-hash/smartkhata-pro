@@ -9,10 +9,24 @@ const RefundInvoice = require("../models/RefundInvoice");
 const Counter = require("../models/Counter");
 const mongoose = require("mongoose");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  getTravelCustomerBalanceMap,
+  getTravelCustomerJournalFilter,
+  roundMoney,
+} = require("../services/travel/travelAccountingMetricsService");
 
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
+
+const hasOwn = (object, key) =>
+  Object.prototype.hasOwnProperty.call(object || {}, key);
 
 const getCustomerDataVersion = async (req, res) => {
   try {
@@ -27,10 +41,15 @@ const getCustomerDataVersion = async (req, res) => {
 
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
-    const [latestCustomer, latestJournal] = await Promise.all([
-      Customer.findOne({
+    const customerVersionQuery = applyModuleScopeFilter(
+      {
         createdBy: objectUserId,
-      })
+      },
+      getRequestedModuleScope(req.query, MODULE_SCOPES.TRADING),
+    );
+
+    const [latestCustomer, latestJournal] = await Promise.all([
+      Customer.findOne(customerVersionQuery)
         .sort({ updatedAt: -1 })
         .select("updatedAt")
         .lean(),
@@ -79,7 +98,8 @@ const getCustomers = async (req, res) => {
 
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
-    const { search = "", status = "active" } = req.query;
+    const requestQuery = req.scopedQuery || req.query || {};
+    const { search = "", status = "active", light = "" } = requestQuery;
 
     // ✅ Safe status value
     const safeStatus = ["active", "hidden", "all"].includes(status)
@@ -89,6 +109,11 @@ const getCustomers = async (req, res) => {
     const query = {
       createdBy: objectUserId,
     };
+
+    applyModuleScopeFilter(
+      query,
+      getRequestedModuleScope(requestQuery, MODULE_SCOPES.TRADING),
+    );
 
     // ✅ Active / Hidden / All filter
     if (safeStatus === "active") {
@@ -107,16 +132,30 @@ const getCustomers = async (req, res) => {
       };
     }
 
-    const customers = await Customer.find(query)
-      .select(
-        "name email phone address creditLimit type isActive hiddenReason openingBalance account createdBy createdAt updatedAt",
-      )
-      .populate("account", "_id name code type category normalBalance isActive")
+    const isLightRequest = light === "true";
+    const customerSelect = isLightRequest
+      ? "name email phone address type moduleScope isActive createdAt updatedAt"
+      : "name email phone address creditLimit type moduleScope isActive hiddenReason openingBalance account createdBy createdAt updatedAt";
+
+    let customersQuery = Customer.find(query).select(customerSelect);
+
+    if (!isLightRequest) {
+      customersQuery = customersQuery.populate(
+        "account",
+        "_id name code type category normalBalance isActive",
+      );
+    }
+
+    const customers = await customersQuery
       .sort({ createdAt: -1 })
       .lean();
 
     if (customers.length === 0) {
       return res.json([]);
+    }
+
+    if (isLightRequest) {
+      return res.json(customers);
     }
 
     // ✅ Customer account IDs collect
@@ -227,11 +266,25 @@ const getCustomers = async (req, res) => {
 const addCustomer = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const { name, email, phone, address, type, openingBalance } = req.body;
+    const { name, email, phone, address, type, openingBalance, moduleScope } =
+      req.body;
+
+    const cleanName = String(name || "").trim();
+
+    if (!cleanName) {
+      return res.status(400).json({
+        message: "Customer name is required",
+      });
+    }
+
+    const safeModuleScope = normalizeModuleScope(
+      moduleScope,
+      MODULE_SCOPES.TRADING,
+    );
 
     // 🔍 Check duplicate active customer (same name)
     const existingCustomer = await Customer.findOne({
-      name: new RegExp(`^${name}$`, "i"),
+      name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
       createdBy: userId,
       isActive: true,
     });
@@ -264,7 +317,7 @@ const addCustomer = async (req, res) => {
     // 🧾 Create linked account
     const account = await Account.create({
       userId,
-      name: `Customer: ${name}`,
+      name: `Customer: ${cleanName}`,
       type: "Asset",
       normalBalance: "debit",
       code: newCode,
@@ -276,11 +329,12 @@ const addCustomer = async (req, res) => {
 
     // 👤 Create customer
     const customer = new Customer({
-      name,
+      name: cleanName,
       email,
       phone,
       address,
       type,
+      moduleScope: safeModuleScope,
       openingBalance: Number(openingBalance) || 0,
       account: account._id,
       createdBy: userId,
@@ -435,6 +489,7 @@ const addCustomer = async (req, res) => {
         email: customer.email,
         address: customer.address,
         type: customer.type,
+        moduleScope: customer.moduleScope,
         openingBalance: customer.openingBalance,
       },
     });
@@ -451,7 +506,8 @@ const updateCustomer = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const customerId = req.params.id;
 
-    const { name, email, phone, address, type, openingBalance } = req.body;
+    const { name, email, phone, address, type, openingBalance, moduleScope } =
+      req.body;
     // 1️⃣ جس customer کو edit کر رہے ہیں، وہ نکالو
     const currentCustomer = await Customer.findOne({
       _id: customerId,
@@ -508,6 +564,14 @@ const updateCustomer = async (req, res) => {
     currentCustomer.phone = phone || currentCustomer.phone;
     currentCustomer.address = address || currentCustomer.address;
     currentCustomer.type = type || currentCustomer.type;
+
+    if (hasOwn(req.body, "moduleScope")) {
+      currentCustomer.moduleScope = normalizeModuleScope(
+        moduleScope,
+        currentCustomer.moduleScope || MODULE_SCOPES.TRADING,
+      );
+    }
+
     currentCustomer.openingBalance = Number(openingBalance) || 0;
 
     const beforeUpdate = {
@@ -516,6 +580,7 @@ const updateCustomer = async (req, res) => {
       email: currentCustomer.email,
       address: currentCustomer.address,
       type: currentCustomer.type,
+      moduleScope: currentCustomer.moduleScope,
       openingBalance: currentCustomer.openingBalance,
     };
 
@@ -536,6 +601,7 @@ const updateCustomer = async (req, res) => {
         email: currentCustomer.email,
         address: currentCustomer.address,
         type: currentCustomer.type,
+        moduleScope: currentCustomer.moduleScope,
         openingBalance: currentCustomer.openingBalance,
       },
     });
@@ -1112,7 +1178,7 @@ const getCustomerDetailedLedger = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { id: customerId } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, moduleScope = "" } = req.query;
 
     if (
       !userId ||
@@ -1146,6 +1212,10 @@ const getCustomerDetailedLedger = async (req, res) => {
         : new mongoose.Types.ObjectId(customer.account);
 
     const accountId = accountObjectId.toString();
+    const travelJournalFilter =
+      moduleScope === "travel" ? getTravelCustomerJournalFilter() : {};
+    const reversalVisibilityFilter =
+      moduleScope === "travel" ? {} : { sourceType: { $ne: "reversal" } };
 
     let openingBalance = 0;
 
@@ -1166,8 +1236,9 @@ const getCustomerDetailedLedger = async (req, res) => {
             createdBy: userObjectId,
             customerId: customerObjectId,
             isDeleted: false,
-            sourceType: { $ne: "reversal" },
+            ...reversalVisibilityFilter,
             "lines.account": accountObjectId,
+            ...travelJournalFilter,
             date: {
               $lt: start,
             },
@@ -1208,8 +1279,9 @@ const getCustomerDetailedLedger = async (req, res) => {
       createdBy: userObjectId,
       customerId: customerObjectId,
       isDeleted: false,
-      sourceType: { $ne: "reversal" },
+      ...reversalVisibilityFilter,
       "lines.account": accountObjectId,
+      ...travelJournalFilter,
     };
 
     if (startDate || endDate) {
@@ -1246,7 +1318,7 @@ const getCustomerDetailedLedger = async (req, res) => {
 
     const journals = await JournalEntry.find(match)
       .select(
-        "date time billNo description sourceType lines invoiceId referenceId",
+        "date time billNo description sourceType originModule lines invoiceId referenceId",
       )
       .sort({
         date: 1,
@@ -1305,6 +1377,24 @@ const getCustomerDetailedLedger = async (req, res) => {
         time: entry.time || "",
         billNo: entry.billNo || "",
         sourceType: entry.sourceType || "",
+        originModule: entry.originModule || "",
+        sourceLabel:
+          entry.originModule === "travel_receive_payment" &&
+          entry.sourceType === "receive_payment"
+            ? "Travel Payment"
+            : entry.originModule === "travel_invoice" &&
+          entry.sourceType === "receive_payment"
+            ? "Travel Invoice Payment"
+            : entry.originModule === "travel_refund" &&
+                entry.sourceType === "refund_payment"
+              ? "Travel Refund Payment"
+              : entry.sourceType === "reversal"
+                ? "Travel Reversal"
+              : entry.sourceType === "travel_booking"
+                ? "Travel Invoice"
+                : entry.sourceType === "travel_refund"
+                  ? "Travel Refund"
+                  : "",
         description: entry.description || "",
         debit,
         credit,
@@ -1433,10 +1523,235 @@ const getCustomerDetailedLedger = async (req, res) => {
   }
 };
 
+const getTravelCustomers = async (req, res) => {
+  if (req.query?.includeBalance === "true") {
+    try {
+      const userId = req.user?.id || req.userId;
+
+      if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+
+      const objectUserId = new mongoose.Types.ObjectId(userId);
+      const { search = "", status = "active", limit = 500 } = req.query || {};
+      const query = {
+        createdBy: objectUserId,
+      };
+
+      applyModuleScopeFilter(query, MODULE_SCOPES.TRAVEL);
+
+      if (status === "active") {
+        query.isActive = true;
+      } else if (status === "hidden") {
+        query.isActive = false;
+      }
+
+      const cleanSearch = String(search || "").trim();
+
+      if (cleanSearch) {
+        query.name = {
+          $regex: escapeRegex(cleanSearch),
+          $options: "i",
+        };
+      }
+
+      const limitNumber = Math.min(Math.max(Number(limit) || 500, 1), 1000);
+      const customers = await Customer.find(query)
+        .select("name email phone address type moduleScope isActive account createdAt updatedAt")
+        .populate("account", "_id name code type category normalBalance isActive")
+        .sort({ name: 1, createdAt: -1 })
+        .limit(limitNumber)
+        .lean();
+
+      const balanceMap = await getTravelCustomerBalanceMap(userId, customers);
+
+      return res.json(
+        customers.map((customer) => {
+          const accountId = String(customer.account?._id || customer.account || "");
+          const balance = roundMoney(balanceMap.get(accountId) || 0);
+
+          return {
+            ...customer,
+            balance,
+            currentReceivable: Math.max(balance, 0),
+            customerCredit: Math.max(-balance, 0),
+          };
+        }),
+      );
+    } catch (error) {
+      console.error("Travel customer fetch failed:", error);
+
+      return res.status(500).json({
+        message: "Travel customer fetch failed",
+        error: error.message,
+      });
+    }
+  }
+
+  const scopedReq = Object.create(req);
+
+  scopedReq.scopedQuery = {
+    ...(req.query || {}),
+    moduleScope: MODULE_SCOPES.TRAVEL,
+    light: "true",
+    status: req.query?.status || "active",
+  };
+
+  return getCustomers(scopedReq, res);
+};
+
+const addTravelCustomer = async (req, res) => {
+  const requestedScope = normalizeModuleScope(
+    req.body?.moduleScope,
+    MODULE_SCOPES.TRAVEL,
+  );
+
+  req.body = {
+    ...req.body,
+    moduleScope:
+      requestedScope === MODULE_SCOPES.TRADING
+        ? MODULE_SCOPES.TRAVEL
+        : requestedScope,
+    openingBalance: 0,
+  };
+
+  return addCustomer(req, res);
+};
+
+const updateTravelCustomer = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const customerId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(customerId))) {
+      return res.status(400).json({ message: "Invalid customer ID" });
+    }
+
+    const customer = await Customer.findOne(
+      applyModuleScopeFilter(
+        {
+          _id: customerId,
+          createdBy: userId,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    ).select("_id moduleScope");
+
+    if (!customer) {
+      return res.status(404).json({ message: "Travel customer not found" });
+    }
+
+    const requestedScope = normalizeModuleScope(
+      req.body?.moduleScope,
+      customer.moduleScope || MODULE_SCOPES.TRAVEL,
+    );
+
+    req.body = {
+      ...req.body,
+      moduleScope:
+        requestedScope === MODULE_SCOPES.TRADING
+          ? MODULE_SCOPES.TRAVEL
+          : requestedScope,
+      openingBalance: 0,
+    };
+
+    return updateCustomer(req, res);
+  } catch (error) {
+    console.error("Travel customer update failed:", error);
+
+    return res.status(500).json({
+      message: "Travel customer update failed",
+      error: error.message,
+    });
+  }
+};
+
+const deleteTravelCustomer = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const actorId = req.actorId || userId;
+    const customerId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(customerId))) {
+      return res.status(400).json({ message: "Invalid customer ID" });
+    }
+
+    const customer = await Customer.findOne(
+      applyModuleScopeFilter(
+        {
+          _id: customerId,
+          createdBy: userId,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (!customer) {
+      return res.status(404).json({ message: "Travel customer not found" });
+    }
+
+    const before = customer.toObject();
+    const reason = String(req.body?.deleteReason || req.query?.reason || "").trim();
+
+    if (customer.moduleScope === MODULE_SCOPES.BOTH) {
+      customer.moduleScope = MODULE_SCOPES.TRADING;
+    } else {
+      customer.isActive = false;
+      customer.hiddenReason = "deleted";
+      customer.deletedAt = new Date();
+      customer.deletedBy = actorId;
+      customer.deleteReason = reason;
+    }
+
+    await customer.save();
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "travel.customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Travel customer ${customer.name}`,
+      description:
+        before.moduleScope === MODULE_SCOPES.BOTH
+          ? `${customer.name} removed from Travel`
+          : `${customer.name} archived from Travel`,
+      before,
+      after: {
+        isActive: customer.isActive,
+        moduleScope: customer.moduleScope,
+        hiddenReason: customer.hiddenReason,
+        deleteReason: customer.deleteReason,
+      },
+    });
+
+    return res.json({
+      message:
+        before.moduleScope === MODULE_SCOPES.BOTH
+          ? "Customer removed from Travel successfully"
+          : "Travel customer archived successfully",
+      customer,
+    });
+  } catch (error) {
+    console.error("Travel customer delete failed:", error);
+
+    return res.status(500).json({
+      message: "Travel customer delete failed",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getCustomers,
+  getTravelCustomers,
   getCustomerDataVersion,
   addCustomer,
+  addTravelCustomer,
+  updateTravelCustomer,
+  deleteTravelCustomer,
   updateCustomer,
   deleteCustomer,
   restoreCustomer,

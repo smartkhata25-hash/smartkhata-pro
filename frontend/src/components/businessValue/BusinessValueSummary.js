@@ -39,6 +39,12 @@ const CARD_CONFIG = [
     gradient: 'from-amber-500 via-orange-500 to-yellow-600',
   },
   {
+    key: BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+    titleKey: 'businessValue.receivableLoans',
+    icon: 'LR',
+    gradient: 'from-teal-600 via-cyan-500 to-blue-600',
+  },
+  {
     key: BUSINESS_VALUE_COMPONENTS.PAYABLES,
     titleKey: 'businessValue.payables',
     icon: '📤',
@@ -179,6 +185,12 @@ const getDetailText = (componentKey, details = {}) => {
   if (componentKey === BUSINESS_VALUE_COMPONENTS.RECEIVABLES) {
     return `${Number(details.totalAccounts || 0).toLocaleString()} ${t(
       'businessValue.accountsCount'
+    )}`;
+  }
+
+  if (componentKey === BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES) {
+    return `${Number(details.totalLoans || 0).toLocaleString()} ${t(
+      'businessValue.receivableLoans'
     )}`;
   }
 

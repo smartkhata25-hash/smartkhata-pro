@@ -11,7 +11,7 @@ const CashFlowPage = () => (
       justifyContent: 'center',
       alignItems: 'center',
       background: '#f4f4f4',
-      overflow: 'hidden', // ✅ scroll کو روکے گا
+      overflow: 'hidden',
     }}
   >
     <CashFlowChart />

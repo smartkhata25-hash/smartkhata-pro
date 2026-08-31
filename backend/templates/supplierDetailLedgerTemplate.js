@@ -19,6 +19,15 @@ const safeText = (value, fallback = "-") => {
 
 const getSourceLabel = (sourceType, fallback, lang) => {
   switch (sourceType) {
+    case "travel_vendor_return":
+      return fallback || "Travel Vendor Return/Credit";
+
+    case "travel_vendor_cost":
+      return fallback || "Travel Vendor Cost";
+
+    case "travel_refund":
+      return fallback || "Travel Vendor Recovery";
+
     case "opening_purchase_invoice":
       return t("ledger.openingBalance", lang);
 

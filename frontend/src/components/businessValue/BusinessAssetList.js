@@ -6,7 +6,14 @@ import { deleteBusinessAsset, formatAssetAmount } from '../../services/businessA
 
 import { hasPermission } from '../../utils/permissionHelper';
 
-const BusinessAssetList = ({ assets = [], loading = false, onEdit, onDeleted, onAdd }) => {
+const BusinessAssetList = ({
+  assets = [],
+  loading = false,
+  onEdit,
+  onDeleted,
+  onAdd,
+  moduleScope,
+}) => {
   const [deletingId, setDeletingId] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -68,7 +75,7 @@ const BusinessAssetList = ({ assets = [], loading = false, onEdit, onDeleted, on
     try {
       setDeletingId(asset._id);
 
-      await deleteBusinessAsset(asset._id);
+      await deleteBusinessAsset(asset._id, { moduleScope });
 
       if (onDeleted) {
         onDeleted(asset._id);

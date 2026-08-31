@@ -38,7 +38,14 @@ const LIABILITY_CATEGORIES = [
   },
 ];
 
-const BusinessLiabilityForm = ({ isOpen, liability = null, titles = [], onClose, onSaved }) => {
+const BusinessLiabilityForm = ({
+  isOpen,
+  liability = null,
+  titles = [],
+  onClose,
+  onSaved,
+  moduleScope,
+}) => {
   const [formData, setFormData] = useState(getEmptyBusinessLiability());
 
   const [saving, setSaving] = useState(false);
@@ -126,8 +133,8 @@ const BusinessLiabilityForm = ({ isOpen, liability = null, titles = [], onClose,
       };
 
       const result = isEditing
-        ? await updateBusinessLiability(liability._id, payload)
-        : await createBusinessLiability(payload);
+        ? await updateBusinessLiability(liability._id, payload, { moduleScope })
+        : await createBusinessLiability(payload, { moduleScope });
 
       if (onSaved) {
         onSaved(result.liability);

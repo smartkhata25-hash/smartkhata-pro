@@ -10,6 +10,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "OPENING_BALANCE",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "sales",
@@ -18,6 +19,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "SALES",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "sales discount",
@@ -26,8 +28,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "SALES_DISCOUNT",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "receive payment discount",
       type: "Expense",
@@ -35,6 +37,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "RECEIVE_PAYMENT_DISCOUNT",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "sales return",
@@ -43,6 +46,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "SALES_RETURN",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "purchase",
@@ -51,6 +55,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "PURCHASE",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "purchase discount",
@@ -59,6 +64,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "PURCHASE_DISCOUNT",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "purchase return",
@@ -67,6 +73,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "PURCHASE_RETURN",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "inventory",
@@ -75,6 +82,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "INVENTORY",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
     {
       name: "cogs",
@@ -83,10 +91,10 @@ const createBaseAccountsForUser = async (userId) => {
       code: "COGS",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
 
     // 🔒 LIABILITY ACCOUNTS
-
     {
       name: "Business Loan",
       type: "Liability",
@@ -94,8 +102,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "BUSINESS_LOAN",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Bank Loan",
       type: "Liability",
@@ -103,8 +111,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "BANK_LOAN",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Supplier Payable",
       type: "Liability",
@@ -112,8 +120,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "SUPPLIER_PAYABLE",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Credit Payable",
       type: "Liability",
@@ -121,8 +129,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "CREDIT_PAYABLE",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Tax Payable",
       type: "Liability",
@@ -130,8 +138,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "TAX_PAYABLE",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Other Liability",
       type: "Liability",
@@ -139,8 +147,8 @@ const createBaseAccountsForUser = async (userId) => {
       code: "OTHER_LIABILITY",
       normalBalance: "credit",
       isSystem: true,
+      moduleScope: "trading",
     },
-
     {
       name: "Loan Receivable",
       type: "Asset",
@@ -148,6 +156,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "LOAN_RECEIVABLE",
       normalBalance: "debit",
       isSystem: true,
+      moduleScope: "trading",
     },
 
     // 🔓 USER ACCOUNTS
@@ -158,6 +167,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "UTILITY_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Rent Expense",
@@ -166,6 +176,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "RENT_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Salary Expense",
@@ -174,6 +185,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "SALARY_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Transport Expense",
@@ -182,6 +194,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "TRANSPORT_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Marketing Expense",
@@ -190,6 +203,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "MARKETING_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Maintenance Expense",
@@ -198,6 +212,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "MAINTENANCE_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
     {
       name: "Other Expense",
@@ -206,7 +221,12 @@ const createBaseAccountsForUser = async (userId) => {
       code: "OTHER_EXP",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "trading",
     },
+
+    // 💳 SHARED PAYMENT ACCOUNTS
+    // ایک ہی account دونوں modules میں استعمال ہوگا،
+    // لیکن Trading اور Travel balance الگ calculate ہوگا۔
     {
       name: "HANDCASH",
       type: "Asset",
@@ -214,6 +234,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "HANDCASH",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "both",
     },
     {
       name: "BANK",
@@ -222,6 +243,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "BANK",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "both",
     },
     {
       name: "JAZZCASH",
@@ -230,6 +252,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "JAZZCASH",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "both",
     },
     {
       name: "EASYPAISA",
@@ -238,28 +261,39 @@ const createBaseAccountsForUser = async (userId) => {
       code: "EASYPAISA",
       normalBalance: "debit",
       isSystem: false,
+      moduleScope: "both",
     },
   ];
 
   for (const acc of baseAccounts) {
+    const isSharedPaymentAccount = acc.moduleScope === "both";
+
     await Account.findOneAndUpdate(
       {
-        userId: userId,
+        userId,
         code: acc.code,
       },
       {
         $setOnInsert: {
-          userId: userId,
+          userId,
           name: acc.name,
           type: acc.type,
           category: acc.category,
           code: acc.code,
           normalBalance: acc.normalBalance,
-          balance: 0,
           openingBalance: 0,
           isSystem: acc.isSystem,
           isActive: true,
         },
+
+        // Existing HANDCASH/BANK/EASYPAISA/JAZZCASH بھی درست ہو جائیں۔
+        ...(isSharedPaymentAccount
+          ? {
+              $set: {
+                moduleScope: "both",
+              },
+            }
+          : {}),
       },
       {
         upsert: true,

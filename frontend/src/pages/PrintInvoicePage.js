@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { useNavigate } from 'react-router-dom';
+import { sharePdfDocument } from '../utils/documentShare';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const PrintInvoicePage = () => {
@@ -11,6 +12,7 @@ const PrintInvoicePage = () => {
   const autoPrint = queryParams.get('autoprint') === 'true' || location.state?.autoPrint;
   const [html, setHtml] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -200,6 +202,67 @@ const PrintInvoicePage = () => {
           }`}
         >
           {pdfLoading ? `⏳ ${t('pdf.preparing')}` : `📄 ${t('pdf.download')}`}
+        </button>
+
+        <button
+          disabled={shareLoading}
+          onClick={async () => {
+            try {
+              setShareLoading(true);
+
+              const token = localStorage.getItem('token');
+              let pdfUrl = '';
+              let fetchOptions = {};
+
+              if (isPreview && location.state?.invoiceData) {
+                if (type === 'sale') {
+                  pdfUrl = `${API}/api/print/sale-pdf`;
+                }
+
+                if (type === 'refund') {
+                  pdfUrl = `${API}/api/print/sale-return-pdf`;
+                }
+
+                fetchOptions = {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(location.state.invoiceData),
+                };
+              } else if (type === 'sale') {
+                pdfUrl = `${API}/api/print/sale-pdf/${id}`;
+              } else if (type === 'refund') {
+                pdfUrl = `${API}/api/print/sale-return-pdf/${id}`;
+              }
+
+              if (!pdfUrl) {
+                throw new Error('PDF endpoint not found');
+              }
+
+              const billNo = location.state?.invoiceData?.billNo || id || 'Preview';
+              const filePrefix = type === 'refund' ? 'SaleReturn' : 'Invoice';
+              const fileName = `${filePrefix}-${billNo}.pdf`;
+
+              await sharePdfDocument({
+                pdfUrl,
+                token,
+                fetchOptions,
+                fileName,
+                title: fileName,
+                text: fileName,
+              });
+            } catch (err) {
+              alert(t('pdf.shareFailed'));
+            } finally {
+              setShareLoading(false);
+            }
+          }}
+          className={`px-5 py-2 text-white rounded shadow ${
+            shareLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-700'
+          }`}
+        >
+          {shareLoading ? `Preparing ${t('pdf.download')}` : t('pdf.share')}
         </button>
       </div>
 

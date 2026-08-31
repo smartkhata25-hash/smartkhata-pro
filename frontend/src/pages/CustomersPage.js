@@ -19,6 +19,7 @@ import CustomerLedgerHeader from '../components/CustomerLedgerHeader';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { sendWhatsAppReminder } from '../utils/whatsapp';
+import { fetchWhatsAppTemplate } from '../services/whatsAppTemplateService';
 import { FaWhatsapp } from 'react-icons/fa';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 
@@ -61,6 +62,7 @@ const CustomersPage = () => {
 
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [businessName, setBusinessName] = useState('');
+  const [whatsAppTemplate, setWhatsAppTemplate] = useState(null);
 
   const {
     state: pageMemory,
@@ -192,6 +194,12 @@ const CustomersPage = () => {
 
     fetchBusinessInfo();
   }, [token]);
+
+  useEffect(() => {
+    fetchWhatsAppTemplate('trading').then(setWhatsAppTemplate).catch(() => {
+      setWhatsAppTemplate(null);
+    });
+  }, []);
 
   // 📱 HANDLE RESPONSIVE
   useEffect(() => {
@@ -1032,6 +1040,7 @@ const CustomersPage = () => {
                                   balance: Number(customer.balance || 0).toFixed(2),
                                   businessName,
                                   lang: getCurrentLanguage(),
+                                  template: whatsAppTemplate,
                                 });
                               }}
                               style={{

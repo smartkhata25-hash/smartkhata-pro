@@ -30,6 +30,12 @@ const money = (value) => {
 
 const getSourceLabel = (sourceType, fallback, lang) => {
   switch (sourceType) {
+    case "travel_booking":
+      return fallback || "Travel Invoice";
+
+    case "travel_refund":
+      return fallback || "Travel Refund";
+
     case "opening_sale_invoice":
     case "opening_refund_invoice":
     case "opening_balance":

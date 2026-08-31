@@ -55,6 +55,7 @@ const BusinessReceivableLoanPaymentHistory = ({
   loan = null,
   onClose,
   onChanged,
+  moduleScope,
 }) => {
   const [historyData, setHistoryData] = useState(null);
 
@@ -84,7 +85,9 @@ const BusinessReceivableLoanPaymentHistory = ({
       setLoading(true);
       setError('');
 
-      const result = await fetchBusinessReceivableLoanPaymentHistory(loanId);
+      const result = await fetchBusinessReceivableLoanPaymentHistory(loanId, {
+        moduleScope,
+      });
 
       setHistoryData(result?.data || null);
     } catch (loadError) {
@@ -94,7 +97,7 @@ const BusinessReceivableLoanPaymentHistory = ({
     } finally {
       setLoading(false);
     }
-  }, [loanId]);
+  }, [loanId, moduleScope]);
 
   useEffect(() => {
     if (!isOpen || !loanId) {
@@ -129,7 +132,9 @@ const BusinessReceivableLoanPaymentHistory = ({
       setReversingId(payment._id);
       setError('');
 
-      await reverseBusinessReceivableLoanPayment(loanId, payment._id);
+      await reverseBusinessReceivableLoanPayment(loanId, payment._id, {
+        moduleScope,
+      });
 
       await loadHistory();
 

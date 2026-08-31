@@ -1,11 +1,17 @@
 import axios from 'axios';
 const API = process.env.REACT_APP_API_BASE_URL;
-export const getSupplierDetailedLedger = async (supplierId, startDate, endDate) => {
+export const getSupplierDetailedLedger = async (
+  supplierId,
+  startDate,
+  endDate,
+  options = {}
+) => {
   const token = localStorage.getItem('token');
 
   const params = {};
   if (startDate) params.startDate = startDate;
   if (endDate) params.endDate = endDate;
+  if (options.moduleScope) params.moduleScope = options.moduleScope;
 
   const res = await axios.get(`${API}/api/suppliers/${supplierId}/detailed-ledger`, {
     headers: {

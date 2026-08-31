@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 
 import { t } from '../../i18n/i18n';
+import { getValidPaymentAccounts } from '../../services/accountService';
 
 import {
   formatLiabilityAmount,
   payBusinessLiability,
 } from '../../services/businessLiabilityService';
-
-const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const PAYMENT_METHODS = [
   {
@@ -37,16 +35,6 @@ const PAYMENT_METHODS = [
   },
 ];
 
-const getAuthConfig = () => {
-  const token = localStorage.getItem('token');
-
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-};
-
 const getToday = () => {
   const now = new Date();
 
@@ -57,7 +45,13 @@ const getToday = () => {
   return `${year}-${month}-${day}`;
 };
 
-const BusinessLiabilityPaymentForm = ({ isOpen = false, liability = null, onClose, onPaid }) => {
+const BusinessLiabilityPaymentForm = ({
+  isOpen = false,
+  liability = null,
+  onClose,
+  onPaid,
+  moduleScope,
+}) => {
   const [form, setForm] = useState({
     amount: '',
     paymentDate: getToday(),
@@ -137,15 +131,12 @@ const BusinessLiabilityPaymentForm = ({ isOpen = false, liability = null, onClos
       try {
         setAccountsLoading(true);
 
-        const response = await axios.get(`${BASE_URL}/api/accounts`, getAuthConfig());
+        const loadedAccounts = await getValidPaymentAccounts({
+          forceRefresh: true,
+          moduleScope,
+        });
 
         if (!active) return;
-
-        const responseData = response.data;
-
-        const loadedAccounts = Array.isArray(responseData)
-          ? responseData
-          : responseData?.accounts || responseData?.data || [];
 
         setAccounts(Array.isArray(loadedAccounts) ? loadedAccounts : []);
       } catch (loadError) {
@@ -167,7 +158,7 @@ const BusinessLiabilityPaymentForm = ({ isOpen = false, liability = null, onClos
     return () => {
       active = false;
     };
-  }, [isOpen]);
+  }, [isOpen, moduleScope]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -256,7 +247,7 @@ const BusinessLiabilityPaymentForm = ({ isOpen = false, liability = null, onClos
         accountId: form.accountId,
         referenceNo: form.referenceNo,
         note: form.note,
-      });
+      }, { moduleScope });
 
       if (onPaid) {
         await onPaid(result);

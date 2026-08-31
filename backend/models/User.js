@@ -1,4 +1,9 @@
 const mongoose = require("mongoose");
+const {
+  DEFAULT_ENABLED_MODULES,
+  DEFAULT_MODULE,
+  MODULE_KEYS,
+} = require("../utils/moduleConfig");
 
 const userSchema = new mongoose.Schema(
   {
@@ -95,6 +100,23 @@ const userSchema = new mongoose.Schema(
     businessType: {
       type: String,
       default: "",
+    },
+
+    enabledModules: {
+      trading: {
+        type: Boolean,
+        default: DEFAULT_ENABLED_MODULES.trading,
+      },
+      travel: {
+        type: Boolean,
+        default: DEFAULT_ENABLED_MODULES.travel,
+      },
+    },
+
+    defaultModule: {
+      type: String,
+      enum: Object.values(MODULE_KEYS),
+      default: DEFAULT_MODULE,
     },
 
     currency: {

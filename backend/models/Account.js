@@ -20,6 +20,12 @@ const accountSchema = new mongoose.Schema({
     enum: ["debit", "credit"],
     required: true,
   },
+  moduleScope: {
+    type: String,
+    enum: ["trading", "travel", "both"],
+    default: "trading",
+    index: true,
+  },
 
   code: {
     type: String,
@@ -93,7 +99,7 @@ const accountSchema = new mongoose.Schema({
   },
 });
 
-accountSchema.index({ userId: 1, code: 1 }, { unique: true });
+accountSchema.index({ userId: 1, moduleScope: 1, code: 1 }, { unique: true });
 
 accountSchema.index({ userId: 1, type: 1 });
 accountSchema.index({ userId: 1, category: 1 });

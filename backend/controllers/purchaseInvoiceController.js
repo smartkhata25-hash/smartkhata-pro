@@ -14,6 +14,10 @@ const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const asyncHandler = require("express-async-handler");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  MODULE_SCOPES,
+  applySupplierModuleScopeFilter,
+} = require("../utils/moduleScope");
 
 const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
@@ -138,6 +142,15 @@ const getVersionSnapshot = async (Model, match) => {
   return `${Number(row.count || 0)}:${timestamp}`;
 };
 
+const getTradingSupplierQuery = (userId, extra = {}) =>
+  applySupplierModuleScopeFilter(
+    {
+      userId,
+      ...extra,
+    },
+    MODULE_SCOPES.TRADING,
+  );
+
 const getPurchaseFormVersions = async (userId) => {
   const [
     suppliersVersion,
@@ -146,10 +159,10 @@ const getPurchaseFormVersions = async (userId) => {
     inventoryVersion,
     accountsVersion,
   ] = await Promise.all([
-    getVersionSnapshot(Supplier, {
-      userId,
-      isDeleted: false,
-    }),
+    getVersionSnapshot(
+      Supplier,
+      getTradingSupplierQuery(userId, { isDeleted: false }),
+    ),
 
     getVersionSnapshot(Party, {
       userId,
@@ -314,11 +327,8 @@ const getPurchaseInvoiceFormOptions = asyncHandler(async (req, res) => {
 
   if (changed.suppliers) {
     tasks.push(
-      Supplier.find({
-        userId,
-        isDeleted: false,
-      })
-        .select("name phone account supplierType")
+      Supplier.find(getTradingSupplierQuery(userId, { isDeleted: false }))
+        .select("name phone account supplierType moduleScope")
         .sort({ name: 1, _id: 1 })
         .lean()
         .then((rows) => {

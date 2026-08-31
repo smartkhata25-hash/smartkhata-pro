@@ -8,6 +8,13 @@ const businessAssetCategorySchema = new mongoose.Schema(
       required: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     name: {
       type: String,
       required: true,
@@ -75,6 +82,7 @@ businessAssetCategorySchema.pre("validate", function (next) {
 businessAssetCategorySchema.index(
   {
     userId: 1,
+    moduleScope: 1,
     normalizedName: 1,
   },
   {
@@ -87,6 +95,7 @@ businessAssetCategorySchema.index(
 
 businessAssetCategorySchema.index({
   userId: 1,
+  moduleScope: 1,
   isDeleted: 1,
   isActive: 1,
 });

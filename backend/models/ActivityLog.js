@@ -23,6 +23,8 @@ const activityLogSchema = new mongoose.Schema(
         "create",
         "update",
         "delete",
+        "void",
+        "reverse",
         "restore",
         "block",
         "unblock",

@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const BusinessAsset = require("../models/BusinessAsset");
 const BusinessAssetCategory = require("../models/BusinessAssetCategory");
+const {
+  applyBusinessValueScopeFilter,
+  getControllerStatusCode,
+  requireBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
 
 const DEFAULT_ASSET_TITLES = [
   "Rack",
@@ -56,17 +61,21 @@ const getUserIds = (req) => {
   };
 };
 
-const validateCategory = async (categoryId, userId) => {
+const validateCategory = async (categoryId, userId, moduleScope) => {
   if (!mongoose.Types.ObjectId.isValid(categoryId)) {
     return null;
   }
 
-  return BusinessAssetCategory.findOne({
+  const query = {
     _id: categoryId,
     userId,
     isDeleted: false,
     isActive: true,
-  });
+  };
+
+  applyBusinessValueScopeFilter(query, moduleScope);
+
+  return BusinessAssetCategory.findOne(query);
 };
 
 exports.getAssetTitles = async (req, res) => {
@@ -90,6 +99,7 @@ exports.getAssetTitles = async (req, res) => {
 exports.createAsset = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const {
       categoryId,
@@ -111,7 +121,7 @@ exports.createAsset = async (req, res) => {
       });
     }
 
-    const category = await validateCategory(categoryId, userId);
+    const category = await validateCategory(categoryId, userId, moduleScope);
 
     if (!category) {
       return res.status(400).json({
@@ -147,6 +157,7 @@ exports.createAsset = async (req, res) => {
 
     const asset = await BusinessAsset.create({
       userId,
+      moduleScope,
       categoryId: category._id,
       name: cleanName,
       quantity: assetQuantity,
@@ -172,8 +183,9 @@ exports.createAsset = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Business Asset Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to create asset.",
       error: error.message,
@@ -184,6 +196,7 @@ exports.createAsset = async (req, res) => {
 exports.getAssets = async (req, res) => {
   try {
     const { userId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const {
       search = "",
@@ -198,6 +211,8 @@ exports.getAssets = async (req, res) => {
       userId,
       isDeleted: false,
     };
+
+    applyBusinessValueScopeFilter(filter, moduleScope);
 
     if (search.trim()) {
       filter.name = {
@@ -255,8 +270,9 @@ exports.getAssets = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Assets Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load assets.",
       error: error.message,
@@ -267,6 +283,7 @@ exports.getAssets = async (req, res) => {
 exports.getAssetById = async (req, res) => {
   try {
     const { userId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -275,11 +292,15 @@ exports.getAssetById = async (req, res) => {
       });
     }
 
-    const asset = await BusinessAsset.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    })
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const asset = await BusinessAsset.findOne(query)
       .populate("categoryId", "name")
       .lean();
 
@@ -304,8 +325,9 @@ exports.getAssetById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Asset Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load asset.",
       error: error.message,
@@ -316,6 +338,7 @@ exports.getAssetById = async (req, res) => {
 exports.updateAsset = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -324,11 +347,15 @@ exports.updateAsset = async (req, res) => {
       });
     }
 
-    const asset = await BusinessAsset.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const asset = await BusinessAsset.findOne(query);
 
     if (!asset) {
       return res.status(404).json({
@@ -338,7 +365,11 @@ exports.updateAsset = async (req, res) => {
     }
 
     if (req.body.categoryId !== undefined) {
-      const category = await validateCategory(req.body.categoryId, userId);
+      const category = await validateCategory(
+        req.body.categoryId,
+        userId,
+        moduleScope,
+      );
 
       if (!category) {
         return res.status(400).json({
@@ -437,8 +468,9 @@ exports.updateAsset = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Business Asset Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to update asset.",
       error: error.message,
@@ -449,6 +481,7 @@ exports.updateAsset = async (req, res) => {
 exports.deleteAsset = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -457,11 +490,15 @@ exports.deleteAsset = async (req, res) => {
       });
     }
 
-    const asset = await BusinessAsset.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const asset = await BusinessAsset.findOne(query);
 
     if (!asset) {
       return res.status(404).json({
@@ -483,8 +520,9 @@ exports.deleteAsset = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete Business Asset Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to delete asset.",
       error: error.message,
@@ -495,6 +533,7 @@ exports.deleteAsset = async (req, res) => {
 exports.restoreAsset = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -503,11 +542,15 @@ exports.restoreAsset = async (req, res) => {
       });
     }
 
-    const asset = await BusinessAsset.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: true,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const asset = await BusinessAsset.findOne(query);
 
     if (!asset) {
       return res.status(404).json({
@@ -516,7 +559,11 @@ exports.restoreAsset = async (req, res) => {
       });
     }
 
-    const category = await validateCategory(asset.categoryId, userId);
+    const category = await validateCategory(
+      asset.categoryId,
+      userId,
+      moduleScope,
+    );
 
     if (!category) {
       return res.status(400).json({
@@ -539,8 +586,9 @@ exports.restoreAsset = async (req, res) => {
     });
   } catch (error) {
     console.error("Restore Business Asset Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to restore asset.",
       error: error.message,

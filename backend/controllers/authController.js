@@ -18,6 +18,7 @@ const createBaseAccountsForUser = require("../utils/createBaseAccounts");
 const createDefaultExpenseTitlesForUser = require("../utils/createDefaultExpenseTitles");
 const fixLegacyExpenseTitles = require("../utils/fixLegacyExpenseTitles");
 const sendEmail = require("../utils/sendEmail");
+const { normalizeModuleConfig } = require("../utils/moduleConfig");
 
 const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
 
@@ -193,6 +194,8 @@ const loginUser = async (req, res) => {
         });
       }
 
+      const moduleConfig = normalizeModuleConfig(businessOwner);
+
       setTimeout(async () => {
         try {
           await fixLegacyExpenseTitles(businessOwnerId);
@@ -283,6 +286,8 @@ const loginUser = async (req, res) => {
         role: user.role,
         accountRole,
         permissions: user.permissions || [],
+        enabledModules: moduleConfig.enabledModules,
+        defaultModule: moduleConfig.defaultModule,
       };
 
       await logActivity({
@@ -332,6 +337,8 @@ const loginUser = async (req, res) => {
           businessType: businessOwner.businessType || "",
           currency: businessOwner.currency || "",
           taxNumber: businessOwner.taxNumber || "",
+          enabledModules: moduleConfig.enabledModules,
+          defaultModule: moduleConfig.defaultModule,
         },
 
         mode: "online",
@@ -408,6 +415,8 @@ const loginUser = async (req, res) => {
       });
     }
 
+    const moduleConfig = normalizeModuleConfig(businessOwner);
+
     const token = jwt.sign(
       {
         id: offlineUser._id,
@@ -450,6 +459,8 @@ const loginUser = async (req, res) => {
         businessType: businessOwner.businessType || "",
         currency: businessOwner.currency || "",
         taxNumber: businessOwner.taxNumber || "",
+        enabledModules: moduleConfig.enabledModules,
+        defaultModule: moduleConfig.defaultModule,
       },
 
       mode: "offline",

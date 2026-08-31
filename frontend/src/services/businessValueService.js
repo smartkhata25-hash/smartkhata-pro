@@ -1,5 +1,12 @@
 import axios from 'axios';
 
+import {
+  BUSINESS_VALUE_MODULE_SCOPES,
+  appendBusinessValueModuleScopeParam,
+} from './businessValueModuleScope';
+
+export { BUSINESS_VALUE_MODULE_SCOPES } from './businessValueModuleScope';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const getAuthConfig = () => {
@@ -18,9 +25,20 @@ const getErrorMessage = (error, fallbackMessage) => {
   );
 };
 
-export const fetchBusinessValueOptions = async () => {
+export const fetchBusinessValueOptions = async ({ moduleScope } = {}) => {
   try {
-    const response = await axios.get(`${BASE_URL}/api/business-value/options`, getAuthConfig());
+    const params = new URLSearchParams();
+
+    appendBusinessValueModuleScopeParam(params, moduleScope);
+
+    const queryString = params.toString();
+
+    const response = await axios.get(
+      queryString
+        ? `${BASE_URL}/api/business-value/options?${queryString}`
+        : `${BASE_URL}/api/business-value/options`,
+      getAuthConfig()
+    );
 
     return response.data;
   } catch (error) {
@@ -30,7 +48,11 @@ export const fetchBusinessValueOptions = async () => {
   }
 };
 
-export const fetchBusinessValue = async ({ preset = 'complete', components = [] } = {}) => {
+export const fetchBusinessValue = async ({
+  preset = 'complete',
+  components = [],
+  moduleScope,
+} = {}) => {
   try {
     const params = new URLSearchParams();
 
@@ -41,6 +63,8 @@ export const fetchBusinessValue = async ({ preset = 'complete', components = [] 
     if (Array.isArray(components) && components.length > 0) {
       params.append('components', components.join(','));
     }
+
+    appendBusinessValueModuleScopeParam(params, moduleScope);
 
     const queryString = params.toString();
 
@@ -71,6 +95,7 @@ export const BUSINESS_VALUE_COMPONENTS = {
   CASH: 'cash',
   BANK: 'bank',
   RECEIVABLES: 'receivables',
+  LOAN_RECEIVABLES: 'loan_receivables',
   PAYABLES: 'payables',
   LIABILITIES: 'liabilities',
 };
@@ -85,10 +110,22 @@ export const DEFAULT_COMPLETE_COMPONENTS = [
   BUSINESS_VALUE_COMPONENTS.LIABILITIES,
 ];
 
+export const TRAVEL_DEFAULT_COMPLETE_COMPONENTS = [
+  BUSINESS_VALUE_COMPONENTS.ASSETS,
+  BUSINESS_VALUE_COMPONENTS.CASH,
+  BUSINESS_VALUE_COMPONENTS.BANK,
+  BUSINESS_VALUE_COMPONENTS.RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.PAYABLES,
+  BUSINESS_VALUE_COMPONENTS.LIABILITIES,
+];
+
 export const DEFAULT_STOCK_ASSET_COMPONENTS = [
   BUSINESS_VALUE_COMPONENTS.INVENTORY,
   BUSINESS_VALUE_COMPONENTS.ASSETS,
 ];
+
+export const TRAVEL_DEFAULT_STOCK_ASSET_COMPONENTS = [BUSINESS_VALUE_COMPONENTS.ASSETS];
 
 export const DEFAULT_OPERATIONAL_COMPONENTS = [
   BUSINESS_VALUE_COMPONENTS.INVENTORY,
@@ -99,17 +136,50 @@ export const DEFAULT_OPERATIONAL_COMPONENTS = [
   BUSINESS_VALUE_COMPONENTS.PAYABLES,
 ];
 
-export const getPresetComponents = (preset) => {
+export const TRAVEL_DEFAULT_OPERATIONAL_COMPONENTS = [
+  BUSINESS_VALUE_COMPONENTS.ASSETS,
+  BUSINESS_VALUE_COMPONENTS.CASH,
+  BUSINESS_VALUE_COMPONENTS.BANK,
+  BUSINESS_VALUE_COMPONENTS.RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.PAYABLES,
+];
+
+export const TRAVEL_BUSINESS_VALUE_COMPONENTS = [
+  BUSINESS_VALUE_COMPONENTS.ASSETS,
+  BUSINESS_VALUE_COMPONENTS.CASH,
+  BUSINESS_VALUE_COMPONENTS.BANK,
+  BUSINESS_VALUE_COMPONENTS.RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+  BUSINESS_VALUE_COMPONENTS.PAYABLES,
+  BUSINESS_VALUE_COMPONENTS.LIABILITIES,
+];
+
+export const getPresetComponents = (preset, { moduleScope } = {}) => {
+  const isTravelScope = moduleScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL;
+
   if (preset === BUSINESS_VALUE_PRESETS.STOCK_ASSETS) {
-    return [...DEFAULT_STOCK_ASSET_COMPONENTS];
+    return [
+      ...(isTravelScope
+        ? TRAVEL_DEFAULT_STOCK_ASSET_COMPONENTS
+        : DEFAULT_STOCK_ASSET_COMPONENTS),
+    ];
   }
 
   if (preset === BUSINESS_VALUE_PRESETS.OPERATIONAL) {
-    return [...DEFAULT_OPERATIONAL_COMPONENTS];
+    return [
+      ...(isTravelScope
+        ? TRAVEL_DEFAULT_OPERATIONAL_COMPONENTS
+        : DEFAULT_OPERATIONAL_COMPONENTS),
+    ];
   }
 
   if (preset === BUSINESS_VALUE_PRESETS.COMPLETE) {
-    return [...DEFAULT_COMPLETE_COMPONENTS];
+    return [
+      ...(isTravelScope
+        ? TRAVEL_DEFAULT_COMPLETE_COMPONENTS
+        : DEFAULT_COMPLETE_COMPONENTS),
+    ];
   }
 
   return [];
@@ -141,9 +211,14 @@ const businessValueService = {
   isComponentIncluded,
   BUSINESS_VALUE_PRESETS,
   BUSINESS_VALUE_COMPONENTS,
+  BUSINESS_VALUE_MODULE_SCOPES,
   DEFAULT_COMPLETE_COMPONENTS,
   DEFAULT_STOCK_ASSET_COMPONENTS,
   DEFAULT_OPERATIONAL_COMPONENTS,
+  TRAVEL_BUSINESS_VALUE_COMPONENTS,
+  TRAVEL_DEFAULT_COMPLETE_COMPONENTS,
+  TRAVEL_DEFAULT_OPERATIONAL_COMPONENTS,
+  TRAVEL_DEFAULT_STOCK_ASSET_COMPONENTS,
 };
 
 export default businessValueService;

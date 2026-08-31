@@ -1,7 +1,32 @@
 const JournalEntry = require("../models/JournalEntry");
-const mongoose = require("mongoose");
 
-const createReversalEntry = async (originalEntry, userId) => {
+const getSessionQuery = (query, session) => (session ? query.session(session) : query);
+
+const createReversalEntry = async (originalEntry, userId, options = {}) => {
+  if (!originalEntry?._id) {
+    throw new Error("Original journal entry is required");
+  }
+
+  if (originalEntry.isReversed) {
+    const existingReversal = await getSessionQuery(
+      JournalEntry.findOne({
+        reversalOf: originalEntry._id,
+        isDeleted: false,
+      }),
+      options.session,
+    );
+
+    if (existingReversal) {
+      return existingReversal;
+    }
+  }
+
+  const reversalDate = options.date || new Date();
+  const reversalTime =
+    options.time ||
+    (reversalDate instanceof Date
+      ? reversalDate.toTimeString().slice(0, 8)
+      : new Date().toTimeString().slice(0, 8));
   const reversedLines = originalEntry.lines.map((line) => ({
     account: line.account,
     amount: line.amount,
@@ -10,22 +35,58 @@ const createReversalEntry = async (originalEntry, userId) => {
   }));
 
   const reversalEntry = new JournalEntry({
-    date: new Date(),
-    time: new Date().toTimeString().slice(0, 8),
-    description: `Reversal of ${originalEntry.sourceType || "journal"} entry`,
+    date: reversalDate,
+    time: reversalTime,
+    description:
+      options.description ||
+      `Reversal of ${originalEntry.sourceType || "journal"} entry`,
+    note: options.note || originalEntry.note || "",
     lines: reversedLines,
     sourceType: "reversal",
+    originModule:
+      options.originModule !== undefined
+        ? options.originModule
+        : originalEntry.originModule || "",
+    referenceId:
+      options.referenceId !== undefined
+        ? options.referenceId
+        : originalEntry.referenceId || null,
+    invoiceId:
+      options.invoiceId !== undefined
+        ? options.invoiceId
+        : originalEntry.invoiceId || null,
+    invoiceModel:
+      options.invoiceModel !== undefined
+        ? options.invoiceModel
+        : originalEntry.invoiceModel || null,
+    billNo: options.billNo || originalEntry.billNo || "",
     createdBy: userId,
+    customerId:
+      options.customerId !== undefined
+        ? options.customerId
+        : originalEntry.customerId || null,
+    supplierId:
+      options.supplierId !== undefined
+        ? options.supplierId
+        : originalEntry.supplierId || null,
+    partyId:
+      options.partyId !== undefined
+        ? options.partyId
+        : originalEntry.partyId || null,
+    attachmentUrl: originalEntry.attachmentUrl || "",
+    attachmentType: originalEntry.attachmentType || "",
     isDeleted: false,
     isReversed: false,
     reversalOf: originalEntry._id,
     isReversal: true,
   });
 
-  await reversalEntry.save();
+  const saveOptions = options.session ? { session: options.session } : undefined;
+
+  await reversalEntry.save(saveOptions);
 
   originalEntry.isReversed = true;
-  await originalEntry.save();
+  await originalEntry.save(saveOptions);
 
   return reversalEntry;
 };

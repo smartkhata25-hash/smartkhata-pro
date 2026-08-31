@@ -13,6 +13,21 @@ const BusinessAsset = require("../models/BusinessAsset");
 const BusinessLiability = require("../models/BusinessLiability");
 
 const BusinessReceivableLoan = require("../models/BusinessReceivableLoan");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  applySupplierModuleScopeFilter,
+} = require("../utils/moduleScope");
+const {
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+  applyBusinessValueScopeFilter,
+  resolveBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
+const {
+  getActualCashBankPosition,
+  getTravelCustomerBalanceTotals,
+  getTravelVendorBalanceTotals,
+} = require("./travel/travelAccountingMetricsService");
 
 const AVAILABLE_COMPONENTS = [
   "inventory",
@@ -50,18 +65,114 @@ const PRESETS = {
   ],
 };
 
+const TRAVEL_AVAILABLE_COMPONENTS = AVAILABLE_COMPONENTS.filter(
+  (component) => component !== "inventory",
+);
+
+const TRAVEL_PRESETS = {
+  stock_assets: ["assets"],
+
+  operational: [
+    "assets",
+    "cash",
+    "bank",
+    "receivables",
+    "loan_receivables",
+    "payables",
+  ],
+
+  complete: [
+    "assets",
+    "cash",
+    "bank",
+    "receivables",
+    "loan_receivables",
+    "payables",
+    "liabilities",
+  ],
+};
+
+const BUSINESS_VALUE_SCOPE_CONFIG = Object.freeze({
+  [MODULE_SCOPES.TRADING]: {
+    availableComponents: AVAILABLE_COMPONENTS,
+    presets: PRESETS,
+  },
+
+  [MODULE_SCOPES.TRAVEL]: {
+    availableComponents: TRAVEL_AVAILABLE_COMPONENTS,
+    presets: TRAVEL_PRESETS,
+  },
+});
+
+const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_ACCOUNT_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
 const roundAmount = (value) => {
   return Number(Number(value || 0).toFixed(2));
 };
 
-const normalizeComponents = ({ preset, components }) => {
-  if (preset && PRESETS[preset]) {
-    return PRESETS[preset];
+const getScopeConfig = (moduleScope = MODULE_SCOPES.TRADING) =>
+  BUSINESS_VALUE_SCOPE_CONFIG[moduleScope] ||
+  BUSINESS_VALUE_SCOPE_CONFIG[MODULE_SCOPES.TRADING];
+
+const getTravelJournalConditions = () => [
+  { originModule: { $in: TRAVEL_ACCOUNT_ORIGINS } },
+  { sourceType: { $in: TRAVEL_ACCOUNT_SOURCE_TYPES } },
+  {
+    sourceType: "reversal",
+    originModule: { $in: TRAVEL_ACCOUNT_ORIGINS },
+  },
+];
+
+const buildTradingJournalFilter = () => ({
+  $nor: getTravelJournalConditions(),
+});
+
+const buildTradingAccountScopeMatch = () => ({
+  $or: [
+    { "account.moduleScope": { $exists: false } },
+    { "account.moduleScope": null },
+    { "account.moduleScope": "" },
+    {
+      "account.moduleScope": {
+        $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH],
+      },
+    },
+  ],
+});
+
+const normalizeComponents = ({
+  preset,
+  components,
+  moduleScope = MODULE_SCOPES.TRADING,
+}) => {
+  const scopeConfig = getScopeConfig(moduleScope);
+
+  if (preset && scopeConfig.presets[preset]) {
+    return scopeConfig.presets[preset];
   }
 
   if (Array.isArray(components)) {
     const validComponents = components.filter((component) =>
-      AVAILABLE_COMPONENTS.includes(component),
+      scopeConfig.availableComponents.includes(component),
     );
 
     return [...new Set(validComponents)];
@@ -71,12 +182,12 @@ const normalizeComponents = ({ preset, components }) => {
     const validComponents = components
       .split(",")
       .map((component) => component.trim().toLowerCase())
-      .filter((component) => AVAILABLE_COMPONENTS.includes(component));
+      .filter((component) => scopeConfig.availableComponents.includes(component));
 
     return [...new Set(validComponents)];
   }
 
-  return PRESETS.complete;
+  return scopeConfig.presets.complete;
 };
 
 const getInventoryValue = async (userId) => {
@@ -162,15 +273,22 @@ const getInventoryValue = async (userId) => {
   };
 };
 
-const getBusinessAssetsValue = async (userId) => {
+const getBusinessAssetsValue = async (
+  userId,
+  moduleScope = MODULE_SCOPES.TRADING,
+) => {
+  const match = {
+    userId,
+    isDeleted: false,
+    isActive: true,
+    status: "active",
+  };
+
+  applyBusinessValueScopeFilter(match, moduleScope);
+
   const result = await BusinessAsset.aggregate([
     {
-      $match: {
-        userId,
-        isDeleted: false,
-        isActive: true,
-        status: "active",
-      },
+      $match: match,
     },
 
     {
@@ -216,6 +334,7 @@ const getAccountBalances = async (userId) => {
       $match: {
         createdBy: userId,
         isDeleted: false,
+        ...buildTradingJournalFilter(),
       },
     },
 
@@ -242,6 +361,7 @@ const getAccountBalances = async (userId) => {
         "account.isActive": {
           $ne: false,
         },
+        ...buildTradingAccountScopeMatch(),
       },
     },
 
@@ -306,28 +426,36 @@ const getAccountBalances = async (userId) => {
 };
 
 const getReceivablePayableValues = async (userId, accountBalances) => {
+  const customerQuery = {
+    createdBy: userId,
+    isActive: true,
+  };
+  const supplierQuery = {
+    userId,
+    isDeleted: {
+      $ne: true,
+    },
+  };
+  const partyQuery = {
+    userId,
+    isActive: true,
+    isDeleted: false,
+  };
+
+  applyModuleScopeFilter(customerQuery, MODULE_SCOPES.TRADING);
+  applySupplierModuleScopeFilter(supplierQuery, MODULE_SCOPES.TRADING);
+  applyModuleScopeFilter(partyQuery, MODULE_SCOPES.TRADING);
+
   const [customers, suppliers, parties] = await Promise.all([
-    Customer.find({
-      createdBy: userId,
-      isActive: true,
-    })
+    Customer.find(customerQuery)
       .select("account")
       .lean(),
 
-    Supplier.find({
-      userId,
-      isDeleted: {
-        $ne: true,
-      },
-    })
+    Supplier.find(supplierQuery)
       .select("account")
       .lean(),
 
-    Party.find({
-      userId,
-      isActive: true,
-      isDeleted: false,
-    })
+    Party.find(partyQuery)
       .select("account")
       .lean(),
   ]);
@@ -405,17 +533,24 @@ const getReceivablePayableValues = async (userId, accountBalances) => {
   };
 };
 
-const getLoanReceivablesValue = async (userId) => {
+const getLoanReceivablesValue = async (
+  userId,
+  moduleScope = MODULE_SCOPES.TRADING,
+) => {
+  const match = {
+    userId,
+    isDeleted: false,
+    status: "active",
+    remainingAmount: {
+      $gt: 0,
+    },
+  };
+
+  applyBusinessValueScopeFilter(match, moduleScope);
+
   const result = await BusinessReceivableLoan.aggregate([
     {
-      $match: {
-        userId,
-        isDeleted: false,
-        status: "active",
-        remainingAmount: {
-          $gt: 0,
-        },
-      },
+      $match: match,
     },
 
     {
@@ -446,17 +581,24 @@ const getLoanReceivablesValue = async (userId) => {
   };
 };
 
-const getManualLiabilitiesValue = async (userId) => {
+const getManualLiabilitiesValue = async (
+  userId,
+  moduleScope = MODULE_SCOPES.TRADING,
+) => {
+  const match = {
+    userId,
+    isDeleted: false,
+    status: "active",
+    remainingAmount: {
+      $gt: 0,
+    },
+  };
+
+  applyBusinessValueScopeFilter(match, moduleScope);
+
   const result = await BusinessLiability.aggregate([
     {
-      $match: {
-        userId,
-        isDeleted: false,
-        status: "active",
-        remainingAmount: {
-          $gt: 0,
-        },
-      },
+      $match: match,
     },
 
     {
@@ -487,6 +629,25 @@ const getManualLiabilitiesValue = async (userId) => {
   };
 };
 
+const getTravelAccountValues = async (userId) => {
+  const [cashBank, customer, vendor] = await Promise.all([
+    getActualCashBankPosition(userId),
+    getTravelCustomerBalanceTotals(userId),
+    getTravelVendorBalanceTotals(userId),
+  ]);
+
+  return {
+    cash: roundAmount(cashBank.cashInHand),
+    bank: roundAmount(cashBank.bankBalance),
+    receivables: roundAmount(customer.totalReceivable || customer.customerDue),
+    payables: roundAmount(vendor.totalPayable || vendor.vendorPayable),
+    receivableCount: (customer.receivableDetails || []).length,
+    payableCount: (vendor.payableDetails || []).length,
+    cashAccounts: cashBank.cashAccounts || [],
+    bankAccounts: cashBank.bankAccounts || [],
+  };
+};
+
 const createComponent = ({
   included,
   value = 0,
@@ -505,15 +666,22 @@ const getBusinessValueSummary = async ({
   userId,
   preset = "complete",
   components,
+  moduleScope = MODULE_SCOPES.TRADING,
 }) => {
   const objectUserId =
     userId instanceof mongoose.Types.ObjectId
       ? userId
       : new mongoose.Types.ObjectId(userId);
+  const normalizedModuleScope = resolveBusinessValueModuleScope({
+    moduleScope,
+  });
+  const scopeConfig = getScopeConfig(normalizedModuleScope);
+  const isTravelScope = normalizedModuleScope === MODULE_SCOPES.TRAVEL;
 
   const selectedComponents = normalizeComponents({
     preset,
     components,
+    moduleScope: normalizedModuleScope,
   });
 
   const shouldInclude = (component) => selectedComponents.includes(component);
@@ -523,7 +691,7 @@ const getBusinessValueSummary = async ({
     : Promise.resolve(null);
 
   const assetsPromise = shouldInclude("assets")
-    ? getBusinessAssetsValue(objectUserId)
+    ? getBusinessAssetsValue(objectUserId, normalizedModuleScope)
     : Promise.resolve(null);
 
   const accountBalancesPromise =
@@ -531,15 +699,17 @@ const getBusinessValueSummary = async ({
     shouldInclude("bank") ||
     shouldInclude("receivables") ||
     shouldInclude("payables")
-      ? getAccountBalances(objectUserId)
+      ? isTravelScope
+        ? getTravelAccountValues(objectUserId)
+        : getAccountBalances(objectUserId)
       : Promise.resolve(null);
 
   const loanReceivablesPromise = shouldInclude("loan_receivables")
-    ? getLoanReceivablesValue(objectUserId)
+    ? getLoanReceivablesValue(objectUserId, normalizedModuleScope)
     : Promise.resolve(null);
 
   const liabilitiesPromise = shouldInclude("liabilities")
-    ? getManualLiabilitiesValue(objectUserId)
+    ? getManualLiabilitiesValue(objectUserId, normalizedModuleScope)
     : Promise.resolve(null);
 
   const [
@@ -562,10 +732,9 @@ const getBusinessValueSummary = async ({
     accountBalances &&
     (shouldInclude("receivables") || shouldInclude("payables"))
   ) {
-    receivablePayableData = await getReceivablePayableValues(
-      objectUserId,
-      accountBalances,
-    );
+    receivablePayableData = isTravelScope
+      ? accountBalances
+      : await getReceivablePayableValues(objectUserId, accountBalances);
   }
 
   const resultComponents = {
@@ -594,6 +763,9 @@ const getBusinessValueSummary = async ({
       included: shouldInclude("cash"),
       value: accountBalances?.cash,
       effect: "positive",
+      details: {
+        cashAccounts: accountBalances?.cashAccounts || [],
+      },
     }),
 
     bank: createComponent({
@@ -602,6 +774,7 @@ const getBusinessValueSummary = async ({
       effect: "positive",
       details: {
         includes: ["bank", "online", "cheque"],
+        bankAccounts: accountBalances?.bankAccounts || [],
       },
     }),
 
@@ -662,17 +835,19 @@ const getBusinessValueSummary = async ({
   const netBusinessValue = totalPositiveValue - totalNegativeValue;
 
   return {
-    preset: preset && PRESETS[preset] ? preset : "custom",
+    moduleScope: normalizedModuleScope,
+
+    preset: preset && scopeConfig.presets[preset] ? preset : "custom",
 
     selectedComponents,
 
-    availableComponents: AVAILABLE_COMPONENTS,
+    availableComponents: scopeConfig.availableComponents,
 
     availablePresets: {
-      stock_assets: PRESETS.stock_assets,
-      operational: PRESETS.operational,
-      complete: PRESETS.complete,
-      custom: AVAILABLE_COMPONENTS,
+      stock_assets: scopeConfig.presets.stock_assets,
+      operational: scopeConfig.presets.operational,
+      complete: scopeConfig.presets.complete,
+      custom: scopeConfig.availableComponents,
     },
 
     components: resultComponents,
@@ -690,6 +865,8 @@ const getBusinessValueSummary = async ({
 module.exports = {
   AVAILABLE_COMPONENTS,
   PRESETS,
+  TRAVEL_AVAILABLE_COMPONENTS,
+  TRAVEL_PRESETS,
   normalizeComponents,
   getBusinessValueSummary,
 };

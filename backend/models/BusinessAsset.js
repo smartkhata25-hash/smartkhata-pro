@@ -14,6 +14,13 @@ const businessAssetSchema = new mongoose.Schema(
       required: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     name: {
       type: String,
       required: true,
@@ -102,18 +109,21 @@ businessAssetSchema.pre("save", function (next) {
 
 businessAssetSchema.index({
   userId: 1,
+  moduleScope: 1,
   isDeleted: 1,
   status: 1,
 });
 
 businessAssetSchema.index({
   userId: 1,
+  moduleScope: 1,
   categoryId: 1,
   isDeleted: 1,
 });
 
 businessAssetSchema.index({
   userId: 1,
+  moduleScope: 1,
   name: 1,
 });
 

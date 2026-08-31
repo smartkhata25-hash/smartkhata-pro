@@ -9,6 +9,13 @@ const businessLiabilityPaymentSchema = new mongoose.Schema(
       index: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     liabilityId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "BusinessLiability",
@@ -100,6 +107,7 @@ const businessLiabilityPaymentSchema = new mongoose.Schema(
 // Liability payment history
 businessLiabilityPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   liabilityId: 1,
   paymentDate: -1,
 });
@@ -107,6 +115,7 @@ businessLiabilityPaymentSchema.index({
 // Account payment history
 businessLiabilityPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   accountId: 1,
   paymentDate: -1,
 });
@@ -114,6 +123,7 @@ businessLiabilityPaymentSchema.index({
 // Active / reversed payments
 businessLiabilityPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   isReversed: 1,
   paymentDate: -1,
 });

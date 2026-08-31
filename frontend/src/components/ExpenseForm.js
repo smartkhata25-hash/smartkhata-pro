@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
 import { getExpenseTitles, createExpenseTitle } from '../services/expenseTitleService';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import { t } from '../i18n/i18n';
@@ -30,6 +30,7 @@ const ExpenseForm = () => {
     category: '',
     description: '',
     attachment: null,
+    moduleScope: 'trading',
   });
 
   const [creditEntries, setCreditEntries] = useState([
@@ -37,10 +38,20 @@ const ExpenseForm = () => {
   ]);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const outletContext = useOutletContext() || {};
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const isTravelExpenseRoute = location.pathname.startsWith('/travel/expenses');
+  const requestedModuleScope =
+    isTravelExpenseRoute || String(searchParams.get('moduleScope') || '').toLowerCase() === 'travel'
+      ? 'travel'
+      : 'trading';
   const canViewExpenses = hasPermission('expenses.view');
   const canCreateExpenses = hasPermission('expenses.create');
   const canEditExpenses = hasPermission('expenses.edit');
+  const closePath = requestedModuleScope === 'travel' ? '/travel/expenses' : '/dashboard';
+  const listPath = requestedModuleScope === 'travel' ? '/travel/expenses' : '/expenses';
 
   const canManageExpenseTitles = hasPermission('expenses.manage_titles');
 
@@ -58,19 +69,19 @@ const ExpenseForm = () => {
     async function fetchData() {
       if (id && (!canViewExpenses || !canEditExpenses)) {
         alert('You do not have permission to edit expenses');
-        navigate('/expenses');
+        navigate(listPath);
         return;
       }
 
       if (!id && !canCreateExpenses) {
         alert('You do not have permission to create expenses');
-        navigate('/dashboard');
+        navigate(closePath);
         return;
       }
 
       try {
         const [aData, titleData, existing] = await Promise.all([
-          getAccounts(),
+          getAccounts(true, { moduleScope: requestedModuleScope }),
 
           canViewExpenses ? getExpenseTitles('') : Promise.resolve([]),
 
@@ -105,6 +116,7 @@ const ExpenseForm = () => {
             attachment: null,
             paymentType: existing.paymentType || 'Cash',
             category: fixedCategoryId,
+            moduleScope: existing.moduleScope || requestedModuleScope,
           });
 
           setSearch(existing.title || '');
@@ -120,7 +132,25 @@ const ExpenseForm = () => {
     return () => {
       cancelled = true;
     };
-  }, [id, canViewExpenses, canCreateExpenses, canEditExpenses, navigate]);
+  }, [
+    id,
+    canViewExpenses,
+    canCreateExpenses,
+    canEditExpenses,
+    navigate,
+    requestedModuleScope,
+    closePath,
+    listPath,
+  ]);
+
+  useEffect(() => {
+    if (!id && requestedModuleScope === 'travel') {
+      setFormData((prev) => ({
+        ...prev,
+        moduleScope: 'travel',
+      }));
+    }
+  }, [id, requestedModuleScope]);
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -171,6 +201,7 @@ const ExpenseForm = () => {
       category: '',
       description: '',
       attachment: null,
+      moduleScope: requestedModuleScope,
     });
 
     setCreditEntries([{ account: '', amount: '', paymentType: 'Cash' }]);
@@ -267,8 +298,15 @@ const ExpenseForm = () => {
         alert(t('expense.saved'));
       }
 
+      if (
+        formData.moduleScope === 'travel' &&
+        typeof outletContext.fetchTravelDashboardSummary === 'function'
+      ) {
+        await outletContext.fetchTravelDashboardSummary({ forceRefresh: true });
+      }
+
       if (type === 'close') {
-        navigate('/dashboard');
+        navigate(formData.moduleScope === 'travel' ? '/travel/expenses' : '/dashboard');
       } else if (type === 'new') {
         resetForm();
       }
@@ -322,7 +360,9 @@ const ExpenseForm = () => {
         className="bg-gradient-to-br from-white via-gray-50 to-gray-100 shadow-xl rounded-xl md:rounded-2xl p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-3 border border-gray-200 content-start"
       >
         <h2 className="text-xl font-bold md:col-span-2 mb-2">
-          {id ? t('expense.edit') : t('expense.new')}
+          {id
+            ? t(requestedModuleScope === 'travel' ? 'travel.expenses.editTitle' : 'expense.edit')
+            : t(requestedModuleScope === 'travel' ? 'travel.expenses.addTitle' : 'expense.new')}
         </h2>
 
         <div className="relative" ref={dropdownRef}>

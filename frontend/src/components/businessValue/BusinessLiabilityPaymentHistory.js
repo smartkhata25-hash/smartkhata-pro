@@ -52,6 +52,7 @@ const BusinessLiabilityPaymentHistory = ({
   liability = null,
   onClose,
   onChanged,
+  moduleScope,
 }) => {
   const [historyData, setHistoryData] = useState(null);
 
@@ -81,7 +82,9 @@ const BusinessLiabilityPaymentHistory = ({
       setLoading(true);
       setError('');
 
-      const result = await fetchLiabilityPaymentHistory(liabilityId);
+      const result = await fetchLiabilityPaymentHistory(liabilityId, {
+        moduleScope,
+      });
 
       setHistoryData(result?.data || null);
     } catch (loadError) {
@@ -91,7 +94,7 @@ const BusinessLiabilityPaymentHistory = ({
     } finally {
       setLoading(false);
     }
-  }, [liabilityId]);
+  }, [liabilityId, moduleScope]);
 
   useEffect(() => {
     if (!isOpen || !liabilityId) {
@@ -126,7 +129,7 @@ const BusinessLiabilityPaymentHistory = ({
       setReversingId(payment._id);
       setError('');
 
-      await reverseLiabilityPayment(liabilityId, payment._id);
+      await reverseLiabilityPayment(liabilityId, payment._id, { moduleScope });
 
       await loadHistory();
 

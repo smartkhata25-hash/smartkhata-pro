@@ -32,6 +32,12 @@ const customerSchema = new mongoose.Schema(
       enum: ["regular", "vip", "blocked", "supplier"],
       default: "regular",
     },
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "both"],
+      default: "trading",
+      index: true,
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -40,6 +46,20 @@ const customerSchema = new mongoose.Schema(
       type: String,
       enum: ["deleted", "converted", "merged", null],
       default: null,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    deleteReason: {
+      type: String,
+      trim: true,
+      default: "",
     },
 
     openingBalance: {
@@ -65,5 +85,6 @@ const customerSchema = new mongoose.Schema(
 customerSchema.index({ createdBy: 1, name: 1, phone: 1 });
 
 customerSchema.index({ createdBy: 1, isActive: 1, hiddenReason: 1 });
+customerSchema.index({ createdBy: 1, moduleScope: 1, isActive: 1 });
 
 module.exports = mongoose.model("Customer", customerSchema);

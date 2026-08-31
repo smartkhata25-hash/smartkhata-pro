@@ -7,8 +7,56 @@ const PurchaseReturn = require("../models/PurchaseReturn");
 
 const buildSupplierDetailLedgerPrint = require("../services/supplierDetailLedgerPrintBuilder");
 const generateSupplierDetailLedgerHTML = require("../templates/supplierDetailLedgerTemplate");
+const {
+  getTravelVendorJournalFilter,
+} = require("../services/travel/travelAccountingMetricsService");
 
 const { generatePdfFromHtml } = require("../services/pdfService");
+
+const resolveSupplierSourceLabel = (entry) => {
+  if (
+    entry.sourceType === "pay_bill" &&
+    ["travel_invoice", "travel_vendor_payment"].includes(entry.originModule)
+  ) {
+    return "Travel Vendor Payment";
+  }
+
+  if (
+    entry.originModule === "travel_vendor_return" &&
+    entry.sourceType === "purchase_return_payment"
+  ) {
+    return "Travel Vendor Return Receipt";
+  }
+
+  if (entry.sourceType === "travel_vendor_return") {
+    return "Travel Vendor Return/Credit";
+  }
+
+  if (entry.sourceType === "travel_vendor_cost") {
+    return "Travel Vendor Cost";
+  }
+
+  if (entry.sourceType === "travel_refund") {
+    return "Travel Vendor Recovery";
+  }
+
+  if (entry.sourceType === "purchase_invoice") {
+    return "Purchase Invoice";
+  }
+
+  if (entry.sourceType === "purchase_return") {
+    return "Purchase Return";
+  }
+
+  if (
+    entry.sourceType === "pay_bill" ||
+    entry.sourceType === "purchase_payment"
+  ) {
+    return "Payment";
+  }
+
+  return "-";
+};
 
 /* =========================================================
    INTERNAL: Fetch Supplier Detailed Ledger Data
@@ -19,6 +67,7 @@ const fetchSupplierDetailedLedgerData = async ({
   userId,
   startDate,
   endDate,
+  moduleScope = "",
 }) => {
   const supplier = await Supplier.findOne({
     _id: supplierId,
@@ -31,6 +80,8 @@ const fetchSupplierDetailedLedgerData = async ({
   }
 
   const accountId = supplier.account._id.toString();
+  const travelJournalFilter =
+    moduleScope === "travel" ? getTravelVendorJournalFilter() : {};
 
   /* ================================
      Opening Balance
@@ -43,8 +94,9 @@ const fetchSupplierDetailedLedgerData = async ({
       {
         $match: {
           createdBy: new mongoose.Types.ObjectId(userId),
-          supplierId: supplier._id,
+          "lines.account": new mongoose.Types.ObjectId(accountId),
           isDeleted: false,
+          ...travelJournalFilter,
           date: { $lt: new Date(startDate) },
         },
       },
@@ -78,9 +130,10 @@ const fetchSupplierDetailedLedgerData = async ({
   ================================ */
 
   const matchFilter = {
-    createdBy: userId,
-    supplierId: supplier._id,
+    createdBy: new mongoose.Types.ObjectId(userId),
+    "lines.account": new mongoose.Types.ObjectId(accountId),
     isDeleted: false,
+    ...travelJournalFilter,
   };
 
   if (startDate && endDate) {
@@ -132,6 +185,7 @@ const fetchSupplierDetailedLedgerData = async ({
       date: entry.date,
       billNo: entry.billNo || "",
       sourceType: entry.sourceType,
+      sourceLabel: resolveSupplierSourceLabel(entry),
       debit,
       credit,
       balance,
@@ -223,13 +277,14 @@ const getSupplierDetailLedgerHtml = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { supplierId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, moduleScope = "" } = req.query;
 
     const rawData = await fetchSupplierDetailedLedgerData({
       supplierId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildSupplierDetailLedgerPrint({
@@ -262,13 +317,14 @@ const generateSupplierDetailLedgerPdf = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { supplierId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, moduleScope = "" } = req.query;
 
     const rawData = await fetchSupplierDetailedLedgerData({
       supplierId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildSupplierDetailLedgerPrint({

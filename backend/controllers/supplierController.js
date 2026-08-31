@@ -2,6 +2,12 @@
 const mongoose = require("mongoose");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
+const TravelServiceCategory = require("../models/TravelServiceCategory");
+const {
+  TRAVEL_VENDOR_TYPES,
+  isSupportedTravelCurrency,
+  normalizeCurrencyCode,
+} = require("../config/travelConfig");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const Counter = require("../models/Counter");
@@ -12,10 +18,126 @@ const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  MODULE_SCOPES,
+  applySupplierModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  getTravelVendorBalanceMap,
+  getTravelVendorJournalFilter,
+  roundMoney,
+} = require("../services/travel/travelAccountingMetricsService");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const hasOwn = (object, key) =>
+  Object.prototype.hasOwnProperty.call(object || {}, key);
+
+const cleanString = (value = "") => String(value || "").trim();
+
+const cleanCurrency = (value = "") => {
+  const currency = normalizeCurrencyCode(value);
+
+  if (!currency) {
+    return "";
+  }
+
+  if (!isSupportedTravelCurrency(currency)) {
+    throw createHttpError(400, "Unsupported travel currency");
+  }
+
+  return currency;
+};
+
+const normalizeTravelVendorType = (value = "") => {
+  const cleanValue = cleanString(value);
+
+  if (!cleanValue) {
+    return "";
+  }
+
+  return TRAVEL_VENDOR_TYPES.includes(cleanValue) ? cleanValue : "other";
+};
+
+const normalizeTravelServiceCategories = async (categoryIds = [], userId) => {
+  const ids = Array.isArray(categoryIds) ? categoryIds : [];
+
+  const validIds = ids
+    .map((id) => String(id || "").trim())
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+  if (validIds.length === 0) {
+    return [];
+  }
+
+  const categories = await TravelServiceCategory.find({
+    _id: { $in: validIds },
+    userId,
+    isActive: { $ne: false },
+    isDeleted: false,
+  })
+    .select("_id")
+    .lean();
+
+  return categories.map((category) => category._id);
+};
+
+const buildTravelSupplierPayload = async (body = {}, userId, { partial = false } = {}) => {
+  const payload = {};
+
+  const hasTravelFields =
+    hasOwn(body, "isTravelVendor") ||
+    hasOwn(body, "travelVendorType") ||
+    hasOwn(body, "travelServiceCategories") ||
+    hasOwn(body, "contactPerson") ||
+    hasOwn(body, "preferredCurrency");
+
+  if (!partial && hasTravelFields) {
+    payload.isTravelVendor = Boolean(
+      body.isTravelVendor ||
+        body.travelVendorType ||
+        body.contactPerson ||
+        body.preferredCurrency ||
+        (Array.isArray(body.travelServiceCategories) &&
+          body.travelServiceCategories.length > 0),
+    );
+  }
+
+  if (hasOwn(body, "isTravelVendor")) {
+    payload.isTravelVendor = body.isTravelVendor !== false;
+  }
+
+  if (hasOwn(body, "travelVendorType")) {
+    payload.travelVendorType = normalizeTravelVendorType(body.travelVendorType);
+  }
+
+  if (hasOwn(body, "travelServiceCategories")) {
+    payload.travelServiceCategories = await normalizeTravelServiceCategories(
+      body.travelServiceCategories,
+      userId,
+    );
+  }
+
+  if (hasOwn(body, "contactPerson")) {
+    payload.contactPerson = cleanString(body.contactPerson);
+  }
+
+  if (hasOwn(body, "preferredCurrency")) {
+    payload.preferredCurrency = cleanCurrency(body.preferredCurrency);
+  }
+
+  return payload;
 };
 
 const generateAccountCode = async (userId) => {
@@ -39,9 +161,27 @@ const generateAccountCode = async (userId) => {
 /* ───────────── Create Supplier ───────────── */
 exports.createSupplier = async (req, res) => {
   try {
-    const { name, phone, email, address, notes, openingBalance, supplierType } =
-      req.body;
+    const {
+      name,
+      phone,
+      email,
+      address,
+      notes,
+      openingBalance,
+      supplierType,
+      moduleScope,
+    } = req.body;
     const userId = req.user?.id || req.userId;
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ message: "Supplier name is required" });
+    }
+
+    const travelPayload = await buildTravelSupplierPayload(req.body, userId);
+    const safeModuleScope = normalizeModuleScope(
+      moduleScope,
+      MODULE_SCOPES.TRADING,
+    );
 
     const existing = await Supplier.findOne({
       name: new RegExp(`^${escapeRegex(name.trim())}$`, "i"),
@@ -85,7 +225,9 @@ exports.createSupplier = async (req, res) => {
       address,
       notes,
       openingBalance,
+      moduleScope: safeModuleScope,
       supplierType,
+      ...travelPayload,
       userId,
       account: account._id,
     });
@@ -227,6 +369,12 @@ exports.createSupplier = async (req, res) => {
         address: supplier.address,
         notes: supplier.notes,
         supplierType: supplier.supplierType,
+        moduleScope: supplier.moduleScope,
+        isTravelVendor: supplier.isTravelVendor,
+        travelVendorType: supplier.travelVendorType,
+        travelServiceCategories: supplier.travelServiceCategories,
+        contactPerson: supplier.contactPerson,
+        preferredCurrency: supplier.preferredCurrency,
         openingBalance: supplier.openingBalance,
         account: supplier.account,
       },
@@ -243,6 +391,7 @@ exports.createSupplier = async (req, res) => {
 exports.getSuppliers = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+    const requestQuery = req.scopedQuery || req.query || {};
 
     const {
       search = "",
@@ -251,9 +400,24 @@ exports.getSuppliers = async (req, res) => {
       sort = "createdAt",
       page = 1,
       limit = 0,
-    } = req.query;
+      forTravel = "",
+      moduleScope = "",
+      travelVendor = "",
+      vendorType = "",
+      light = "",
+    } = requestQuery;
 
     const query = { userId };
+
+    applySupplierModuleScopeFilter(
+      query,
+      forTravel === "true"
+        ? MODULE_SCOPES.TRAVEL
+        : getRequestedModuleScope(
+            { ...requestQuery, moduleScope },
+            MODULE_SCOPES.TRADING,
+          ),
+    );
 
     // ✅ Active / Hidden / All
     if (status === "active") {
@@ -279,6 +443,14 @@ exports.getSuppliers = async (req, res) => {
       query.supplierType = type;
     }
 
+    if (travelVendor === "true" || travelVendor === "tagged") {
+      query.isTravelVendor = true;
+    }
+
+    if (vendorType) {
+      query.travelVendorType = normalizeTravelVendorType(vendorType);
+    }
+
     // ✅ Only allowed sorting fields
     const allowedSortFields = [
       "createdAt",
@@ -291,13 +463,22 @@ exports.getSuppliers = async (req, res) => {
 
     const pageNumber = Math.max(Number(page) || 1, 1);
     const limitNumber = Math.max(Number(limit) || 0, 0);
+    const isTravelList = forTravel === "true";
+    const isLightRequest = light === "true" || isTravelList;
 
     let supplierQuery = Supplier.find(query)
       .select(
-        "name phone email address notes openingBalance supplierType account isDeleted hiddenReason createdAt",
+        "name phone email address notes openingBalance supplierType moduleScope account isDeleted hiddenReason isTravelVendor travelVendorType travelServiceCategories contactPerson preferredCurrency createdAt updatedAt",
       )
       .sort({ [sortField]: 1 })
       .lean();
+
+    if (isTravelList) {
+      supplierQuery = supplierQuery.populate(
+        "travelServiceCategories",
+        "name code isActive",
+      );
+    }
 
     // ✅ Pagination MongoDB پر ہوگی، memory میں نہیں
     if (limitNumber > 0) {
@@ -310,6 +491,10 @@ exports.getSuppliers = async (req, res) => {
 
     if (suppliers.length === 0) {
       return res.json([]);
+    }
+
+    if (isLightRequest) {
+      return res.json(suppliers);
     }
 
     const supplierAccountIds = suppliers
@@ -405,13 +590,356 @@ exports.getSuppliers = async (req, res) => {
 
 /* ───────────── Update Supplier ───────────── */
 
+exports.getTravelVendors = async (req, res) => {
+  if (req.query?.includeBalance === "true") {
+    try {
+      const userId = req.user?.id || req.userId;
+
+      if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+
+      const {
+        search = "",
+        status = "active",
+        vendorType = "",
+        travelVendor = "",
+        limit = 500,
+      } = req.query || {};
+      const query = {
+        userId: new mongoose.Types.ObjectId(userId),
+      };
+
+      applySupplierModuleScopeFilter(query, MODULE_SCOPES.TRAVEL);
+
+      if (status === "active") {
+        query.isDeleted = false;
+      } else if (status === "hidden") {
+        query.isDeleted = true;
+      }
+
+      if (travelVendor === "true" || travelVendor === "tagged") {
+        query.isTravelVendor = true;
+      }
+
+      if (vendorType) {
+        query.travelVendorType = normalizeTravelVendorType(vendorType);
+      }
+
+      const cleanSearch = String(search || "").trim();
+
+      if (cleanSearch) {
+        const safeSearch = escapeRegex(cleanSearch);
+        query.$or = [
+          { name: { $regex: safeSearch, $options: "i" } },
+          { phone: { $regex: safeSearch, $options: "i" } },
+          { email: { $regex: safeSearch, $options: "i" } },
+        ];
+      }
+
+      const limitNumber = Math.min(Math.max(Number(limit) || 500, 1), 1000);
+      const vendors = await Supplier.find(query)
+        .select(
+          "name phone email address notes openingBalance supplierType moduleScope account isDeleted hiddenReason isTravelVendor travelVendorType travelServiceCategories contactPerson preferredCurrency createdAt updatedAt",
+        )
+        .populate("travelServiceCategories", "name code isActive")
+        .sort({ name: 1, createdAt: -1 })
+        .limit(limitNumber)
+        .lean();
+
+      const balanceMap = await getTravelVendorBalanceMap(userId, vendors);
+
+      return res.json(
+        vendors.map((vendor) => {
+          const accountId = String(vendor.account?._id || vendor.account || "");
+          const balance = roundMoney(balanceMap.get(accountId) || 0);
+
+          return {
+            ...vendor,
+            balance,
+            currentPayable: Math.max(balance, 0),
+            vendorCredit: Math.max(-balance, 0),
+          };
+        }),
+      );
+    } catch (error) {
+      console.error("Travel vendor fetch failed:", error);
+
+      return res.status(500).json({
+        message: "Travel vendor fetch failed",
+        error: error.message,
+      });
+    }
+  }
+
+  const scopedReq = Object.create(req);
+
+  scopedReq.scopedQuery = {
+    ...(req.query || {}),
+    forTravel: "true",
+    light: "true",
+    status: req.query?.status || "active",
+  };
+
+  return exports.getSuppliers(scopedReq, res);
+};
+
+exports.createTravelVendor = async (req, res) => {
+  const requestedScope = normalizeModuleScope(
+    req.body?.moduleScope,
+    MODULE_SCOPES.TRAVEL,
+  );
+
+  req.body = {
+    ...req.body,
+    isTravelVendor: true,
+    moduleScope:
+      requestedScope === MODULE_SCOPES.TRADING
+        ? MODULE_SCOPES.TRAVEL
+        : requestedScope,
+    supplierType: "vendor",
+    openingBalance: 0,
+  };
+
+  return exports.createSupplier(req, res);
+};
+
+exports.updateSupplierTravelMetadata = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const supplierId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(supplierId))) {
+      return res.status(400).json({ message: "Invalid supplier ID" });
+    }
+
+    const supplier = await Supplier.findOne({
+      _id: supplierId,
+      userId,
+      isDeleted: false,
+    });
+
+    if (!supplier) {
+      return res.status(404).json({ message: "Supplier not found" });
+    }
+
+    const before = {
+      name: supplier.name,
+      phone: supplier.phone,
+      email: supplier.email,
+      address: supplier.address,
+      notes: supplier.notes,
+      moduleScope: supplier.moduleScope,
+      isTravelVendor: supplier.isTravelVendor,
+      travelVendorType: supplier.travelVendorType,
+      travelServiceCategories: supplier.travelServiceCategories,
+      contactPerson: supplier.contactPerson,
+      preferredCurrency: supplier.preferredCurrency,
+    };
+
+    if (hasOwn(req.body, "name")) {
+      const name = cleanString(req.body.name);
+
+      if (!name) {
+        return res.status(400).json({ message: "Supplier name is required" });
+      }
+
+      if (name.toLowerCase() !== supplier.name.trim().toLowerCase()) {
+        const duplicate = await Supplier.findOne({
+          name: new RegExp(`^${escapeRegex(name)}$`, "i"),
+          userId,
+          isDeleted: false,
+          _id: { $ne: supplier._id },
+        }).select("_id");
+
+        if (duplicate) {
+          return res.status(400).json({
+            message:
+              "Supplier name already exists. Please choose a different name.",
+          });
+        }
+      }
+
+      supplier.name = name;
+    }
+
+    if (hasOwn(req.body, "phone")) {
+      supplier.phone = cleanString(req.body.phone);
+    }
+
+    if (hasOwn(req.body, "email")) {
+      supplier.email = cleanString(req.body.email).toLowerCase();
+    }
+
+    if (hasOwn(req.body, "address")) {
+      supplier.address = cleanString(req.body.address);
+    }
+
+    if (hasOwn(req.body, "notes")) {
+      supplier.notes = cleanString(req.body.notes);
+    }
+
+    const travelPayload = await buildTravelSupplierPayload(
+      {
+        ...req.body,
+        isTravelVendor: true,
+      },
+      userId,
+      { partial: true },
+    );
+
+    const requestedModuleScope = hasOwn(req.body, "moduleScope")
+      ? normalizeModuleScope(req.body.moduleScope, MODULE_SCOPES.TRAVEL)
+      : normalizeModuleScope(supplier.moduleScope, MODULE_SCOPES.TRAVEL);
+
+    Object.assign(supplier, travelPayload, {
+      isTravelVendor: true,
+      moduleScope:
+        requestedModuleScope === MODULE_SCOPES.TRADING
+          ? MODULE_SCOPES.TRAVEL
+          : requestedModuleScope,
+    });
+
+    await supplier.save();
+    await supplier.populate("travelServiceCategories", "name code isActive");
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "travel.vendors",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Travel vendor ${supplier.name}`,
+      description: `Travel vendor ${supplier.name} updated`,
+      before,
+      after: {
+        name: supplier.name,
+        phone: supplier.phone,
+        email: supplier.email,
+        address: supplier.address,
+        notes: supplier.notes,
+        moduleScope: supplier.moduleScope,
+        isTravelVendor: supplier.isTravelVendor,
+        travelVendorType: supplier.travelVendorType,
+        travelServiceCategories: supplier.travelServiceCategories,
+        contactPerson: supplier.contactPerson,
+        preferredCurrency: supplier.preferredCurrency,
+      },
+    });
+
+    return res.json(supplier);
+  } catch (error) {
+    console.error("Travel vendor update error:", error);
+
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    if (error?.name === "ValidationError" || error?.code === 11000) {
+      return res.status(400).json({ message: error.message });
+    }
+
+    return res.status(500).json({ message: "Travel vendor update failed" });
+  }
+};
+
+exports.deleteTravelVendor = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const actorId = req.actorId || userId;
+    const supplierId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(supplierId))) {
+      return res.status(400).json({ message: "Invalid vendor ID" });
+    }
+
+    const supplier = await Supplier.findOne(
+      applySupplierModuleScopeFilter(
+        {
+          _id: supplierId,
+          userId,
+          isDeleted: false,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (!supplier) {
+      return res.status(404).json({ message: "Travel vendor not found" });
+    }
+
+    const before = supplier.toObject();
+    const reason = String(req.body?.deleteReason || req.query?.reason || "").trim();
+
+    if (supplier.moduleScope === MODULE_SCOPES.BOTH) {
+      supplier.moduleScope = MODULE_SCOPES.TRADING;
+      supplier.isTravelVendor = false;
+    } else {
+      supplier.isDeleted = true;
+      supplier.supplierType = "blocked";
+      supplier.hiddenReason = "deleted";
+      supplier.deletedAt = new Date();
+      supplier.deletedBy = actorId;
+      supplier.deleteReason = reason;
+    }
+
+    await supplier.save();
+
+    await logActivity({
+      req,
+      action: "delete",
+      module: "travel.vendors",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Travel vendor ${supplier.name}`,
+      description:
+        before.moduleScope === MODULE_SCOPES.BOTH
+          ? `${supplier.name} removed from Travel`
+          : `${supplier.name} archived from Travel`,
+      before,
+      after: {
+        isDeleted: supplier.isDeleted,
+        supplierType: supplier.supplierType,
+        moduleScope: supplier.moduleScope,
+        isTravelVendor: supplier.isTravelVendor,
+        hiddenReason: supplier.hiddenReason,
+        deleteReason: supplier.deleteReason,
+      },
+    });
+
+    return res.json({
+      message:
+        before.moduleScope === MODULE_SCOPES.BOTH
+          ? "Vendor removed from Travel successfully"
+          : "Travel vendor archived successfully",
+      supplier,
+    });
+  } catch (error) {
+    console.error("Travel vendor delete error:", error);
+
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return res.status(500).json({ message: "Travel vendor delete failed" });
+  }
+};
+
 exports.updateSupplier = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const supplierId = req.params.id;
 
-    const { name, phone, email, address, notes, openingBalance, supplierType } =
-      req.body;
+    const {
+      name,
+      phone,
+      email,
+      address,
+      notes,
+      openingBalance,
+      supplierType,
+      moduleScope,
+    } = req.body;
 
     // 1️⃣ Current supplier (جو edit ہو رہا ہے)
     const currentSupplier = await Supplier.findOne({
@@ -432,8 +960,17 @@ exports.updateSupplier = async (req, res) => {
       notes: currentSupplier.notes,
       openingBalance: currentSupplier.openingBalance,
       supplierType: currentSupplier.supplierType,
+      moduleScope: currentSupplier.moduleScope,
+      isTravelVendor: currentSupplier.isTravelVendor,
+      travelVendorType: currentSupplier.travelVendorType,
+      travelServiceCategories: currentSupplier.travelServiceCategories,
+      contactPerson: currentSupplier.contactPerson,
+      preferredCurrency: currentSupplier.preferredCurrency,
       account: currentSupplier.account,
     };
+    const travelPayload = await buildTravelSupplierPayload(req.body, userId, {
+      partial: true,
+    });
 
     if (
       name &&
@@ -486,6 +1023,13 @@ exports.updateSupplier = async (req, res) => {
     currentSupplier.address = address || currentSupplier.address;
     currentSupplier.notes = notes || currentSupplier.notes;
     currentSupplier.supplierType = supplierType || currentSupplier.supplierType;
+    if (hasOwn(req.body, "moduleScope")) {
+      currentSupplier.moduleScope = normalizeModuleScope(
+        moduleScope,
+        currentSupplier.moduleScope || MODULE_SCOPES.TRADING,
+      );
+    }
+    Object.assign(currentSupplier, travelPayload);
 
     // =====================================================
     // ✅ OPENING BALANCE UPDATE HANDLING
@@ -706,6 +1250,12 @@ exports.updateSupplier = async (req, res) => {
         notes: currentSupplier.notes,
         openingBalance: currentSupplier.openingBalance,
         supplierType: currentSupplier.supplierType,
+        moduleScope: currentSupplier.moduleScope,
+        isTravelVendor: currentSupplier.isTravelVendor,
+        travelVendorType: currentSupplier.travelVendorType,
+        travelServiceCategories: currentSupplier.travelServiceCategories,
+        contactPerson: currentSupplier.contactPerson,
+        preferredCurrency: currentSupplier.preferredCurrency,
         account: currentSupplier.account,
       },
     });
@@ -713,6 +1263,11 @@ exports.updateSupplier = async (req, res) => {
     res.json(currentSupplier);
   } catch (error) {
     console.error("❌ Update Supplier Error:", error);
+
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
     res.status(500).json({ message: "Server Error" });
   }
 };
@@ -1346,7 +1901,7 @@ exports.getSupplierDetailedLedger = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
     const { id: supplierId } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, moduleScope = "" } = req.query;
 
     // 1️⃣ Supplier + account
     const supplier = await Supplier.findOne({
@@ -1359,6 +1914,8 @@ exports.getSupplierDetailedLedger = async (req, res) => {
     }
 
     const accountId = supplier.account._id.toString();
+    const travelJournalFilter =
+      moduleScope === "travel" ? getTravelVendorJournalFilter() : {};
 
     // ===============================
     // 🔑 STEP 1: OPENING BALANCE (DATE WISE)
@@ -1368,8 +1925,9 @@ exports.getSupplierDetailedLedger = async (req, res) => {
     if (startDate) {
       const prevJournals = await JournalEntry.find({
         createdBy: userId,
-        supplierId: supplier._id,
+        "lines.account": new mongoose.Types.ObjectId(accountId),
         isDeleted: false,
+        ...travelJournalFilter,
         date: { $lt: new Date(startDate) },
       }).lean();
 
@@ -1387,8 +1945,9 @@ exports.getSupplierDetailedLedger = async (req, res) => {
 
     const match = {
       createdBy: userId,
-      supplierId: supplier._id,
+      "lines.account": new mongoose.Types.ObjectId(accountId),
       isDeleted: false,
+      ...travelJournalFilter,
     };
 
     if (startDate && endDate) {
@@ -1437,6 +1996,23 @@ exports.getSupplierDetailedLedger = async (req, res) => {
         time: entry.time || "",
         billNo: entry.billNo || "",
         sourceType: entry.sourceType || "",
+        originModule: entry.originModule || "",
+        sourceLabel:
+          entry.originModule === "travel_vendor_payment" &&
+          entry.sourceType === "pay_bill"
+            ? "Travel Vendor Payment"
+            : entry.originModule === "travel_vendor_return" &&
+                entry.sourceType === "purchase_return_payment"
+              ? "Travel Vendor Return Receipt"
+              : entry.sourceType === "travel_vendor_return"
+                ? "Travel Vendor Return/Credit"
+                : entry.sourceType === "reversal"
+                  ? "Travel Reversal"
+                : entry.sourceType === "travel_vendor_cost"
+            ? "Travel Vendor Cost"
+            : entry.sourceType === "travel_refund"
+              ? "Travel Vendor Recovery"
+              : "",
         description: entry.description || "",
         debit,
         credit,

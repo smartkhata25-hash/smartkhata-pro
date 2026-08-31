@@ -13,6 +13,7 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
     phone: '',
     address: '',
     type: 'regular',
+    moduleScope: 'trading',
     openingBalance: '',
     openingType: 'receivable',
   });
@@ -27,6 +28,7 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
         phone: initialData.phone || '',
         address: initialData.address || '',
         type: initialData.type || 'regular',
+        moduleScope: initialData.moduleScope || 'trading',
 
         openingBalance: Math.abs(opening),
 
@@ -134,6 +136,11 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
             <option value="blocked">{t('customer.blocked')}</option>
           </select>
 
+          <select name="moduleScope" value={formData.moduleScope} onChange={handleChange} style={input}>
+            <option value="trading">{t('moduleScope.trading')}</option>
+            <option value="both">{t('moduleScope.both')}</option>
+          </select>
+
           {!initialData?._id && (
             <div className="flex gap-2">
               <select
@@ -201,6 +208,7 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
                   phone: '',
                   address: '',
                   type: 'regular',
+                  moduleScope: 'trading',
                   openingBalance: '',
                   openingType: 'receivable',
                 })

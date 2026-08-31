@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { t } from '../../i18n/i18n';
 
@@ -13,7 +13,7 @@ import {
 
 import { hasPermission } from '../../utils/permissionHelper';
 
-const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
+const AssetCategoryManager = ({ isOpen, onClose, onChanged, moduleScope }) => {
   const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState(getEmptyBusinessAssetCategory());
 
@@ -28,13 +28,20 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
 
   const isEditing = Boolean(editingCategory?._id);
 
-  const loadCategories = async () => {
+  const resetForm = useCallback(() => {
+    setFormData(getEmptyBusinessAssetCategory());
+    setEditingCategory(null);
+    setError('');
+  }, []);
+
+  const loadCategories = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
 
       const result = await fetchBusinessAssetCategories({
         includeInactive: true,
+        moduleScope,
       });
 
       const rows = sortBusinessAssetCategories(result.categories || []);
@@ -45,14 +52,14 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [moduleScope]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     loadCategories();
     resetForm();
-  }, [isOpen]);
+  }, [isOpen, loadCategories, resetForm]);
 
   const filteredCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -72,12 +79,6 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
       );
     });
   }, [categories, search]);
-
-  const resetForm = () => {
-    setFormData(getEmptyBusinessAssetCategory());
-    setEditingCategory(null);
-    setError('');
-  };
 
   const startEdit = (category) => {
     setEditingCategory(category);
@@ -113,9 +114,11 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
       setError('');
 
       if (isEditing) {
-        await updateBusinessAssetCategory(editingCategory._id, formData);
+        await updateBusinessAssetCategory(editingCategory._id, formData, {
+          moduleScope,
+        });
       } else {
-        await createBusinessAssetCategory(formData);
+        await createBusinessAssetCategory(formData, { moduleScope });
       }
 
       await loadCategories();
@@ -147,7 +150,7 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
       setActionId(category._id);
       setError('');
 
-      await deleteBusinessAssetCategory(category._id);
+      await deleteBusinessAssetCategory(category._id, { moduleScope });
 
       await loadCategories();
 
@@ -170,11 +173,15 @@ const AssetCategoryManager = ({ isOpen, onClose, onChanged }) => {
       setActionId(category._id);
       setError('');
 
-      await updateBusinessAssetCategory(category._id, {
-        name: category.name,
-        description: category.description || '',
-        isActive: category.isActive === false,
-      });
+      await updateBusinessAssetCategory(
+        category._id,
+        {
+          name: category.name,
+          description: category.description || '',
+          isActive: category.isActive === false,
+        },
+        { moduleScope }
+      );
 
       await loadCategories();
 

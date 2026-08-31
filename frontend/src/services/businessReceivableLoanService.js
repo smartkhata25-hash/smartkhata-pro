@@ -1,5 +1,11 @@
 import axios from 'axios';
 
+import {
+  appendBusinessValueModuleScopeParam,
+  getBusinessValueModuleScopeParams,
+  withBusinessValueModuleScope,
+} from './businessValueModuleScope';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const getAuthConfig = () => {
@@ -44,6 +50,8 @@ const buildLoanQuery = (filters = {}) => {
   if (filters.limit) {
     params.append('limit', String(filters.limit));
   }
+
+  appendBusinessValueModuleScopeParam(params, filters.moduleScope);
 
   return params.toString();
 };
@@ -102,7 +110,7 @@ export const fetchBusinessReceivableLoans = async (filters = {}) => {
   }
 };
 
-export const fetchBusinessReceivableLoanById = async (loanId) => {
+export const fetchBusinessReceivableLoanById = async (loanId, options = {}) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
@@ -110,7 +118,10 @@ export const fetchBusinessReceivableLoanById = async (loanId) => {
 
     const response = await axios.get(
       `${BASE_URL}/api/business-receivable-loans/${loanId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -121,9 +132,12 @@ export const fetchBusinessReceivableLoanById = async (loanId) => {
   }
 };
 
-export const createBusinessReceivableLoan = async (loanData) => {
+export const createBusinessReceivableLoan = async (loanData, options = {}) => {
   try {
-    const payload = normalizeLoanPayload(loanData);
+    const payload = withBusinessValueModuleScope(
+      normalizeLoanPayload(loanData),
+      options.moduleScope || loanData?.moduleScope
+    );
 
     const response = await axios.post(
       `${BASE_URL}/api/business-receivable-loans`,
@@ -139,13 +153,16 @@ export const createBusinessReceivableLoan = async (loanData) => {
   }
 };
 
-export const updateBusinessReceivableLoan = async (loanId, loanData) => {
+export const updateBusinessReceivableLoan = async (loanId, loanData, options = {}) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
     }
 
-    const payload = normalizeLoanUpdatePayload(loanData);
+    const payload = withBusinessValueModuleScope(
+      normalizeLoanUpdatePayload(loanData),
+      options.moduleScope || loanData?.moduleScope
+    );
 
     const response = await axios.put(
       `${BASE_URL}/api/business-receivable-loans/${loanId}`,
@@ -161,7 +178,7 @@ export const updateBusinessReceivableLoan = async (loanId, loanData) => {
   }
 };
 
-export const deleteBusinessReceivableLoan = async (loanId) => {
+export const deleteBusinessReceivableLoan = async (loanId, options = {}) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
@@ -169,7 +186,10 @@ export const deleteBusinessReceivableLoan = async (loanId) => {
 
     const response = await axios.delete(
       `${BASE_URL}/api/business-receivable-loans/${loanId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -180,13 +200,20 @@ export const deleteBusinessReceivableLoan = async (loanId) => {
   }
 };
 
-export const receiveBusinessReceivableLoanPayment = async (loanId, paymentData) => {
+export const receiveBusinessReceivableLoanPayment = async (
+  loanId,
+  paymentData,
+  options = {}
+) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
     }
 
-    const payload = normalizeRepaymentPayload(paymentData);
+    const payload = withBusinessValueModuleScope(
+      normalizeRepaymentPayload(paymentData),
+      options.moduleScope || paymentData?.moduleScope
+    );
 
     const response = await axios.post(
       `${BASE_URL}/api/business-receivable-loans/${loanId}/payments`,
@@ -202,7 +229,7 @@ export const receiveBusinessReceivableLoanPayment = async (loanId, paymentData) 
   }
 };
 
-export const fetchBusinessReceivableLoanPaymentHistory = async (loanId) => {
+export const fetchBusinessReceivableLoanPaymentHistory = async (loanId, options = {}) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
@@ -210,7 +237,10 @@ export const fetchBusinessReceivableLoanPaymentHistory = async (loanId) => {
 
     const response = await axios.get(
       `${BASE_URL}/api/business-receivable-loans/${loanId}/payments`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -221,7 +251,7 @@ export const fetchBusinessReceivableLoanPaymentHistory = async (loanId) => {
   }
 };
 
-export const reverseBusinessReceivableLoanPayment = async (loanId, paymentId) => {
+export const reverseBusinessReceivableLoanPayment = async (loanId, paymentId, options = {}) => {
   try {
     if (!loanId) {
       throw new Error('Loan ID is required');
@@ -234,7 +264,10 @@ export const reverseBusinessReceivableLoanPayment = async (loanId, paymentId) =>
     const response = await axios.patch(
       `${BASE_URL}/api/business-receivable-loans/${loanId}/payments/${paymentId}/reverse`,
       {},
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;

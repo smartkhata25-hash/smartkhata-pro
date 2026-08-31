@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { getAllExpenses, deleteExpense } from '../services/expenseService';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 
@@ -8,6 +8,9 @@ const ExpenseList = () => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const moduleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
+  const isTravelExpenseView = moduleScope === 'travel';
   const canViewExpenses = hasPermission('expenses.view');
   const canCreateExpenses = hasPermission('expenses.create');
   const canEditExpenses = hasPermission('expenses.edit');
@@ -20,7 +23,7 @@ const ExpenseList = () => {
     }
 
     try {
-      const data = await getAllExpenses();
+      const data = await getAllExpenses(isTravelExpenseView ? { moduleScope: 'travel' } : {});
       setExpenses(Array.isArray(data) ? data : []);
     } catch (err) {
       alert(t('alerts.expenseLoadError'));
@@ -28,7 +31,7 @@ const ExpenseList = () => {
     } finally {
       setLoading(false);
     }
-  }, [canViewExpenses]);
+  }, [canViewExpenses, isTravelExpenseView]);
 
   useEffect(() => {
     if (!canViewExpenses) {
@@ -48,7 +51,7 @@ const ExpenseList = () => {
     if (!window.confirm(t('alerts.confirmDeleteExpense'))) return;
 
     try {
-      await deleteExpense(id);
+      await deleteExpense(id, isTravelExpenseView ? { moduleScope: 'travel' } : {});
       fetchData();
     } catch (err) {
       alert(t('alerts.expenseDeleteFailed'));
@@ -58,10 +61,12 @@ const ExpenseList = () => {
   return (
     <div className="p-6 bg-white rounded shadow-md">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">{t('expense.allExpenses')}</h2>
+        <h2 className="text-xl font-bold">
+          {t(isTravelExpenseView ? 'travel.reports.expenses.title' : 'expense.allExpenses')}
+        </h2>
         {canCreateExpenses && (
           <button
-            onClick={() => navigate('/add-expense')}
+            onClick={() => navigate(isTravelExpenseView ? '/travel/expenses/new' : '/add-expense')}
             className="bg-blue-600 text-white px-4 py-2 rounded"
           >
             + {t('expense.new')}
@@ -110,7 +115,13 @@ const ExpenseList = () => {
                     <div className="flex gap-2 justify-center">
                       {canEditExpenses && (
                         <button
-                          onClick={() => navigate(`/edit-expense/${e._id}`)}
+                          onClick={() =>
+                            navigate(
+                              isTravelExpenseView
+                                ? `/travel/expenses/${e._id}/edit`
+                                : `/edit-expense/${e._id}`
+                            )
+                          }
                           className="bg-yellow-500 text-white px-3 py-1 rounded"
                         >
                           {t('common.edit')}

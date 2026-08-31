@@ -8,6 +8,13 @@ const businessLiabilitySchema = new mongoose.Schema(
       required: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     title: {
       type: String,
       required: true,
@@ -89,18 +96,21 @@ businessLiabilitySchema.pre("save", function (next) {
 
 businessLiabilitySchema.index({
   userId: 1,
+  moduleScope: 1,
   isDeleted: 1,
   status: 1,
 });
 
 businessLiabilitySchema.index({
   userId: 1,
+  moduleScope: 1,
   category: 1,
   isDeleted: 1,
 });
 
 businessLiabilitySchema.index({
   userId: 1,
+  moduleScope: 1,
   title: 1,
 });
 

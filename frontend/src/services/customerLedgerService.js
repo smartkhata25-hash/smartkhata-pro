@@ -8,21 +8,26 @@ const getToken = () => localStorage.getItem('token');
 const API_URL = `${BASE_URL}/api/customer-ledger`;
 
 // ✅ ONLY & FINAL: Get ledger by CUSTOMER ACCOUNT (CORRECT ACCOUNTING)
-export const getLedgerByCustomerAccount = async (accountId, start, end) => {
+export const getLedgerByCustomerAccount = async (accountId, start, end, options = {}) => {
   if (!accountId) {
     throw new Error('AccountId is required for ledger');
   }
 
-  let url = `${API_URL}/${accountId}`;
-
+  const params = {};
   if (start && end) {
-    url += `?startDate=${start}&endDate=${end}`;
+    params.startDate = start;
+    params.endDate = end;
   }
 
-  const res = await axios.get(url, {
+  if (options.moduleScope) {
+    params.moduleScope = options.moduleScope;
+  }
+
+  const res = await axios.get(`${API_URL}/${accountId}`, {
     headers: {
       Authorization: `Bearer ${getToken()}`,
     },
+    params,
   });
 
   return res.data;

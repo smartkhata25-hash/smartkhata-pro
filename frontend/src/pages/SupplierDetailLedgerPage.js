@@ -1,16 +1,18 @@
 // 📁 src/pages/SupplierDetailLedgerPage.js
 // بسم اللہ الرحمن الرحیم
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 
 import { getSupplierDetailedLedger } from '../services/supplierDetailLedgerService';
 import { fetchSupplierLedger } from '../services/supplierService';
+import { fetchTravelVendors } from '../services/travelMasterService';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
+import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
 
 const SUPPLIER_DETAIL_LEDGER_DEFAULTS = {
   selectedSupplierId: '',
@@ -23,7 +25,9 @@ const SUPPLIER_DETAIL_LEDGER_DEFAULTS = {
 export default function SupplierDetailLedgerPage() {
   const { supplierId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const token = localStorage.getItem('token');
+  const isTravelLedger = isTravelContext(location);
 
   const [blocks, setBlocks] = useState([]);
 
@@ -42,7 +46,9 @@ export default function SupplierDetailLedgerPage() {
   const handledRouteSupplierRef = useRef('');
 
   const { state: pageMemory, updateField: updatePageField } = usePageMemory(
-    'supplier_detail_ledger_page_state',
+    isTravelLedger
+      ? 'travel_supplier_detail_ledger_page_state'
+      : 'supplier_detail_ledger_page_state',
     SUPPLIER_DETAIL_LEDGER_DEFAULTS,
     {
       expiryHours: 24,
@@ -82,6 +88,19 @@ export default function SupplierDetailLedgerPage() {
     localStorage.getItem('supplierDetailLedgerPrintSize') || 'A5'
   );
 
+  const buildPrintQuery = useCallback(
+    (params = {}) => {
+      const query = new URLSearchParams(params);
+
+      if (isTravelLedger) {
+        query.set('moduleScope', 'travel');
+      }
+
+      return query.toString();
+    },
+    [isTravelLedger]
+  );
+
   useEffect(() => {
     localStorage.setItem('supplierDetailLedgerPrintSize', printSize);
   }, [printSize]);
@@ -112,9 +131,12 @@ export default function SupplierDetailLedgerPage() {
           fetchSupplierLedger(sid, {
             startDate: s || '',
             endDate: e || '',
+            moduleScope: isTravelLedger ? 'travel' : '',
           }),
 
-          getSupplierDetailedLedger(sid, s || '', e || ''),
+          getSupplierDetailedLedger(sid, s || '', e || '', {
+            moduleScope: isTravelLedger ? 'travel' : '',
+          }),
         ]);
 
         const opening = Number(master?.openingBalance || 0);
@@ -170,7 +192,7 @@ export default function SupplierDetailLedgerPage() {
         setLoading(false);
       }
     },
-    [suppliers, startDate, endDate, setSelectedSupplierId, setSupplierName]
+    [suppliers, startDate, endDate, isTravelLedger, setSelectedSupplierId, setSupplierName]
   );
 
   useEffect(() => {
@@ -210,6 +232,14 @@ export default function SupplierDetailLedgerPage() {
   }, [supplierId, selectedSupplierId, suppliers, startDate, endDate, loadData]);
 
   useEffect(() => {
+    if (isTravelLedger) {
+      fetchTravelVendors({ includeBalance: 'true' }, { forceRefresh: true })
+        .then((data) => setSuppliers(Array.isArray(data) ? data : []))
+        .catch(() => setSuppliers([]));
+
+      return;
+    }
+
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/suppliers`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -218,7 +248,7 @@ export default function SupplierDetailLedgerPage() {
       .then((r) => r.json())
       .then((d) => setSuppliers(Array.isArray(d) ? d : []))
       .catch(() => setSuppliers([]));
-  }, []);
+  }, [isTravelLedger]);
 
   const buildBlocks = (ledger = []) => {
     const map = {};
@@ -233,11 +263,12 @@ export default function SupplierDetailLedgerPage() {
           date: row.date,
           sourceType: row.sourceType,
           sourceLabel:
-            row.sourceType === 'purchase_invoice'
+            row.sourceLabel ||
+            (row.sourceType === 'purchase_invoice'
               ? t('purchase.invoice')
               : row.sourceType === 'payment'
                 ? t('payment.payBill')
-                : '-',
+                : '-'),
           items: [],
           debit: 0,
           credit: 0,
@@ -427,9 +458,15 @@ export default function SupplierDetailLedgerPage() {
                         setSelectedSupplierId(s._id);
                         setShowSuggestions(false);
 
-                        navigate(`/supplier-ledger/${s._id}/detail`, {
-                          replace: true,
-                        });
+                        navigate(
+                          `/supplier-ledger/${s._id}/detail${isTravelLedger ? '?moduleScope=travel' : ''}`,
+                          {
+                            replace: true,
+                            state: isTravelLedger
+                              ? buildTravelRouteState('/travel/vendors')
+                              : undefined,
+                          }
+                        );
 
                         loadData(s._id, startDate, endDate);
                       }}
@@ -503,12 +540,12 @@ export default function SupplierDetailLedgerPage() {
             onClick={async () => {
               if (!selectedSupplierId) return;
 
-              const query = new URLSearchParams({
+              const query = buildPrintQuery({
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
                 lang: getCurrentLanguage(),
-              }).toString();
+              });
 
               try {
                 const response = await fetch(
@@ -554,12 +591,12 @@ export default function SupplierDetailLedgerPage() {
             onClick={async () => {
               if (!selectedSupplierId) return;
 
-              const query = new URLSearchParams({
+              const query = buildPrintQuery({
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
                 lang: getCurrentLanguage(),
-              }).toString();
+              });
 
               try {
                 const response = await fetch(
@@ -771,11 +808,11 @@ export default function SupplierDetailLedgerPage() {
 
           if (!selectedSupplierId) return;
 
-          const query = new URLSearchParams({
+          const query = buildPrintQuery({
             startDate: startDate || '',
             endDate: endDate || '',
             size: printSize,
-          }).toString();
+          });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-detail-ledger/${selectedSupplierId}/pdf?${query}`;
 

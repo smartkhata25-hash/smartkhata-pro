@@ -82,6 +82,7 @@ const defaultSettings = async (userId) => {
     purchase: { ...documentBlock },
     saleReturn: { ...documentBlock },
     purchaseReturn: { ...documentBlock },
+    travelInvoice: { ...documentBlock },
   };
 };
 
@@ -122,7 +123,11 @@ const updatePrintSetting = async (req, res) => {
       setting = await PrintSetting.create(defaults);
     }
 
-    if (!["sales", "saleReturn", "purchase", "purchaseReturn"].includes(type)) {
+    if (
+      !["sales", "saleReturn", "purchase", "purchaseReturn", "travelInvoice"].includes(
+        type,
+      )
+    ) {
       return res.status(400).json({
         msg: "Invalid document type",
       });
@@ -155,7 +160,11 @@ const resetPrintSetting = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { type } = req.params;
 
-    if (!["sales", "saleReturn", "purchase", "purchaseReturn"].includes(type)) {
+    if (
+      !["sales", "saleReturn", "purchase", "purchaseReturn", "travelInvoice"].includes(
+        type,
+      )
+    ) {
       return res.status(400).json({
         msg: "Invalid document type",
       });

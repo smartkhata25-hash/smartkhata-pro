@@ -13,6 +13,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
     email: '',
     address: '',
     supplierType: 'vendor',
+    moduleScope: 'trading',
     openingBalance: '',
     openingType: 'payable',
     notes: '',
@@ -28,6 +29,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
         email: initialData.email || '',
         address: initialData.address || '',
         supplierType: initialData.supplierType || 'vendor',
+        moduleScope: initialData.moduleScope || 'trading',
 
         openingBalance: opening,
 
@@ -129,6 +131,11 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
             <option value="other">{t('supplier.other')}</option>
           </select>
 
+          <select name="moduleScope" value={formData.moduleScope} onChange={handleChange} style={input}>
+            <option value="trading">{t('moduleScope.trading')}</option>
+            <option value="both">{t('moduleScope.both')}</option>
+          </select>
+
           {!initialData?._id && (
             <div className="flex gap-2">
               <select
@@ -204,6 +211,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
                   email: '',
                   address: '',
                   supplierType: 'vendor',
+                  moduleScope: 'trading',
                   openingBalance: '',
                   openingType: 'payable',
                   notes: '',

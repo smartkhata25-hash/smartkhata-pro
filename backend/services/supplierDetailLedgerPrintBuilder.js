@@ -14,6 +14,15 @@ const safeNumber = (value) => {
 
 const resolveSourceLabel = (type) => {
   switch (type) {
+    case "travel_vendor_return":
+      return "Travel Vendor Return/Credit";
+
+    case "travel_vendor_cost":
+      return "Travel Vendor Cost";
+
+    case "travel_refund":
+      return "Travel Vendor Recovery";
+
     case "purchase_invoice":
       return "Purchase Invoice";
 

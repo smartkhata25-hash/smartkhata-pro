@@ -11,6 +11,8 @@ const PermissionGuard = ({
   allPermissions = [],
   ownerOnly = false,
   systemAdminOnly = false,
+  moduleKey = null,
+  module = null,
   fallback = null,
   hide = true,
   disabled = false,
@@ -26,6 +28,8 @@ const PermissionGuard = ({
       allPermissions,
       ownerOnly,
       systemAdminOnly,
+      moduleKey,
+      module,
       user,
     });
 

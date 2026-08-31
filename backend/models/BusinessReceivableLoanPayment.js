@@ -9,6 +9,13 @@ const businessReceivableLoanPaymentSchema = new mongoose.Schema(
       index: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel"],
+      default: "trading",
+      index: true,
+    },
+
     loanId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "BusinessReceivableLoan",
@@ -113,18 +120,21 @@ businessReceivableLoanPaymentSchema.pre("validate", function (next) {
 
 businessReceivableLoanPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   loanId: 1,
   paymentDate: -1,
 });
 
 businessReceivableLoanPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   accountId: 1,
   paymentDate: -1,
 });
 
 businessReceivableLoanPaymentSchema.index({
   userId: 1,
+  moduleScope: 1,
   isReversed: 1,
   paymentDate: -1,
 });

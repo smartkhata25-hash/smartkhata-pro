@@ -42,6 +42,12 @@ const COMPONENT_OPTIONS = [
     effect: 'positive',
   },
   {
+    key: BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+    labelKey: 'businessValue.receivableLoans',
+    icon: 'LR',
+    effect: 'positive',
+  },
+  {
     key: BUSINESS_VALUE_COMPONENTS.PAYABLES,
     labelKey: 'businessValue.payables',
     icon: '📤',
@@ -90,6 +96,8 @@ const BusinessValueTopBar = ({
   onComponentsChange,
   onApply,
   onRefresh,
+  availableComponentKeys = null,
+  presetOptions = PRESET_OPTIONS,
 }) => {
   const presetButtonRef = useRef(null);
   const presetMenuRef = useRef(null);
@@ -110,6 +118,16 @@ const BusinessValueTopBar = ({
     left: 0,
   });
 
+  const componentOptions = useMemo(() => {
+    if (!Array.isArray(availableComponentKeys) || availableComponentKeys.length === 0) {
+      return COMPONENT_OPTIONS;
+    }
+
+    const allowedKeys = new Set(availableComponentKeys);
+
+    return COMPONENT_OPTIONS.filter((option) => allowedKeys.has(option.key));
+  }, [availableComponentKeys]);
+
   const selectedCount = selectedComponents.length;
 
   const netBusinessValue = Number(data?.netBusinessValue || 0);
@@ -119,12 +137,12 @@ const BusinessValueTopBar = ({
   const totalNegativeValue = Number(data?.totalNegativeValue || 0);
 
   const allSelected = useMemo(() => {
-    return COMPONENT_OPTIONS.every((option) => selectedComponents.includes(option.key));
-  }, [selectedComponents]);
+    return componentOptions.every((option) => selectedComponents.includes(option.key));
+  }, [componentOptions, selectedComponents]);
 
   const activePreset = useMemo(() => {
-    return PRESET_OPTIONS.find((option) => option.key === preset) || PRESET_OPTIONS[2];
-  }, [preset]);
+    return presetOptions.find((option) => option.key === preset) || presetOptions[2];
+  }, [preset, presetOptions]);
 
   const getSafeLeft = (preferredLeft, menuWidth) => {
     const viewportWidth = window.innerWidth;
@@ -278,7 +296,7 @@ const BusinessValueTopBar = ({
       return;
     }
 
-    onComponentsChange(COMPONENT_OPTIONS.map((option) => option.key));
+    onComponentsChange(componentOptions.map((option) => option.key));
   };
 
   return (
@@ -467,7 +485,7 @@ const BusinessValueTopBar = ({
             </div>
 
             <div className="p-2">
-              {PRESET_OPTIONS.map((option) => {
+              {presetOptions.map((option) => {
                 const selected = option.key === preset;
 
                 return (
@@ -564,7 +582,7 @@ const BusinessValueTopBar = ({
             </div>
 
             <div className="max-h-[360px] overflow-y-auto p-2">
-              {COMPONENT_OPTIONS.map((option) => {
+              {componentOptions.map((option) => {
                 const checked = selectedComponents.includes(option.key);
 
                 const negative = option.effect === 'negative';

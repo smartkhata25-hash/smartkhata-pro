@@ -1,5 +1,11 @@
 import axios from 'axios';
 
+import {
+  appendBusinessValueModuleScopeParam,
+  getBusinessValueModuleScopeParams,
+  withBusinessValueModuleScope,
+} from './businessValueModuleScope';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const getAuthConfig = () => {
@@ -45,6 +51,8 @@ const buildAssetQuery = (filters = {}) => {
     params.append('limit', String(filters.limit));
   }
 
+  appendBusinessValueModuleScopeParam(params, filters.moduleScope);
+
   return params.toString();
 };
 
@@ -61,9 +69,19 @@ const normalizeAssetPayload = (asset = {}) => {
   };
 };
 
-export const fetchAssetTitles = async () => {
+export const fetchAssetTitles = async ({ moduleScope } = {}) => {
   try {
-    const response = await axios.get(`${BASE_URL}/api/business-assets/titles`, getAuthConfig());
+    const params = new URLSearchParams();
+
+    appendBusinessValueModuleScopeParam(params, moduleScope);
+
+    const queryString = params.toString();
+    const response = await axios.get(
+      queryString
+        ? `${BASE_URL}/api/business-assets/titles?${queryString}`
+        : `${BASE_URL}/api/business-assets/titles`,
+      getAuthConfig()
+    );
 
     return response.data;
   } catch (error) {
@@ -91,13 +109,16 @@ export const fetchBusinessAssets = async (filters = {}) => {
   }
 };
 
-export const fetchBusinessAssetById = async (assetId) => {
+export const fetchBusinessAssetById = async (assetId, options = {}) => {
   try {
     if (!assetId) {
       throw new Error('Asset ID is required');
     }
 
-    const response = await axios.get(`${BASE_URL}/api/business-assets/${assetId}`, getAuthConfig());
+    const response = await axios.get(`${BASE_URL}/api/business-assets/${assetId}`, {
+      ...getAuthConfig(),
+      params: getBusinessValueModuleScopeParams(options.moduleScope),
+    });
 
     return response.data;
   } catch (error) {
@@ -107,9 +128,12 @@ export const fetchBusinessAssetById = async (assetId) => {
   }
 };
 
-export const createBusinessAsset = async (assetData) => {
+export const createBusinessAsset = async (assetData, options = {}) => {
   try {
-    const payload = normalizeAssetPayload(assetData);
+    const payload = withBusinessValueModuleScope(
+      normalizeAssetPayload(assetData),
+      options.moduleScope || assetData?.moduleScope
+    );
 
     const response = await axios.post(`${BASE_URL}/api/business-assets`, payload, getAuthConfig());
 
@@ -121,13 +145,16 @@ export const createBusinessAsset = async (assetData) => {
   }
 };
 
-export const updateBusinessAsset = async (assetId, assetData) => {
+export const updateBusinessAsset = async (assetId, assetData, options = {}) => {
   try {
     if (!assetId) {
       throw new Error('Asset ID is required');
     }
 
-    const payload = normalizeAssetPayload(assetData);
+    const payload = withBusinessValueModuleScope(
+      normalizeAssetPayload(assetData),
+      options.moduleScope || assetData?.moduleScope
+    );
 
     const response = await axios.put(
       `${BASE_URL}/api/business-assets/${assetId}`,
@@ -143,7 +170,7 @@ export const updateBusinessAsset = async (assetId, assetData) => {
   }
 };
 
-export const deleteBusinessAsset = async (assetId) => {
+export const deleteBusinessAsset = async (assetId, options = {}) => {
   try {
     if (!assetId) {
       throw new Error('Asset ID is required');
@@ -151,7 +178,10 @@ export const deleteBusinessAsset = async (assetId) => {
 
     const response = await axios.delete(
       `${BASE_URL}/api/business-assets/${assetId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -162,7 +192,7 @@ export const deleteBusinessAsset = async (assetId) => {
   }
 };
 
-export const restoreBusinessAsset = async (assetId) => {
+export const restoreBusinessAsset = async (assetId, options = {}) => {
   try {
     if (!assetId) {
       throw new Error('Asset ID is required');
@@ -171,7 +201,10 @@ export const restoreBusinessAsset = async (assetId) => {
     const response = await axios.patch(
       `${BASE_URL}/api/business-assets/${assetId}/restore`,
       {},
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;

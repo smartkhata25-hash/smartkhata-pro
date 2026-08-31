@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCashSummary, getAccountTransactions, getAccounts } from '../services/accountService';
 import AccountTransactionTable from '../components/AccountTransactionTable';
@@ -18,8 +18,13 @@ const AccountDetailPage = () => {
   const txnCacheRef = useRef({});
 
   const pathname = location.pathname;
-  const isCashView = pathname === '/accounts/cash';
-  const isBankView = pathname === '/accounts/bank';
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const isCashView = pathname === '/accounts/cash' || pathname === '/travel/accounts/cash';
+  const isBankView = pathname === '/accounts/bank' || pathname === '/travel/accounts/bank';
+  const isTravelScoped =
+    pathname.startsWith('/travel/accounts') || queryParams.get('moduleScope') === 'travel';
+  const moduleScope = isTravelScoped ? 'travel' : 'trading';
+  const requestedAccountId = queryParams.get('accountId') || '';
 
   useEffect(() => {
     if (!canViewAccountTransactions) {
@@ -38,40 +43,73 @@ const AccountDetailPage = () => {
     return bal;
   }, []);
 
+  const getSafeBalance = useCallback((account = {}) => {
+    const balance = Number(account.balance || 0);
+
+    return Number.isFinite(balance) ? balance : 0;
+  }, []);
+
+  const getTxnCacheKey = useCallback(
+    (accountId) => `${isTravelScoped ? 'travel' : 'all'}:${accountId}`,
+    [isTravelScoped]
+  );
+
+  const buildAccountState = useCallback(
+    (account, txns = []) => {
+      const activityBalance = calculateBalanceFromTxns(txns);
+
+      if (!isTravelScoped) {
+        return {
+          ...account,
+          balance: activityBalance,
+        };
+      }
+
+      const actualBalance = getSafeBalance(account);
+
+      return {
+        ...account,
+        actualBalance,
+        travelActivityBalance: activityBalance,
+        balance: actualBalance,
+      };
+    },
+    [calculateBalanceFromTxns, getSafeBalance, isTravelScoped]
+  );
+
   const loadSingleAccount = useCallback(
     async (account) => {
       if (!canViewAccountTransactions) {
         return;
       }
 
+      const cacheKey = getTxnCacheKey(account._id);
+
       // ✅ CACHE CHECK
-      if (txnCacheRef.current[account._id]) {
-        const cached = txnCacheRef.current[account._id];
+      if (txnCacheRef.current[cacheKey]) {
+        const cached = txnCacheRef.current[cacheKey];
 
         setTransactions(cached);
 
-        setSelectedAccount({
-          ...account,
-          balance: calculateBalanceFromTxns(cached),
-        });
+        setSelectedAccount(buildAccountState(account, cached));
 
         return;
       }
 
       // 🔄 API call (only first time)
-      const txns = await getAccountTransactions(account._id);
+      const txns = await getAccountTransactions(
+        account._id,
+        { moduleScope }
+      );
       const safeTxns = Array.isArray(txns) ? txns : [];
 
-      txnCacheRef.current[account._id] = safeTxns;
+      txnCacheRef.current[cacheKey] = safeTxns;
 
       setTransactions(safeTxns);
 
-      setSelectedAccount({
-        ...account,
-        balance: calculateBalanceFromTxns(safeTxns),
-      });
+      setSelectedAccount(buildAccountState(account, safeTxns));
     },
-    [canViewAccountTransactions, calculateBalanceFromTxns]
+    [buildAccountState, canViewAccountTransactions, getTxnCacheKey, moduleScope]
   );
 
   useEffect(() => {
@@ -82,8 +120,98 @@ const AccountDetailPage = () => {
 
       try {
         /* ================= CASH ================= */
+        if (isCashView && isTravelScoped) {
+          const all = await getAccounts(true, { moduleScope });
+          const cashAccounts = all.filter((account) => account.category === 'cash');
+
+          if (!cashAccounts.length) {
+            alert(t('alerts.cashAccountNotFound'));
+            return;
+          }
+
+          const txnResults = await Promise.all(
+            cashAccounts.map(async (acc) => {
+              const cacheKey = getTxnCacheKey(acc._id);
+
+              if (txnCacheRef.current[cacheKey]) {
+                return txnCacheRef.current[cacheKey];
+              }
+
+              const txns = await getAccountTransactions(acc._id, { moduleScope });
+
+              return Array.isArray(txns) ? txns : [];
+            })
+          );
+
+          cashAccounts.forEach((acc, i) => {
+            const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
+
+            txnCacheRef.current[getTxnCacheKey(acc._id)] = txns;
+          });
+
+          const accountsWithBalance = cashAccounts.map((acc, i) => {
+            const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
+
+            return buildAccountState(acc, txns);
+          });
+
+          let allTxns = txnResults.flat().filter(Boolean);
+
+          allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+          const combinedActualBalance = accountsWithBalance.reduce(
+            (sum, account) => sum + getSafeBalance(account),
+            0
+          );
+          const combinedTravelActivityBalance = calculateBalanceFromTxns(allTxns);
+          const combinedWithBalance = {
+            _id: 'ALL_CASH',
+            name: 'All Cash (Combined)',
+            isCombined: true,
+            balance: combinedActualBalance,
+            actualBalance: combinedActualBalance,
+            travelActivityBalance: combinedTravelActivityBalance,
+          };
+          const selectableAccounts =
+            accountsWithBalance.length > 1 ? [combinedWithBalance, ...accountsWithBalance] : accountsWithBalance;
+          const selectedFromQuery = requestedAccountId
+            ? accountsWithBalance.find((account) => String(account._id) === String(requestedAccountId))
+            : null;
+
+          if (requestedAccountId && !selectedFromQuery) {
+            alert(t('alerts.cashAccountNotFound'));
+            return;
+          }
+
+          const selected = selectedFromQuery || selectableAccounts[0];
+
+          setAccounts(selectableAccounts);
+          setSelectedAccount(selected);
+          setTransactions(
+            selected?.isCombined ? allTxns : txnCacheRef.current[getTxnCacheKey(selected?._id)] || []
+          );
+          return;
+        }
+
         if (isCashView) {
-          const cash = await getCashSummary();
+          if (requestedAccountId) {
+            const all = await getAccounts(true, { moduleScope });
+            const cashAccounts = all.filter((account) => account.category === 'cash');
+            const selectedCash = cashAccounts.find(
+              (account) => String(account._id) === String(requestedAccountId)
+            );
+
+            if (!selectedCash) {
+              alert(t('alerts.cashAccountNotFound'));
+              return;
+            }
+
+            setAccounts(cashAccounts);
+            await loadSingleAccount(selectedCash);
+            return;
+          }
+
+          const cash = await getCashSummary({ moduleScope });
           if (!cash?._id) {
             alert(t('alerts.cashAccountNotFound'));
             return;
@@ -95,7 +223,7 @@ const AccountDetailPage = () => {
 
         /* ================= BANK ================= */
         if (isBankView) {
-          const all = await getAccounts();
+          const all = await getAccounts(true, { moduleScope });
 
           const bankAccounts = all.filter(
             (a) => a.category === 'bank' || a.category === 'online' || a.category === 'wallet'
@@ -103,11 +231,16 @@ const AccountDetailPage = () => {
 
           const txnResults = await Promise.all(
             bankAccounts.map(async (acc) => {
-              if (txnCacheRef.current[acc._id]) {
-                return txnCacheRef.current[acc._id];
+              const cacheKey = getTxnCacheKey(acc._id);
+
+              if (txnCacheRef.current[cacheKey]) {
+                return txnCacheRef.current[cacheKey];
               }
 
-              const txns = await getAccountTransactions(acc._id);
+              const txns = await getAccountTransactions(
+                acc._id,
+                { moduleScope }
+              );
               return Array.isArray(txns) ? txns : [];
             })
           );
@@ -115,16 +248,13 @@ const AccountDetailPage = () => {
           bankAccounts.forEach((acc, i) => {
             const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
 
-            txnCacheRef.current[acc._id] = txns;
+            txnCacheRef.current[getTxnCacheKey(acc._id)] = txns;
           });
 
           const accountsWithBalance = bankAccounts.map((acc, i) => {
             const txns = Array.isArray(txnResults[i]) ? txnResults[i] : [];
 
-            return {
-              ...acc,
-              balance: calculateBalanceFromTxns(txns),
-            };
+            return buildAccountState(acc, txns);
           });
 
           if (!bankAccounts.length) {
@@ -142,14 +272,32 @@ const AccountDetailPage = () => {
 
           allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
 
+          const combinedActualBalance = accountsWithBalance.reduce(
+            (sum, account) => sum + getSafeBalance(account),
+            0
+          );
+          const combinedTravelActivityBalance = calculateBalanceFromTxns(allTxns);
+
           const combinedWithBalance = {
             ...combined,
-            balance: calculateBalanceFromTxns(allTxns),
+            balance: isTravelScoped ? combinedActualBalance : combinedTravelActivityBalance,
+            actualBalance: combinedActualBalance,
+            travelActivityBalance: combinedTravelActivityBalance,
           };
 
+          const selectedFromQuery = requestedAccountId
+            ? accountsWithBalance.find((account) => String(account._id) === String(requestedAccountId))
+            : null;
+
           setAccounts([combinedWithBalance, ...accountsWithBalance]);
-          setSelectedAccount(combinedWithBalance);
-          setTransactions(allTxns);
+
+          if (selectedFromQuery) {
+            setSelectedAccount(selectedFromQuery);
+            setTransactions(txnCacheRef.current[getTxnCacheKey(selectedFromQuery._id)] || []);
+          } else {
+            setSelectedAccount(combinedWithBalance);
+            setTransactions(allTxns);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -165,6 +313,12 @@ const AccountDetailPage = () => {
     loadSingleAccount,
     canViewAccountTransactions,
     calculateBalanceFromTxns,
+    buildAccountState,
+    getSafeBalance,
+    getTxnCacheKey,
+    isTravelScoped,
+    moduleScope,
+    requestedAccountId,
   ]);
 
   const handleAccountChange = async (e) => {
@@ -181,7 +335,7 @@ const AccountDetailPage = () => {
       const real = accounts.filter((a) => !a.isCombined);
 
       for (const r of real) {
-        const cached = txnCacheRef.current[r._id] || [];
+        const cached = txnCacheRef.current[getTxnCacheKey(r._id)] || [];
         allTxns.push(...cached);
       }
 
@@ -190,7 +344,9 @@ const AccountDetailPage = () => {
 
       setSelectedAccount({
         ...acc,
-        balance: calculateBalanceFromTxns(allTxns),
+        balance: isTravelScoped ? getSafeBalance(acc) : calculateBalanceFromTxns(allTxns),
+        actualBalance: getSafeBalance(acc),
+        travelActivityBalance: calculateBalanceFromTxns(allTxns),
       });
     } else {
       await loadSingleAccount(acc);
@@ -207,6 +363,7 @@ const AccountDetailPage = () => {
           onAccountChange={handleAccountChange}
           isCashView={isCashView}
           isBankView={isBankView}
+          isTravelScoped={isTravelScoped}
         />
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">

@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const BusinessAssetCategory = require("../models/BusinessAssetCategory");
 const BusinessAsset = require("../models/BusinessAsset");
+const {
+  applyBusinessValueScopeFilter,
+  getControllerStatusCode,
+  requireBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
 
 const DEFAULT_CATEGORIES = [
   "Furniture",
@@ -12,11 +17,15 @@ const DEFAULT_CATEGORIES = [
   "Other",
 ];
 
-const ensureDefaultCategories = async (userId, actorId) => {
-  const existingCategories = await BusinessAssetCategory.find({
+const ensureDefaultCategories = async (userId, actorId, moduleScope) => {
+  const existingQuery = {
     userId,
     isDeleted: false,
-  })
+  };
+
+  applyBusinessValueScopeFilter(existingQuery, moduleScope);
+
+  const existingCategories = await BusinessAssetCategory.find(existingQuery)
     .select("normalizedName")
     .lean();
 
@@ -35,6 +44,7 @@ const ensureDefaultCategories = async (userId, actorId) => {
   await BusinessAssetCategory.insertMany(
     missingCategories.map((name) => ({
       userId,
+      moduleScope,
       name,
       normalizedName: name.toLowerCase(),
       isSystem: true,
@@ -52,6 +62,7 @@ exports.createCategory = async (req, res) => {
     const actorId = new mongoose.Types.ObjectId(
       req.user.actorId || req.actorId || req.user.id,
     );
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const name = String(req.body.name || "").trim();
     const description = String(req.body.description || "").trim();
@@ -65,11 +76,15 @@ exports.createCategory = async (req, res) => {
 
     const normalizedName = name.toLowerCase();
 
-    const duplicate = await BusinessAssetCategory.findOne({
+    const duplicateQuery = {
       userId,
       normalizedName,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(duplicateQuery, moduleScope);
+
+    const duplicate = await BusinessAssetCategory.findOne(duplicateQuery);
 
     if (duplicate) {
       return res.status(400).json({
@@ -80,6 +95,7 @@ exports.createCategory = async (req, res) => {
 
     const category = await BusinessAssetCategory.create({
       userId,
+      moduleScope,
       name,
       normalizedName,
       description,
@@ -97,8 +113,9 @@ exports.createCategory = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Business Asset Category Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to create category.",
       error: error.message,
@@ -112,15 +129,18 @@ exports.getCategories = async (req, res) => {
     const actorId = new mongoose.Types.ObjectId(
       req.user.actorId || req.actorId || req.user.id,
     );
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const includeInactive = req.query.includeInactive === "true";
 
-    await ensureDefaultCategories(userId, actorId);
+    await ensureDefaultCategories(userId, actorId, moduleScope);
 
     const filter = {
       userId,
       isDeleted: false,
     };
+
+    applyBusinessValueScopeFilter(filter, moduleScope);
 
     if (!includeInactive) {
       filter.isActive = true;
@@ -139,8 +159,9 @@ exports.getCategories = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Asset Categories Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load categories.",
       error: error.message,
@@ -151,6 +172,7 @@ exports.getCategories = async (req, res) => {
 exports.getCategoryById = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -159,11 +181,15 @@ exports.getCategoryById = async (req, res) => {
       });
     }
 
-    const category = await BusinessAssetCategory.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    }).lean();
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const category = await BusinessAssetCategory.findOne(query).lean();
 
     if (!category) {
       return res.status(404).json({
@@ -178,8 +204,9 @@ exports.getCategoryById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Asset Category Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load category.",
       error: error.message,
@@ -193,6 +220,7 @@ exports.updateCategory = async (req, res) => {
     const actorId = new mongoose.Types.ObjectId(
       req.user.actorId || req.actorId || req.user.id,
     );
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -201,11 +229,15 @@ exports.updateCategory = async (req, res) => {
       });
     }
 
-    const category = await BusinessAssetCategory.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const category = await BusinessAssetCategory.findOne(query);
 
     if (!category) {
       return res.status(404).json({
@@ -228,12 +260,16 @@ exports.updateCategory = async (req, res) => {
 
     const normalizedName = name.toLowerCase();
 
-    const duplicate = await BusinessAssetCategory.findOne({
+    const duplicateQuery = {
       _id: { $ne: category._id },
       userId,
       normalizedName,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(duplicateQuery, moduleScope);
+
+    const duplicate = await BusinessAssetCategory.findOne(duplicateQuery);
 
     if (duplicate) {
       return res.status(400).json({
@@ -264,8 +300,9 @@ exports.updateCategory = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Business Asset Category Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to update category.",
       error: error.message,
@@ -279,6 +316,7 @@ exports.deleteCategory = async (req, res) => {
     const actorId = new mongoose.Types.ObjectId(
       req.user.actorId || req.actorId || req.user.id,
     );
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -287,11 +325,15 @@ exports.deleteCategory = async (req, res) => {
       });
     }
 
-    const category = await BusinessAssetCategory.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const category = await BusinessAssetCategory.findOne(query);
 
     if (!category) {
       return res.status(404).json({
@@ -300,11 +342,15 @@ exports.deleteCategory = async (req, res) => {
       });
     }
 
-    const assetExists = await BusinessAsset.exists({
+    const assetQuery = {
       userId,
       categoryId: category._id,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(assetQuery, moduleScope);
+
+    const assetExists = await BusinessAsset.exists(assetQuery);
 
     if (assetExists) {
       return res.status(400).json({
@@ -325,8 +371,9 @@ exports.deleteCategory = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete Business Asset Category Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to delete category.",
       error: error.message,
@@ -340,6 +387,7 @@ exports.restoreCategory = async (req, res) => {
     const actorId = new mongoose.Types.ObjectId(
       req.user.actorId || req.actorId || req.user.id,
     );
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -348,11 +396,15 @@ exports.restoreCategory = async (req, res) => {
       });
     }
 
-    const category = await BusinessAssetCategory.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: true,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const category = await BusinessAssetCategory.findOne(query);
 
     if (!category) {
       return res.status(404).json({
@@ -361,12 +413,16 @@ exports.restoreCategory = async (req, res) => {
       });
     }
 
-    const duplicate = await BusinessAssetCategory.findOne({
+    const duplicateQuery = {
       _id: { $ne: category._id },
       userId,
       normalizedName: category.normalizedName,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(duplicateQuery, moduleScope);
+
+    const duplicate = await BusinessAssetCategory.findOne(duplicateQuery);
 
     if (duplicate) {
       return res.status(400).json({
@@ -388,8 +444,9 @@ exports.restoreCategory = async (req, res) => {
     });
   } catch (error) {
     console.error("Restore Business Asset Category Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to restore category.",
       error: error.message,

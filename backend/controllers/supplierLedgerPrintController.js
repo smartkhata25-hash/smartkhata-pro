@@ -4,10 +4,58 @@ const mongoose = require("mongoose");
 
 const Supplier = require("../models/Supplier");
 const JournalEntry = require("../models/JournalEntry");
+const {
+  getTravelVendorJournalFilter,
+} = require("../services/travel/travelAccountingMetricsService");
 
 const buildSupplierLedgerPrint = require("../services/supplierLedgerPrintBuilder");
 const generateSupplierLedgerHTML = require("../templates/supplierLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+
+const resolveSupplierSourceLabel = (entry) => {
+  if (
+    entry.sourceType === "pay_bill" &&
+    ["travel_invoice", "travel_vendor_payment"].includes(entry.originModule)
+  ) {
+    return "Travel Vendor Payment";
+  }
+
+  if (
+    entry.originModule === "travel_vendor_return" &&
+    entry.sourceType === "purchase_return_payment"
+  ) {
+    return "Travel Vendor Return Receipt";
+  }
+
+  if (entry.sourceType === "travel_vendor_return") {
+    return "Travel Vendor Return/Credit";
+  }
+
+  if (entry.sourceType === "travel_vendor_cost") {
+    return "Travel Vendor Cost";
+  }
+
+  if (entry.sourceType === "travel_refund") {
+    return "Travel Vendor Recovery";
+  }
+
+  if (entry.sourceType === "purchase_invoice") {
+    return "Purchase Invoice";
+  }
+
+  if (
+    entry.sourceType === "pay_bill" ||
+    entry.sourceType === "purchase_payment"
+  ) {
+    return "Payment";
+  }
+
+  if (entry.sourceType === "purchase_return") {
+    return "Purchase Return";
+  }
+
+  return "-";
+};
 
 /* =========================================================
    INTERNAL: FETCH SUPPLIER LEDGER DATA
@@ -18,6 +66,7 @@ const fetchSupplierLedgerData = async ({
   userId,
   startDate,
   endDate,
+  moduleScope = "",
 }) => {
   const supplier = await Supplier.findById(supplierId).populate("account");
 
@@ -36,6 +85,8 @@ const fetchSupplierLedgerData = async ({
 
   const accountObjectId = new mongoose.Types.ObjectId(account);
   const userObjectId = new mongoose.Types.ObjectId(userId);
+  const travelJournalFilter =
+    moduleScope === "travel" ? getTravelVendorJournalFilter() : {};
 
   /* ================================
      Ledger Entries Query
@@ -45,6 +96,7 @@ const fetchSupplierLedgerData = async ({
     createdBy: userObjectId,
     "lines.account": accountObjectId,
     isDeleted: false,
+    ...travelJournalFilter,
   };
 
   if (startDate && endDate) {
@@ -69,6 +121,7 @@ const fetchSupplierLedgerData = async ({
       createdBy: userObjectId,
       isDeleted: false,
       "lines.account": accountObjectId,
+      ...travelJournalFilter,
       date: { $lt: new Date(startDate) },
     }).lean();
 
@@ -99,14 +152,7 @@ const fetchSupplierLedgerData = async ({
 
           sourceType: entry.sourceType || "",
 
-          sourceLabel:
-            entry.sourceType === "purchase_invoice"
-              ? "Purchase Invoice"
-              : entry.sourceType === "pay_bill"
-                ? "Payment"
-                : entry.sourceType === "purchase_return"
-                  ? "Purchase Return"
-                  : "-",
+          sourceLabel: resolveSupplierSourceLabel(entry),
 
           debit: line.type === "debit" ? Number(line.amount || 0) : 0,
           credit: line.type === "credit" ? Number(line.amount || 0) : 0,
@@ -131,13 +177,14 @@ const getSupplierLedgerHtml = async (req, res) => {
     const userId = req.user?.id || req.userId;
 
     const { supplierId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, moduleScope = "" } = req.query;
 
     const rawData = await fetchSupplierLedgerData({
       supplierId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildSupplierLedgerPrint({
@@ -173,13 +220,14 @@ const generateSupplierLedgerPdf = async (req, res) => {
     const userId = req.user?.id || req.userId;
 
     const { supplierId } = req.params;
-    const { startDate, endDate, size } = req.query;
+    const { startDate, endDate, size, moduleScope = "" } = req.query;
 
     const rawData = await fetchSupplierLedgerData({
       supplierId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildSupplierLedgerPrint({

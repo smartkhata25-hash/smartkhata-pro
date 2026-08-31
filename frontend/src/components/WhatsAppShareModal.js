@@ -7,18 +7,14 @@ export default function WhatsAppShareModal({ open, onClose, onSelect }) {
   return (
     <div style={overlayStyle}>
       <div style={modalStyle}>
-        <h3 style={{ marginBottom: 10 }}>{t('whatsapp.send')}</h3>
+        <h3 style={{ marginBottom: 10 }}>{t('pdf.share')}</h3>
 
         <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-          {t('whatsapp.description')}
+          {t('pdf.shareDescription')}
         </p>
 
-        <button style={btnStyle} onClick={() => onSelect('whatsapp')}>
-          🟢 WhatsApp
-        </button>
-
-        <button style={btnStyle} onClick={() => onSelect('business')}>
-          🟢 WhatsApp Business
+        <button style={btnStyle} onClick={() => onSelect('native')}>
+          {t('pdf.share')}
         </button>
 
         <button style={cancelStyle} onClick={onClose}>
@@ -29,7 +25,6 @@ export default function WhatsAppShareModal({ open, onClose, onSelect }) {
   );
 }
 
-// 🎨 Styles
 const overlayStyle = {
   position: 'fixed',
   top: 0,
@@ -59,7 +54,7 @@ const btnStyle = {
   border: 'none',
   fontWeight: 600,
   cursor: 'pointer',
-  background: '#25D366',
+  background: '#0891b2',
   color: '#fff',
 };
 

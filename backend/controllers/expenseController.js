@@ -1,10 +1,66 @@
 const Expense = require("../models/Expense");
+const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const ExpenseTitle = require("../models/ExpenseTitle");
+const mongoose = require("mongoose");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { isBalanced } = require("../utils/journalHelper");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const { clearTravelReportCache } = require("../services/travel/travelReportCacheService");
+const {
+  getSoftDeleteReason,
+  recalculateTravelSoftDeleteAccounts,
+  reverseTravelJournals,
+} = require("../services/travel/travelSoftDeleteService");
 const fs = require("fs");
 const path = require("path");
+
+const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
+const TRAVEL_EXPENSE_SCOPES = new Set([MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH]);
+
+const getExpenseOriginModule = (moduleScope) =>
+  TRAVEL_EXPENSE_SCOPES.has(moduleScope) ? TRAVEL_EXPENSE_ORIGIN : "";
+
+const validateScopedExpenseAccounts = async ({
+  userId,
+  moduleScope,
+  debitAccountId,
+  creditEntries = [],
+}) => {
+  const accountIds = [
+    debitAccountId,
+    ...creditEntries.map((entry) => entry.account),
+  ]
+    .filter(Boolean)
+    .map((id) => String(id));
+  const uniqueAccountIds = [...new Set(accountIds)];
+
+  if (uniqueAccountIds.length === 0) {
+    const error = new Error("Expense accounts are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const query = {
+    _id: { $in: uniqueAccountIds },
+    userId,
+    isActive: { $ne: false },
+  };
+
+  applyModuleScopeFilter(query, moduleScope);
+
+  const matchedAccounts = await Account.find(query).select("_id").lean();
+
+  if (matchedAccounts.length !== uniqueAccountIds.length) {
+    const error = new Error("One or more selected accounts are not available in this module.");
+    error.statusCode = 400;
+    throw error;
+  }
+};
 
 // ✅ Create Expense with Journal Entry (UPDATED WITH TITLE MAPPING)
 exports.createExpense = async (req, res) => {
@@ -18,6 +74,7 @@ exports.createExpense = async (req, res) => {
       amount,
       paymentType,
       description,
+      moduleScope,
     } = req.body;
 
     const creditEntries = JSON.parse(req.body.creditEntries || "[]");
@@ -60,6 +117,10 @@ exports.createExpense = async (req, res) => {
     }
 
     const numericAmount = Number(amount);
+    const normalizedModuleScope = normalizeModuleScope(
+      moduleScope,
+      MODULE_SCOPES.TRADING,
+    );
 
     const totalCredit = creditEntries.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -93,6 +154,13 @@ exports.createExpense = async (req, res) => {
       })),
     ];
 
+    await validateScopedExpenseAccounts({
+      userId,
+      moduleScope: normalizedModuleScope,
+      debitAccountId: finalCategory,
+      creditEntries,
+    });
+
     if (!isBalanced(lines)) {
       return res.status(400).json({
         message:
@@ -114,6 +182,7 @@ exports.createExpense = async (req, res) => {
       attachment: attachmentPath,
       userId,
       titleId: titleId || null,
+      moduleScope: normalizedModuleScope,
     });
 
     await expense.save();
@@ -124,6 +193,7 @@ exports.createExpense = async (req, res) => {
       description: finalTitle || description || "Expense Entry",
       createdBy: userId,
       sourceType: "expense",
+      originModule: getExpenseOriginModule(normalizedModuleScope),
       referenceId: expense._id,
       lines,
     });
@@ -138,13 +208,17 @@ exports.createExpense = async (req, res) => {
       await recalculateAccountBalance(acc);
     }
 
+    if (TRAVEL_EXPENSE_SCOPES.has(normalizedModuleScope)) {
+      clearTravelReportCache(userId);
+    }
+
     res.status(201).json({
       message: "Expense created successfully",
       data: expense,
     });
   } catch (err) {
     console.error("❌ Error creating expense:", err);
-    res.status(500).json({ error: err.message || "Internal server error" });
+    res.status(err.statusCode || 500).json({ error: err.message || "Internal server error" });
   }
 };
 
@@ -160,6 +234,7 @@ exports.updateExpense = async (req, res) => {
       amount,
       paymentType,
       description,
+      moduleScope,
     } = req.body;
 
     const creditEntries = JSON.parse(req.body.creditEntries || "[]");
@@ -180,6 +255,11 @@ exports.updateExpense = async (req, res) => {
     if (!expense) {
       return res.status(404).json({ error: "Expense not found" });
     }
+
+    const previousModuleScope = normalizeModuleScope(
+      expense.moduleScope,
+      MODULE_SCOPES.TRADING,
+    );
 
     let finalCategory = category;
     let finalTitle = title || "";
@@ -209,6 +289,10 @@ exports.updateExpense = async (req, res) => {
     }
 
     const numericAmount = Number(amount);
+    const normalizedModuleScope = normalizeModuleScope(
+      moduleScope,
+      expense.moduleScope || MODULE_SCOPES.TRADING,
+    );
 
     const totalCredit = creditEntries.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -243,6 +327,13 @@ exports.updateExpense = async (req, res) => {
       })),
     ];
 
+    await validateScopedExpenseAccounts({
+      userId,
+      moduleScope: normalizedModuleScope,
+      debitAccountId: finalCategory,
+      creditEntries,
+    });
+
     if (!isBalanced(lines)) {
       return res.status(400).json({
         message: "Journal entry is not balanced.",
@@ -268,6 +359,7 @@ exports.updateExpense = async (req, res) => {
     expense.account = null;
     expense.description = description;
     expense.titleId = titleId || null;
+    expense.moduleScope = normalizedModuleScope;
 
     if (req.file) {
       expense.attachment = `uploads/${req.file.filename}`;
@@ -286,6 +378,7 @@ exports.updateExpense = async (req, res) => {
       description: finalTitle || description || "Expense Update",
       createdBy: userId,
       sourceType: "expense",
+      originModule: getExpenseOriginModule(normalizedModuleScope),
       referenceId: expense._id,
       lines,
     });
@@ -307,13 +400,20 @@ exports.updateExpense = async (req, res) => {
       await recalculateAccountBalance(acc);
     }
 
+    if (
+      TRAVEL_EXPENSE_SCOPES.has(normalizedModuleScope) ||
+      TRAVEL_EXPENSE_SCOPES.has(previousModuleScope)
+    ) {
+      clearTravelReportCache(userId);
+    }
+
     res.json({
       message: "Expense updated successfully",
       data: expense,
     });
   } catch (err) {
     console.error("❌ Error updating expense:", err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 };
 
@@ -321,12 +421,82 @@ exports.updateExpense = async (req, res) => {
 exports.deleteExpense = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+    const actorId = req.actorId || userId;
     const expense = await Expense.findOne({
       _id: req.params.id,
       userId,
       isDeleted: false,
     });
     if (!expense) return res.status(404).json({ error: "Expense not found" });
+
+    const requestedScope = normalizeModuleScope(
+      req.query?.moduleScope || req.query?.scope,
+      "",
+    );
+    const expenseScope = normalizeModuleScope(
+      expense.moduleScope,
+      MODULE_SCOPES.TRADING,
+    );
+    const isTravelDelete =
+      expenseScope === MODULE_SCOPES.TRAVEL ||
+      (expenseScope === MODULE_SCOPES.BOTH && requestedScope === MODULE_SCOPES.TRAVEL);
+
+    if (isTravelDelete) {
+      const session = await mongoose.startSession();
+      let accountIds = [];
+
+      try {
+        await session.withTransaction(async () => {
+          const liveExpense = await Expense.findOne({
+            _id: req.params.id,
+            userId,
+            isDeleted: false,
+          }).session(session);
+
+          if (!liveExpense) {
+            throw Object.assign(new Error("Expense not found"), { statusCode: 404 });
+          }
+
+          const reversalResult = await reverseTravelJournals({
+            userId,
+            referenceId: liveExpense._id,
+            originModule: TRAVEL_EXPENSE_ORIGIN,
+            sourceTypes: ["expense"],
+            session,
+            reason: getSoftDeleteReason(req, "Travel expense corrected"),
+          });
+
+          if (reversalResult.journals.length === 0) {
+            throw Object.assign(
+              new Error("Travel expense journal was not found for reversal"),
+              { statusCode: 409 },
+            );
+          }
+
+          accountIds = reversalResult.accountIds;
+          liveExpense.isDeleted = true;
+          liveExpense.deletedAt = new Date();
+          liveExpense.deletedBy = actorId;
+          liveExpense.deleteReason = getSoftDeleteReason(req, "Travel expense corrected");
+          liveExpense.isReversed = true;
+          liveExpense.reversedAt = new Date();
+          liveExpense.reversedBy = actorId;
+          liveExpense.reversalJournalEntryIds = reversalResult.reversalIds;
+
+          await liveExpense.save({ session });
+        });
+      } finally {
+        await session.endSession();
+      }
+
+      await recalculateTravelSoftDeleteAccounts(accountIds);
+      clearTravelReportCache(userId);
+
+      return res.json({
+        message: "Travel expense reversed and archived successfully",
+        reversed: true,
+      });
+    }
 
     const { account, category } = expense;
 
@@ -353,9 +523,19 @@ exports.deleteExpense = async (req, res) => {
       }
     }
 
+    if (TRAVEL_EXPENSE_SCOPES.has(expense.moduleScope)) {
+      clearTravelReportCache(userId);
+    }
+
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("❌ Error deleting expense:", err);
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.message,
+        message: err.message,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 };
@@ -363,11 +543,17 @@ exports.deleteExpense = async (req, res) => {
 exports.getAllExpenses = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-
-    const expenses = await Expense.find({
+    const expenseQuery = {
       userId,
       isDeleted: false,
-    })
+    };
+    const requestedScope = String(req.query?.moduleScope || req.query?.scope || "")
+      .trim()
+      .toLowerCase();
+
+    applyModuleScopeFilter(expenseQuery, requestedScope || MODULE_SCOPES.TRADING);
+
+    const expenses = await Expense.find(expenseQuery)
       .populate("category", "name")
       .sort({ createdAt: -1 })
       .lean();

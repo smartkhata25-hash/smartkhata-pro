@@ -1,32 +1,22 @@
 const mongoose = require("mongoose");
 
-/* =========================================================
-   DOCUMENT VISIBILITY SETTINGS
-========================================================= */
 const documentSettingSchema = new mongoose.Schema({
-  // 🔹 Basic Visibility Controls
   showHeader: { type: Boolean, default: true },
   showFooter: { type: Boolean, default: true },
 
-  // 🔹 Item Columns Control (ONLY THESE TWO ARE HIDEABLE)
   showDescription: { type: Boolean, default: true },
   showUOM: { type: Boolean, default: true },
 
-  // 🔹 Payment & Status Controls
   showPaid: { type: Boolean, default: true },
   showStatus: { type: Boolean, default: true },
   showPaymentType: { type: Boolean, default: true },
   showBalance: { type: Boolean, default: true },
   showCustomerTotalBalance: { type: Boolean, default: true },
 
-  // 🔹 Extra
   showStamp: { type: Boolean, default: true },
   showBy: { type: Boolean, default: true },
 });
 
-/* =========================================================
-   HEADER SETTINGS
-========================================================= */
 const headerSettingSchema = new mongoose.Schema({
   companyName: { type: String, default: "" },
   address: { type: String, default: "" },
@@ -46,9 +36,6 @@ const headerSettingSchema = new mongoose.Schema({
   showTaxNumber: { type: Boolean, default: true },
 });
 
-/* =========================================================
-   LAYOUT SETTINGS (UPDATED WITH COLUMN SIZE CONTROL)
-========================================================= */
 const layoutSchema = new mongoose.Schema({
   headerSize: {
     type: String,
@@ -86,7 +73,6 @@ const layoutSchema = new mongoose.Schema({
     default: "standard",
   },
 
-  /* ================= NEW: COLUMN SIZE CONTROL ================= */
   columnSizes: {
     name: {
       type: String,
@@ -121,18 +107,12 @@ const layoutSchema = new mongoose.Schema({
   },
 });
 
-/* =========================================================
-   DOCUMENT SCHEMA (Header + Settings + Layout)
-========================================================= */
 const documentPrintSchema = new mongoose.Schema({
   header: headerSettingSchema,
   settings: documentSettingSchema,
   layout: layoutSchema,
 });
 
-/* =========================================================
-   MAIN PRINT SETTING SCHEMA
-========================================================= */
 const printSettingSchema = new mongoose.Schema(
   {
     userId: {
@@ -142,11 +122,11 @@ const printSettingSchema = new mongoose.Schema(
       unique: true,
     },
 
-    // Each document has its own full config
     sales: documentPrintSchema,
     purchase: documentPrintSchema,
     saleReturn: documentPrintSchema,
     purchaseReturn: documentPrintSchema,
+    travelInvoice: documentPrintSchema,
   },
   { timestamps: true },
 );

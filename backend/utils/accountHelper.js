@@ -2,6 +2,13 @@ const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 
+const persistAccountBalance = (filter, balance) =>
+  Account.updateOne(
+    filter,
+    { $set: { balance: Number(balance || 0) } },
+    { strict: false },
+  );
+
 // ⚠️ LEGACY HELPER — avoid using in journal-based accounting
 exports.updateAccountBalance = async (accountId, amount, operation = "add") => {
   const account = await Account.findById(accountId);
@@ -75,10 +82,15 @@ exports.recalculateAccountBalance = async (accountId) => {
       calculatedBalance = totalCredit - totalDebit;
     }
 
-    account.balance = calculatedBalance;
-    await account.save();
+    await persistAccountBalance(
+      {
+        _id: account._id,
+        userId: account.userId,
+      },
+      calculatedBalance,
+    );
 
-    return account.balance;
+    return calculatedBalance;
   } catch (err) {
     console.error("❌ Error recalculating balance:", err.message);
     throw err;
@@ -183,7 +195,7 @@ exports.recalculateAccountBalances = async (accountIds = []) => {
   });
 
   if (updates.length > 0) {
-    await Account.bulkWrite(updates);
+    await Account.bulkWrite(updates, { strict: false });
   }
 
   return accounts.map((account) => {
@@ -271,7 +283,7 @@ exports.recalculateAllUserAccounts = async (userId) => {
       balance = data.credit - data.debit;
     }
 
-    await Account.updateOne({ _id: acc._id }, { balance });
+    await persistAccountBalance({ _id: acc._id }, balance);
 
     results.push({ name: acc.name, balance });
   }

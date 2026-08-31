@@ -2,6 +2,7 @@ const User = require("../models/User");
 const PrintSetting = require("../models/PrintSetting");
 const { defaultSettings } = require("./printSettingController");
 const { logActivity } = require("../utils/activityLogger");
+const { normalizeModuleConfig } = require("../utils/moduleConfig");
 
 const ownerOnlyCheck = (req, res) => {
   if (req.user?.accountRole !== "owner") {
@@ -112,7 +113,14 @@ const saveBusinessInfo = async (req, res) => {
     if (!ownerOnlyCheck(req, res)) return;
 
     const ownerId = req.userId;
-    const { businessName, businessType, currency, taxNumber } = req.body;
+    const {
+      businessName,
+      businessType,
+      currency,
+      taxNumber,
+      enabledModules,
+      defaultModule,
+    } = req.body;
 
     const user = await User.findById(ownerId);
 
@@ -127,12 +135,24 @@ const saveBusinessInfo = async (req, res) => {
       businessType: user.businessType || "",
       currency: user.currency || "",
       taxNumber: user.taxNumber || "",
+      ...normalizeModuleConfig(user),
     };
 
     user.businessName = String(businessName || "").trim();
     user.businessType = String(businessType || "").trim();
     user.currency = String(currency || "").trim();
     user.taxNumber = String(taxNumber || "").trim();
+
+    if (enabledModules !== undefined || defaultModule !== undefined) {
+      const moduleConfig = normalizeModuleConfig({
+        enabledModules:
+          enabledModules !== undefined ? enabledModules : user.enabledModules,
+        defaultModule: defaultModule !== undefined ? defaultModule : user.defaultModule,
+      });
+
+      user.enabledModules = moduleConfig.enabledModules;
+      user.defaultModule = moduleConfig.defaultModule;
+    }
 
     await user.save();
 
@@ -157,11 +177,17 @@ const saveBusinessInfo = async (req, res) => {
         businessType: user.businessType,
         currency: user.currency,
         taxNumber: user.taxNumber,
+        ...normalizeModuleConfig(user),
       },
     });
 
     return res.json({
       msg: "Business Info saved successfully",
+      businessName: user.businessName,
+      businessType: user.businessType,
+      currency: user.currency,
+      taxNumber: user.taxNumber,
+      ...normalizeModuleConfig(user),
     });
   } catch (err) {
     console.error("Business Info Save Error:", err);
@@ -181,7 +207,7 @@ const getProfile = async (req, res) => {
 
     const [owner, loggedInUser] = await Promise.all([
       User.findById(ownerId).select(
-        "name fullName email cnic mobile address businessName businessType currency taxNumber",
+        "name fullName email cnic mobile address businessName businessType currency taxNumber enabledModules defaultModule",
       ),
 
       User.findById(actorId).select(
@@ -205,6 +231,7 @@ const getProfile = async (req, res) => {
       businessType: owner.businessType || "",
       currency: owner.currency || "",
       taxNumber: owner.taxNumber || "",
+      ...normalizeModuleConfig(owner),
 
       loggedInUser: {
         _id: loggedInUser._id,

@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 const BusinessLiability = require("../models/BusinessLiability");
 
 const BusinessLiabilityPayment = require("../models/BusinessLiabilityPayment");
+const {
+  applyBusinessValueScopeFilter,
+  getControllerStatusCode,
+  requireBusinessValueModuleScope,
+} = require("../utils/businessValueModuleScope");
 
 const DEFAULT_LIABILITY_TITLES = [
   "Business Loan",
@@ -58,6 +63,7 @@ exports.getLiabilityTitles = async (req, res) => {
 exports.createLiability = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const {
       title,
@@ -122,6 +128,7 @@ exports.createLiability = async (req, res) => {
 
     const liability = await BusinessLiability.create({
       userId,
+      moduleScope,
       title: cleanTitle,
       category,
       originalAmount: totalAmount,
@@ -141,8 +148,9 @@ exports.createLiability = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Business Liability Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to create liability.",
       error: error.message,
@@ -153,6 +161,7 @@ exports.createLiability = async (req, res) => {
 exports.getLiabilities = async (req, res) => {
   try {
     const { userId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     const {
       search = "",
@@ -167,6 +176,8 @@ exports.getLiabilities = async (req, res) => {
       userId,
       isDeleted: false,
     };
+
+    applyBusinessValueScopeFilter(filter, moduleScope);
 
     if (search.trim()) {
       filter.title = {
@@ -222,8 +233,9 @@ exports.getLiabilities = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Liabilities Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load liabilities.",
       error: error.message,
@@ -234,6 +246,7 @@ exports.getLiabilities = async (req, res) => {
 exports.getLiabilityById = async (req, res) => {
   try {
     const { userId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -242,11 +255,15 @@ exports.getLiabilityById = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    }).lean();
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const liability = await BusinessLiability.findOne(query).lean();
 
     if (!liability) {
       return res.status(404).json({
@@ -261,8 +278,9 @@ exports.getLiabilityById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Business Liability Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to load liability.",
       error: error.message,
@@ -273,6 +291,7 @@ exports.getLiabilityById = async (req, res) => {
 exports.updateLiability = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -281,11 +300,15 @@ exports.updateLiability = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const liability = await BusinessLiability.findOne(query);
 
     if (!liability) {
       return res.status(404).json({
@@ -294,11 +317,15 @@ exports.updateLiability = async (req, res) => {
       });
     }
 
-    const hasPaymentHistory = await BusinessLiabilityPayment.exists({
+    const paymentQuery = {
       userId,
       liabilityId: liability._id,
       isReversed: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(paymentQuery, moduleScope);
+
+    const hasPaymentHistory = await BusinessLiabilityPayment.exists(paymentQuery);
 
     if (
       hasPaymentHistory &&
@@ -391,8 +418,9 @@ exports.updateLiability = async (req, res) => {
     });
   } catch (error) {
     console.error("Update Business Liability Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to update liability.",
       error: error.message,
@@ -403,6 +431,7 @@ exports.updateLiability = async (req, res) => {
 exports.deleteLiability = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -411,11 +440,15 @@ exports.deleteLiability = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const liability = await BusinessLiability.findOne(query);
 
     if (!liability) {
       return res.status(404).json({
@@ -424,11 +457,15 @@ exports.deleteLiability = async (req, res) => {
       });
     }
 
-    const hasPaymentHistory = await BusinessLiabilityPayment.exists({
+    const paymentQuery = {
       userId,
       liabilityId: liability._id,
       isReversed: false,
-    });
+    };
+
+    applyBusinessValueScopeFilter(paymentQuery, moduleScope);
+
+    const hasPaymentHistory = await BusinessLiabilityPayment.exists(paymentQuery);
 
     if (hasPaymentHistory) {
       return res.status(400).json({
@@ -449,8 +486,9 @@ exports.deleteLiability = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete Business Liability Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to delete liability.",
       error: error.message,
@@ -461,6 +499,7 @@ exports.deleteLiability = async (req, res) => {
 exports.restoreLiability = async (req, res) => {
   try {
     const { userId, actorId } = getUserIds(req);
+    const moduleScope = requireBusinessValueModuleScope(req);
 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -469,11 +508,15 @@ exports.restoreLiability = async (req, res) => {
       });
     }
 
-    const liability = await BusinessLiability.findOne({
+    const query = {
       _id: req.params.id,
       userId,
       isDeleted: true,
-    });
+    };
+
+    applyBusinessValueScopeFilter(query, moduleScope);
+
+    const liability = await BusinessLiability.findOne(query);
 
     if (!liability) {
       return res.status(404).json({
@@ -496,8 +539,9 @@ exports.restoreLiability = async (req, res) => {
     });
   } catch (error) {
     console.error("Restore Business Liability Error:", error);
+    const statusCode = getControllerStatusCode(error);
 
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
       message: "Failed to restore liability.",
       error: error.message,

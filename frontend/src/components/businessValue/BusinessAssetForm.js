@@ -19,6 +19,7 @@ const BusinessAssetForm = ({
   onClose,
   onSaved,
   onManageCategories,
+  moduleScope,
 }) => {
   const [formData, setFormData] = useState(getEmptyBusinessAsset());
   const [saving, setSaving] = useState(false);
@@ -106,8 +107,8 @@ const BusinessAssetForm = ({
       setError('');
 
       const result = isEditing
-        ? await updateBusinessAsset(asset._id, formData)
-        : await createBusinessAsset(formData);
+        ? await updateBusinessAsset(asset._id, formData, { moduleScope })
+        : await createBusinessAsset(formData, { moduleScope });
 
       if (onSaved) {
         onSaved(result.asset);

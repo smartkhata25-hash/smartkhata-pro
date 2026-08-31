@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { login as loginUser } from '../services/authService';
 import { t } from '../i18n/i18n';
 import { useEffect } from 'react';
+import { getDefaultWorkspacePath } from '../utils/moduleNavigation';
+
+const readStoredUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null');
+  } catch {
+    return null;
+  }
+};
+
 export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -14,12 +24,13 @@ export default function LoginPage() {
 
     const lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
     const isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
+    const user = readStoredUser();
 
     if (token && userId) {
       if (lockEnabled === 'true' && isUnlocked !== 'true') {
         navigate('/lock');
       } else {
-        navigate('/dashboard');
+        navigate(getDefaultWorkspacePath(user));
       }
     }
   }, [navigate]);
@@ -58,7 +69,7 @@ export default function LoginPage() {
         } else if (!user.businessName || !user.businessType || !user.currency) {
           navigate('/business-info');
         } else {
-          navigate('/dashboard');
+          navigate(getDefaultWorkspacePath(user));
         }
       } else {
         alert(res.msg || t('alerts.loginFailed'));

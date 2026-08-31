@@ -724,16 +724,65 @@ thead {
   }
 }
 
-/* 🔒 Remove number input arrows/spinners */
-
-.no-spinner::-webkit-outer-spin-button,
-.no-spinner::-webkit-inner-spin-button {
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.no-spinner {
+input[type='number'] {
   -webkit-appearance: none;
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+/* Business Info module settings */
+.business-info-card {
+  padding: 24px !important;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.business-module-card:hover {
+  transform: translateY(-1px);
+}
+
+.business-module-card:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.urdu-mode .business-module-card {
+  direction: rtl;
+}
+
+.urdu-mode .business-module-card span {
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .business-info-card {
+    padding: 16px !important;
+  }
+
+  .business-module-card {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .business-info-actions {
+    position: sticky;
+    bottom: 10px;
+    z-index: 10;
+    margin: 10px -4px -4px;
+    padding: 10px;
+    border: 1px solid rgba(226, 232, 240, 0.92);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+    backdrop-filter: blur(10px);
+  }
+
+  .business-info-actions .btn {
+    min-height: 38px;
+  }
 }

@@ -58,6 +58,11 @@ const payBillSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    originModule: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     attachments: [
       {
         key: {
@@ -100,6 +105,39 @@ const payBillSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    deleteReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    isReversed: {
+      type: Boolean,
+      default: false,
+    },
+    reversedAt: {
+      type: Date,
+      default: null,
+    },
+    reversedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    reversalJournalEntryIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "JournalEntry",
+      },
+    ],
   },
   {
     timestamps: true,
@@ -135,6 +173,12 @@ payBillSchema.index({
 payBillSchema.index({
   userId: 1,
   billNo: 1,
+});
+
+payBillSchema.index({
+  userId: 1,
+  originModule: 1,
+  isDeleted: 1,
 });
 
 module.exports = mongoose.model("PayBill", payBillSchema);

@@ -1,0 +1,19 @@
+const express = require("express");
+
+const ctrl = require("../controllers/travel/travelReportController");
+const protect = require("../middleware/authMiddleware");
+const { requireModule } = require("../middleware/moduleMiddleware");
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { MODULE_KEYS } = require("../utils/moduleConfig");
+
+const router = express.Router();
+
+router.use(protect, requireModule(MODULE_KEYS.TRAVEL));
+
+router.get(
+  "/summary",
+  requirePermission("travel.reports"),
+  ctrl.getTravelReportSummary,
+);
+
+module.exports = router;

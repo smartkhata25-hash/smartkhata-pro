@@ -5,6 +5,10 @@ const Party = require("../models/Party");
 const Product = require("../models/Product");
 const Account = require("../models/Account");
 const InventoryTransaction = require("../models/InventoryTransaction");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+} = require("../utils/moduleScope");
 
 const getOwnerId = (req) => {
   return (
@@ -44,6 +48,15 @@ const buildSectionVersion = (prefix, count, latestDocument) => {
   return `${prefix}:${count}:${getDocumentTimestamp(latestDocument)}`;
 };
 
+const getTradingCustomerQuery = (userId, extra = {}) =>
+  applyModuleScopeFilter(
+    {
+      createdBy: userId,
+      ...extra,
+    },
+    MODULE_SCOPES.TRADING,
+  );
+
 const buildInvoiceOptionsVersions = async (userId) => {
   const [
     latestCustomer,
@@ -57,18 +70,12 @@ const buildInvoiceOptionsVersions = async (userId) => {
     latestPaymentAccount,
     paymentAccountCount,
   ] = await Promise.all([
-    Customer.findOne({
-      createdBy: userId,
-      isActive: true,
-    })
+    Customer.findOne(getTradingCustomerQuery(userId, { isActive: true }))
       .sort({ updatedAt: -1, _id: -1 })
       .select("updatedAt createdAt")
       .lean(),
 
-    Customer.countDocuments({
-      createdBy: userId,
-      isActive: true,
-    }),
+    Customer.countDocuments(getTradingCustomerQuery(userId, { isActive: true })),
 
     Party.findOne({
       userId,
@@ -235,10 +242,7 @@ const getProductStockMap = async ({ userId, productIds }) => {
 };
 
 const getCustomers = async (userId) => {
-  return Customer.find({
-    createdBy: userId,
-    isActive: true,
-  })
+  return Customer.find(getTradingCustomerQuery(userId, { isActive: true }))
     .select("name phone account balance")
     .sort({
       name: 1,

@@ -19,6 +19,7 @@ const BusinessLiabilityList = ({
   onAdd,
   onPay,
   onHistory,
+  moduleScope,
 }) => {
   const [deletingId, setDeletingId] = useState('');
   const [search, setSearch] = useState('');
@@ -84,7 +85,7 @@ const BusinessLiabilityList = ({
     try {
       setDeletingId(liability._id);
 
-      await deleteBusinessLiability(liability._id);
+      await deleteBusinessLiability(liability._id, { moduleScope });
 
       if (onDeleted) {
         onDeleted(liability._id);

@@ -1,5 +1,11 @@
 import axios from 'axios';
 
+import {
+  appendBusinessValueModuleScopeParam,
+  getBusinessValueModuleScopeParams,
+  withBusinessValueModuleScope,
+} from './businessValueModuleScope';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 const getAuthConfig = () => {
@@ -45,6 +51,8 @@ const buildLiabilityQuery = (filters = {}) => {
     params.append('limit', String(filters.limit));
   }
 
+  appendBusinessValueModuleScopeParam(params, filters.moduleScope);
+
   return params.toString();
 };
 
@@ -76,10 +84,18 @@ const normalizeLiabilityPaymentPayload = (payment = {}) => {
   };
 };
 
-export const fetchLiabilityTitles = async () => {
+export const fetchLiabilityTitles = async ({ moduleScope } = {}) => {
   try {
+    const params = new URLSearchParams();
+
+    appendBusinessValueModuleScopeParam(params, moduleScope);
+
+    const queryString = params.toString();
+
     const response = await axios.get(
-      `${BASE_URL}/api/business-liabilities/titles`,
+      queryString
+        ? `${BASE_URL}/api/business-liabilities/titles?${queryString}`
+        : `${BASE_URL}/api/business-liabilities/titles`,
       getAuthConfig()
     );
 
@@ -109,7 +125,7 @@ export const fetchBusinessLiabilities = async (filters = {}) => {
   }
 };
 
-export const fetchBusinessLiabilityById = async (liabilityId) => {
+export const fetchBusinessLiabilityById = async (liabilityId, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
@@ -117,7 +133,10 @@ export const fetchBusinessLiabilityById = async (liabilityId) => {
 
     const response = await axios.get(
       `${BASE_URL}/api/business-liabilities/${liabilityId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -128,9 +147,12 @@ export const fetchBusinessLiabilityById = async (liabilityId) => {
   }
 };
 
-export const createBusinessLiability = async (liabilityData) => {
+export const createBusinessLiability = async (liabilityData, options = {}) => {
   try {
-    const payload = normalizeLiabilityPayload(liabilityData);
+    const payload = withBusinessValueModuleScope(
+      normalizeLiabilityPayload(liabilityData),
+      options.moduleScope || liabilityData?.moduleScope
+    );
 
     const response = await axios.post(
       `${BASE_URL}/api/business-liabilities`,
@@ -146,13 +168,16 @@ export const createBusinessLiability = async (liabilityData) => {
   }
 };
 
-export const updateBusinessLiability = async (liabilityId, liabilityData) => {
+export const updateBusinessLiability = async (liabilityId, liabilityData, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
     }
 
-    const payload = normalizeLiabilityPayload(liabilityData);
+    const payload = withBusinessValueModuleScope(
+      normalizeLiabilityPayload(liabilityData),
+      options.moduleScope || liabilityData?.moduleScope
+    );
 
     const response = await axios.put(
       `${BASE_URL}/api/business-liabilities/${liabilityId}`,
@@ -168,7 +193,7 @@ export const updateBusinessLiability = async (liabilityId, liabilityData) => {
   }
 };
 
-export const deleteBusinessLiability = async (liabilityId) => {
+export const deleteBusinessLiability = async (liabilityId, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
@@ -176,7 +201,10 @@ export const deleteBusinessLiability = async (liabilityId) => {
 
     const response = await axios.delete(
       `${BASE_URL}/api/business-liabilities/${liabilityId}`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -187,7 +215,7 @@ export const deleteBusinessLiability = async (liabilityId) => {
   }
 };
 
-export const restoreBusinessLiability = async (liabilityId) => {
+export const restoreBusinessLiability = async (liabilityId, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
@@ -196,7 +224,10 @@ export const restoreBusinessLiability = async (liabilityId) => {
     const response = await axios.patch(
       `${BASE_URL}/api/business-liabilities/${liabilityId}/restore`,
       {},
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -207,13 +238,16 @@ export const restoreBusinessLiability = async (liabilityId) => {
   }
 };
 
-export const payBusinessLiability = async (liabilityId, paymentData) => {
+export const payBusinessLiability = async (liabilityId, paymentData, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
     }
 
-    const payload = normalizeLiabilityPaymentPayload(paymentData);
+    const payload = withBusinessValueModuleScope(
+      normalizeLiabilityPaymentPayload(paymentData),
+      options.moduleScope || paymentData?.moduleScope
+    );
 
     const response = await axios.post(
       `${BASE_URL}/api/business-liabilities/${liabilityId}/payments`,
@@ -229,7 +263,7 @@ export const payBusinessLiability = async (liabilityId, paymentData) => {
   }
 };
 
-export const fetchLiabilityPaymentHistory = async (liabilityId) => {
+export const fetchLiabilityPaymentHistory = async (liabilityId, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
@@ -237,7 +271,10 @@ export const fetchLiabilityPaymentHistory = async (liabilityId) => {
 
     const response = await axios.get(
       `${BASE_URL}/api/business-liabilities/${liabilityId}/payments`,
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;
@@ -248,7 +285,7 @@ export const fetchLiabilityPaymentHistory = async (liabilityId) => {
   }
 };
 
-export const reverseLiabilityPayment = async (liabilityId, paymentId) => {
+export const reverseLiabilityPayment = async (liabilityId, paymentId, options = {}) => {
   try {
     if (!liabilityId) {
       throw new Error('Liability ID is required');
@@ -261,7 +298,10 @@ export const reverseLiabilityPayment = async (liabilityId, paymentId) => {
     const response = await axios.patch(
       `${BASE_URL}/api/business-liabilities/${liabilityId}/payments/${paymentId}/reverse`,
       {},
-      getAuthConfig()
+      {
+        ...getAuthConfig(),
+        params: getBusinessValueModuleScopeParams(options.moduleScope),
+      }
     );
 
     return response.data;

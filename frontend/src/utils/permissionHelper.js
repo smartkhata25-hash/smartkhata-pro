@@ -1,5 +1,7 @@
 // 📁 src/utils/permissionHelper.js
 
+import { isModuleEnabled, MODULE_KEYS } from './moduleConfig';
+
 //  SAFE LOCAL STORAGE HELPERS
 
 const safeParseJSON = (value, fallback = null) => {
@@ -128,6 +130,16 @@ export const hasAllPermissions = (permissions = [], user = null) => {
   return permissions.every((permission) => hasPermission(permission, currentUser));
 };
 
+export const hasModuleAccess = (moduleKey, user = null) => {
+  if (!moduleKey) return true;
+
+  const currentUser = user || getStoredUser();
+
+  if (!currentUser) return false;
+
+  return isModuleEnabled(currentUser, moduleKey);
+};
+
 //  ACCESS HELPERS
 
 export const canAccess = ({
@@ -136,11 +148,19 @@ export const canAccess = ({
   allPermissions = [],
   ownerOnly = false,
   systemAdminOnly = false,
+  moduleKey = null,
+  module = null,
   user = null,
 } = {}) => {
   const currentUser = user || getStoredUser();
 
   if (!currentUser) return false;
+
+  const requiredModule = moduleKey || module;
+
+  if (requiredModule && !hasModuleAccess(requiredModule, currentUser)) {
+    return false;
+  }
 
   if (systemAdminOnly) {
     return isSystemAdmin(currentUser);
@@ -415,6 +435,35 @@ export const FRONTEND_PERMISSIONS = {
     DELETE: 'journal.delete',
   },
 
+  TRAVEL: {
+    VIEW: 'travel.view',
+    CUSTOMERS: 'travel.customers',
+    TRAVELERS_VIEW: 'travel.travelers.view',
+    TRAVELERS_MANAGE: 'travel.travelers.manage',
+    SERVICES_VIEW: 'travel.services.view',
+    SERVICES_MANAGE: 'travel.services.manage',
+    HOTELS_VIEW: 'travel.hotels.view',
+    HOTELS_MANAGE: 'travel.hotels.manage',
+    AIRLINES_VIEW: 'travel.airlines.view',
+    AIRLINES_MANAGE: 'travel.airlines.manage',
+    AIRPORTS_VIEW: 'travel.airports.view',
+    AIRPORTS_MANAGE: 'travel.airports.manage',
+    VENDORS_VIEW: 'travel.vendors.view',
+    VENDORS_MANAGE: 'travel.vendors.manage',
+    BOOKINGS_VIEW: 'travel.bookings.view',
+    BOOKINGS_CREATE: 'travel.bookings.create',
+    BOOKINGS_EDIT: 'travel.bookings.edit',
+    BOOKINGS_CANCEL: 'travel.bookings.cancel',
+    BOOKINGS: 'travel.bookings',
+    GROUPS: 'travel.groups',
+    HOTELS: 'travel.hotels',
+    VENDORS: 'travel.vendors',
+    DOCUMENTS: 'travel.documents',
+    PAYMENTS: 'travel.payments',
+    REPORTS: 'travel.reports',
+    SETTINGS: 'travel.settings',
+  },
+
   REPORTS: {
     DASHBOARD: 'reports.dashboard',
     TRIAL_BALANCE: 'reports.trial_balance',
@@ -469,6 +518,7 @@ const permissionHelper = {
   hasPermission,
   hasAnyPermission,
   hasAllPermissions,
+  hasModuleAccess,
   canAccess,
 
   canViewModule,
@@ -489,6 +539,7 @@ const permissionHelper = {
   clearAuthStorage,
 
   FRONTEND_PERMISSIONS,
+  MODULE_KEYS,
 };
 
 export default permissionHelper;

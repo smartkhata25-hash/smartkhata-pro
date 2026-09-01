@@ -1,7 +1,7 @@
 // src/pages/ActivityLogPage.js
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
   fetchActivities,
@@ -72,6 +72,10 @@ const ACTION_OPTIONS = [
 
 const ActivityLogPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const isTravelWorkspace = location.pathname.startsWith('/travel');
+  const moduleScope = isTravelWorkspace ? 'travel' : 'trading';
 
   const [activities, setActivities] = useState([]);
   const [users, setUsers] = useState([]);
@@ -99,7 +103,10 @@ const ActivityLogPage = () => {
       setLoading(true);
       setError('');
 
-      const result = await fetchActivities(appliedFilters);
+      const result = await fetchActivities({
+        ...appliedFilters,
+        moduleScope,
+      });
 
       setActivities(result.activities || []);
       setPagination(result.pagination || EMPTY_PAGINATION);
@@ -110,7 +117,7 @@ const ActivityLogPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters]);
+  }, [appliedFilters, moduleScope]);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -126,7 +133,9 @@ const ActivityLogPage = () => {
     try {
       setSummaryLoading(true);
 
-      const result = await getActivitySummary();
+      const result = await getActivitySummary({
+        moduleScope,
+      });
 
       setSummary({
         totalActivities: result.totalActivities || 0,
@@ -139,7 +148,7 @@ const ActivityLogPage = () => {
     } finally {
       setSummaryLoading(false);
     }
-  }, []);
+  }, [moduleScope]);
 
   useEffect(() => {
     loadUsers();
@@ -316,10 +325,6 @@ const ActivityLogPage = () => {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
                 <h1 className="text-xl md:text-2xl font-bold text-gray-800">Activity Log</h1>
-
-                <p className="text-sm text-gray-500 mt-1">
-                  Owner اور Staff کی تمام اہم Activities دیکھیں
-                </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -334,10 +339,10 @@ const ActivityLogPage = () => {
 
                 <button
                   type="button"
-                  onClick={() => navigate('/staff')}
+                  onClick={() => navigate(isTravelWorkspace ? '/travel/dashboard' : '/staff')}
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
                 >
-                  ← Staff Management
+                  {isTravelWorkspace ? '← Travel Dashboard' : '← Staff Management'}
                 </button>
               </div>
             </div>

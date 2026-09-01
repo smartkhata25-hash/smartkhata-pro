@@ -652,7 +652,7 @@ const PartiesPage = () => {
                       selectedPartyId === party._id ? '1px solid #6366f1' : '1px solid #e5e7eb',
                   }}
                 >
-                  <div style={{ paddingRight: 70 }}>
+                  <div style={{ paddingInlineEnd: 70 }}>
                     <div style={{ fontWeight: 800, fontSize: 14 }}>
                       {party.name}
 
@@ -710,12 +710,11 @@ const PartiesPage = () => {
                         display: 'flex',
                         gap: 6,
                         position: 'absolute',
-                        right: 8,
+                        insetInlineEnd: 8,
                         bottom: 8,
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* ✅ Active Party Actions */}
                       {party.isActive !== false && (
                         <>
                           {canEditParties && (

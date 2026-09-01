@@ -66,7 +66,7 @@ export const fetchCustomers = async (token = null, params = {}, forceRefresh = f
 
   if (!cacheExists) {
     const [data, versionData] = await Promise.all([
-      getCustomers(token),
+      getCustomers(token, safeParams),
       fetchCustomerDataVersion(token),
     ]);
 
@@ -90,7 +90,7 @@ export const fetchCustomers = async (token = null, params = {}, forceRefresh = f
       return cachedCustomers;
     }
 
-    const freshCustomers = await getCustomers(token);
+    const freshCustomers = await getCustomers(token, safeParams);
 
     setCachedCustomers(freshCustomers);
 

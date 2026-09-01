@@ -7,7 +7,7 @@ import MegaMenu from './MegaMenu';
 import menuConfig from './menuConfig';
 import { filterMenuConfigByModules } from '../utils/moduleNavigation';
 import { MODULE_KEYS } from '../utils/moduleConfig';
-import { isTravelContext } from '../utils/travelContext';
+import { isTravelContext, buildTravelRouteState } from '../utils/travelContext';
 import { getCurrentLanguage, setLanguage } from '../i18n/i18n';
 import { t } from '../i18n/i18n';
 import axios from 'axios';
@@ -292,6 +292,17 @@ const TopHeader = ({
   const location = useLocation();
   const isTravelWorkspace = isTravelContext(location);
 
+  const navigateFromHeader = (path, travelPath = null) => {
+    if (isTravelWorkspace) {
+      navigate(travelPath || path, {
+        state: buildTravelRouteState('/travel/dashboard'),
+      });
+      return;
+    }
+
+    navigate(path);
+  };
+
   const handleBack = () => {
     if (isTravelWorkspace && location.state?.returnTo) {
       navigate(location.state.returnTo);
@@ -492,7 +503,7 @@ const TopHeader = ({
             onMouseOut={(e) => (e.target.style.background = 'transparent')}
             title={t('common.back')}
           >
-            ←
+            {lang === 'ur' ? '→' : '←'}
           </button>
         )}
 
@@ -706,10 +717,15 @@ const TopHeader = ({
           </div>
 
           {showUserMenu && (
-            <div className="absolute right-0 mt-2 w-52 bg-white border rounded shadow-lg z-50">
+            <div
+              dir={lang === 'ur' ? 'rtl' : 'ltr'}
+              className={`absolute mt-2 w-52 bg-white border rounded shadow-lg z-50 ${
+                lang === 'ur' ? 'left-0 text-right' : 'right-0 text-left'
+              }`}
+            >
               <div
                 onClick={() => {
-                  navigate('/personal-info');
+                  navigateFromHeader('/personal-info');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -719,7 +735,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  navigate('/business-info');
+                  navigateFromHeader('/business-info');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -729,7 +745,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  navigate('/backup');
+                  navigateFromHeader('/backup');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -739,7 +755,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  navigate('/print-settings');
+                  navigateFromHeader('/print-settings');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -749,7 +765,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  navigate('/whatsapp-settings');
+                  navigateFromHeader('/whatsapp-settings');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -759,7 +775,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  navigate('/change-pin');
+                  navigateFromHeader('/change-pin');
                   setShowUserMenu(false);
                 }}
                 className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -773,7 +789,7 @@ const TopHeader = ({
 
                   <div
                     onClick={() => {
-                      navigate('/staff');
+                      navigateFromHeader('/staff');
                       setShowUserMenu(false);
                     }}
                     className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -783,7 +799,7 @@ const TopHeader = ({
 
                   <div
                     onClick={() => {
-                      navigate('/activity-log');
+                      navigateFromHeader('/activity-log', '/travel/activity-log');
                       setShowUserMenu(false);
                     }}
                     className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
@@ -792,7 +808,6 @@ const TopHeader = ({
                   </div>
                 </>
               )}
-
               <div
                 onClick={() => {
                   const userId = localStorage.getItem('userId');

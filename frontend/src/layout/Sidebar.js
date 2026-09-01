@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 
 import { t } from '../i18n/i18n';
 import { isModuleEnabled, MODULE_KEYS } from '../utils/moduleConfig';
@@ -7,10 +8,16 @@ import { canAccess } from '../utils/permissionHelper';
 import { travelSidebarItems } from '../components/travel/layout/travelNavigationConfig';
 import { isTravelContext } from '../utils/travelContext';
 
-const Sidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
+const Sidebar = ({
+  isSidebarOpen,
+  setIsSidebarOpen,
+  isDesktopSidebarVisible,
+  setIsDesktopSidebarVisible,
+}) => {
   const location = useLocation();
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const isRTL = document.documentElement.dir === 'rtl';
 
   const showTradingShortcuts = isModuleEnabled(user, MODULE_KEYS.TRADING);
 
@@ -62,11 +69,27 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
       md:static md:translate-x-0`}
     >
       <div className="border-b border-slate-700 p-4">
-        <input
-          type="text"
-          placeholder={t('common.quickSearch')}
-          className="w-full rounded-md bg-slate-700 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder={t('common.quickSearch')}
+            className="min-w-0 flex-1 rounded-md bg-slate-700 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+          />
+
+          <button
+            type="button"
+            onClick={() => setIsDesktopSidebarVisible(false)}
+            title="Hide Sidebar"
+            aria-label="Hide Sidebar"
+            className="hidden h-9 w-8 flex-shrink-0 items-center justify-center rounded-md bg-slate-700 text-slate-200 transition hover:bg-slate-600 hover:text-white md:flex"
+          >
+            {isRTL ? (
+              <FaChevronRight aria-hidden="true" className="text-xs" />
+            ) : (
+              <FaChevronLeft aria-hidden="true" className="text-xs" />
+            )}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-1 overflow-y-auto p-3">

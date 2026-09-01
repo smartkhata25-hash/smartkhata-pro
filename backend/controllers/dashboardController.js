@@ -10,9 +10,57 @@ const Party = require("../models/Party");
 const { getProfitSummary } = require("../services/accounting/profitService");
 
 const {
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+} = require("../utils/businessValueModuleScope");
+
+const {
   getDashboardCache,
   setDashboardCache,
 } = require("../services/dashboardCacheService");
+
+const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
+const getTravelJournalConditions = () => [
+  {
+    originModule: {
+      $in: TRAVEL_JOURNAL_ORIGINS,
+    },
+  },
+  {
+    sourceType: {
+      $in: TRAVEL_JOURNAL_SOURCE_TYPES,
+    },
+  },
+  {
+    sourceType: "reversal",
+    originModule: {
+      $in: TRAVEL_JOURNAL_ORIGINS,
+    },
+  },
+];
+
+const getTradingJournalFilter = () => ({
+  $nor: getTravelJournalConditions(),
+});
 
 const getDashboardSummary = async (req, res) => {
   try {
@@ -116,6 +164,7 @@ const getDashboardSummary = async (req, res) => {
           createdBy: userId,
           isDeleted: false,
           ...dateFilter,
+          ...getTradingJournalFilter(),
         },
       },
 
@@ -376,13 +425,21 @@ const getDashboardSummary = async (req, res) => {
 
     const dashboardData = {
       totalSales: Number(Number(netSales || 0).toFixed(2)),
+
       totalExpenses: Number(dashboardExpenses.toFixed(2)),
+
       netProfit: Number(Number(netProfit || 0).toFixed(2)),
+
       grossProfit: Number(Number(grossProfit || 0).toFixed(2)),
+
       cogs: Number(Number(cogs || 0).toFixed(2)),
+
       totalCash: Number(totalCash.toFixed(2)),
+
       totalBank: Number(totalBank.toFixed(2)),
+
       totalReceivable: Number(totalReceivable.toFixed(2)),
+
       totalPayable: Number(totalPayable.toFixed(2)),
 
       receivableDetails,
@@ -401,16 +458,18 @@ const getDashboardSummary = async (req, res) => {
   } catch (error) {
     console.error("Dashboard Summary Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Server Error",
       error: error.message,
     });
   }
 };
+
 // ✅ Monthly Sales – Fully Professional Aggregation
 const getMonthlySales = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
+
     const year = parseInt(req.query.year) || new Date().getFullYear();
 
     const salesData = await JournalEntry.aggregate([
@@ -418,25 +477,39 @@ const getMonthlySales = async (req, res) => {
         $match: {
           createdBy: userId,
           isDeleted: false,
+
+          ...getTradingJournalFilter(),
+
           date: {
             $gte: new Date(`${year}-01-01T00:00:00.000Z`),
+
             $lte: new Date(`${year}-12-31T23:59:59.999Z`),
           },
         },
       },
-      { $unwind: "$lines" },
+
+      {
+        $unwind: "$lines",
+      },
 
       // 🔎 Join account info
       {
         $lookup: {
           from: "accounts",
-          let: { accId: "$lines.account" },
+
+          let: {
+            accId: "$lines.account",
+          },
+
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$_id", "$$accId"] },
+                $expr: {
+                  $eq: ["$_id", "$$accId"],
+                },
               },
             },
+
             {
               $project: {
                 type: 1,
@@ -444,10 +517,14 @@ const getMonthlySales = async (req, res) => {
               },
             },
           ],
+
           as: "accountInfo",
         },
       },
-      { $unwind: "$accountInfo" },
+
+      {
+        $unwind: "$accountInfo",
+      },
 
       // ✅ Only Income + credit
       {
@@ -460,12 +537,21 @@ const getMonthlySales = async (req, res) => {
       // 📊 Group by month
       {
         $group: {
-          _id: { $month: "$date" },
-          total: { $sum: "$lines.amount" },
+          _id: {
+            $month: "$date",
+          },
+
+          total: {
+            $sum: "$lines.amount",
+          },
         },
       },
 
-      { $sort: { _id: 1 } },
+      {
+        $sort: {
+          _id: 1,
+        },
+      },
     ]);
 
     // 🗓 Always return 12 months
@@ -490,13 +576,16 @@ const getMonthlySales = async (req, res) => {
       monthlyTotals[item._id - 1] = item.total;
     });
 
-    res.json({
+    return res.json({
       labels: monthNames,
       data: monthlyTotals,
     });
   } catch (error) {
     console.error("Monthly Sales Error:", error);
-    res.status(500).json({ message: "Server error" });
+
+    return res.status(500).json({
+      message: "Server error",
+    });
   }
 };
 
@@ -512,13 +601,20 @@ const getMonthlyCashFlow = async (req, res) => {
         $match: {
           createdBy: userId,
           isDeleted: false,
+
+          ...getTradingJournalFilter(),
+
           date: {
             $gte: new Date(`${year}-01-01T00:00:00.000Z`),
+
             $lte: new Date(`${year}-12-31T23:59:59.999Z`),
           },
         },
       },
-      { $unwind: "$lines" },
+
+      {
+        $unwind: "$lines",
+      },
 
       {
         $lookup: {
@@ -528,21 +624,32 @@ const getMonthlyCashFlow = async (req, res) => {
           as: "accountInfo",
         },
       },
-      { $unwind: "$accountInfo" },
+
+      {
+        $unwind: "$accountInfo",
+      },
 
       {
         $match: {
-          "accountInfo.category": { $in: ["cash", "bank"] },
+          "accountInfo.category": {
+            $in: ["cash", "bank"],
+          },
         },
       },
 
       {
         $group: {
           _id: {
-            month: { $month: "$date" },
+            month: {
+              $month: "$date",
+            },
+
             type: "$lines.type",
           },
-          total: { $sum: "$lines.amount" },
+
+          total: {
+            $sum: "$lines.amount",
+          },
         },
       },
     ]);
@@ -563,6 +670,7 @@ const getMonthlyCashFlow = async (req, res) => {
     ];
 
     const inflow = new Array(12).fill(0);
+
     const outflow = new Array(12).fill(0);
 
     cashFlowData.forEach((item) => {
@@ -575,14 +683,17 @@ const getMonthlyCashFlow = async (req, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       labels: monthNames,
       inflow,
       outflow,
     });
   } catch (error) {
     console.error("Monthly Cash Flow Error:", error);
-    res.status(500).json({ message: "Server error" });
+
+    return res.status(500).json({
+      message: "Server error",
+    });
   }
 };
 
@@ -603,6 +714,7 @@ const getDashboardAlerts = async (req, res) => {
     const today = new Date();
 
     let invoiceDateFilter = {};
+
     if (startDate && endDate) {
       invoiceDateFilter = {
         invoiceDate: {
@@ -617,17 +729,28 @@ const getDashboardAlerts = async (req, res) => {
       isActive: true,
     }).select("_id");
 
-    const activeCustomerIds = activeCustomers.map((c) => c._id);
+    const activeCustomerIds = activeCustomers.map((customer) => customer._id);
 
     const overdueQuery = {
       createdBy: userId,
-      isDeleted: { $ne: true },
+
+      isDeleted: {
+        $ne: true,
+      },
 
       // ✅ hidden customer invoices ignore
-      customerId: { $in: activeCustomerIds },
+      customerId: {
+        $in: activeCustomerIds,
+      },
 
-      status: { $ne: "Paid" },
-      dueDate: { $lt: today },
+      status: {
+        $ne: "Paid",
+      },
+
+      dueDate: {
+        $lt: today,
+      },
+
       ...invoiceDateFilter,
     };
 
@@ -638,12 +761,20 @@ const getDashboardAlerts = async (req, res) => {
 
     const pendingQuery = {
       createdBy: userId,
-      isDeleted: { $ne: true },
+
+      isDeleted: {
+        $ne: true,
+      },
 
       // ✅ hidden customer invoices ignore
-      customerId: { $in: activeCustomerIds },
+      customerId: {
+        $in: activeCustomerIds,
+      },
 
-      status: { $in: ["Unpaid", "Partial"] },
+      status: {
+        $in: ["Unpaid", "Partial"],
+      },
+
       ...invoiceDateFilter,
     };
 
@@ -652,7 +783,9 @@ const getDashboardAlerts = async (req, res) => {
         ? Promise.resolve(0)
         : Invoice.countDocuments(pendingQuery);
 
-    let productFilter = { userId };
+    let productFilter = {
+      userId,
+    };
 
     if (categoryId) {
       productFilter.categoryId = new mongoose.Types.ObjectId(categoryId);
@@ -662,33 +795,64 @@ const getDashboardAlerts = async (req, res) => {
       "_id lowStockThreshold",
     );
 
-    const productIds = products.map((p) => p._id);
+    const productIds = products.map((product) => product._id);
 
     const stockData = await InventoryTransaction.aggregate([
       {
         $match: {
-          productId: { $in: productIds },
+          productId: {
+            $in: productIds,
+          },
+
           userId,
         },
       },
+
       {
         $group: {
           _id: "$productId",
+
           stock: {
             $sum: {
               $switch: {
                 branches: [
-                  { case: { $eq: ["$type", "IN"] }, then: "$quantity" },
                   {
-                    case: { $eq: ["$type", "OUT"] },
-                    then: { $multiply: ["$quantity", -1] },
+                    case: {
+                      $eq: ["$type", "IN"],
+                    },
+
+                    then: "$quantity",
                   },
-                  { case: { $eq: ["$type", "ADJUST_IN"] }, then: "$quantity" },
+
                   {
-                    case: { $eq: ["$type", "ADJUST_OUT"] },
-                    then: { $multiply: ["$quantity", -1] },
+                    case: {
+                      $eq: ["$type", "OUT"],
+                    },
+
+                    then: {
+                      $multiply: ["$quantity", -1],
+                    },
+                  },
+
+                  {
+                    case: {
+                      $eq: ["$type", "ADJUST_IN"],
+                    },
+
+                    then: "$quantity",
+                  },
+
+                  {
+                    case: {
+                      $eq: ["$type", "ADJUST_OUT"],
+                    },
+
+                    then: {
+                      $multiply: ["$quantity", -1],
+                    },
                   },
                 ],
+
                 default: 0,
               },
             },
@@ -698,6 +862,7 @@ const getDashboardAlerts = async (req, res) => {
     ]);
 
     const stockMap = {};
+
     stockData.forEach((item) => {
       stockMap[item._id.toString()] = item.stock;
     });
@@ -707,6 +872,7 @@ const getDashboardAlerts = async (req, res) => {
 
     products.forEach((product) => {
       const currentStock = stockMap[product._id.toString()] || 0;
+
       const threshold = product.lowStockThreshold || 0;
 
       if (currentStock < 0) {
@@ -726,13 +892,14 @@ const getDashboardAlerts = async (req, res) => {
       pendingPaymentsPromise,
     ]);
 
-    res.json({
+    return res.json({
       summary: {
         lowStock,
         negativeStock,
         overdueInvoices,
         pendingPayments,
       },
+
       filtersApplied: {
         startDate,
         endDate,
@@ -742,12 +909,15 @@ const getDashboardAlerts = async (req, res) => {
         onlyOverdue,
         onlyPending,
       },
+
       generatedAt: new Date(),
     });
   } catch (error) {
     console.error("Dashboard Alerts Error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       message: "Dashboard alerts calculation failed",
+
       error: error.message,
     });
   }

@@ -81,9 +81,9 @@ export const getActivityUsers = async () => {
 };
 
 // Activity summary
-export const getActivitySummary = async () => {
+export const getActivitySummary = async (params = {}) => {
   try {
-    const response = await axios.get(`${API_URL}/summary`, getConfig());
+    const response = await axios.get(`${API_URL}/summary`, getConfig(params));
 
     return {
       totalActivities: Number(response.data?.totalActivities || 0),
@@ -112,10 +112,13 @@ export const buildActivityParams = (filters = {}) => {
     params.module = filters.module;
   }
 
+  if (filters.moduleScope) {
+    params.moduleScope = filters.moduleScope;
+  }
+
   if (filters.search) {
     params.search = String(filters.search).trim();
   }
-
   if (filters.startDate) {
     params.startDate = filters.startDate;
   }

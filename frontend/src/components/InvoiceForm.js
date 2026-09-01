@@ -1470,7 +1470,7 @@ const InvoiceForm = ({
                 📖
               </button>
 
-              {/* Previous */}
+              {/* Previous / Next */}
               {canViewSales && (
                 <>
                   <button
@@ -1478,16 +1478,15 @@ const InvoiceForm = ({
                     onClick={() => handleInvoiceNavigation('previous')}
                     className="px-2 md:px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200 text-xs md:text-sm"
                   >
-                    ⬅️
+                    {(localStorage.getItem('lang') || 'en') === 'ur' ? '➡️' : '⬅️'}
                   </button>
 
-                  {/* Next */}
                   <button
                     type="button"
                     onClick={() => handleInvoiceNavigation('next')}
                     className="px-2 md:px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200 text-xs md:text-sm"
                   >
-                    ➡️
+                    {(localStorage.getItem('lang') || 'en') === 'ur' ? '⬅️' : '➡️'}
                   </button>
                 </>
               )}

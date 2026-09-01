@@ -36,6 +36,7 @@ const logActivity = async ({
   req,
   action,
   module,
+  moduleScope = "",
   entityType = "",
   entityId = null,
   title = "",
@@ -66,12 +67,31 @@ const logActivity = async ({
       return null;
     }
 
+    const cleanModule = String(module).trim().toLowerCase();
+
+    const requestedScope = String(
+      moduleScope || req.body?.moduleScope || req.query?.moduleScope || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    const resolvedModuleScope =
+      requestedScope === "travel" ||
+      requestedScope === "trading" ||
+      requestedScope === "both"
+        ? requestedScope
+        : req.originalUrl?.startsWith("/api/travel") ||
+            cleanModule.startsWith("travel.")
+          ? "travel"
+          : "trading";
+
     const activity = await ActivityLog.create({
       businessOwnerId,
       performedBy,
 
       action: String(action).trim().toLowerCase(),
-      module: String(module).trim().toLowerCase(),
+      module: cleanModule,
+      moduleScope: resolvedModuleScope,
 
       entityType: entityType ? String(entityType).trim() : "",
       entityId: entityId || null,

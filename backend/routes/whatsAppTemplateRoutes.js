@@ -4,6 +4,7 @@ const {
   getWhatsAppTemplate,
   updateWhatsAppTemplate,
 } = require("../controllers/whatsAppTemplateController");
+
 const protect = require("../middleware/authMiddleware");
 const { requireModule } = require("../middleware/moduleMiddleware");
 const { requirePermission } = require("../middleware/permissionMiddleware");
@@ -17,7 +18,10 @@ router.put(
   "/trading",
   protect,
   requirePermission("settings.print"),
-  updateWhatsAppTemplate,
+  (req, res) => {
+    req.params.moduleScope = "trading";
+    return updateWhatsAppTemplate(req, res);
+  },
 );
 
 router.put(
@@ -25,7 +29,10 @@ router.put(
   protect,
   requireModule(MODULE_KEYS.TRAVEL),
   requirePermission("travel.settings"),
-  updateWhatsAppTemplate,
+  (req, res) => {
+    req.params.moduleScope = "travel";
+    return updateWhatsAppTemplate(req, res);
+  },
 );
 
 module.exports = router;

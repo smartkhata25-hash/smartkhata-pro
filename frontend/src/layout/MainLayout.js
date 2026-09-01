@@ -151,9 +151,7 @@ const MainLayout = () => {
 
   const [travelDashboardSummaryLoadedAt, setTravelDashboardSummaryLoadedAt] = useState(0);
 
-  const [travelReminderSummary, setTravelReminderSummary] = useState(
-    EMPTY_TRAVEL_REMINDER_SUMMARY
-  );
+  const [travelReminderSummary, setTravelReminderSummary] = useState(EMPTY_TRAVEL_REMINDER_SUMMARY);
 
   const [travelReminderSummaryLoading, setTravelReminderSummaryLoading] = useState(false);
 
@@ -668,7 +666,6 @@ const MainLayout = () => {
 
       {/* ================= WORKSPACE ================= */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* MOBILE SIDEBAR OVERLAY */}
         {isSidebarOpen && isMobile && (
           <div
             className="fixed inset-0 z-30 bg-black bg-opacity-40 md:hidden"
@@ -676,35 +673,48 @@ const MainLayout = () => {
           />
         )}
 
-        {/* ================= SIDEBAR ================= */}
         {showSidebar && (
-          <Sidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+          <Sidebar
+            isSidebarOpen={isSidebarOpen}
+            setIsSidebarOpen={setIsSidebarOpen}
+            isDesktopSidebarVisible={isDesktopSidebarVisible}
+            setIsDesktopSidebarVisible={setIsDesktopSidebarVisible}
+          />
         )}
 
-        {/* ================= DESKTOP SIDEBAR TOGGLE ================= */}
-        {!hideWorkspacePanels && !isMobile && (
+        {/* ================= DESKTOP SIDEBAR SHOW BUTTON ================= */}
+        {!hideWorkspacePanels && !isMobile && !isDesktopSidebarVisible && (
           <button
             type="button"
-            onClick={() => setIsDesktopSidebarVisible((previous) => !previous)}
-            title={isDesktopSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar'}
-            aria-label={isDesktopSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar'}
+            onClick={() => setIsDesktopSidebarVisible(true)}
+            title="Show Sidebar"
+            aria-label="Show Sidebar"
             className="
-                absolute top-2 z-40 hidden
-                h-9 w-7 items-center justify-center
-                rounded-r-lg
-                border border-l-0 border-slate-300
-                bg-gradient-to-b from-white to-slate-100
-                text-slate-600 shadow-md
-                transition-all duration-300
-                hover:bg-white hover:text-cyan-700
-                focus:outline-none focus:ring-2 focus:ring-cyan-300
-                md:flex
-              "
+              absolute top-2 z-40 hidden
+              h-9 w-7 items-center justify-center
+              border border-slate-300
+              bg-gradient-to-b from-white to-slate-100
+              text-slate-600 shadow-md
+              transition-all duration-300
+              hover:bg-white hover:text-cyan-700
+              focus:outline-none focus:ring-2 focus:ring-cyan-300
+              md:flex
+            "
             style={{
-              left: isDesktopSidebarVisible ? (isTravelWorkspace ? '14rem' : '12rem') : '0',
+              ...(document.documentElement.dir === 'rtl'
+                ? {
+                    right: 0,
+                    borderRightWidth: 0,
+                    borderRadius: '0.5rem 0 0 0.5rem',
+                  }
+                : {
+                    left: 0,
+                    borderLeftWidth: 0,
+                    borderRadius: '0 0.5rem 0.5rem 0',
+                  }),
             }}
           >
-            {isDesktopSidebarVisible ? (
+            {document.documentElement.dir === 'rtl' ? (
               <FaChevronLeft aria-hidden="true" className="text-xs" />
             ) : (
               <FaChevronRight aria-hidden="true" className="text-xs" />

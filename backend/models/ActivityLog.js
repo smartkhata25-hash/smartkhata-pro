@@ -52,6 +52,15 @@ const activityLogSchema = new mongoose.Schema(
       lowercase: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "both"],
+      default: "trading",
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
+
     entityType: {
       type: String,
       default: "",
@@ -144,6 +153,14 @@ activityLogSchema.index({
   businessOwnerId: 1,
   isDeleted: 1,
   module: 1,
+  createdAt: -1,
+});
+
+// ✅ Module Scope Filter
+activityLogSchema.index({
+  businessOwnerId: 1,
+  isDeleted: 1,
+  moduleScope: 1,
   createdAt: -1,
 });
 

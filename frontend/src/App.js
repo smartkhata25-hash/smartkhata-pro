@@ -719,6 +719,15 @@ function App() {
             />
 
             <Route
+              path="/travel/activity-log"
+              element={
+                <PermissionRoute ownerOnly>
+                  <ActivityLogPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/accounts"
               element={
                 <PermissionRoute permission="accounts.view">

@@ -888,12 +888,11 @@ const SuppliersPage = () => {
                         display: 'flex',
                         gap: 6,
                         position: 'absolute',
-                        right: 8,
+                        insetInlineEnd: 8,
                         bottom: 6,
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* ✅ ACTIVE SUPPLIER ACTIONS */}
                       {supplier.isDeleted !== true && (
                         <>
                           {canEditSuppliers && (

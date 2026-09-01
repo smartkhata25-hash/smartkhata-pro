@@ -196,9 +196,11 @@ const CustomersPage = () => {
   }, [token]);
 
   useEffect(() => {
-    fetchWhatsAppTemplate('trading').then(setWhatsAppTemplate).catch(() => {
-      setWhatsAppTemplate(null);
-    });
+    fetchWhatsAppTemplate('trading')
+      .then(setWhatsAppTemplate)
+      .catch(() => {
+        setWhatsAppTemplate(null);
+      });
   }, []);
 
   // 📱 HANDLE RESPONSIVE
@@ -958,7 +960,7 @@ const CustomersPage = () => {
                         display: 'flex',
                         gap: 6,
                         position: 'absolute',
-                        right: 8,
+                        insetInlineEnd: 8,
                         bottom: 6,
                       }}
                       onClick={(e) => e.stopPropagation()}

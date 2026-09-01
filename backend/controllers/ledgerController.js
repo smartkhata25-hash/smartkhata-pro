@@ -1,22 +1,88 @@
 const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const Customer = require("../models/Customer");
+
+const { MODULE_SCOPES, normalizeModuleScope } = require("../utils/moduleScope");
+
 const {
-  getTravelCustomerJournalFilter,
-} = require("../services/travel/travelAccountingMetricsService");
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+} = require("../utils/businessValueModuleScope");
+
+const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
+const getTravelJournalConditions = () => [
+  {
+    originModule: {
+      $in: TRAVEL_JOURNAL_ORIGINS,
+    },
+  },
+  {
+    sourceType: {
+      $in: TRAVEL_JOURNAL_SOURCE_TYPES,
+    },
+  },
+  {
+    sourceType: "reversal",
+    originModule: {
+      $in: TRAVEL_JOURNAL_ORIGINS,
+    },
+  },
+];
+
+const getCustomerJournalScopeFilter = (moduleScope) => {
+  const scope = normalizeModuleScope(moduleScope, MODULE_SCOPES.TRADING);
+
+  if (scope === MODULE_SCOPES.TRAVEL) {
+    return {
+      $or: getTravelJournalConditions(),
+    };
+  }
+
+  return {
+    $nor: getTravelJournalConditions(),
+  };
+};
 
 // 🧾 Get Ledger for a Specific Customer (journal-based)
 
 const resolveCustomerSourceLabel = (entry) => {
-  if (entry.originModule === "travel_receive_payment" && entry.sourceType === "receive_payment") {
+  if (
+    entry.originModule === "travel_receive_payment" &&
+    entry.sourceType === "receive_payment"
+  ) {
     return "Travel Payment";
   }
 
-  if (entry.originModule === "travel_invoice" && entry.sourceType === "receive_payment") {
+  if (
+    entry.originModule === "travel_invoice" &&
+    entry.sourceType === "receive_payment"
+  ) {
     return "Travel Invoice Payment";
   }
 
-  if (entry.originModule === "travel_refund" && entry.sourceType === "refund_payment") {
+  if (
+    entry.originModule === "travel_refund" &&
+    entry.sourceType === "refund_payment"
+  ) {
     return "Travel Refund Payment";
   }
 
@@ -61,9 +127,11 @@ const getCustomerLedger = async (req, res) => {
   try {
     const { customerId } = req.params;
 
-    const { startDate, endDate, moduleScope = "" } = req.query;
+    const { startDate, endDate, moduleScope } = req.query;
 
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
+
+    const journalScopeFilter = getCustomerJournalScopeFilter(moduleScope);
 
     // ✅ Step 1: Fetch customer using ACCOUNT ID
     const customer = await Customer.findOne({
@@ -72,7 +140,9 @@ const getCustomerLedger = async (req, res) => {
     }).populate("account");
 
     if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+      return res.status(404).json({
+        message: "Customer not found",
+      });
     }
 
     // ✅ Step 2: Resolve accountId safely
@@ -82,24 +152,24 @@ const getCustomerLedger = async (req, res) => {
         : customer.account;
 
     if (!account) {
-      return res
-        .status(400)
-        .json({ message: "No account linked with customer" });
+      return res.status(400).json({
+        message: "No account linked with customer",
+      });
     }
 
     const accountId = account.toString();
 
     const objectId = new mongoose.Types.ObjectId(accountId);
-    const travelJournalFilter =
-      moduleScope === "travel" ? getTravelCustomerJournalFilter() : {};
 
     // ✅ Step 3: Build filter
     const matchFilter = {
       createdBy: userId,
       isDeleted: false,
-      sourceType: { $ne: "reversal" },
+      sourceType: {
+        $ne: "reversal",
+      },
       "lines.account": objectId,
-      ...travelJournalFilter,
+      ...journalScopeFilter,
     };
 
     if (startDate && endDate) {
@@ -120,27 +190,37 @@ const getCustomerLedger = async (req, res) => {
       .select(
         "date time billNo description sourceType originModule lines paymentType attachmentUrl attachmentType invoiceId referenceId",
       )
-      .sort({ date: 1, time: 1 })
+      .sort({
+        date: 1,
+        time: 1,
+      })
       .lean();
 
     // ✅ Step 5: Opening balance
     let opening = 0;
 
     if (startDate) {
+      const openingStart = new Date(startDate);
+      openingStart.setHours(0, 0, 0, 0);
+
       const result = await JournalEntry.aggregate([
         {
           $match: {
             createdBy: userId,
             isDeleted: false,
-            sourceType: { $ne: "reversal" },
+            sourceType: {
+              $ne: "reversal",
+            },
             "lines.account": objectId,
-            ...travelJournalFilter,
+            ...journalScopeFilter,
             date: {
-              $lt: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
+              $lt: openingStart,
             },
           },
         },
-        { $unwind: "$lines" },
+        {
+          $unwind: "$lines",
+        },
         {
           $match: {
             "lines.account": objectId,
@@ -152,9 +232,13 @@ const getCustomerLedger = async (req, res) => {
             balance: {
               $sum: {
                 $cond: [
-                  { $eq: ["$lines.type", "debit"] },
+                  {
+                    $eq: ["$lines.type", "debit"],
+                  },
                   "$lines.amount",
-                  { $multiply: ["$lines.amount", -1] },
+                  {
+                    $multiply: ["$lines.amount", -1],
+                  },
                 ],
               },
             },
@@ -167,13 +251,16 @@ const getCustomerLedger = async (req, res) => {
 
     // ✅ Step 6: Running balance calculation
     let balance = opening;
+
     const ledger = [];
 
-    for (let entry of entries) {
-      for (let line of entry.lines) {
+    for (const entry of entries) {
+      for (const line of entry.lines || []) {
         if (line.account?.toString() === accountId) {
-          const debit = line.type === "debit" ? line.amount : 0;
-          const credit = line.type === "credit" ? line.amount : 0;
+          const debit = line.type === "debit" ? Number(line.amount || 0) : 0;
+
+          const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
+
           balance += debit - credit;
 
           ledger.push({
@@ -192,9 +279,13 @@ const getCustomerLedger = async (req, res) => {
 
             balance,
             runningBalance: Number(balance.toFixed(2)),
+
             attachmentUrl: entry.attachmentUrl || "",
+
             attachmentType: entry.attachmentType || "",
+
             invoiceId: entry.invoiceId || null,
+
             referenceId: entry.referenceId || null,
           });
         }
@@ -202,7 +293,7 @@ const getCustomerLedger = async (req, res) => {
     }
 
     // ✅ Final Response
-    res.json({
+    return res.json({
       customerId: customer._id,
       customerName: customer.name,
       isActive: customer.isActive,
@@ -212,13 +303,19 @@ const getCustomerLedger = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Ledger fetch error:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
 const getCustomerBalance = async (req, res) => {
   try {
     const { accountId } = req.params;
+
+    const { moduleScope } = req.query;
 
     if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
       return res.status(400).json({
@@ -229,6 +326,8 @@ const getCustomerBalance = async (req, res) => {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
     const accountObjectId = new mongoose.Types.ObjectId(accountId);
+
+    const journalScopeFilter = getCustomerJournalScopeFilter(moduleScope);
 
     const customer = await Customer.findOne({
       account: accountObjectId,
@@ -248,27 +347,43 @@ const getCustomerBalance = async (req, res) => {
         $match: {
           createdBy: userId,
           isDeleted: false,
-          sourceType: { $ne: "reversal" },
+
+          sourceType: {
+            $ne: "reversal",
+          },
+
           "lines.account": accountObjectId,
+
+          ...journalScopeFilter,
         },
       },
+
       {
         $unwind: "$lines",
       },
+
       {
         $match: {
           "lines.account": accountObjectId,
         },
       },
+
       {
         $group: {
           _id: null,
+
           balance: {
             $sum: {
               $cond: [
-                { $eq: ["$lines.type", "debit"] },
+                {
+                  $eq: ["$lines.type", "debit"],
+                },
+
                 "$lines.amount",
-                { $multiply: ["$lines.amount", -1] },
+
+                {
+                  $multiply: ["$lines.amount", -1],
+                },
               ],
             },
           },

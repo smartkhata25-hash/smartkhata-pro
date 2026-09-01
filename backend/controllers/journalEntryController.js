@@ -7,6 +7,43 @@ const { createReversalEntry } = require("../utils/journalReversal");
 const { isBalanced } = require("../utils/journalHelper");
 const { logAudit } = require("../utils/auditHelper");
 const { isPeriodLocked } = require("../utils/periodLockHelper");
+const {
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+} = require("../utils/businessValueModuleScope");
+
+const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
+const getTravelJournalConditions = () => [
+  { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
+  { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
+  {
+    sourceType: "reversal",
+    originModule: { $in: TRAVEL_JOURNAL_ORIGINS },
+  },
+];
+
+const getTradingJournalFilter = () => ({
+  $nor: getTravelJournalConditions(),
+});
 
 // ✅ Helper: Recalculate all involved accounts in one batch
 const recalculateInvolvedAccounts = async (lines) => {
@@ -122,13 +159,16 @@ exports.createEntry = async (req, res) => {
     });
 
     await entry.save();
+
     console.log("🔥 STEP1 JOURNAL SAVED:", {
       supplierId,
       customerId,
       partyId,
       lines,
     });
+
     await recalculateInvolvedAccounts(lines);
+
     await logAudit({
       userId,
       action: "CREATE",
@@ -140,7 +180,10 @@ exports.createEntry = async (req, res) => {
 
     res.status(201).json(entry);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
@@ -168,17 +211,21 @@ exports.updateEntry = async (req, res) => {
     } = req.body;
 
     if (!lines || lines.length < 2) {
-      return res.status(400).json({ message: "کم از کم دو لائنز ہونی چاہئیں" });
+      return res.status(400).json({
+        message: "کم از کم دو لائنز ہونی چاہئیں",
+      });
     }
 
     if (!isBalanced(lines)) {
-      return res
-        .status(400)
-        .json({ message: "Total Debit اور Credit برابر ہونے چاہئیں" });
+      return res.status(400).json({
+        message: "Total Debit اور Credit برابر ہونے چاہئیں",
+      });
     }
 
     const accountIds = lines.map((l) => l.account);
-    const accounts = await Account.find({ _id: { $in: accountIds } });
+    const accounts = await Account.find({
+      _id: { $in: accountIds },
+    });
 
     for (const line of lines) {
       const account = accounts.find(
@@ -192,13 +239,13 @@ exports.updateEntry = async (req, res) => {
       }
 
       const rule = JOURNAL_RULES[account.type];
+
       if (!rule) {
         return res.status(400).json({
           message: `اکاؤنٹ ٹائپ ${account.type} کے لیے رولز موجود نہیں`,
         });
       }
 
-      // ❌ allowed debit / credit check
       if (!rule.allowed.includes(line.type)) {
         return res.status(400).json({
           message: `${account.type} اکاؤنٹ کو ${line.type} نہیں کیا جا سکتا`,
@@ -218,12 +265,13 @@ exports.updateEntry = async (req, res) => {
       _id: req.params.id,
       createdBy: userId,
       isDeleted: false,
+      ...getTradingJournalFilter(),
     });
 
     if (!entry) {
-      return res
-        .status(404)
-        .json({ message: "Entry نہیں ملی یا delete ہو چکی ہے" });
+      return res.status(404).json({
+        message: "Entry نہیں ملی یا delete ہو چکی ہے",
+      });
     }
 
     // 🔒 PERIOD LOCK CHECK (UPDATE)
@@ -234,7 +282,6 @@ exports.updateEntry = async (req, res) => {
     }
 
     const beforeUpdate = entry.toObject();
-
     const oldLines = entry.lines;
 
     entry.date = date;
@@ -254,7 +301,9 @@ exports.updateEntry = async (req, res) => {
     entry.referenceId = referenceId || null;
 
     await entry.save();
+
     await recalculateInvolvedAccounts([...oldLines, ...lines]);
+
     await logAudit({
       userId,
       action: "UPDATE",
@@ -266,9 +315,13 @@ exports.updateEntry = async (req, res) => {
 
     res.json(entry);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
+
 // ✅ Get All Entries
 exports.getEntries = async (req, res) => {
   try {
@@ -279,7 +332,11 @@ exports.getEntries = async (req, res) => {
     const limit = parseInt(req.query.limit || "20");
     const skip = (page - 1) * limit;
 
-    const filter = { createdBy: userId, isDeleted: false };
+    const filter = {
+      createdBy: userId,
+      isDeleted: false,
+      ...getTradingJournalFilter(),
+    };
 
     if (startDate && endDate) {
       filter.date = {
@@ -293,14 +350,19 @@ exports.getEntries = async (req, res) => {
       .sort({ date: -1 })
       .skip(skip)
       .limit(limit);
+
     const total = await JournalEntry.countDocuments(filter);
 
     res.json(entries);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
+// ✅ Delete / Reverse Trading Entry
 exports.deleteEntry = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -309,6 +371,7 @@ exports.deleteEntry = async (req, res) => {
       _id: req.params.id,
       createdBy: userId,
       isDeleted: false,
+      ...getTradingJournalFilter(),
     });
 
     if (!entry) {
@@ -332,6 +395,7 @@ exports.deleteEntry = async (req, res) => {
 
     // 🔁 Create reversal entry
     const reversal = await createReversalEntry(entry, userId);
+
     await logAudit({
       userId,
       action: "REVERSE",
@@ -342,6 +406,7 @@ exports.deleteEntry = async (req, res) => {
     });
 
     entry.isDeleted = true;
+
     await entry.save();
 
     await recalculateInvolvedAccounts([...entry.lines, ...reversal.lines]);
@@ -360,16 +425,17 @@ exports.deleteEntry = async (req, res) => {
   }
 };
 
-// ✅ Trial Balance (Optimized Professional Version)
-
+// ✅ Trial Balance
 exports.getTrialBalance = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
+
     const { startDate, endDate } = req.query;
 
     const matchFilter = {
       createdBy: userId,
       isDeleted: false,
+      ...getTradingJournalFilter(),
     };
 
     if (startDate && endDate) {
@@ -379,32 +445,50 @@ exports.getTrialBalance = async (req, res) => {
       };
     }
 
-    // 🔥 Aggregate ALL accounts in ONE query
     const summary = await JournalEntry.aggregate([
-      { $match: matchFilter },
-      { $unwind: "$lines" },
-
+      {
+        $match: matchFilter,
+      },
+      {
+        $unwind: "$lines",
+      },
       {
         $group: {
           _id: "$lines.account",
+
           totalDebit: {
             $sum: {
-              $cond: [{ $eq: ["$lines.type", "debit"] }, "$lines.amount", 0],
+              $cond: [
+                {
+                  $eq: ["$lines.type", "debit"],
+                },
+                "$lines.amount",
+                0,
+              ],
             },
           },
+
           totalCredit: {
             $sum: {
-              $cond: [{ $eq: ["$lines.type", "credit"] }, "$lines.amount", 0],
+              $cond: [
+                {
+                  $eq: ["$lines.type", "credit"],
+                },
+                "$lines.amount",
+                0,
+              ],
             },
           },
         },
       },
     ]);
 
-    // 🔹 Get all accounts
-    const accounts = await Account.find({ userId });
+    const accounts = await Account.find({
+      userId,
+    });
 
     const trialBalance = [];
+
     let totalDebit = 0;
     let totalCredit = 0;
 
@@ -470,29 +554,29 @@ exports.getTrialBalance = async (req, res) => {
   }
 };
 
-// ✅ Ledger by Account (with Opening Balance)
+// ✅ Ledger by Account
 exports.getLedgerByAccount = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
-
     const { accountId } = req.params;
 
-    // 🔍 Fetch account to get normalBalance
     const account = await Account.findById(accountId);
 
     if (!account) {
-      return res.status(404).json({ message: "Account not found" });
+      return res.status(404).json({
+        message: "Account not found",
+      });
     }
 
     const { startDate, endDate } = req.query;
 
-    // ✅ Correctly cast accountId to ObjectId
     const objectId = new mongoose.Types.ObjectId(accountId);
 
     const filter = {
       createdBy: userId,
       "lines.account": objectId,
       isDeleted: false,
+      ...getTradingJournalFilter(),
     };
 
     if (startDate && endDate) {
@@ -502,12 +586,14 @@ exports.getLedgerByAccount = async (req, res) => {
       };
     }
 
-    // 🔢 All matching entries for date range
     const entries = await JournalEntry.find(filter)
       .populate("lines.account")
-      .sort({ date: 1 });
+      .sort({
+        date: 1,
+      });
 
     let balance = 0;
+
     const ledger = [];
 
     let openingBalance = 0;
@@ -515,15 +601,19 @@ exports.getLedgerByAccount = async (req, res) => {
     if (startDate) {
       const openingEntries = await JournalEntry.find({
         createdBy: userId,
-        "lines.account": accountId,
-        date: { $lt: new Date(startDate) },
+        "lines.account": objectId,
+        date: {
+          $lt: new Date(startDate),
+        },
         isDeleted: false,
+        ...getTradingJournalFilter(),
       });
 
       openingEntries.forEach((entry) => {
         entry.lines.forEach((line) => {
           if (line.account && line.account.toString() === accountId) {
             const debit = line.type === "debit" ? line.amount : 0;
+
             const credit = line.type === "credit" ? line.amount : 0;
 
             if (account.normalBalance === "debit") {
@@ -547,17 +637,17 @@ exports.getLedgerByAccount = async (req, res) => {
       });
     }
 
-    // 🔁 Entries with running balance
     entries.forEach((entry) => {
       entry.lines.forEach((line) => {
         const accId = line.account?._id?.toString() || line.account?.toString();
+
         const targetId = accountId.toString();
 
         if (accId === targetId) {
           const debit = line.type === "debit" ? line.amount : 0;
+
           const credit = line.type === "credit" ? line.amount : 0;
 
-          // 🔥 NEW LOGIC BASED ON ACCOUNT TYPE
           if (account.normalBalance === "debit") {
             balance += debit - credit;
           } else {
@@ -590,17 +680,19 @@ exports.getLedgerByAccount = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Ledger error:", error);
-    res.status(500).json({ message: "Ledger error", error: error.message });
+
+    res.status(500).json({
+      message: "Ledger error",
+      error: error.message,
+    });
   }
 };
 
-// ✅ Monthly Cash Flow Summary for Dashboard (Professional Version)
-
+// ✅ Monthly Cash Flow Summary for Dashboard
 exports.getMonthlyCashFlow = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
-    // ✅ Year from query (fallback current year)
     const year = parseInt(req.query.year) || new Date().getFullYear();
 
     const start = new Date(`${year}-01-01`);
@@ -608,17 +700,22 @@ exports.getMonthlyCashFlow = async (req, res) => {
 
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
-    // 🔥 Aggregate directly from database (FAST)
     const data = await JournalEntry.aggregate([
       {
         $match: {
           createdBy: objectUserId,
           isDeleted: false,
-          date: { $gte: start, $lte: end },
+          date: {
+            $gte: start,
+            $lte: end,
+          },
+          ...getTradingJournalFilter(),
         },
       },
 
-      { $unwind: "$lines" },
+      {
+        $unwind: "$lines",
+      },
 
       {
         $lookup: {
@@ -629,21 +726,30 @@ exports.getMonthlyCashFlow = async (req, res) => {
         },
       },
 
-      { $unwind: "$account" },
+      {
+        $unwind: "$account",
+      },
 
       {
         $match: {
-          "account.category": { $in: ["cash", "bank"] },
+          "account.category": {
+            $in: ["cash", "bank"],
+          },
         },
       },
 
       {
         $group: {
           _id: {
-            month: { $month: "$date" },
+            month: {
+              $month: "$date",
+            },
             type: "$lines.type",
           },
-          total: { $sum: "$lines.amount" },
+
+          total: {
+            $sum: "$lines.amount",
+          },
         },
       },
     ]);
@@ -686,6 +792,7 @@ exports.getMonthlyCashFlow = async (req, res) => {
     });
   } catch (err) {
     console.error("Cash flow error:", err);
+
     res.status(500).json({
       message: "Cash flow error",
       error: err.message,

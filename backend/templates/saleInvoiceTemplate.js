@@ -230,34 +230,34 @@ td.left {
 }
 
 /* ================= TOTALS ================= */
-
 .totals {
   margin-top: ${blockSpacing}px;
   width: 325px;
-  margin-left: auto;
+  margin-left: ${lang === "ur" ? "0" : "auto"};
+  margin-right: ${lang === "ur" ? "auto" : "0"};
   font-weight: 700;
 }
 
 .totals-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  direction: ${lang === "ur" ? "rtl" : "ltr"};
   gap: 10px;
   border-bottom: 2px solid black;
   padding: 2px 0;
 }
 
 .totals-row span:first-child {
-  text-align: left;
+  text-align: ${lang === "ur" ? "right" : "left"};
   white-space: nowrap;
-  overflow: hidden;
 }
 
 .totals-row span:last-child {
-  text-align: right;
+  text-align: ${lang === "ur" ? "left" : "right"};
+  direction: ltr;
   white-space: nowrap;
 }
-
 /* ================= FOOTER ================= */
 
 .footer {

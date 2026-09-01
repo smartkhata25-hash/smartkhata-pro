@@ -2,6 +2,12 @@ const WhatsAppTemplate = require("../models/WhatsAppTemplate");
 
 const VALID_MODULE_SCOPES = new Set(["trading", "travel"]);
 
+const REQUIRED_TEMPLATE_VARIABLES = Object.freeze([
+  "{{name}}",
+  "{{balance}}",
+  "{{businessName}}",
+]);
+
 const DEFAULT_REMINDER_TEMPLATES = Object.freeze({
   englishTemplate: `💰 PAYMENT REMINDER
 
@@ -32,7 +38,9 @@ Rs {{balance}}
 const getUserId = (req) => req.user?.id || req.userId;
 
 const normalizeModuleScope = (value) => {
-  const moduleScope = String(value || "").trim().toLowerCase();
+  const moduleScope = String(value || "")
+    .trim()
+    .toLowerCase();
 
   return VALID_MODULE_SCOPES.has(moduleScope) ? moduleScope : "";
 };
@@ -41,6 +49,29 @@ const normalizeTemplateText = (value, fallback) => {
   const text = String(value || "").trim();
 
   return text || fallback;
+};
+
+const getMissingTemplateVariables = (template = "") =>
+  REQUIRED_TEMPLATE_VARIABLES.filter(
+    (variable) => !String(template || "").includes(variable),
+  );
+
+const validateTemplateVariables = (englishTemplate, urduTemplate) => {
+  const missingEnglish = getMissingTemplateVariables(englishTemplate);
+  const missingUrdu = getMissingTemplateVariables(urduTemplate);
+
+  if (missingEnglish.length === 0 && missingUrdu.length === 0) {
+    return null;
+  }
+
+  return {
+    message:
+      "Name, balance and business name variables cannot be removed from the WhatsApp template.",
+    missingVariables: {
+      englishTemplate: missingEnglish,
+      urduTemplate: missingUrdu,
+    },
+  };
 };
 
 const serializeTemplate = (template, moduleScope) => {
@@ -63,16 +94,21 @@ exports.DEFAULT_REMINDER_TEMPLATES = DEFAULT_REMINDER_TEMPLATES;
 exports.getWhatsAppTemplate = async (req, res) => {
   try {
     const userId = getUserId(req);
+
     const moduleScope = normalizeModuleScope(
       req.params.moduleScope || req.query.moduleScope,
     );
 
     if (!userId) {
-      return res.status(401).json({ message: "Authentication required" });
+      return res.status(401).json({
+        message: "Authentication required",
+      });
     }
 
     if (!moduleScope) {
-      return res.status(400).json({ message: "Invalid module scope" });
+      return res.status(400).json({
+        message: "Invalid module scope",
+      });
     }
 
     const template = await WhatsAppTemplate.findOne({
@@ -97,23 +133,35 @@ exports.updateWhatsAppTemplate = async (req, res) => {
     const moduleScope = normalizeModuleScope(req.params.moduleScope);
 
     if (!userId) {
-      return res.status(401).json({ message: "Authentication required" });
+      return res.status(401).json({
+        message: "Authentication required",
+      });
     }
 
     if (!moduleScope) {
-      return res.status(400).json({ message: "Invalid module scope" });
+      return res.status(400).json({
+        message: "Invalid module scope",
+      });
     }
 
-    const payload = {
-      englishTemplate: normalizeTemplateText(
-        req.body?.englishTemplate,
-        DEFAULT_REMINDER_TEMPLATES.englishTemplate,
-      ),
-      urduTemplate: normalizeTemplateText(
-        req.body?.urduTemplate,
-        DEFAULT_REMINDER_TEMPLATES.urduTemplate,
-      ),
-    };
+    const englishTemplate = normalizeTemplateText(
+      req.body?.englishTemplate,
+      DEFAULT_REMINDER_TEMPLATES.englishTemplate,
+    );
+
+    const urduTemplate = normalizeTemplateText(
+      req.body?.urduTemplate,
+      DEFAULT_REMINDER_TEMPLATES.urduTemplate,
+    );
+
+    const validationError = validateTemplateVariables(
+      englishTemplate,
+      urduTemplate,
+    );
+
+    if (validationError) {
+      return res.status(400).json(validationError);
+    }
 
     const template = await WhatsAppTemplate.findOneAndUpdate(
       {
@@ -121,7 +169,10 @@ exports.updateWhatsAppTemplate = async (req, res) => {
         moduleScope,
       },
       {
-        $set: payload,
+        $set: {
+          englishTemplate,
+          urduTemplate,
+        },
         $setOnInsert: {
           userId,
           moduleScope,

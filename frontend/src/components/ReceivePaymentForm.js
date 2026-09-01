@@ -1252,7 +1252,42 @@ const ReceivePaymentForm = () => {
                 />
               </div>
 
-              <div className="flex justify-end mt-4">
+              <div className="flex justify-end items-center gap-2 mt-4">
+                {canViewReceivePayments && (
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-2 rounded-xl shadow"
+                  >
+                    🖨
+                  </button>
+                )}
+
+                {canViewReceivePayments && (
+                  <button
+                    type="button"
+                    disabled={pdfLoading}
+                    onClick={async () => {
+                      try {
+                        setPdfLoading(true);
+                        await handleExportPDF();
+                      } finally {
+                        setPdfLoading(false);
+                      }
+                    }}
+                    className="text-white px-3 py-2 rounded-xl shadow"
+                    style={{
+                      cursor: pdfLoading ? 'not-allowed' : 'pointer',
+                      opacity: pdfLoading ? 0.7 : 1,
+                      background: pdfLoading
+                        ? '#9ca3af'
+                        : 'linear-gradient(to right, #ef4444, #b91c1c)',
+                    }}
+                  >
+                    {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
+                  </button>
+                )}
+
                 <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
                   <div className="flex justify-between font-semibold text-sm">
                     <span>{t('total')}</span>
@@ -1313,40 +1348,6 @@ const ReceivePaymentForm = () => {
                 <option value="narrow">A5</option>
                 <option value="thermal">Thermal</option>
               </select>
-              {canViewReceivePayments && (
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  className="bg-gradient-to-r from-gray-700 to-gray-900 text-white px-3 py-1.5 rounded-xl shadow"
-                >
-                  🖨
-                </button>
-              )}
-              {canViewReceivePayments && (
-                <button
-                  type="button"
-                  disabled={pdfLoading}
-                  onClick={async () => {
-                    try {
-                      setPdfLoading(true);
-
-                      await handleExportPDF();
-                    } finally {
-                      setPdfLoading(false);
-                    }
-                  }}
-                  className="text-white px-3 py-1.5 rounded-xl shadow transition-all duration-200"
-                  style={{
-                    cursor: pdfLoading ? 'not-allowed' : 'pointer',
-                    opacity: pdfLoading ? 0.7 : 1,
-                    background: pdfLoading
-                      ? '#9ca3af'
-                      : 'linear-gradient(to right, #ef4444, #b91c1c)',
-                  }}
-                >
-                  {pdfLoading ? `⏳ ${t('pdf.preparing')}` : 'PDF'}
-                </button>
-              )}
             </div>
           </form>
 

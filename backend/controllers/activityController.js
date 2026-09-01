@@ -2,9 +2,63 @@ const mongoose = require("mongoose");
 
 const ActivityLog = require("../models/ActivityLog");
 const User = require("../models/User");
+const {
+  MODULE_SCOPES,
+  getRequestedModuleScope,
+} = require("../utils/moduleScope");
 
 const getOwnerId = (req) =>
   req.user?.businessOwnerId || req.user?.id || req.userId;
+
+const applyActivityModuleScopeFilter = (query, scope) => {
+  if (scope === MODULE_SCOPES.TRAVEL) {
+    query.$and = [
+      ...(query.$and || []),
+      {
+        $or: [
+          { moduleScope: { $in: [MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH] } },
+          {
+            $and: [
+              {
+                $or: [
+                  { moduleScope: { $exists: false } },
+                  { moduleScope: null },
+                  { moduleScope: "" },
+                ],
+              },
+              { module: /^travel\./i },
+            ],
+          },
+        ],
+      },
+    ];
+
+    return query;
+  }
+
+  query.$and = [
+    ...(query.$and || []),
+    {
+      $or: [
+        { moduleScope: { $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH] } },
+        {
+          $and: [
+            {
+              $or: [
+                { moduleScope: { $exists: false } },
+                { moduleScope: null },
+                { moduleScope: "" },
+              ],
+            },
+            { module: { $not: /^travel\./i } },
+          ],
+        },
+      ],
+    },
+  ];
+
+  return query;
+};
 
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -19,6 +73,7 @@ const getActivities = async (req, res) => {
       staffId = "",
       action = "",
       module = "",
+      moduleScope = "",
       search = "",
       startDate = "",
       endDate = "",
@@ -38,6 +93,13 @@ const getActivities = async (req, res) => {
       businessOwnerId: ownerObjectId,
       isDeleted: false,
     };
+
+    const requestedModuleScope = getRequestedModuleScope(
+      { moduleScope },
+      MODULE_SCOPES.TRADING,
+    );
+
+    applyActivityModuleScopeFilter(query, requestedModuleScope);
 
     if (staffId) {
       if (!isValidObjectId(staffId)) {
@@ -335,12 +397,21 @@ const getActivitySummary = async (req, res) => {
 
     const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
 
+    const requestedModuleScope = getRequestedModuleScope(
+      req.query,
+      MODULE_SCOPES.TRADING,
+    );
+
+    const summaryMatch = {
+      businessOwnerId: ownerObjectId,
+      isDeleted: false,
+    };
+
+    applyActivityModuleScopeFilter(summaryMatch, requestedModuleScope);
+
     const summary = await ActivityLog.aggregate([
       {
-        $match: {
-          businessOwnerId: ownerObjectId,
-          isDeleted: false,
-        },
+        $match: summaryMatch,
       },
 
       {

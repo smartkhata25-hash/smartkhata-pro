@@ -22,7 +22,6 @@ const UPLOADS_DIR = path.join(__dirname, "../../uploads");
 
 const MIN_BACKUP_SCHEMA_VERSION = 2;
 
-/* Models used for safe MongoDB type casting */
 const MODEL_LOADERS = {
   accounts: () => require("../models/Account"),
   customers: () => require("../models/Customer"),
@@ -36,6 +35,9 @@ const MODEL_LOADERS = {
   travelbookings: () => require("../models/TravelBooking"),
   travelrefunds: () => require("../models/TravelRefund"),
   travelvendorreturns: () => require("../models/TravelVendorReturn"),
+  travelreminders: () => require("../models/TravelReminder"),
+
+  activitylogs: () => require("../models/ActivityLog"),
 
   categories: () => require("../models/Category"),
   products: () => require("../models/Product"),
@@ -71,7 +73,6 @@ const MODEL_LOADERS = {
   businessreceivableloanpayments: () =>
     require("../models/BusinessReceivableLoanPayment"),
 };
-
 const RESTORE_ORDER = Object.keys(COLLECTION_CONFIG);
 
 function ensureDirectories() {

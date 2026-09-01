@@ -35,6 +35,9 @@ const COLLECTION_CONFIG = {
   travelbookings: { field: "userId", required: false },
   travelrefunds: { field: "userId", required: false },
   travelvendorreturns: { field: "userId", required: false },
+  travelreminders: { field: "userId", required: false },
+
+  activitylogs: { field: "businessOwnerId", required: false },
 
   categories: { field: "userId", required: true },
   products: { field: "userId", required: true },

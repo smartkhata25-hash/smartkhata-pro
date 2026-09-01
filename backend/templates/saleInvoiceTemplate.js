@@ -304,7 +304,7 @@ ${
 <thead>
 <tr>
   <th style="width:5%">#</th>
-  <th style="${widthStyle("name")}; text-align:left;">${t("item", lang)}</th>
+  <th style="${widthStyle("name")}; text-align:${lang === "ur" ? "right" : "left"};">${t("item", lang)}</th>
   ${
     columns?.showDescription
       ? `<th style="${widthStyle("description")}">${t("description", lang)}</th>`
@@ -325,7 +325,15 @@ ${
           (item, index) => `
 <tr>
   <td>${index + 1}</td>
-  <td class="left">${item.name || "-"}</td>
+  <td
+  style="
+    text-align:${lang === "ur" ? "right" : "left"};
+    padding-right:${lang === "ur" ? "6px" : "0"};
+    padding-left:${lang === "ur" ? "0" : "6px"};
+  "
+>
+  ${item.name || "-"}
+</td>
   ${columns?.showDescription ? `<td>${item.description || "-"}</td>` : ""}
   ${columns?.showUOM ? `<td>${item.uom || "-"}</td>` : ""}
   <td>${item.quantity || 0}</td>

@@ -6,27 +6,29 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { customerId, productId } = req.query;
 
-    if (!customerId || !productId) {
+    if (
+      !userId ||
+      !mongoose.Types.ObjectId.isValid(customerId) ||
+      !mongoose.Types.ObjectId.isValid(productId)
+    ) {
       return res.status(400).json({
-        message: "customerId and productId are required",
+        message: "Valid customerId and productId are required",
       });
     }
 
+    const ownerId = new mongoose.Types.ObjectId(userId);
     const selectedCustomerOrPartyId = new mongoose.Types.ObjectId(customerId);
+    const selectedProductId = new mongoose.Types.ObjectId(productId);
 
     const history = await Invoice.aggregate([
       {
         $match: {
-          createdBy: new mongoose.Types.ObjectId(userId),
+          createdBy: ownerId,
           isDeleted: false,
-
+          "items.productId": selectedProductId,
           $or: [
-            {
-              customerId: selectedCustomerOrPartyId,
-            },
-            {
-              partyId: selectedCustomerOrPartyId,
-            },
+            { customerId: selectedCustomerOrPartyId },
+            { partyId: selectedCustomerOrPartyId },
           ],
         },
       },
@@ -35,7 +37,7 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
       },
       {
         $match: {
-          "items.productId": new mongoose.Types.ObjectId(productId),
+          "items.productId": selectedProductId,
         },
       },
       {

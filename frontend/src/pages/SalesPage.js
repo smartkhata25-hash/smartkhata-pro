@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import InvoiceForm from '../components/InvoiceForm';
 import { t } from '../i18n/i18n';
@@ -19,10 +19,13 @@ export default function SalesPage() {
   // 🔹 Sales history state
   const [salesHistory, setSalesHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const historyRequestRef = useRef(0);
 
   // 🔹 Fetch sales history
   const fetchSalesHistory = useCallback(
     async (customerId, productId) => {
+      const requestId = ++historyRequestRef.current;
+
       if (!customerId || !productId) {
         setSalesHistory([]);
         setLoadingHistory(false);
@@ -30,9 +33,8 @@ export default function SalesPage() {
       }
 
       try {
-        console.log('🔥 fetchSalesHistory FUNCTION CALLED');
         setLoadingHistory(true);
-        console.log('🧠 Sending IDs:', customerId, productId);
+
         const res = await fetch(
           `${API}/api/sales-history?customerId=${customerId}&productId=${productId}`,
           {
@@ -43,20 +45,27 @@ export default function SalesPage() {
         );
 
         const data = await res.json();
-        console.log('✅ fetchSalesHistory FUNCTION FINISHED');
 
-        console.log('📥 API RESPONSE:', data);
+        if (requestId !== historyRequestRef.current) {
+          return;
+        }
 
         if (res.ok) {
-          setSalesHistory(data || []);
+          setSalesHistory(Array.isArray(data) ? data : []);
         } else {
           setSalesHistory([]);
         }
       } catch (err) {
+        if (requestId !== historyRequestRef.current) {
+          return;
+        }
+
         console.error(t('alerts.salesHistoryFailed'), err);
         setSalesHistory([]);
       } finally {
-        setLoadingHistory(false);
+        if (requestId === historyRequestRef.current) {
+          setLoadingHistory(false);
+        }
       }
     },
     [token]

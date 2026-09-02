@@ -250,4 +250,22 @@ invoiceSchema.index({
   invoiceDate: -1,
 });
 
+// ✅ Sales History - Customer + Product + Latest
+invoiceSchema.index({
+  createdBy: 1,
+  customerId: 1,
+  isDeleted: 1,
+  "items.productId": 1,
+  createdAt: -1,
+});
+
+// ✅ Sales History - Party + Product + Latest
+invoiceSchema.index({
+  createdBy: 1,
+  partyId: 1,
+  isDeleted: 1,
+  "items.productId": 1,
+  createdAt: -1,
+});
+
 module.exports = mongoose.model("Invoice", invoiceSchema);

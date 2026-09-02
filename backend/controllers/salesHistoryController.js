@@ -32,28 +32,53 @@ exports.getSalesHistoryByCustomerProduct = async (req, res) => {
           ],
         },
       },
-      {
-        $unwind: "$items",
-      },
-      {
-        $match: {
-          "items.productId": selectedProductId,
-        },
-      },
+
       {
         $sort: {
           createdAt: -1,
         },
       },
+
+      {
+        $project: {
+          billNo: 1,
+          invoiceDate: 1,
+          invoiceTime: 1,
+          createdAt: 1,
+
+          matchedItem: {
+            $arrayElemAt: [
+              {
+                $filter: {
+                  input: "$items",
+                  as: "item",
+                  cond: {
+                    $eq: ["$$item.productId", selectedProductId],
+                  },
+                },
+              },
+              0,
+            ],
+          },
+        },
+      },
+
+      {
+        $match: {
+          matchedItem: { $ne: null },
+        },
+      },
+
       {
         $limit: 4,
       },
+
       {
         $project: {
           _id: 1,
           billNo: 1,
-          rate: "$items.price",
-          quantity: "$items.quantity",
+          rate: "$matchedItem.price",
+          quantity: "$matchedItem.quantity",
           invoiceDate: 1,
           invoiceTime: 1,
           createdAt: 1,

@@ -16,24 +16,60 @@ const TravelSummaryCard = ({
 
   const isUpcomingDepartures = card.key === 'upcomingDepartures';
 
-  const canOpen = Boolean(card.route && !card.disabled && onCardClick && !isUpcomingDepartures);
+  const canOpenRegular = Boolean(
+    card.route && !card.disabled && onCardClick && !isUpcomingDepartures
+  );
 
-  const Container = canOpen ? 'button' : 'article';
+  const canOpenReminder = Boolean(isUpcomingDepartures && !card.disabled && onOpenReminderCenter);
+
+  const isClickable = canOpenRegular || canOpenReminder;
 
   const dueCount = Number(reminderSummary?.dueCount || 0);
   const upcomingCount = Number(reminderSummary?.upcomingCount || 0);
   const failedEmailCount = Number(reminderSummary?.failedEmailCount || 0);
   const attentionCount = Number(reminderSummary?.attentionCount || 0);
 
+  const handleCardClick = () => {
+    if (canOpenReminder) {
+      onOpenReminderCenter();
+      return;
+    }
+
+    if (canOpenRegular) {
+      onCardClick(card);
+    }
+  };
+
+  const handleCardKeyDown = (event) => {
+    if (!isClickable) return;
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleCardClick();
+    }
+  };
+
+  const handleReminderAction = (event) => {
+    event.stopPropagation();
+
+    if (onOpenReminderCenter) {
+      onOpenReminderCenter();
+    }
+  };
+
   return (
-    <Container
-      type={canOpen ? 'button' : undefined}
-      onClick={canOpen ? () => onCardClick(card) : undefined}
-      aria-disabled={!canOpen && Boolean(card.route) && !isUpcomingDepartures}
+    <article
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onClick={isClickable ? handleCardClick : undefined}
+      onKeyDown={isClickable ? handleCardKeyDown : undefined}
+      aria-disabled={!isClickable && Boolean(card.route)}
       data-travel-summary-card={card.key}
       data-travel-card-category={card.category}
-      className={`group relative min-h-[126px] w-full overflow-hidden rounded-lg border ${tone.borderClass} bg-gradient-to-br ${tone.surfaceClass} p-4 text-left shadow-sm transition duration-200 ${
-        canOpen
+      className={`group relative min-h-[126px] w-full overflow-hidden rounded-lg border ${
+        tone.borderClass
+      } bg-gradient-to-br ${tone.surfaceClass} p-4 text-left shadow-sm transition duration-200 ${
+        isClickable
           ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-500'
           : 'cursor-default'
       }`}
@@ -49,7 +85,7 @@ const TravelSummaryCard = ({
           {isUpcomingDepartures ? (
             <button
               type="button"
-              onClick={onOpenReminderCenter}
+              onClick={handleReminderAction}
               title={t('travel.reminders.openCenter')}
               aria-label={t('travel.reminders.openCenter')}
               className={`relative inline-flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg text-lg shadow-sm ring-2 transition hover:scale-105 ${tone.iconClass}`}
@@ -78,7 +114,7 @@ const TravelSummaryCard = ({
             <div className="mt-2 flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={onOpenReminderCenter}
+                onClick={handleReminderAction}
                 title={t('travel.reminders.dueNow')}
                 className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-1.5 py-1 text-amber-700 transition hover:from-amber-100 hover:to-orange-100"
               >
@@ -91,7 +127,7 @@ const TravelSummaryCard = ({
 
               <button
                 type="button"
-                onClick={onOpenReminderCenter}
+                onClick={handleReminderAction}
                 title={t('travel.reminders.upcoming')}
                 className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 px-1.5 py-1 text-cyan-700 transition hover:from-cyan-100 hover:to-sky-100"
               >
@@ -106,7 +142,7 @@ const TravelSummaryCard = ({
 
               <button
                 type="button"
-                onClick={onOpenReminderCenter}
+                onClick={handleReminderAction}
                 title={t('travel.reminders.failedEmail')}
                 className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-1.5 py-1 text-rose-700 transition hover:from-rose-100 hover:to-red-100"
               >
@@ -128,7 +164,7 @@ const TravelSummaryCard = ({
           </div>
         )}
       </div>
-    </Container>
+    </article>
   );
 };
 

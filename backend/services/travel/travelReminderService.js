@@ -8,6 +8,7 @@ const User = require("../../models/User");
 const {
   DEFAULT_TRAVEL_REMINDER_TEMPLATES,
 } = require("../../models/TravelReminderSettings");
+
 const getUserId = (req) => req.user?.id || req.userId;
 
 const createHttpError = (statusCode, message) => {
@@ -85,6 +86,7 @@ const getItemDateRange = (item) => {
     end: null,
   };
 };
+
 const { sendTravelReminderEmail } = require("./travelReminderEmailService");
 
 const DEFAULT_LEAD_MINUTES = 24 * 60;
@@ -162,23 +164,29 @@ const serializeSettings = (settings) => {
       plain.automaticRemindersEnabled,
       DEFAULT_SETTINGS.automaticRemindersEnabled,
     ),
+
     defaultLeadMinutes: normalizeLeadMinutes(
       plain.defaultLeadMinutes,
       DEFAULT_SETTINGS.defaultLeadMinutes,
     ),
+
     emailEnabled: normalizeBoolean(
       plain.emailEnabled,
       DEFAULT_SETTINGS.emailEnabled,
     ),
+
     whatsappEnabled: normalizeBoolean(
       plain.whatsappEnabled,
       DEFAULT_SETTINGS.whatsappEnabled,
     ),
+
     englishTemplate:
       String(plain.englishTemplate || "").trim() ||
       DEFAULT_SETTINGS.englishTemplate,
+
     urduTemplate:
       String(plain.urduTemplate || "").trim() || DEFAULT_SETTINGS.urduTemplate,
+
     updatedAt: plain.updatedAt || null,
   };
 };
@@ -206,6 +214,10 @@ const getTravelReminderSettings = async (userId) => {
   return serializeSettings(settings);
 };
 
+/* -------------------------------------------------------------------------- */
+/*                      UPDATE BUSINESS REMINDER SETTINGS                     */
+/* -------------------------------------------------------------------------- */
+
 const updateTravelReminderSettings = async ({ userId, actorId, payload }) => {
   const source = parseJsonField(payload, {}) || {};
 
@@ -214,23 +226,29 @@ const updateTravelReminderSettings = async ({ userId, actorId, payload }) => {
       source.automaticRemindersEnabled,
       DEFAULT_SETTINGS.automaticRemindersEnabled,
     ),
+
     defaultLeadMinutes: normalizeLeadMinutes(
       source.defaultLeadMinutes,
       DEFAULT_SETTINGS.defaultLeadMinutes,
     ),
+
     emailEnabled: normalizeBoolean(
       source.emailEnabled,
       DEFAULT_SETTINGS.emailEnabled,
     ),
+
     whatsappEnabled: normalizeBoolean(
       source.whatsappEnabled,
       DEFAULT_SETTINGS.whatsappEnabled,
     ),
+
     englishTemplate:
       String(source.englishTemplate || "").trim() ||
       DEFAULT_SETTINGS.englishTemplate,
+
     urduTemplate:
       String(source.urduTemplate || "").trim() || DEFAULT_SETTINGS.urduTemplate,
+
     updatedBy: actorId || null,
   };
 
@@ -238,7 +256,9 @@ const updateTravelReminderSettings = async ({ userId, actorId, payload }) => {
     { userId },
     {
       $set: update,
-      $setOnInsert: { userId },
+      $setOnInsert: {
+        userId,
+      },
     },
     {
       new: true,
@@ -248,34 +268,99 @@ const updateTravelReminderSettings = async ({ userId, actorId, payload }) => {
     },
   ).lean();
 
-  return serializeSettings(settings);
+  const serializedSettings = serializeSettings(settings);
+
+  /*
+   * Business Defaults save ہونے کے بعد صرف ان active
+   * bookings کے reminders دوبارہ sync کیے جاتے ہیں
+   * جو Business Defaults inherit کر رہی ہیں۔
+   *
+   * Custom per-booking settings کو نہیں چھیڑا جاتا۔
+   */
+  try {
+    const bookings = await TravelBooking.find({
+      userId,
+
+      isActive: {
+        $ne: false,
+      },
+
+      isDeleted: {
+        $ne: true,
+      },
+
+      isVoided: {
+        $ne: true,
+      },
+
+      status: {
+        $in: [...ACTIVE_BOOKING_STATUSES],
+      },
+    })
+      .select("_id reminderSettings")
+      .lean();
+
+    const inheritedBookings = bookings.filter((booking) => {
+      const reminderSettings = parseJsonField(booking.reminderSettings, null);
+
+      return (
+        !reminderSettings || reminderSettings.inheritBusinessDefaults !== false
+      );
+    });
+
+    for (const booking of inheritedBookings) {
+      await syncTravelBookingReminder({
+        bookingId: booking._id,
+        userId,
+        actorId,
+        settings: booking.reminderSettings,
+      });
+    }
+  } catch (error) {
+    console.error("Travel reminder defaults resync failed:", error.message);
+  }
+
+  return serializedSettings;
 };
+
+/* -------------------------------------------------------------------------- */
+/*                    NORMALIZE BOOKING REMINDER SETTINGS                     */
+/* -------------------------------------------------------------------------- */
 
 const normalizeBookingReminderSettings = (rawSettings, businessSettings) => {
   const source = parseJsonField(rawSettings, null);
+
   const defaults = serializeSettings(businessSettings);
 
   if (!source || source.inheritBusinessDefaults !== false) {
     return {
       inheritBusinessDefaults: true,
+
       enabled: defaults.automaticRemindersEnabled,
+
       leadMinutes: defaults.defaultLeadMinutes,
+
       emailEnabled: defaults.emailEnabled,
+
       whatsappEnabled: defaults.whatsappEnabled,
     };
   }
 
   return {
     inheritBusinessDefaults: false,
+
     enabled: normalizeBoolean(
       source.enabled,
       defaults.automaticRemindersEnabled,
     ),
+
     leadMinutes: normalizeLeadMinutes(
       source.leadMinutes,
       defaults.defaultLeadMinutes,
     ),
+
     emailEnabled: normalizeBoolean(source.emailEnabled, defaults.emailEnabled),
+
     whatsappEnabled: normalizeBoolean(
       source.whatsappEnabled,
       defaults.whatsappEnabled,
@@ -299,10 +384,15 @@ const earliestDate = (values = []) =>
     .filter(Boolean)
     .sort((a, b) => a.getTime() - b.getTime())[0] || null;
 
+/* -------------------------------------------------------------------------- */
+/*                           GET PRIORITY EVENT                               */
+/* -------------------------------------------------------------------------- */
+
 const getPriorityEvent = (booking) => {
   const items = Array.isArray(booking?.bookingItems)
     ? booking.bookingItems
     : [];
+
   const candidates = [];
   const now = new Date();
 
@@ -336,16 +426,19 @@ const getPriorityEvent = (booking) => {
         "air_ticket_departure",
         passengerDeparture || range.start,
       );
+
       return;
     }
 
     if (item?.itemType === "umrah_package") {
       addCandidate("umrah_package", "umrah_departure", range.start);
+
       return;
     }
 
     if (item?.itemType === "hotel") {
       addCandidate("hotel", "hotel_check_in", range.start);
+
       return;
     }
 
@@ -371,7 +464,9 @@ const getPriorityEvent = (booking) => {
     if (match) {
       return {
         eventType,
+
         eventLabel: EVENT_LABELS[eventType],
+
         eventDateTime: match,
       };
     }
@@ -385,10 +480,16 @@ const getPriorityEvent = (booking) => {
 
   return {
     eventType: "travel_start",
+
     eventLabel: EVENT_LABELS.travel_start,
+
     eventDateTime: fallbackDate,
   };
 };
+
+/* -------------------------------------------------------------------------- */
+/*                           BOOKING HELPERS                                  */
+/* -------------------------------------------------------------------------- */
 
 const shouldKeepReminderForBooking = (booking) =>
   booking &&
@@ -426,8 +527,17 @@ const buildIdempotencyKey = ({
 const cancelReminderQuery = (userId, bookingId, includeDue = false) => ({
   userId,
   bookingId,
-  status: includeDue ? { $in: ["pending", "processing", "due"] } : "pending",
+
+  status: includeDue
+    ? {
+        $in: ["pending", "processing", "due"],
+      }
+    : "pending",
 });
+
+/* -------------------------------------------------------------------------- */
+/*                         CANCEL BOOKING REMINDERS                           */
+/* -------------------------------------------------------------------------- */
 
 const cancelBookingReminders = async ({
   userId,
@@ -436,7 +546,9 @@ const cancelBookingReminders = async ({
   includeDue = false,
 }) => {
   if (!userId || !bookingId) {
-    return { modifiedCount: 0 };
+    return {
+      modifiedCount: 0,
+    };
   }
 
   const now = new Date();
@@ -446,11 +558,17 @@ const cancelBookingReminders = async ({
     {
       $set: {
         status: "cancelled",
+
         inAppStatus: "cancelled",
+
         enabled: false,
+
         cancelledAt: now,
+
         cancelledReason: reason,
+
         processingUntil: null,
+
         lockId: "",
       },
     },
@@ -464,6 +582,10 @@ const getPopulatedBooking = (bookingId, userId) =>
   })
     .populate("customerId", "name phone email moduleScope")
     .lean();
+
+/* -------------------------------------------------------------------------- */
+/*                            SYNC BOOKING REMINDER                           */
+/* -------------------------------------------------------------------------- */
 
 const syncTravelBookingReminder = async ({
   booking,
@@ -479,22 +601,32 @@ const syncTravelBookingReminder = async ({
         : await getPopulatedBooking(bookingId || booking?._id, userId);
 
     if (!sourceBooking?._id) {
-      return { skipped: true, reason: "booking_not_found" };
+      return {
+        skipped: true,
+        reason: "booking_not_found",
+      };
     }
 
     if (!sourceBooking.customerId?._id && !sourceBooking.customerId) {
       await cancelBookingReminders({
         userId,
+
         bookingId: sourceBooking._id,
+
         reason: "Booking customer missing",
       });
 
-      return { skipped: true, reason: "customer_missing" };
+      return {
+        skipped: true,
+        reason: "customer_missing",
+      };
     }
 
     const businessSettings = await getTravelReminderSettings(userId);
+
     const effectiveSettings = normalizeBookingReminderSettings(
       settings ?? sourceBooking.reminderSettings,
+
       businessSettings,
     );
 
@@ -504,102 +636,160 @@ const syncTravelBookingReminder = async ({
     ) {
       await cancelBookingReminders({
         userId,
+
         bookingId: sourceBooking._id,
+
         reason: effectiveSettings.enabled
           ? "Booking no longer needs reminders"
           : "Reminder disabled",
+
         includeDue: !effectiveSettings.enabled,
       });
 
-      return { skipped: true, reason: "disabled_or_inactive" };
+      return {
+        skipped: true,
+        reason: "disabled_or_inactive",
+      };
     }
 
     const event = getPriorityEvent(sourceBooking);
+
     const now = new Date();
 
     if (!event || event.eventDateTime <= now) {
       await cancelBookingReminders({
         userId,
+
         bookingId: sourceBooking._id,
+
         reason: "No future event date",
       });
 
-      return { skipped: true, reason: "no_future_event" };
+      return {
+        skipped: true,
+        reason: "no_future_event",
+      };
     }
 
     const remindAt = new Date(
       event.eventDateTime.getTime() - effectiveSettings.leadMinutes * 60 * 1000,
     );
+
     const customerId =
       sourceBooking.customerId?._id || sourceBooking.customerId;
+
     const idempotencyKey = buildIdempotencyKey({
       userId,
+
       bookingId: sourceBooking._id,
+
       customerId,
+
       eventType: event.eventType,
+
       eventDateTime: event.eventDateTime,
+
       remindAt,
     });
 
     await TravelReminder.updateMany(
       {
         userId,
+
         bookingId: sourceBooking._id,
+
         status: "pending",
-        idempotencyKey: { $ne: idempotencyKey },
+
+        idempotencyKey: {
+          $ne: idempotencyKey,
+        },
       },
       {
         $set: {
           status: "cancelled",
+
           inAppStatus: "cancelled",
+
           enabled: false,
+
           cancelledAt: now,
+
           cancelledReason: "Booking reminder rescheduled",
         },
       },
     );
 
-    const existing = await TravelReminder.findOne({ idempotencyKey });
+    const existing = await TravelReminder.findOne({
+      idempotencyKey,
+    });
 
     if (existing && existing.status !== "pending") {
       return {
         skipped: true,
+
         reason: "history_not_rewritten",
+
         reminder: serializeReminder(existing),
       };
     }
 
     const reminderPayload = {
       userId,
+
       bookingId: sourceBooking._id,
+
       customerId,
+
       bookingNumber: getBookingNumber(sourceBooking),
+
       customerName: sourceBooking.customerId?.name || "",
+
       eventType: event.eventType,
+
       eventLabel: event.eventLabel,
+
       eventDateTime: event.eventDateTime,
+
       remindAt,
+
       leadMinutes: effectiveSettings.leadMinutes,
+
       enabled: true,
+
       emailEnabled: effectiveSettings.emailEnabled,
+
       whatsappEnabled: effectiveSettings.whatsappEnabled,
+
       emailStatus: effectiveSettings.emailEnabled ? "pending" : "disabled",
+
       inAppStatus: "pending",
+
       status: "pending",
+
       isRead: false,
+
       readAt: null,
+
       readBy: null,
+
       cancelledAt: null,
+
       cancelledReason: "",
+
       processingUntil: null,
+
       lockId: "",
+
       idempotencyKey,
     };
 
     const reminder = await TravelReminder.findOneAndUpdate(
-      { idempotencyKey },
+      {
+        idempotencyKey,
+      },
       {
         $set: reminderPayload,
+
         $setOnInsert: {
           createdBy: actorId || null,
         },
@@ -614,14 +804,25 @@ const syncTravelBookingReminder = async ({
 
     return {
       skipped: false,
+
       reminder: serializeReminder(reminder),
     };
   } catch (error) {
     console.error("Travel reminder sync failed:", error.message);
 
-    return { skipped: true, reason: "sync_failed", error: error.message };
+    return {
+      skipped: true,
+
+      reason: "sync_failed",
+
+      error: error.message,
+    };
   }
 };
+
+/* -------------------------------------------------------------------------- */
+/*                           DATE / TIME HELPERS                              */
+/* -------------------------------------------------------------------------- */
 
 const formatDatePart = (value) => {
   const date = nullableDate(value);
@@ -646,6 +847,7 @@ const formatTimePart = (value) => {
   }
 
   const hours = date.getUTCHours();
+
   const minutes = date.getUTCMinutes();
 
   if (hours === 0 && minutes === 0) {
@@ -666,21 +868,31 @@ const getBusinessName = async (userId) => {
   return user?.businessName || user?.name || "Smart Khata";
 };
 
+/* -------------------------------------------------------------------------- */
+/*                           TEMPLATE VARIABLES                              */
+/* -------------------------------------------------------------------------- */
+
 const buildTemplateVariables = async (reminder) => {
   const booking = reminder.bookingId;
+
   const customer = reminder.customerId;
 
   return {
     customerName: customer?.name || reminder.customerName || "Customer",
+
     bookingNumber:
       booking?.invoiceNumber ||
       booking?.bookingNumber ||
       reminder.bookingNumber ||
       "-",
+
     eventType:
       reminder.eventLabel || EVENT_LABELS[reminder.eventType] || "Travel",
+
     eventDate: formatDatePart(reminder.eventDateTime),
+
     eventTime: formatTimePart(reminder.eventDateTime),
+
     businessName: await getBusinessName(reminder.userId),
   };
 };
@@ -692,6 +904,10 @@ const applyTemplate = (template, variables) =>
       : String(variables[key]),
   );
 
+/* -------------------------------------------------------------------------- */
+/*                            POPULATE REMINDER                              */
+/* -------------------------------------------------------------------------- */
+
 const populateReminder = (query) =>
   query
     .populate("customerId", "name phone email moduleScope")
@@ -700,16 +916,22 @@ const populateReminder = (query) =>
       "bookingNumber invoiceNumber serviceType status travelStartDate travelEndDate isDeleted isVoided",
     );
 
+/* -------------------------------------------------------------------------- */
+/*                            SERIALIZE REMINDER                             */
+/* -------------------------------------------------------------------------- */
+
 const serializeReminder = (reminder) => {
   if (!reminder) {
     return null;
   }
 
   const plain = reminder.toObject ? reminder.toObject() : reminder;
+
   const booking =
     plain.bookingId && typeof plain.bookingId === "object"
       ? plain.bookingId
       : null;
+
   const customer =
     plain.customerId && typeof plain.customerId === "object"
       ? plain.customerId
@@ -717,47 +939,93 @@ const serializeReminder = (reminder) => {
 
   return {
     _id: plain._id,
+
     bookingId: booking?._id || plain.bookingId,
+
     customerId: customer?._id || plain.customerId,
+
     bookingNumber:
       booking?.invoiceNumber ||
       booking?.bookingNumber ||
       plain.bookingNumber ||
       "",
+
     customerName: customer?.name || plain.customerName || "",
+
     customerPhone: customer?.phone || "",
+
     customerEmail: customer?.email || "",
+
     eventType: plain.eventType,
+
     eventLabel: plain.eventLabel || EVENT_LABELS[plain.eventType] || "",
+
     eventDateTime: plain.eventDateTime,
+
     remindAt: plain.remindAt,
+
     leadMinutes: plain.leadMinutes,
+
     enabled: plain.enabled !== false,
+
     emailEnabled: plain.emailEnabled === true,
+
     whatsappEnabled: plain.whatsappEnabled !== false,
+
     status: plain.status,
+
     inAppStatus: plain.inAppStatus,
+
     dueAt: plain.dueAt,
+
     isRead: plain.isRead === true,
+
     readAt: plain.readAt,
+
     emailStatus: plain.emailStatus,
+
     emailSentAt: plain.emailSentAt,
+
     emailError: plain.emailError || "",
+
     emailAttempts: Number(plain.emailAttempts || 0),
+
     cancelledAt: plain.cancelledAt,
+
     cancelledReason: plain.cancelledReason || "",
+
     createdAt: plain.createdAt,
+
     updatedAt: plain.updatedAt,
   };
 };
 
+/* -------------------------------------------------------------------------- */
+/*                              SUMMARY QUERY                                */
+/* -------------------------------------------------------------------------- */
+
 const dueAttentionFilter = (now = new Date()) => ({
   enabled: true,
-  status: { $ne: "cancelled" },
+
+  status: {
+    $ne: "cancelled",
+  },
+
   $or: [
-    { status: "due" },
-    { status: "pending", remindAt: { $lte: now } },
-    { emailStatus: "failed" },
+    {
+      status: "due",
+    },
+
+    {
+      status: "pending",
+      remindAt: {
+        $lte: now,
+      },
+    },
+
+    {
+      emailStatus: "failed",
+    },
   ],
 });
 
@@ -773,54 +1041,107 @@ const getTravelReminderSummary = async (userId) => {
   ] = await Promise.all([
     TravelReminder.countDocuments({
       userId,
+
       isRead: false,
+
       ...dueAttentionFilter(now),
     }),
+
     TravelReminder.countDocuments({
       userId,
+
       enabled: true,
-      status: { $ne: "cancelled" },
-      $or: [{ status: "due" }, { status: "pending", remindAt: { $lte: now } }],
+
+      status: {
+        $ne: "cancelled",
+      },
+
+      $or: [
+        {
+          status: "due",
+        },
+
+        {
+          status: "pending",
+
+          remindAt: {
+            $lte: now,
+          },
+        },
+      ],
     }),
+
     TravelReminder.countDocuments({
       userId,
+
       enabled: true,
+
       status: "pending",
-      remindAt: { $gt: now },
+
+      remindAt: {
+        $gt: now,
+      },
     }),
+
     TravelReminder.countDocuments({
       userId,
+
       enabled: true,
-      status: { $ne: "cancelled" },
+
+      status: {
+        $ne: "cancelled",
+      },
+
       emailStatus: "failed",
     }),
+
     populateReminder(
       TravelReminder.findOne({
         userId,
+
         enabled: true,
+
         status: "pending",
-        remindAt: { $gt: now },
-      }).sort({ remindAt: 1 }),
+
+        remindAt: {
+          $gt: now,
+        },
+      }).sort({
+        remindAt: 1,
+      }),
     ).lean(),
   ]);
 
   return {
     attentionCount,
+
     dueCount,
+
     upcomingCount,
+
     failedEmailCount,
+
     nextReminder: serializeReminder(nextReminder),
+
     loadedAt: new Date(),
   };
 };
 
+/* -------------------------------------------------------------------------- */
+/*                             LIST QUERY                                     */
+/* -------------------------------------------------------------------------- */
+
 const buildReminderListQuery = (userId, status = "") => {
   const now = new Date();
-  const base = { userId };
+
+  const base = {
+    userId,
+  };
 
   if (status === "due") {
     return {
       ...base,
+
       ...dueAttentionFilter(now),
     };
   }
@@ -828,17 +1149,27 @@ const buildReminderListQuery = (userId, status = "") => {
   if (status === "upcoming") {
     return {
       ...base,
+
       enabled: true,
+
       status: "pending",
-      remindAt: { $gt: now },
+
+      remindAt: {
+        $gt: now,
+      },
     };
   }
 
   if (status === "failed") {
     return {
       ...base,
+
       enabled: true,
-      status: { $ne: "cancelled" },
+
+      status: {
+        $ne: "cancelled",
+      },
+
       emailStatus: "failed",
     };
   }
@@ -846,34 +1177,60 @@ const buildReminderListQuery = (userId, status = "") => {
   if (status === "completed") {
     return {
       ...base,
-      status: { $in: ["due", "cancelled"] },
+
+      status: {
+        $in: ["due", "cancelled"],
+      },
+
       isRead: true,
     };
   }
 
   return {
     ...base,
+
     $or: [
       dueAttentionFilter(now),
-      { enabled: true, status: "pending" },
+
+      {
+        enabled: true,
+        status: "pending",
+      },
+
       {
         status: "cancelled",
-        updatedAt: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
+
+        updatedAt: {
+          $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+        },
       },
     ],
   };
 };
 
+/* -------------------------------------------------------------------------- */
+/*                              LIST REMINDERS                               */
+/* -------------------------------------------------------------------------- */
+
 const listTravelReminders = async ({ userId, status = "", limit = 80 }) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 80, 1), 200);
+
   const reminders = await populateReminder(
     TravelReminder.find(buildReminderListQuery(userId, status))
-      .sort({ isRead: 1, remindAt: 1, updatedAt: -1 })
+      .sort({
+        isRead: 1,
+        remindAt: 1,
+        updatedAt: -1,
+      })
       .limit(safeLimit),
   ).lean();
 
   return reminders.map(serializeReminder);
 };
+
+/* -------------------------------------------------------------------------- */
+/*                         BOOKING REMINDER STATE                            */
+/* -------------------------------------------------------------------------- */
 
 const getBookingReminderState = async ({ userId, bookingId }) => {
   if (!mongoose.Types.ObjectId.isValid(String(bookingId))) {
@@ -891,20 +1248,33 @@ const getBookingReminderState = async ({ userId, bookingId }) => {
 
   const [settings, reminders] = await Promise.all([
     getTravelReminderSettings(userId),
+
     populateReminder(
       TravelReminder.find({
         userId,
+
         bookingId,
-        status: { $ne: "cancelled" },
-      }).sort({ remindAt: 1, updatedAt: -1 }),
+
+        status: {
+          $ne: "cancelled",
+        },
+      }).sort({
+        remindAt: 1,
+        updatedAt: -1,
+      }),
     ).lean(),
   ]);
 
   return {
     settings,
+
     reminders: reminders.map(serializeReminder),
   };
 };
+
+/* -------------------------------------------------------------------------- */
+/*                             SEND EMAIL                                    */
+/* -------------------------------------------------------------------------- */
 
 const completeReminderEmail = async (reminder) => {
   if (!reminder.emailEnabled) {
@@ -917,11 +1287,13 @@ const completeReminderEmail = async (reminder) => {
   const populated = await populateReminder(
     TravelReminder.findById(reminder._id),
   ).lean();
+
   const customer = populated?.customerId;
 
   if (!customer?.email) {
     return {
       emailStatus: "skipped",
+
       emailError: "Customer email is missing",
     };
   }
@@ -930,43 +1302,64 @@ const completeReminderEmail = async (reminder) => {
 
   await sendTravelReminderEmail({
     toEmail: customer.email,
+
     customerName: variables.customerName,
+
     bookingNumber: variables.bookingNumber,
+
     eventType: variables.eventType,
+
     eventDate: variables.eventDate,
+
     eventTime: variables.eventTime,
+
     businessName: variables.businessName,
   });
 
   return {
     emailStatus: "sent",
+
     emailSentAt: new Date(),
+
     emailError: "",
   };
 };
 
+/* -------------------------------------------------------------------------- */
+/*                         FINALIZE CLAIMED REMINDER                          */
+/* -------------------------------------------------------------------------- */
+
 const finalizeClaimedReminder = async (reminder) => {
   const now = new Date();
+
   const update = {
     status: "due",
+
     inAppStatus: "due",
+
     dueAt: reminder.dueAt || now,
+
     lastProcessedAt: now,
+
     processingUntil: null,
+
     lockId: "",
   };
 
   if (!reminder.emailEnabled) {
     update.emailStatus = "disabled";
+
     update.emailError = "";
   } else if (reminder.emailStatus !== "sent") {
     update.emailAttempts = Number(reminder.emailAttempts || 0) + 1;
+
     update.emailLastAttemptAt = now;
 
     try {
       Object.assign(update, await completeReminderEmail(reminder));
     } catch (error) {
       update.emailStatus = "failed";
+
       update.emailError = error.message || "Email sending failed";
     }
   }
@@ -974,24 +1367,36 @@ const finalizeClaimedReminder = async (reminder) => {
   const saved = await TravelReminder.findOneAndUpdate(
     {
       _id: reminder._id,
+
       status: "processing",
+
       lockId: reminder.lockId,
     },
-    { $set: update },
-    { new: true },
+    {
+      $set: update,
+    },
+    {
+      new: true,
+    },
   );
 
   return serializeReminder(saved);
 };
 
+/* -------------------------------------------------------------------------- */
+/*                         PROCESS DUE REMINDERS                             */
+/* -------------------------------------------------------------------------- */
+
 const processDueTravelReminders = async ({
   limit = MAX_PROCESS_LIMIT,
 } = {}) => {
   const startedAt = new Date();
+
   const safeLimit = Math.min(
     Math.max(Number(limit) || MAX_PROCESS_LIMIT, 1),
     200,
   );
+
   const results = {
     processed: 0,
     sent: 0,
@@ -1001,31 +1406,58 @@ const processDueTravelReminders = async ({
 
   for (let index = 0; index < safeLimit; index += 1) {
     const now = new Date();
+
     const lockId = crypto.randomUUID();
+
     const reminder = await TravelReminder.findOneAndUpdate(
       {
         enabled: true,
+
         status: "pending",
-        remindAt: { $lte: now },
+
+        remindAt: {
+          $lte: now,
+        },
+
         $or: [
-          { processingUntil: null },
-          { processingUntil: { $exists: false } },
-          { processingUntil: { $lte: now } },
+          {
+            processingUntil: null,
+          },
+
+          {
+            processingUntil: {
+              $exists: false,
+            },
+          },
+
+          {
+            processingUntil: {
+              $lte: now,
+            },
+          },
         ],
       },
       {
         $set: {
           status: "processing",
+
           processingStartedAt: now,
+
           processingUntil: new Date(now.getTime() + PROCESSING_LOCK_MS),
+
           lockId,
         },
+
         $inc: {
           processAttempts: 1,
         },
       },
       {
-        sort: { remindAt: 1, createdAt: 1 },
+        sort: {
+          remindAt: 1,
+          createdAt: 1,
+        },
+
         new: true,
       },
     );
@@ -1049,10 +1481,16 @@ const processDueTravelReminders = async ({
 
   return {
     ...results,
+
     startedAt,
+
     finishedAt: new Date(),
   };
 };
+
+/* -------------------------------------------------------------------------- */
+/*                         GET REMINDER FOR ACTION                           */
+/* -------------------------------------------------------------------------- */
 
 const getReminderForAction = async ({ userId, reminderId }) => {
   if (!mongoose.Types.ObjectId.isValid(String(reminderId))) {
@@ -1062,8 +1500,12 @@ const getReminderForAction = async ({ userId, reminderId }) => {
   const reminder = await populateReminder(
     TravelReminder.findOne({
       _id: reminderId,
+
       userId,
-      status: { $ne: "cancelled" },
+
+      status: {
+        $ne: "cancelled",
+      },
     }),
   ).lean();
 
@@ -1074,21 +1516,36 @@ const getReminderForAction = async ({ userId, reminderId }) => {
   return reminder;
 };
 
+/* -------------------------------------------------------------------------- */
+/*                         MANUAL EMAIL SEND                                 */
+/* -------------------------------------------------------------------------- */
+
 const sendReminderEmailNow = async ({ userId, reminderId }) => {
-  const reminder = await getReminderForAction({ userId, reminderId });
+  const reminder = await getReminderForAction({
+    userId,
+    reminderId,
+  });
+
   const now = new Date();
 
   if (!reminder.emailEnabled) {
     const saved = await TravelReminder.findOneAndUpdate(
-      { _id: reminderId, userId },
+      {
+        _id: reminderId,
+        userId,
+      },
       {
         $set: {
           emailStatus: "disabled",
+
           emailError: "",
+
           emailLastAttemptAt: now,
         },
       },
-      { new: true },
+      {
+        new: true,
+      },
     );
 
     return serializeReminder(saved);
@@ -1096,6 +1553,7 @@ const sendReminderEmailNow = async ({ userId, reminderId }) => {
 
   const update = {
     emailAttempts: Number(reminder.emailAttempts || 0) + 1,
+
     emailLastAttemptAt: now,
   };
 
@@ -1103,17 +1561,29 @@ const sendReminderEmailNow = async ({ userId, reminderId }) => {
     Object.assign(update, await completeReminderEmail(reminder));
   } catch (error) {
     update.emailStatus = "failed";
+
     update.emailError = error.message || "Email sending failed";
   }
 
   const saved = await TravelReminder.findOneAndUpdate(
-    { _id: reminderId, userId },
-    { $set: update },
-    { new: true },
+    {
+      _id: reminderId,
+      userId,
+    },
+    {
+      $set: update,
+    },
+    {
+      new: true,
+    },
   );
 
   return serializeReminder(saved);
 };
+
+/* -------------------------------------------------------------------------- */
+/*                           MARK READ / UNREAD                              */
+/* -------------------------------------------------------------------------- */
 
 const markReminderRead = async ({
   userId,
@@ -1126,21 +1596,31 @@ const markReminderRead = async ({
   }
 
   const now = new Date();
+
   const saved = await TravelReminder.findOneAndUpdate(
     {
       _id: reminderId,
+
       userId,
-      status: { $ne: "cancelled" },
+
+      status: {
+        $ne: "cancelled",
+      },
     },
     {
       $set: {
         isRead: read,
+
         readAt: read ? now : null,
+
         readBy: read ? actorId || null : null,
+
         inAppStatus: read ? "read" : "due",
       },
     },
-    { new: true },
+    {
+      new: true,
+    },
   );
 
   if (!saved) {
@@ -1150,12 +1630,19 @@ const markReminderRead = async ({
   return serializeReminder(saved);
 };
 
+/* -------------------------------------------------------------------------- */
+/*                           WHATSAPP MESSAGE                                */
+/* -------------------------------------------------------------------------- */
+
 const getWhatsAppReminderMessage = async ({
   userId,
   reminderId,
   lang = "en",
 }) => {
-  const reminder = await getReminderForAction({ userId, reminderId });
+  const reminder = await getReminderForAction({
+    userId,
+    reminderId,
+  });
 
   if (!reminder.whatsappEnabled) {
     throw createHttpError(400, "WhatsApp action is disabled for this reminder");
@@ -1168,7 +1655,9 @@ const getWhatsAppReminderMessage = async ({
   }
 
   const settings = await getTravelReminderSettings(userId);
+
   const variables = await buildTemplateVariables(reminder);
+
   const template =
     String(lang).toLowerCase() === "ur"
       ? settings.urduTemplate
@@ -1176,27 +1665,47 @@ const getWhatsAppReminderMessage = async ({
 
   return {
     phone: customer.phone,
+
     message: applyTemplate(template, variables),
   };
 };
 
 const serializeRequestUserId = (req) => getUserId(req);
 
+/* -------------------------------------------------------------------------- */
+/*                                EXPORTS                                    */
+/* -------------------------------------------------------------------------- */
+
 module.exports = {
   DEFAULT_SETTINGS,
+
   EVENT_LABELS,
+
   cancelBookingReminders,
+
   getTravelReminderSettings,
+
   getTravelReminderSummary,
+
   getBookingReminderState,
+
   getWhatsAppReminderMessage,
+
   listTravelReminders,
+
   markReminderRead,
+
   normalizeBookingReminderSettings,
+
   processDueTravelReminders,
+
   sendReminderEmailNow,
+
   serializeReminder,
+
   serializeRequestUserId,
+
   syncTravelBookingReminder,
+
   updateTravelReminderSettings,
 };

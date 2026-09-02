@@ -50,9 +50,7 @@ import {
   TravelCompactAutocomplete,
   TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
-import {
-  TravelBookingReminderControls,
-} from '../../components/travel/reminders/TravelReminderCenter';
+import { TravelBookingReminderControls } from '../../components/travel/reminders/TravelReminderCenter';
 
 import {
   bookingItemTypeOptions,
@@ -760,11 +758,33 @@ const TravelBookingFormPage = () => {
         setLoading(true);
         setFormError('');
 
-        const booking = await fetchTravelBookingById(id);
+        const [booking, latestReminderSettings] = await Promise.all([
+          fetchTravelBookingById(id),
+          fetchTravelReminderSettings(),
+        ]);
+
         const preparedBooking = prepareBookingForForm(booking);
 
-        setFormState(preparedBooking);
-        void ensureReferencesLoaded(getBookingOptionalReferenceKeys(preparedBooking));
+        const bookingReminder = normalizeReminderSettingsForForm(preparedBooking.reminderSettings);
+
+        const finalBooking =
+          bookingReminder.inheritBusinessDefaults !== false
+            ? {
+                ...preparedBooking,
+                reminderSettings: normalizeReminderSettingsForForm({
+                  inheritBusinessDefaults: true,
+                  automaticRemindersEnabled: latestReminderSettings?.automaticRemindersEnabled,
+                  defaultLeadMinutes: latestReminderSettings?.defaultLeadMinutes,
+                  emailEnabled: latestReminderSettings?.emailEnabled,
+                  whatsappEnabled: latestReminderSettings?.whatsappEnabled,
+                }),
+              }
+            : preparedBooking;
+
+        setReminderBusinessSettings(latestReminderSettings || null);
+        setFormState(finalBooking);
+
+        void ensureReferencesLoaded(getBookingOptionalReferenceKeys(finalBooking));
       } catch (error) {
         console.error('Travel invoice load failed:', error);
         setFormError(t('travel.booking.alerts.loadOneFailed'));

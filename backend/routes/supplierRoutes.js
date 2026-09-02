@@ -45,6 +45,12 @@ router.delete(
   ctrl.deleteTravelVendor,
 );
 
+router.get(
+  "/data-version",
+  requirePermission("suppliers.view"),
+  ctrl.getSupplierDataVersion,
+);
+
 // Create Supplier
 router.post("/", requirePermission("suppliers.create"), ctrl.createSupplier);
 

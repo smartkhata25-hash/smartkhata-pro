@@ -8,6 +8,7 @@ export const TRAVEL_CACHE_DOMAINS = Object.freeze({
   AIRLINES: 'travelAirlines',
   AIRPORTS: 'travelAirports',
   VENDORS: 'travelVendors',
+  PAYMENT_ACCOUNTS: 'travelPaymentAccounts',
   CURRENCY_SETTINGS: 'travelCurrencySettings',
   TRAVEL_CUSTOMERS: 'travelCustomers',
   BOOKINGS: 'travelBookings',
@@ -165,6 +166,10 @@ export const upsertCachedTravelRecord = (domain, record) => {
     return false;
   }
 
+  if (!hasTravelCache(domain)) {
+    return false;
+  }
+
   const records = getCachedTravelRecords(domain);
   const index = records.findIndex((item) => String(item?._id) === String(record._id));
 
@@ -183,6 +188,10 @@ export const upsertCachedTravelRecord = (domain, record) => {
 
 export const removeCachedTravelRecord = (domain, recordId) => {
   if (!recordId) {
+    return false;
+  }
+
+  if (!hasTravelCache(domain)) {
     return false;
   }
 

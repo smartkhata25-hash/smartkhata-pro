@@ -217,6 +217,91 @@ const numberValue = (value) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
+const hasRecordReference = (value) => Boolean(getRecordId(value));
+
+const mergeReferenceRecords = (current = [], loaded = []) => {
+  const loadedRecords = Array.isArray(loaded) ? loaded : [];
+  const loadedIds = new Set(loadedRecords.map((record) => String(record?._id || record?.id || '')));
+
+  return [
+    ...loadedRecords,
+    ...(Array.isArray(current) ? current : []).filter(
+      (record) => !loadedIds.has(String(record?._id || record?.id || ''))
+    ),
+  ];
+};
+
+const getBookingOptionalReferenceKeys = (bookingState = {}) => {
+  const keys = new Set();
+  const bookingItems = Array.isArray(bookingState.bookingItems) ? bookingState.bookingItems : [];
+
+  const addFlightReferenceKeys = (details = {}) => {
+    if (!details || typeof details !== 'object') {
+      return;
+    }
+
+    if (hasRecordReference(details.airlineId)) {
+      keys.add('airlines');
+    }
+
+    if (
+      hasRecordReference(details.originAirportId) ||
+      hasRecordReference(details.destinationAirportId) ||
+      hasRecordReference(details.returnOriginAirportId) ||
+      hasRecordReference(details.returnDestinationAirportId)
+    ) {
+      keys.add('airports');
+    }
+  };
+
+  bookingItems.forEach((item = {}) => {
+    const itemType = item.itemType || '';
+
+    if (Array.isArray(item.travelerIds) && item.travelerIds.length > 0) {
+      keys.add('travelers');
+    }
+
+    if (itemType === 'air_ticket') {
+      keys.add('airlines');
+      keys.add('airports');
+    }
+
+    if (itemType === 'visit_visa') {
+      keys.add('travelers');
+    }
+
+    if (itemType === 'hotel' || hasRecordReference(item.hotelDetails?.hotelId)) {
+      keys.add('hotels');
+    }
+
+    addFlightReferenceKeys(item.ticketDetails);
+
+    (item.ticketDetails?.passengerTickets || []).forEach(addFlightReferenceKeys);
+
+    if (itemType === 'umrah_package') {
+      keys.add('airlines');
+      keys.add('hotels');
+    }
+
+    const umrahDetails = item.umrahDetails || {};
+
+    if (
+      hasRecordReference(umrahDetails.makkahHotelId) ||
+      hasRecordReference(umrahDetails.madinahHotelId)
+    ) {
+      keys.add('hotels');
+    }
+
+    (umrahDetails.components || []).forEach((component = {}) => {
+      if (component.componentType === 'hotel' || hasRecordReference(component.hotelId)) {
+        keys.add('hotels');
+      }
+    });
+  });
+
+  return Array.from(keys);
+};
+
 const clearUmrahHotelPricingBreakdown = (pricing = {}) => {
   const next = {
     ...pricing,
@@ -458,6 +543,7 @@ const TravelBookingFormPage = () => {
   const location = useLocation();
   const { id } = useParams();
   const routePrefillAppliedRef = useRef(false);
+  const lazyReferenceLoadedRef = useRef({});
 
   const isEditMode = Boolean(id);
 
@@ -529,6 +615,58 @@ const TravelBookingFormPage = () => {
     }
   );
 
+  const ensureReferenceLoaded = useCallback(async (key, options = {}) => {
+    if (!key) {
+      return;
+    }
+
+    if (!options.forceRefresh && lazyReferenceLoadedRef.current[key]) {
+      return;
+    }
+
+    lazyReferenceLoadedRef.current[key] = true;
+
+    try {
+      if (key === 'travelers') {
+        const data = await fetchTravelers({}, options);
+        setTravelers((current) => mergeReferenceRecords(current, data));
+      }
+
+      if (key === 'hotels') {
+        const data = await fetchTravelHotels({}, options);
+        setHotels((current) => mergeReferenceRecords(current, data));
+      }
+
+      if (key === 'airlines') {
+        const data = await fetchTravelAirlines({}, options);
+        setAirlines((current) => mergeReferenceRecords(current, data));
+      }
+
+      if (key === 'airports') {
+        const data = await fetchTravelAirports({}, options);
+        setAirports((current) => mergeReferenceRecords(current, data));
+      }
+    } catch (error) {
+      lazyReferenceLoadedRef.current[key] = false;
+      console.error('Travel invoice optional reference failed:', key, error);
+    }
+  }, []);
+
+  const ensureReferencesLoaded = useCallback(
+    (keys = [], options = {}) => {
+      const uniqueKeys = [...new Set((keys || []).filter(Boolean))];
+
+      if (uniqueKeys.length === 0) {
+        return Promise.resolve();
+      }
+
+      return Promise.all(uniqueKeys.map((key) => ensureReferenceLoaded(key, options))).then(
+        () => undefined
+      );
+    },
+    [ensureReferenceLoaded]
+  );
+
   const routePrefill = location.state?.travelBookingPrefill || null;
 
   useEffect(() => {
@@ -538,8 +676,12 @@ const TravelBookingFormPage = () => {
 
     routePrefillAppliedRef.current = true;
     clearDraft();
-    setFormState(prepareBookingForForm(routePrefill));
-  }, [clearDraft, isEditMode, routePrefill]);
+
+    const preparedPrefill = prepareBookingForForm(routePrefill);
+
+    setFormState(preparedPrefill);
+    void ensureReferencesLoaded(getBookingOptionalReferenceKeys(preparedPrefill));
+  }, [clearDraft, ensureReferencesLoaded, isEditMode, routePrefill]);
 
   const loadReferences = useCallback(async () => {
     try {
@@ -548,24 +690,16 @@ const TravelBookingFormPage = () => {
 
       const [
         customerData,
-        travelerData,
         categoryData,
         serviceData,
-        hotelData,
-        airlineData,
-        airportData,
         vendorData,
         accountData,
         currencyData,
         reminderSettingsData,
       ] = await Promise.all([
         fetchTravelCustomers(),
-        fetchTravelers(),
         fetchTravelServiceCategories(),
         fetchTravelServices(),
-        fetchTravelHotels(),
-        fetchTravelAirlines(),
-        fetchTravelAirports(),
         fetchTravelVendors(),
         fetchTravelPaymentAccounts(),
         fetchTravelCurrencySettings(),
@@ -573,16 +707,19 @@ const TravelBookingFormPage = () => {
       ]);
 
       setCustomers(Array.isArray(customerData) ? customerData : []);
-      setTravelers(Array.isArray(travelerData) ? travelerData : []);
       setCategories(Array.isArray(categoryData) ? categoryData : []);
       setServices(Array.isArray(serviceData) ? serviceData : []);
-      setHotels(Array.isArray(hotelData) ? hotelData : []);
-      setAirlines(Array.isArray(airlineData) ? airlineData : []);
-      setAirports(Array.isArray(airportData) ? airportData : []);
       setVendors(Array.isArray(vendorData) ? vendorData : []);
       setPaymentAccounts(Array.isArray(accountData) ? accountData : []);
       setCurrencySettings(currencyData || null);
       setReminderBusinessSettings(reminderSettingsData || null);
+      Object.assign(lazyReferenceLoadedRef.current, {
+        customers: true,
+        categories: true,
+        services: true,
+        vendors: true,
+        paymentAccounts: true,
+      });
       setFormState((current) => {
         const currentReminder = normalizeReminderSettingsForForm(current.reminderSettings);
 
@@ -624,8 +761,10 @@ const TravelBookingFormPage = () => {
         setFormError('');
 
         const booking = await fetchTravelBookingById(id);
+        const preparedBooking = prepareBookingForForm(booking);
 
-        setFormState(prepareBookingForForm(booking));
+        setFormState(preparedBooking);
+        void ensureReferencesLoaded(getBookingOptionalReferenceKeys(preparedBooking));
       } catch (error) {
         console.error('Travel invoice load failed:', error);
         setFormError(t('travel.booking.alerts.loadOneFailed'));
@@ -635,7 +774,7 @@ const TravelBookingFormPage = () => {
     };
 
     loadBooking();
-  }, [id, isEditMode]);
+  }, [ensureReferencesLoaded, id, isEditMode]);
 
   const totals = useMemo(
     () => calculateLocalTotals(formState, currencySettings),
@@ -1596,6 +1735,13 @@ const TravelBookingFormPage = () => {
   };
 
   const toggleItemDetails = (index) => {
+    if (!expandedItems[index]) {
+      const item = formState.bookingItems?.[index];
+      const keys = ['travelers', ...getBookingOptionalReferenceKeys({ bookingItems: [item] })];
+
+      void ensureReferencesLoaded(keys);
+    }
+
     setExpandedItems((current) => ({
       ...current,
       [index]: !current[index],

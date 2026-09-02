@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { clearTravelCacheDomain, TRAVEL_CACHE_DOMAINS } from '../utils/travelMasterCache';
+
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/accounts`;
 const ACCOUNT_CACHE_PREFIX = 'accounts_cache_v2';
@@ -100,6 +102,8 @@ export const clearAccountsCache = () => {
         key === 'paymentAccounts'
     )
     .forEach((key) => localStorage.removeItem(key));
+
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.PAYMENT_ACCOUNTS);
 };
 
 const authHeaders = (params = {}) => ({

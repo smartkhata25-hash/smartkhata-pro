@@ -18,6 +18,66 @@ const escapeRegex = (text = "") => {
 
 const getUserId = (req) => req.user?.id || req.userId;
 
+exports.getPartyDataVersion = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({ message: "Invalid user" });
+    }
+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const partyAccounts = await Party.find({
+      userId: userObjectId,
+    })
+      .select("account")
+      .lean();
+
+    const accountIds = partyAccounts
+      .map((party) => party.account)
+      .filter(Boolean);
+
+    const [latestParty, latestJournal] = await Promise.all([
+      Party.findOne({
+        userId: userObjectId,
+      })
+        .sort({ updatedAt: -1 })
+        .select("updatedAt")
+        .lean(),
+
+      accountIds.length > 0
+        ? JournalEntry.findOne({
+            createdBy: userObjectId,
+            isDeleted: { $ne: true },
+            "lines.account": { $in: accountIds },
+          })
+            .sort({ updatedAt: -1 })
+            .select("updatedAt")
+            .lean()
+        : null,
+    ]);
+
+    const partyTime = latestParty?.updatedAt
+      ? new Date(latestParty.updatedAt).getTime()
+      : 0;
+
+    const journalTime = latestJournal?.updatedAt
+      ? new Date(latestJournal.updatedAt).getTime()
+      : 0;
+
+    return res.json({
+      version: String(Math.max(partyTime, journalTime)),
+    });
+  } catch (error) {
+    console.error("Get Party Data Version Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to check party data version",
+    });
+  }
+};
+
 const generateAccountCode = async (userId) => {
   const lastAccount = await Account.findOne({
     userId,

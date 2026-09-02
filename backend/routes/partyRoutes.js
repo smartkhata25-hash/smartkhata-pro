@@ -8,6 +8,7 @@ const { requirePermission } = require("../middleware/permissionMiddleware");
 const {
   createParty,
   getParties,
+  getPartyDataVersion,
   getPartyById,
   updateParty,
   deleteParty,
@@ -21,6 +22,12 @@ router.use(protect);
 
 // Get All Parties
 router.get("/", requirePermission("parties.view"), getParties);
+
+router.get(
+  "/data-version",
+  requirePermission("parties.view"),
+  getPartyDataVersion,
+);
 
 // Create Party
 router.post("/", requirePermission("parties.create"), createParty);

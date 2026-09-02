@@ -19,6 +19,7 @@ const SUPPLIER_API = `${BASE_URL}/api/suppliers`;
 const CUSTOMER_API = `${BASE_URL}/api/customers`;
 const TRAVEL_DASHBOARD_CACHE_MAX_AGE_MS = 30 * 1000;
 const TRAVEL_REPORT_CACHE_MAX_AGE_MS = 30 * 1000;
+const activeListRequests = new Map();
 
 const getConfig = (params = {}) => ({
   headers: {
@@ -71,6 +72,13 @@ const normalizeParams = (params = {}) =>
     return result;
   }, {});
 
+const getRequestCacheKey = (domain, params = {}) =>
+  `${domain}:${JSON.stringify(
+    Object.keys(params)
+      .sort()
+      .map((key) => [key, params[key]])
+  )}`;
+
 const isCacheableListRequest = (params = {}) => {
   const safeParams = normalizeParams(params);
   const nonCacheKeys = ['search', 'categoryId', 'city', 'country', 'vendorId', 'vendorType'];
@@ -86,14 +94,32 @@ const fetchList = async (domain, url, params = {}, options = {}) => {
     return getCachedTravelRecords(domain);
   }
 
-  const response = await axios.get(url, getConfig(safeParams));
-  const data = Array.isArray(response.data) ? response.data : [];
+  const requestKey = getRequestCacheKey(domain, safeParams);
 
-  if (cacheable) {
-    setCachedTravelRecords(domain, data);
+  if (!options.forceRefresh && activeListRequests.has(requestKey)) {
+    return activeListRequests.get(requestKey);
   }
 
-  return data;
+  const request = axios
+    .get(url, getConfig(safeParams))
+    .then((response) => {
+      const data = Array.isArray(response.data) ? response.data : [];
+
+      if (cacheable) {
+        setCachedTravelRecords(domain, data);
+      }
+
+      return data;
+    })
+    .finally(() => {
+      activeListRequests.delete(requestKey);
+    });
+
+  if (!options.forceRefresh) {
+    activeListRequests.set(requestKey, request);
+  }
+
+  return request;
 };
 
 const createRecord = async (domain, url, data) => {
@@ -540,11 +566,13 @@ export const voidTravelBooking = async (id, data = {}) => {
   return response.data;
 };
 
-export const fetchTravelPaymentAccounts = async () => {
-  const response = await axios.get(`${TRAVEL_API}/bookings/payment-accounts`, getConfig());
-
-  return Array.isArray(response.data) ? response.data : [];
-};
+export const fetchTravelPaymentAccounts = (options = {}) =>
+  fetchList(
+    TRAVEL_CACHE_DOMAINS.PAYMENT_ACCOUNTS,
+    `${TRAVEL_API}/bookings/payment-accounts`,
+    {},
+    options
+  );
 
 export const fetchTravelRefundableInvoices = async (params = {}) => {
   const response = await axios.get(

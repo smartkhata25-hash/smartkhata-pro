@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaArrowLeft,
@@ -231,8 +231,14 @@ const TravelVendorReturnsPage = () => {
   const currentPage = Math.max(Number(filters.page || 1), 1);
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+  const returnsRequestRef = useRef(0);
+  const [searchInput, setSearchInput] = useState(filters.search || '');
 
   const canManage = hasPermission('travel.vendors.manage');
+
+  useEffect(() => {
+    setSearchInput(filters.search || '');
+  }, [filters.search]);
 
   const selectedVendor = useMemo(
     () => vendors.find((vendor) => String(vendor._id) === String(formState.vendorId)) || null,
@@ -254,6 +260,9 @@ const TravelVendorReturnsPage = () => {
   );
 
   const loadList = useCallback(async () => {
+    const requestId = returnsRequestRef.current + 1;
+    returnsRequestRef.current = requestId;
+
     try {
       setLoading(true);
       setPageError('');
@@ -267,15 +276,25 @@ const TravelVendorReturnsPage = () => {
         limit: PAGE_SIZE,
       });
 
+      if (requestId !== returnsRequestRef.current) {
+        return;
+      }
+
       setReturns(Array.isArray(response?.data) ? response.data : []);
 
       setTotal(Number(response?.total || 0));
     } catch (error) {
+      if (requestId !== returnsRequestRef.current) {
+        return;
+      }
+
       console.error('Travel vendor returns load failed:', error);
 
       setPageError(t('travel.vendorReturns.loadFailed'));
     } finally {
-      setLoading(false);
+      if (requestId === returnsRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [currentPage, filters.fromDate, filters.receivedStatus, filters.search, filters.toDate]);
 
@@ -284,7 +303,7 @@ const TravelVendorReturnsPage = () => {
       setFormError('');
 
       const [vendorData, accountData] = await Promise.all([
-        fetchTravelVendors({ includeBalance: 'true' }, { forceRefresh: true }),
+        fetchTravelVendors({ includeBalance: 'true' }),
         fetchTravelPaymentAccounts(),
       ]);
 
@@ -476,8 +495,21 @@ const TravelVendorReturnsPage = () => {
   );
 
   const clearFilters = useCallback(() => {
+    setSearchInput('');
     setSearchParams({}, { replace: true });
   }, [setSearchParams]);
+
+  useEffect(() => {
+    if (searchInput === (filters.search || '')) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      updateFilter('search', searchInput);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [filters.search, searchInput, updateFilter]);
 
   const handleDeleteVendorReturn = useCallback(
     async (record, event = null) => {
@@ -751,8 +783,8 @@ const TravelVendorReturnsPage = () => {
         !formVisible && (
           <TravelMasterToolbar className="lg:grid lg:grid-cols-[minmax(320px,1.8fr)_minmax(170px,auto)_44px_44px_44px_44px]">
             <TravelSearchInput
-              value={filters.search}
-              onChange={(value) => updateFilter('search', value)}
+              value={searchInput}
+              onChange={setSearchInput}
               placeholderKey="travel.vendorReturns.search"
             />
 

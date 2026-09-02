@@ -8,12 +8,83 @@ const User = require("../../models/User");
 const {
   DEFAULT_TRAVEL_REMINDER_TEMPLATES,
 } = require("../../models/TravelReminderSettings");
-const {
-  getItemDateRange,
-  getUserId,
-  createHttpError,
-  nullableDate,
-} = require("./travelBookingService");
+const getUserId = (req) => req.user?.id || req.userId;
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const nullableDate = (value) => {
+  if (value === "" || value === undefined || value === null) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw createHttpError(400, "Invalid date");
+  }
+
+  return date;
+};
+
+const getItemDateRange = (item) => {
+  if (item.itemType === "air_ticket") {
+    const passengerDates = (item.ticketDetails?.passengerTickets || [])
+      .flatMap((passenger) => [
+        passenger.departureDateTime,
+        passenger.returnDateTime,
+      ])
+      .filter(Boolean);
+
+    if (passengerDates.length > 0) {
+      const sorted = passengerDates
+        .map((date) => new Date(date))
+        .sort((a, b) => a.getTime() - b.getTime());
+
+      return {
+        start: item.ticketDetails?.departureDateTime || sorted[0],
+        end: item.ticketDetails?.returnDateTime || sorted[sorted.length - 1],
+      };
+    }
+
+    return {
+      start: item.ticketDetails?.departureDateTime || null,
+      end:
+        item.ticketDetails?.returnDateTime ||
+        item.ticketDetails?.departureDateTime ||
+        null,
+    };
+  }
+
+  if (item.itemType === "hotel") {
+    return {
+      start: item.hotelDetails?.checkIn || null,
+      end: item.hotelDetails?.checkOut || null,
+    };
+  }
+
+  if (item.itemType === "umrah_package") {
+    return {
+      start: item.umrahDetails?.departureDate || null,
+      end: item.umrahDetails?.returnDate || null,
+    };
+  }
+
+  if (item.itemType === "transport") {
+    return {
+      start: item.transportDetails?.dateTime || null,
+      end: item.transportDetails?.dateTime || null,
+    };
+  }
+
+  return {
+    start: null,
+    end: null,
+  };
+};
 const { sendTravelReminderEmail } = require("./travelReminderEmailService");
 
 const DEFAULT_LEAD_MINUTES = 24 * 60;

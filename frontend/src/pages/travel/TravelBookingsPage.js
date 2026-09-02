@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaCheckCircle,
@@ -294,6 +294,12 @@ const TravelBookingsPage = () => {
   const currentPage = Math.max(Number(pageMemory.page || 1), 1);
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+  const bookingsRequestRef = useRef(0);
+  const [searchInput, setSearchInput] = useState(pageMemory.search || '');
+
+  useEffect(() => {
+    setSearchInput(pageMemory.search || '');
+  }, [pageMemory.search]);
 
   useEffect(() => {
     const nextFields = {};
@@ -322,6 +328,9 @@ const TravelBookingsPage = () => {
         return;
       }
 
+      const requestId = bookingsRequestRef.current + 1;
+      bookingsRequestRef.current = requestId;
+
       try {
         setLoading(true);
         setPageError('');
@@ -340,15 +349,25 @@ const TravelBookingsPage = () => {
           options
         );
 
+        if (requestId !== bookingsRequestRef.current) {
+          return;
+        }
+
         setBookings(Array.isArray(response?.data) ? response.data : []);
 
         setTotal(Number(response?.total || 0));
       } catch (error) {
+        if (requestId !== bookingsRequestRef.current) {
+          return;
+        }
+
         console.error('Travel bookings load failed:', error);
 
         setPageError(t('travel.booking.alerts.loadFailed'));
       } finally {
-        setLoading(false);
+        if (requestId === bookingsRequestRef.current) {
+          setLoading(false);
+        }
       }
     },
     [
@@ -444,6 +463,7 @@ const TravelBookingsPage = () => {
   );
 
   const clearFilters = useCallback(() => {
+    setSearchInput('');
     updateFields(PAGE_DEFAULTS);
 
     setSearchParams(
@@ -453,6 +473,18 @@ const TravelBookingsPage = () => {
       }
     );
   }, [setSearchParams, updateFields]);
+
+  useEffect(() => {
+    if (searchInput === (pageMemory.search || '')) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      updateFilter('search', searchInput);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [pageMemory.search, searchInput, updateFilter]);
 
   const handleDeleteBooking = useCallback(
     async (booking, event = null) => {
@@ -851,8 +883,8 @@ const TravelBookingsPage = () => {
       filters={
         <TravelMasterToolbar className="lg:grid lg:grid-cols-[minmax(280px,1.7fr)_minmax(160px,auto)_minmax(135px,auto)_minmax(135px,auto)_minmax(155px,auto)_44px_44px]">
           <TravelSearchInput
-            value={pageMemory.search}
-            onChange={(value) => updateFilter('search', value)}
+            value={searchInput}
+            onChange={setSearchInput}
             placeholderKey="travel.booking.filters.search"
           />
 

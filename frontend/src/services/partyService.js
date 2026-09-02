@@ -2,6 +2,9 @@ import axios from 'axios';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/parties`;
+const PARTY_LIST_CACHE_PREFIX = 'parties_cache_v1';
+const PARTY_LIST_VERSION_PREFIX = 'parties_cache_version_v1';
+const activePartyRequests = new Map();
 
 const getToken = () => localStorage.getItem('token');
 
@@ -14,10 +17,94 @@ const getAuthHeaders = (token = null) => ({
 
 const PARTY_CACHE_KEYS = ['saleParties', 'purchaseParties', 'purchase_parties'];
 
+const normalizeParams = (params = {}) =>
+  Object.entries(params || {}).reduce((result, [key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      result[key] = value;
+    }
+
+    return result;
+  }, {});
+
+const safeParseJson = (value, fallback = null) => {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const getCurrentUserScope = () => {
+  const user = safeParseJson(localStorage.getItem('user'), {});
+  const businessId =
+    user?.businessOwnerId ||
+    user?.businessOwner ||
+    localStorage.getItem('businessOwnerId') ||
+    user?._id ||
+    localStorage.getItem('userId') ||
+    'anonymous';
+  const actorId = user?._id || localStorage.getItem('userId') || businessId;
+
+  return `${businessId}:${actorId}`;
+};
+
+const getParamKey = (params = {}) =>
+  JSON.stringify(
+    Object.keys(params)
+      .sort()
+      .map((key) => [key, params[key]])
+  );
+
+const getPartyListCacheKey = (params = {}) =>
+  `${PARTY_LIST_CACHE_PREFIX}:${getCurrentUserScope()}:${getParamKey(params)}`;
+
+const getPartyListVersionKey = (params = {}) =>
+  `${PARTY_LIST_VERSION_PREFIX}:${getCurrentUserScope()}:${getParamKey(params)}`;
+
+const getCachedPartyList = (cacheKey) => {
+  const parsed = safeParseJson(localStorage.getItem(cacheKey), null);
+
+  return Array.isArray(parsed) ? parsed : null;
+};
+
+const setCachedPartyList = (cacheKey, parties = []) => {
+  if (Array.isArray(parties)) {
+    localStorage.setItem(cacheKey, JSON.stringify(parties));
+  }
+};
+
+const setPartyListVersion = (versionKey, version) => {
+  if (version === null || version === undefined || version === '') {
+    localStorage.removeItem(versionKey);
+    return;
+  }
+
+  localStorage.setItem(versionKey, String(version));
+};
+
+const isPartyListVersionChanged = (versionKey, serverVersion) => {
+  if (serverVersion === null || serverVersion === undefined) {
+    return true;
+  }
+
+  return localStorage.getItem(versionKey) !== String(serverVersion);
+};
+
+const isPartyListCacheable = (params = {}) => !params.search;
+
+const normalizeOptions = (options = {}) =>
+  typeof options === 'boolean' ? { forceRefresh: options } : options || {};
+
 export const clearPartyCaches = () => {
   PARTY_CACHE_KEYS.forEach((key) => {
     localStorage.removeItem(key);
   });
+
+  Object.keys(localStorage)
+    .filter(
+      (key) => key.startsWith(PARTY_LIST_CACHE_PREFIX) || key.startsWith(PARTY_LIST_VERSION_PREFIX)
+    )
+    .forEach((key) => localStorage.removeItem(key));
 };
 
 const getCachedParties = (key) => {
@@ -52,13 +139,67 @@ const saveCachedParties = (key, data) => {
   localStorage.setItem(key, JSON.stringify(data));
 };
 
-export const fetchParties = async (params = {}, token = null) => {
-  const res = await axios.get(API_URL, {
-    ...getAuthHeaders(token),
-    params,
+export const fetchPartyDataVersion = async (token = null) => {
+  const res = await axios.get(`${API_URL}/data-version`, getAuthHeaders(token));
+
+  return res.data;
+};
+
+export const fetchParties = async (params = {}, token = null, options = {}) => {
+  const safeParams = normalizeParams(params);
+  const safeOptions = normalizeOptions(options);
+  const cacheable = isPartyListCacheable(safeParams);
+  const cacheKey = getPartyListCacheKey(safeParams);
+  const versionKey = getPartyListVersionKey(safeParams);
+
+  if (!safeOptions.forceRefresh && activePartyRequests.has(cacheKey)) {
+    return activePartyRequests.get(cacheKey);
+  }
+
+  const request = (async () => {
+    if (!safeOptions.forceRefresh && cacheable) {
+      const cached = getCachedPartyList(cacheKey);
+
+      if (cached) {
+        try {
+          const versionData = await fetchPartyDataVersion(token);
+          const serverVersion = versionData?.version ?? null;
+
+          if (!isPartyListVersionChanged(versionKey, serverVersion)) {
+            return cached;
+          }
+        } catch (error) {
+          console.error('Party cache/version check failed:', error);
+
+          return cached;
+        }
+      }
+    }
+
+    const [res, versionData] = await Promise.all([
+      axios.get(API_URL, {
+        ...getAuthHeaders(token),
+        params: safeParams,
+      }),
+      cacheable ? fetchPartyDataVersion(token).catch(() => null) : Promise.resolve(null),
+    ]);
+    const data = Array.isArray(res.data) ? res.data : res.data;
+
+    if (cacheable && Array.isArray(data)) {
+      setCachedPartyList(cacheKey, data);
+      setPartyListVersion(versionKey, versionData?.version ?? null);
+    }
+
+    return data;
+  })().finally(() => {
+    activePartyRequests.delete(cacheKey);
   });
 
-  return Array.isArray(res.data) ? res.data : res.data;
+  if (!safeOptions.forceRefresh) {
+    activePartyRequests.set(cacheKey, request);
+  }
+
+  return request;
 };
 
 // ✅ Alias

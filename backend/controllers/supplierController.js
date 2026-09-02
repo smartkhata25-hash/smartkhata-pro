@@ -46,6 +46,69 @@ const hasOwn = (object, key) =>
 
 const cleanString = (value = "") => String(value || "").trim();
 
+exports.getSupplierDataVersion = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({ message: "Invalid user" });
+    }
+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const supplierVersionQuery = applySupplierModuleScopeFilter(
+      {
+        userId: userObjectId,
+      },
+      getRequestedModuleScope(req.query, MODULE_SCOPES.TRADING),
+    );
+
+    const supplierAccounts = await Supplier.find(supplierVersionQuery)
+      .select("account")
+      .lean();
+
+    const accountIds = supplierAccounts
+      .map((supplier) => supplier.account)
+      .filter(Boolean);
+
+    const [latestSupplier, latestJournal] = await Promise.all([
+      Supplier.findOne(supplierVersionQuery)
+        .sort({ updatedAt: -1 })
+        .select("updatedAt")
+        .lean(),
+
+      accountIds.length > 0
+        ? JournalEntry.findOne({
+            createdBy: userObjectId,
+            isDeleted: { $ne: true },
+            "lines.account": { $in: accountIds },
+          })
+            .sort({ updatedAt: -1 })
+            .select("updatedAt")
+            .lean()
+        : null,
+    ]);
+
+    const supplierTime = latestSupplier?.updatedAt
+      ? new Date(latestSupplier.updatedAt).getTime()
+      : 0;
+
+    const journalTime = latestJournal?.updatedAt
+      ? new Date(latestJournal.updatedAt).getTime()
+      : 0;
+
+    return res.json({
+      version: String(Math.max(supplierTime, journalTime)),
+    });
+  } catch (error) {
+    console.error("Get Supplier Data Version Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to check supplier data version",
+    });
+  }
+};
+
 const cleanCurrency = (value = "") => {
   const currency = normalizeCurrencyCode(value);
 
@@ -93,7 +156,11 @@ const normalizeTravelServiceCategories = async (categoryIds = [], userId) => {
   return categories.map((category) => category._id);
 };
 
-const buildTravelSupplierPayload = async (body = {}, userId, { partial = false } = {}) => {
+const buildTravelSupplierPayload = async (
+  body = {},
+  userId,
+  { partial = false } = {},
+) => {
   const payload = {};
 
   const hasTravelFields =
@@ -106,11 +173,11 @@ const buildTravelSupplierPayload = async (body = {}, userId, { partial = false }
   if (!partial && hasTravelFields) {
     payload.isTravelVendor = Boolean(
       body.isTravelVendor ||
-        body.travelVendorType ||
-        body.contactPerson ||
-        body.preferredCurrency ||
-        (Array.isArray(body.travelServiceCategories) &&
-          body.travelServiceCategories.length > 0),
+      body.travelVendorType ||
+      body.contactPerson ||
+      body.preferredCurrency ||
+      (Array.isArray(body.travelServiceCategories) &&
+        body.travelServiceCategories.length > 0),
     );
   }
 
@@ -869,7 +936,9 @@ exports.deleteTravelVendor = async (req, res) => {
     }
 
     const before = supplier.toObject();
-    const reason = String(req.body?.deleteReason || req.query?.reason || "").trim();
+    const reason = String(
+      req.body?.deleteReason || req.query?.reason || "",
+    ).trim();
 
     if (supplier.moduleScope === MODULE_SCOPES.BOTH) {
       supplier.moduleScope = MODULE_SCOPES.TRADING;
@@ -2008,11 +2077,11 @@ exports.getSupplierDetailedLedger = async (req, res) => {
                 ? "Travel Vendor Return/Credit"
                 : entry.sourceType === "reversal"
                   ? "Travel Reversal"
-                : entry.sourceType === "travel_vendor_cost"
-            ? "Travel Vendor Cost"
-            : entry.sourceType === "travel_refund"
-              ? "Travel Vendor Recovery"
-              : "",
+                  : entry.sourceType === "travel_vendor_cost"
+                    ? "Travel Vendor Cost"
+                    : entry.sourceType === "travel_refund"
+                      ? "Travel Vendor Recovery"
+                      : "",
         description: entry.description || "",
         debit,
         credit,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBookOpen,
@@ -208,6 +208,12 @@ const TravelPaymentHistoryPage = () => {
   const currentPage = Math.max(Number(filters.page || 1), 1);
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+  const recordsRequestRef = useRef(0);
+  const [searchInput, setSearchInput] = useState(filters.search || '');
+
+  useEffect(() => {
+    setSearchInput(filters.search || '');
+  }, [filters.search]);
 
   const updateFilter = useCallback(
     (field, value) => {
@@ -231,8 +237,21 @@ const TravelPaymentHistoryPage = () => {
   );
 
   const clearFilters = useCallback(() => {
+    setSearchInput('');
     setSearchParams({}, { replace: true });
   }, [setSearchParams]);
+
+  useEffect(() => {
+    if (searchInput === (filters.search || '')) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      updateFilter('search', searchInput);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [filters.search, searchInput, updateFilter]);
 
   const loadReferences = useCallback(async () => {
     try {
@@ -251,6 +270,9 @@ const TravelPaymentHistoryPage = () => {
   }, [isVendorMode]);
 
   const loadRecords = useCallback(async () => {
+    const requestId = recordsRequestRef.current + 1;
+    recordsRequestRef.current = requestId;
+
     try {
       setLoading(true);
       setPageError('');
@@ -263,10 +285,18 @@ const TravelPaymentHistoryPage = () => {
         limit: PAGE_SIZE,
       });
 
+      if (requestId !== recordsRequestRef.current) {
+        return;
+      }
+
       setRecords(Array.isArray(payload?.data) ? payload.data : []);
 
       setTotal(Number(payload?.total || 0));
     } catch (error) {
+      if (requestId !== recordsRequestRef.current) {
+        return;
+      }
+
       console.error('Travel payment history load failed:', error);
 
       setPageError(
@@ -275,7 +305,9 @@ const TravelPaymentHistoryPage = () => {
           : t('travel.payments.receivedHistory.loadFailed')
       );
     } finally {
-      setLoading(false);
+      if (requestId === recordsRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [currentPage, filters, isVendorMode]);
 
@@ -864,8 +896,8 @@ const TravelPaymentHistoryPage = () => {
       filters={
         <TravelMasterToolbar className="lg:grid lg:grid-cols-[minmax(190px,1fr)_minmax(150px,auto)_minmax(130px,auto)_minmax(130px,auto)_minmax(145px,auto)_minmax(160px,auto)_44px_44px]">
           <TravelSearchInput
-            value={filters.search}
-            onChange={(value) => updateFilter('search', value)}
+            value={searchInput}
+            onChange={setSearchInput}
             placeholderKey="travel.payments.filters.search"
           />
 

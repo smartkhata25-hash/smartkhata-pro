@@ -198,6 +198,7 @@ const loginUser = async (req, res) => {
 
       setTimeout(async () => {
         try {
+          await createBaseAccountsForUser(businessOwnerId);
           await fixLegacyExpenseTitles(businessOwnerId);
         } catch (backgroundError) {
           console.error(
@@ -206,7 +207,6 @@ const loginUser = async (req, res) => {
           );
         }
       }, 0);
-
       // Every user can have separate devices
       let installation = await Installation.findOne({
         userId: user._id,

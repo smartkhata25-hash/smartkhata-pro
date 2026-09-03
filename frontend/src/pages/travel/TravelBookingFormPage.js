@@ -32,6 +32,7 @@ import {
   fetchTravelCustomers,
   fetchTravelCurrencySettings,
   fetchTravelHotels,
+  fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelServiceCategories,
   fetchTravelServices,
@@ -165,10 +166,91 @@ const getTravelBookingDraftKey = () => {
 const getRecordId = (record) =>
   typeof record === 'object' ? record?._id || record?.id || '' : record || '';
 
+const buildCounterpartyOption = (record, type) => {
+  const sourceId = getRecordId(record);
+
+  return {
+    ...record,
+    _id: sourceId ? `${type}:${sourceId}` : '',
+    sourceId,
+    counterpartyType: type,
+    entityType: type,
+  };
+};
+
+const getCounterpartySelection = (value, record, fallbackType = 'vendor') => {
+  if (record?.counterpartyType) {
+    return {
+      type: record.counterpartyType,
+      id: record.sourceId || getRecordId(record),
+    };
+  }
+
+  const rawValue = String(value || '');
+  const [type, ...idParts] = rawValue.split(':');
+  const id = idParts.join(':');
+
+  if (id && ['customer', 'vendor', 'party'].includes(type)) {
+    return { type, id };
+  }
+
+  return {
+    type: fallbackType,
+    id: getRecordId(value),
+  };
+};
+
+const getCustomerCounterpartyValue = (formState = {}) =>
+  formState.customerType === 'party' && getRecordId(formState.customerPartyId)
+    ? `party:${getRecordId(formState.customerPartyId)}`
+    : getRecordId(formState.customerId)
+      ? `customer:${getRecordId(formState.customerId)}`
+      : '';
+
+const getVendorCounterpartyValue = (source = {}) =>
+  source.vendorType === 'party' && getRecordId(source.vendorPartyId)
+    ? `party:${getRecordId(source.vendorPartyId)}`
+    : getRecordId(source.vendorId)
+      ? `vendor:${getRecordId(source.vendorId)}`
+      : '';
+
+const applyVendorCounterpartyToItem = (item = {}, selection = {}) => {
+  if (!selection.id) {
+    return {
+      ...item,
+      vendorType: 'vendor',
+      vendorId: '',
+      vendorPartyId: '',
+    };
+  }
+
+  if (selection.type === 'party') {
+    return {
+      ...item,
+      vendorType: 'party',
+      vendorId: '',
+      vendorPartyId: selection.id,
+    };
+  }
+
+  return {
+    ...item,
+    vendorType: 'vendor',
+    vendorId: selection.id,
+    vendorPartyId: '',
+  };
+};
+
 const getCustomerLabel = (customer) => customer?.name || '-';
 
 const getCustomerMeta = (customer) =>
-  [customer?.phone, customer?.email].filter(Boolean).join(' | ');
+  [
+    customer?.counterpartyType === 'party' ? t('travel.counterparty.party') : '',
+    customer?.phone,
+    customer?.email,
+  ]
+    .filter(Boolean)
+    .join(' | ');
 
 const getServiceLabel = (service) => service?.name || service?.code || '-';
 
@@ -204,6 +286,7 @@ const isRecordActive = (record) => record?.isDeleted !== true && record?.isActiv
 
 const getVendorMeta = (vendor) =>
   [
+    vendor?.counterpartyType === 'party' ? t('travel.counterparty.party') : '',
     vendor?.phone,
     vendor?.travelVendorType ? t(`travel.vendorTypes.${vendor.travelVendorType}`) : '',
   ]
@@ -559,6 +642,7 @@ const TravelBookingFormPage = () => {
   const [formError, setFormError] = useState('');
 
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
   const [travelers, setTravelers] = useState([]);
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -599,6 +683,7 @@ const TravelBookingFormPage = () => {
       shouldSave: (value) =>
         Boolean(
           value?.customerId ||
+          value?.customerPartyId ||
           value?.notes ||
           value?.receivedAmount ||
           value?.bookingItems?.some(
@@ -607,7 +692,8 @@ const TravelBookingFormPage = () => {
               item.serviceId ||
               item.costPrice ||
               item.sellingPrice ||
-              item.vendorPaidAmount
+              item.vendorPaidAmount ||
+              item.vendorPartyId
           )
         ),
     }
@@ -688,6 +774,7 @@ const TravelBookingFormPage = () => {
 
       const [
         customerData,
+        partyData,
         categoryData,
         serviceData,
         vendorData,
@@ -696,6 +783,7 @@ const TravelBookingFormPage = () => {
         reminderSettingsData,
       ] = await Promise.all([
         fetchTravelCustomers(),
+        fetchTravelParties(),
         fetchTravelServiceCategories(),
         fetchTravelServices(),
         fetchTravelVendors(),
@@ -705,6 +793,7 @@ const TravelBookingFormPage = () => {
       ]);
 
       setCustomers(Array.isArray(customerData) ? customerData : []);
+      setParties(Array.isArray(partyData) ? partyData : []);
       setCategories(Array.isArray(categoryData) ? categoryData : []);
       setServices(Array.isArray(serviceData) ? serviceData : []);
       setVendors(Array.isArray(vendorData) ? vendorData : []);
@@ -713,6 +802,7 @@ const TravelBookingFormPage = () => {
       setReminderBusinessSettings(reminderSettingsData || null);
       Object.assign(lazyReferenceLoadedRef.current, {
         customers: true,
+        parties: true,
         categories: true,
         services: true,
         vendors: true,
@@ -803,6 +893,18 @@ const TravelBookingFormPage = () => {
 
   const activeCustomers = useMemo(() => customers.filter(isRecordActive), [customers]);
 
+  const activeParties = useMemo(() => parties.filter(isRecordActive), [parties]);
+
+  const customerCounterparties = useMemo(
+    () => [
+      ...activeCustomers.map((customerRecord) => buildCounterpartyOption(customerRecord, 'customer')),
+      ...activeParties
+        .filter((party) => ['customer', 'both'].includes(party.role || 'both'))
+        .map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [activeCustomers, activeParties]
+  );
+
   const activeTravelers = useMemo(() => travelers.filter(isRecordActive), [travelers]);
 
   const activeServices = useMemo(() => services.filter(isRecordActive), [services]);
@@ -815,9 +917,22 @@ const TravelBookingFormPage = () => {
 
   const activeVendors = useMemo(() => vendors.filter(isRecordActive), [vendors]);
 
+  const vendorCounterparties = useMemo(
+    () => [
+      ...activeVendors.map((vendorRecord) => buildCounterpartyOption(vendorRecord, 'vendor')),
+      ...activeParties
+        .filter((party) => ['supplier', 'both'].includes(party.role || 'both'))
+        .map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [activeVendors, activeParties]
+  );
+
   const customer = useMemo(
-    () => activeCustomers.find((item) => String(item._id) === String(formState.customerId)) || null,
-    [activeCustomers, formState.customerId]
+    () =>
+      customerCounterparties.find(
+        (item) => String(item._id) === String(getCustomerCounterpartyValue(formState))
+      ) || null,
+    [customerCounterparties, formState]
   );
 
   const modalFields = useMemo(() => {
@@ -1692,25 +1807,70 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const primaryVendorId = getRecordId(formState.bookingItems?.[0]?.vendorId) || '';
+  const primaryVendorId = getVendorCounterpartyValue(formState.bookingItems?.[0] || {});
 
-  const updatePrimaryVendor = (value) => {
+  const updatePrimaryVendor = (value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
+
     if ((formState.bookingItems || []).length === 0) {
       setFormState((current) => ({
         ...current,
 
         bookingItems: [
-          {
-            ...createEmptyBookingItem(current.serviceType || 'service'),
-            vendorId: value,
-          },
+          applyVendorCounterpartyToItem(
+            createEmptyBookingItem(current.serviceType || 'service'),
+            selection
+          ),
         ],
       }));
 
       return;
     }
 
-    updateItemField(0, 'vendorId', value);
+    updateItem(0, (item) => applyVendorCounterpartyToItem(item, selection));
+  };
+
+  const updateItemVendorCounterparty = (itemIndex, value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
+
+    updateItem(itemIndex, (item) => applyVendorCounterpartyToItem(item, selection));
+  };
+
+  const updateUmrahComponentVendorCounterparty = (itemIndex, componentIndex, value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
+
+    setFormState((current) => {
+      const bookingItems = [...(current.bookingItems || [])];
+      const item = bookingItems[itemIndex];
+
+      if (!item) {
+        return current;
+      }
+
+      const components = [...(item.umrahDetails?.components || [])];
+
+      if (!components[componentIndex]) {
+        return current;
+      }
+
+      components[componentIndex] = applyVendorCounterpartyToItem(
+        components[componentIndex],
+        selection
+      );
+
+      bookingItems[itemIndex] = {
+        ...item,
+        umrahDetails: {
+          ...(item.umrahDetails || {}),
+          components,
+        },
+      };
+
+      return {
+        ...current,
+        bookingItems,
+      };
+    });
   };
 
   const toggleItemTraveler = (itemIndex, travelerId) => {
@@ -1866,7 +2026,12 @@ const TravelBookingFormPage = () => {
     if (type === 'customer') {
       setCustomers((current) => upsertRecord(current, record));
 
-      updateRoot('customerId', record._id);
+      setFormState((current) => ({
+        ...current,
+        customerType: 'customer',
+        customerId: record._id,
+        customerPartyId: '',
+      }));
     }
 
     if (type === 'traveler') {
@@ -1930,9 +2095,18 @@ const TravelBookingFormPage = () => {
       setVendors((current) => upsertRecord(current, record));
 
       if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
-        updateUmrahComponent(itemIndex, componentIndex, 'vendorId', record._id);
+        updateUmrahComponentVendorCounterparty(
+          itemIndex,
+          componentIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
       } else if (Number.isInteger(itemIndex)) {
-        updateItemField(itemIndex, 'vendorId', record._id);
+        updateItemVendorCounterparty(
+          itemIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
       }
     }
 
@@ -2049,7 +2223,7 @@ const TravelBookingFormPage = () => {
   };
 
   const validateBooking = () => {
-    if (!formState.customerId) {
+    if (!formState.customerId && !formState.customerPartyId) {
       return 'Customer is required.';
     }
 
@@ -2084,7 +2258,7 @@ const TravelBookingFormPage = () => {
             return `Vendor Paid Now cannot exceed cost in Umrah component ${componentIndex + 1}.`;
           }
 
-          if (paid > 0 && !component.vendorId) {
+          if (paid > 0 && !component.vendorId && !component.vendorPartyId) {
             return `Vendor is required in Umrah component ${
               componentIndex + 1
             } when Vendor Paid Now is entered.`;
@@ -2104,7 +2278,7 @@ const TravelBookingFormPage = () => {
         return `Vendor Paid Now cannot exceed cost in item ${index + 1}.`;
       }
 
-      if (paid > 0 && !item.vendorId) {
+      if (paid > 0 && !item.vendorId && !item.vendorPartyId) {
         return `Vendor is required in item ${index + 1} when Vendor Paid Now is entered.`;
       }
 
@@ -2866,14 +3040,19 @@ const TravelBookingFormPage = () => {
 
                     <TravelCompactAutocomplete
                       labelKey="travel.booking.fields.vendor"
-                      value={getRecordId(component.vendorId) || ''}
-                      records={activeVendors}
+                      value={getVendorCounterpartyValue(component)}
+                      records={vendorCounterparties}
                       disabled={accountingLocked}
                       getLabel={getVendorLabel}
                       getMeta={getVendorMeta}
                       placeholderKey="travel.placeholders.vendorName"
-                      onChange={(value) =>
-                        updateUmrahComponent(itemIndex, componentIndex, 'vendorId', value)
+                      onChange={(value, record) =>
+                        updateUmrahComponentVendorCounterparty(
+                          itemIndex,
+                          componentIndex,
+                          value,
+                          record
+                        )
                       }
                       onQuickAdd={
                         canManageVendors
@@ -4630,13 +4809,13 @@ const TravelBookingFormPage = () => {
             {!useComponents && (
               <TravelCompactAutocomplete
                 labelKey="travel.booking.fields.vendor"
-                value={getRecordId(item.vendorId) || ''}
-                records={activeVendors}
+                value={getVendorCounterpartyValue(item)}
+                records={vendorCounterparties}
                 disabled={accountingLocked}
                 getLabel={getVendorLabel}
                 getMeta={getVendorMeta}
                 placeholderKey="travel.placeholders.vendorName"
-                onChange={(value) => updateItemField(index, 'vendorId', value)}
+                onChange={(value, record) => updateItemVendorCounterparty(index, value, record)}
                 onQuickAdd={
                   canManageVendors
                     ? (query) =>
@@ -4748,14 +4927,23 @@ const TravelBookingFormPage = () => {
 
               <TravelCompactAutocomplete
                 labelKey="travel.booking.fields.customer"
-                value={formState.customerId}
-                records={activeCustomers}
+                value={getCustomerCounterpartyValue(formState)}
+                records={customerCounterparties}
                 disabled={accountingLocked}
                 getLabel={getCustomerLabel}
                 getMeta={getCustomerMeta}
                 placeholderKey="travel.booking.placeholders.customerSearch"
                 emptyKey="travel.booking.empty.customers"
-                onChange={(value) => updateRoot('customerId', value)}
+                onChange={(value, record) => {
+                  const selection = getCounterpartySelection(value, record, 'customer');
+
+                  setFormState((current) => ({
+                    ...current,
+                    customerType: selection.type === 'party' ? 'party' : 'customer',
+                    customerId: selection.type === 'party' ? '' : selection.id,
+                    customerPartyId: selection.type === 'party' ? selection.id : '',
+                  }));
+                }}
                 onQuickAdd={(query) => openModal('customer', 'quick', { query })}
                 onAddDetails={(query) => openModal('customer', 'details', { query })}
               />
@@ -4763,7 +4951,7 @@ const TravelBookingFormPage = () => {
               <TravelCompactAutocomplete
                 labelKey="travel.booking.fields.vendor"
                 value={primaryVendorId}
-                records={activeVendors}
+                records={vendorCounterparties}
                 disabled={accountingLocked}
                 getLabel={getVendorLabel}
                 getMeta={getVendorMeta}

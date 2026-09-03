@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
 import LedgerTable from '../components/LedgerTable';
 
 import { fetchParties } from '../services/partyService';
+import { fetchTravelParties } from '../services/travelMasterService';
 import PartyLedgerHeader from '../components/PartyLedgerHeader';
 import { getPartyLedger } from '../services/partyLedgerService';
 
@@ -23,6 +24,9 @@ const PARTY_LEDGER_DEFAULTS = {
 const PartyLedgerPage = () => {
   const { partyId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const moduleScope = searchParams.get('moduleScope') === 'travel' ? 'travel' : '';
+  const isTravelLedger = moduleScope === 'travel';
 
   const [parties, setParties] = useState([]);
   const [ledger, setLedger] = useState([]);
@@ -74,7 +78,11 @@ const PartyLedgerPage = () => {
   );
 
   useEffect(() => {
-    fetchParties()
+    const loadParties = isTravelLedger
+      ? fetchTravelParties({ includeBalance: 'false' }, { forceRefresh: true })
+      : fetchParties();
+
+    Promise.resolve(loadParties)
       .then((data) => {
         setParties(Array.isArray(data) ? data : []);
       })
@@ -82,7 +90,7 @@ const PartyLedgerPage = () => {
         console.error('Party load failed:', err);
         alert(t('alerts.partyListLoadFailed'));
       });
-  }, []);
+  }, [isTravelLedger]);
 
   const loadLedger = useCallback(
     async (id, start = startDate, end = endDate) => {
@@ -102,7 +110,9 @@ const PartyLedgerPage = () => {
       setLoading(true);
 
       try {
-        const data = await getPartyLedger(id, start || '', end || '');
+        const data = await getPartyLedger(id, start || '', end || '', {
+          moduleScope,
+        });
 
         setLedger(Array.isArray(data?.ledger) ? data.ledger : []);
 
@@ -135,19 +145,19 @@ const PartyLedgerPage = () => {
         setLoading(false);
       }
     },
-    [startDate, endDate, setSelectedPartyId, setPartyName]
+    [moduleScope, startDate, endDate, setSelectedPartyId, setPartyName]
   );
 
   useEffect(() => {
     if (!partyId) return;
-    if (parties.length === 0) return;
 
     const selected = parties.find((party) => String(party._id) === String(partyId));
 
-    if (!selected) return;
+    setSelectedPartyId(selected?._id || partyId);
 
-    setSelectedPartyId(selected._id);
-    setPartyName(selected.name || '');
+    if (selected?.name) {
+      setPartyName(selected.name);
+    }
   }, [partyId, parties, setSelectedPartyId, setPartyName]);
 
   useEffect(() => {
@@ -164,25 +174,14 @@ const PartyLedgerPage = () => {
       return;
     }
 
-    if (parties.length === 0) return;
-
     const selected = parties.find((party) => String(party._id) === String(selectedPartyId));
 
-    if (!selected) {
-      setLedger([]);
-
-      setSummary({
-        opening: 0,
-        debit: 0,
-        credit: 0,
-        closing: 0,
-      });
-
-      return;
+    if (selected?.name) {
+      setPartyName(selected.name);
     }
 
     loadLedger(selectedPartyId, startDate, endDate);
-  }, [selectedPartyId, parties, startDate, endDate, loadLedger]);
+  }, [selectedPartyId, parties, startDate, endDate, loadLedger, setPartyName]);
   const totalDebit = summary.debit;
   const totalCredit = summary.credit;
   const closingBalance = summary.closing;
@@ -263,12 +262,13 @@ const PartyLedgerPage = () => {
           balanceStatus={balanceStatus}
           balanceColor={balanceColor}
           isMobile={window.innerWidth <= 768}
-          onBack={() => navigate('/parties')}
+          onBack={() => navigate(isTravelLedger ? '/travel/parties' : '/parties')}
           partyName={partyName}
           setPartyName={setPartyName}
           showSuggestions={showSuggestions}
           setShowSuggestions={setShowSuggestions}
           printSize="A5"
+          moduleScope={moduleScope}
         />
       }
     >

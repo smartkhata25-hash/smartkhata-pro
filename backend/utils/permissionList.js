@@ -125,6 +125,8 @@ const PERMISSIONS = {
   TRAVEL: {
     VIEW: "travel.view",
     CUSTOMERS: "travel.customers",
+    PARTIES_VIEW: "travel.parties.view",
+    PARTIES_MANAGE: "travel.parties.manage",
     TRAVELERS_VIEW: "travel.travelers.view",
     TRAVELERS_MANAGE: "travel.travelers.manage",
     SERVICES_VIEW: "travel.services.view",

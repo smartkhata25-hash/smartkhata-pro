@@ -6,6 +6,7 @@ import { t } from '../../i18n/i18n';
 import {
   createTravelReceivePayment,
   fetchTravelCustomers,
+  fetchTravelParties,
   fetchTravelPaymentAccounts,
 } from '../../services/travelMasterService';
 import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/localDateTime';
@@ -17,7 +18,9 @@ import {
 } from '../../components/travel/master/TravelMasterUI';
 
 const createInitialForm = () => ({
+  customerType: 'customer',
   customerId: '',
+  customerPartyId: '',
   amount: '',
   accountId: '',
   paymentType: 'cash',
@@ -44,8 +47,74 @@ const paymentTypeOptions = [
 
 const getCustomerLabel = (customer) => customer?.name || '-';
 
+const getRecordId = (record) => (typeof record === 'object' ? record?._id : record) || '';
+
+const buildCounterpartyOption = (record, type) => {
+  const sourceId = getRecordId(record);
+
+  return {
+    ...record,
+    _id: sourceId ? `${type}:${sourceId}` : '',
+    sourceId,
+    counterpartyType: type,
+    entityType: type,
+  };
+};
+
+const getCustomerCounterpartyValue = (formState) =>
+  formState.customerType === 'party' && getRecordId(formState.customerPartyId)
+    ? `party:${getRecordId(formState.customerPartyId)}`
+    : getRecordId(formState.customerId)
+      ? `customer:${getRecordId(formState.customerId)}`
+      : '';
+
+const getCounterpartySelection = (value, record, fallbackType = 'customer') => {
+  if (record?.counterpartyType) {
+    return {
+      type: record.counterpartyType,
+      id: record.sourceId || getRecordId(record),
+    };
+  }
+
+  if (typeof value === 'string' && value.includes(':')) {
+    const [type, id] = value.split(':');
+
+    return {
+      type: type || fallbackType,
+      id: id || '',
+    };
+  }
+
+  return {
+    type: fallbackType,
+    id: value || '',
+  };
+};
+
+const getCustomerReceivable = (customer) => {
+  if (customer?.counterpartyType === 'party' || customer?.entityType === 'party') {
+    return Math.max(Number(customer?.balance || 0), 0);
+  }
+
+  return Number(customer?.currentReceivable || 0);
+};
+
+const getCustomerCredit = (customer) => {
+  if (customer?.counterpartyType === 'party' || customer?.entityType === 'party') {
+    return Math.max(-Number(customer?.balance || 0), 0);
+  }
+
+  return Number(customer?.customerCredit || 0);
+};
+
 const getCustomerMeta = (customer) =>
-  [customer?.phone, formatTravelMoney(customer?.currentReceivable)].filter(Boolean).join(' | ');
+  [
+    customer?.counterpartyType === 'party' ? t('travel.counterparty.party') : '',
+    customer?.phone,
+    formatTravelMoney(getCustomerReceivable(customer)),
+  ]
+    .filter(Boolean)
+    .join(' | ');
 
 const getAccountLabel = (account) => [account?.name, account?.code].filter(Boolean).join(' - ');
 
@@ -93,6 +162,7 @@ const TravelReceivePaymentPage = () => {
 
   const [formState, setFormState] = useState(createInitialForm);
   const [customers, setCustomers] = useState([]);
+  const [parties, setParties] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
 
   const [loading, setLoading] = useState(false);
@@ -102,11 +172,23 @@ const TravelReceivePaymentPage = () => {
   const [successMessage, setSuccessMessage] = useState('');
 
   const queryCustomerId = searchParams.get('customerId') || '';
+  const queryCustomerType = searchParams.get('customerType') === 'party' ? 'party' : 'customer';
+  const queryCustomerPartyId = searchParams.get('customerPartyId') || '';
+
+  const customerOptions = useMemo(
+    () => [
+      ...customers.map((customer) => buildCounterpartyOption(customer, 'customer')),
+      ...parties.map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [customers, parties]
+  );
 
   const selectedCustomer = useMemo(
     () =>
-      customers.find((customer) => String(customer._id) === String(formState.customerId)) || null,
-    [customers, formState.customerId]
+      customerOptions.find(
+        (customer) => String(customer._id) === String(getCustomerCounterpartyValue(formState))
+      ) || null,
+    [customerOptions, formState]
   );
 
   const loadReferences = useCallback(async () => {
@@ -114,9 +196,19 @@ const TravelReceivePaymentPage = () => {
       setLoading(true);
       setFormError('');
 
-      const [customerData, accountData] = await Promise.all([
+      const [customerData, partyData, accountData] = await Promise.all([
         fetchTravelCustomers(
           {
+            includeBalance: 'true',
+          },
+          {
+            forceRefresh: true,
+          }
+        ),
+        fetchTravelParties(
+          {
+            status: 'active',
+            eligibleRole: 'customer',
             includeBalance: 'true',
           },
           {
@@ -127,10 +219,12 @@ const TravelReceivePaymentPage = () => {
       ]);
 
       const safeCustomers = Array.isArray(customerData) ? customerData : [];
+      const safeParties = Array.isArray(partyData) ? partyData : [];
 
       const safeAccounts = Array.isArray(accountData) ? accountData : [];
 
       setCustomers(safeCustomers);
+      setParties(safeParties);
       setPaymentAccounts(safeAccounts);
 
       setFormState((current) => ({
@@ -151,15 +245,30 @@ const TravelReceivePaymentPage = () => {
   }, [loadReferences]);
 
   useEffect(() => {
-    if (!queryCustomerId) {
+    if (!queryCustomerId && !queryCustomerPartyId) {
       return;
     }
 
     setFormState((current) => ({
       ...current,
-      customerId: queryCustomerId,
+      customerType: queryCustomerType,
+      customerId: queryCustomerType === 'party' ? '' : queryCustomerId,
+      customerPartyId: queryCustomerType === 'party' ? queryCustomerPartyId || queryCustomerId : '',
     }));
-  }, [queryCustomerId]);
+  }, [queryCustomerId, queryCustomerPartyId, queryCustomerType]);
+
+  const updateCustomerCounterparty = (value, record) => {
+    const selection = getCounterpartySelection(value, record, 'customer');
+
+    setFormState((current) => ({
+      ...current,
+      customerType: selection.type === 'party' ? 'party' : 'customer',
+      customerId: selection.type === 'party' ? '' : selection.id,
+      customerPartyId: selection.type === 'party' ? selection.id : '',
+    }));
+
+    setSuccessMessage('');
+  };
 
   const updateField = (field, value) => {
     setFormState((current) => ({
@@ -180,22 +289,43 @@ const TravelReceivePaymentPage = () => {
 
       const saved = await createTravelReceivePayment(formState);
 
-      setCustomers((current) =>
-        current.map((customer) =>
-          String(customer._id) === String(saved.customer?._id)
-            ? {
-                ...customer,
-                balance: saved.balance,
-                currentReceivable: saved.currentReceivable,
-                customerCredit: saved.customerCredit,
-              }
-            : customer
-        )
-      );
+      const savedCustomerId = getRecordId(saved.customer);
+      const isSavedParty =
+        saved.customer?.counterpartyType === 'party' || saved.customer?.entityType === 'party';
+
+      if (isSavedParty) {
+        setParties((current) =>
+          current.map((party) =>
+            String(party._id) === String(savedCustomerId)
+              ? {
+                  ...party,
+                  balance: saved.balance,
+                  currentReceivable: saved.currentReceivable,
+                  customerCredit: saved.customerCredit,
+                }
+              : party
+          )
+        );
+      } else {
+        setCustomers((current) =>
+          current.map((customer) =>
+            String(customer._id) === String(savedCustomerId)
+              ? {
+                  ...customer,
+                  balance: saved.balance,
+                  currentReceivable: saved.currentReceivable,
+                  customerCredit: saved.customerCredit,
+                }
+              : customer
+          )
+        );
+      }
 
       setFormState((current) => ({
         ...createInitialForm(),
+        customerType: current.customerType,
         customerId: current.customerId,
+        customerPartyId: current.customerPartyId,
         accountId: current.accountId,
         paymentType: current.paymentType,
       }));
@@ -253,9 +383,9 @@ const TravelReceivePaymentPage = () => {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.customer"
-              value={formState.customerId}
-              onChange={(id) => updateField('customerId', id)}
-              records={customers}
+              value={getCustomerCounterpartyValue(formState)}
+              onChange={updateCustomerCounterparty}
+              records={customerOptions}
               getLabel={getCustomerLabel}
               getMeta={getCustomerMeta}
               placeholderKey="travel.payments.customerPlaceholder"
@@ -362,13 +492,13 @@ const TravelReceivePaymentPage = () => {
             <div className="grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
               <SummaryBox
                 labelKey="travel.fields.currentReceivable"
-                value={formatTravelMoney(selectedCustomer.currentReceivable)}
+                value={formatTravelMoney(getCustomerReceivable(selectedCustomer))}
                 accent="text-amber-700"
               />
 
               <SummaryBox
                 labelKey="travel.fields.customerCredit"
-                value={formatTravelMoney(selectedCustomer.customerCredit)}
+                value={formatTravelMoney(getCustomerCredit(selectedCustomer))}
                 accent="text-blue-700"
               />
             </div>
@@ -378,7 +508,12 @@ const TravelReceivePaymentPage = () => {
             <TravelActionButton
               type="submit"
               icon={FaSave}
-              disabled={saving || loading || !formState.customerId || !formState.accountId}
+              disabled={
+                saving ||
+                loading ||
+                (!formState.customerId && !formState.customerPartyId) ||
+                !formState.accountId
+              }
             >
               {saving ? t('travel.common.saving') : t('travel.payments.receiveAction')}
             </TravelActionButton>

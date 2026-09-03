@@ -75,6 +75,7 @@ const normalizeBreakdownItems = (records = [], defaultEntityType) => {
         entityId:
           item?.entityId ||
           item?.customerId ||
+          item?.partyId ||
           item?.supplierId ||
           item?.vendorId ||
           item?._id ||
@@ -405,6 +406,13 @@ const TravelRightPanel = ({
 
     if (item.entityType === 'customer') {
       navigate(`/customer-ledger/${item.entityId}?moduleScope=travel`, {
+        state: routeState,
+      });
+      return;
+    }
+
+    if (item.entityType === 'party') {
+      navigate(`/party-ledger/${item.entityId}?moduleScope=travel`, {
         state: routeState,
       });
       return;

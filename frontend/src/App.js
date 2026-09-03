@@ -79,6 +79,7 @@ const TravelAirportsPage = lazy(() => import('./pages/travel/TravelAirportsPage'
 const TravelTripPlannerPage = lazy(() => import('./pages/travel/TravelTripPlannerPage'));
 const TravelUmrahCalculatorPage = lazy(() => import('./pages/travel/TravelUmrahCalculatorPage'));
 const TravelCustomersPage = lazy(() => import('./pages/travel/TravelCustomersPage'));
+const TravelPartiesPage = lazy(() => import('./pages/travel/TravelPartiesPage'));
 const TravelVendorsPage = lazy(() => import('./pages/travel/TravelVendorsPage'));
 const TravelPaymentHistoryPage = lazy(() => import('./pages/travel/TravelPaymentHistoryPage'));
 const TravelReceivePaymentPage = lazy(() => import('./pages/travel/TravelReceivePaymentPage'));
@@ -520,6 +521,18 @@ function App() {
                   moduleKey={MODULE_KEYS.TRAVEL}
                 >
                   <TravelCustomersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/parties"
+              element={
+                <PermissionRoute
+                  anyPermissions={['travel.parties.view', 'travel.parties.manage']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelPartiesPage />
                 </PermissionRoute>
               }
             />

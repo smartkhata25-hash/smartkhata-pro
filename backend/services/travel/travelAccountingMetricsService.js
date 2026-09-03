@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const Customer = require("../../models/Customer");
 const JournalEntry = require("../../models/JournalEntry");
+const Party = require("../../models/Party");
 const Supplier = require("../../models/Supplier");
 
 const {
@@ -14,6 +15,10 @@ const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
   TRAVEL_BUSINESS_VALUE_ORIGINS,
 } = require("../../utils/businessValueModuleScope");
+const {
+  TRAVEL_PARTY_OPENING_ORIGIN,
+  buildTravelPartyRoleQuery,
+} = require("./travelCounterpartyService");
 
 const TRAVEL_INVOICE_ORIGIN = "travel_invoice";
 const TRAVEL_REFUND_ORIGIN = "travel_refund";
@@ -21,6 +26,15 @@ const TRAVEL_RECEIVE_PAYMENT_ORIGIN = "travel_receive_payment";
 const TRAVEL_VENDOR_PAYMENT_ORIGIN = "travel_vendor_payment";
 const TRAVEL_VENDOR_RETURN_ORIGIN = "travel_vendor_return";
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
+
+const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
+  TRAVEL_INVOICE_ORIGIN,
+  TRAVEL_REFUND_ORIGIN,
+  TRAVEL_RECEIVE_PAYMENT_ORIGIN,
+  TRAVEL_VENDOR_PAYMENT_ORIGIN,
+  TRAVEL_VENDOR_RETURN_ORIGIN,
+  TRAVEL_PARTY_OPENING_ORIGIN,
+]);
 
 const CASH_ACCOUNT_CATEGORIES = Object.freeze(["cash"]);
 
@@ -119,6 +133,12 @@ const getTravelVendorJournalFilter = () => ({
       },
     },
   ],
+});
+
+const getTravelPartyJournalFilter = () => ({
+  originModule: {
+    $in: TRAVEL_PARTY_BALANCE_ORIGINS,
+  },
 });
 
 const getTravelProfitJournalFilter = () => ({
@@ -255,22 +275,54 @@ const getTravelVendorBalanceMap = async (
   );
 };
 
-const getTravelCustomerBalanceTotals = async (userId) => {
-  const customers = await Customer.find(
-    applyModuleScopeFilter(
-      {
-        createdBy: toObjectId(userId),
-        isActive: {
-          $ne: false,
-        },
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id name phone account")
-    .lean();
+const getTravelPartyBalanceMap = async (
+  userId,
+  parties = [],
+  options = {},
+) => {
+  const accountIds = parties
+    .map((party) => party.account?._id || party.account)
+    .filter(Boolean);
 
-  const balanceMap = await getTravelCustomerBalanceMap(userId, customers);
+  const rows = await aggregateAccountLines({
+    userId,
+    accountIds,
+    journalFilter: getTravelPartyJournalFilter(),
+    session: options.session || null,
+  });
+
+  return new Map(
+    rows.map((row) => [
+      String(row._id),
+      roundMoney(Number(row.debit || 0) - Number(row.credit || 0)),
+    ]),
+  );
+};
+
+const getTravelCustomerBalanceTotals = async (userId) => {
+  const [customers, parties] = await Promise.all([
+    Customer.find(
+      applyModuleScopeFilter(
+        {
+          createdBy: toObjectId(userId),
+          isActive: {
+            $ne: false,
+          },
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id name phone account")
+      .lean(),
+    Party.find(buildTravelPartyRoleQuery(toObjectId(userId), "customer"))
+      .select("_id name phone role account")
+      .lean(),
+  ]);
+
+  const [balanceMap, partyBalanceMap] = await Promise.all([
+    getTravelCustomerBalanceMap(userId, customers),
+    getTravelPartyBalanceMap(userId, parties),
+  ]);
 
   let customerDue = 0;
   let customerCredit = 0;
@@ -310,6 +362,26 @@ const getTravelCustomerBalanceTotals = async (userId) => {
     }
   });
 
+  parties.forEach((party) => {
+    const accountId = String(party.account || "");
+
+    const balance = roundMoney(partyBalanceMap.get(accountId) || 0);
+
+    if (balance > 0) {
+      customerDue += balance;
+
+      receivableDetails.push({
+        entityId: party._id,
+        accountId: party.account,
+        entityType: "party",
+        role: party.role || "both",
+        name: party.name || "-",
+        phone: party.phone || "",
+        amount: balance,
+      });
+    }
+  });
+
   receivableDetails.sort(
     (left, right) => Number(right.amount || 0) - Number(left.amount || 0),
   );
@@ -331,19 +403,27 @@ const getTravelCustomerBalanceTotals = async (userId) => {
 };
 
 const getTravelVendorBalanceTotals = async (userId) => {
-  const vendors = await Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        userId: toObjectId(userId),
-        isDeleted: false,
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id name phone account")
-    .lean();
+  const [vendors, parties] = await Promise.all([
+    Supplier.find(
+      applySupplierModuleScopeFilter(
+        {
+          userId: toObjectId(userId),
+          isDeleted: false,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id name phone account")
+      .lean(),
+    Party.find(buildTravelPartyRoleQuery(toObjectId(userId), "supplier"))
+      .select("_id name phone role account")
+      .lean(),
+  ]);
 
-  const balanceMap = await getTravelVendorBalanceMap(userId, vendors);
+  const [balanceMap, partyBalanceMap] = await Promise.all([
+    getTravelVendorBalanceMap(userId, vendors),
+    getTravelPartyBalanceMap(userId, parties),
+  ]);
 
   let vendorPayable = 0;
   let vendorCredit = 0;
@@ -379,6 +459,28 @@ const getTravelVendorBalanceTotals = async (userId) => {
         name: vendor.name || "-",
         phone: vendor.phone || "",
         amount: credit,
+      });
+    }
+  });
+
+  parties.forEach((party) => {
+    const accountId = String(party.account || "");
+
+    const balance = roundMoney(partyBalanceMap.get(accountId) || 0);
+
+    if (balance < 0) {
+      const payable = Math.abs(balance);
+
+      vendorPayable += payable;
+
+      payableDetails.push({
+        entityId: party._id,
+        accountId: party.account,
+        entityType: "party",
+        role: party.role || "both",
+        name: party.name || "-",
+        phone: party.phone || "",
+        amount: payable,
       });
     }
   });
@@ -998,6 +1100,8 @@ module.exports = {
   getTravelDashboardAccountingTotals,
 
   getTravelVendorBalanceMap,
+  getTravelPartyBalanceMap,
+  getTravelPartyJournalFilter,
   getTravelVendorBalanceTotals,
   getTravelVendorJournalFilter,
 

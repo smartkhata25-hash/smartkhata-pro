@@ -41,6 +41,16 @@ const refundItemSchema = new mongoose.Schema(
       ref: "Supplier",
       default: null,
     },
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
     vendorRecoveryAmount: {
       type: Number,
       min: 0,
@@ -89,7 +99,18 @@ const travelRefundSchema = new mongoose.Schema(
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      default: null,
+      index: true,
+    },
+    customerType: {
+      type: String,
+      enum: ["customer", "party"],
+      default: "customer",
+    },
+    customerPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
       index: true,
     },
     refundMode: {
@@ -234,6 +255,7 @@ travelRefundSchema.index({
   isDeleted: 1,
 });
 travelRefundSchema.index({ userId: 1, customerId: 1, isDeleted: 1 });
+travelRefundSchema.index({ userId: 1, customerPartyId: 1, isDeleted: 1 });
 travelRefundSchema.index({ userId: 1, isDeleted: 1, isReversed: 1 });
 
 module.exports = mongoose.model("TravelRefund", travelRefundSchema);

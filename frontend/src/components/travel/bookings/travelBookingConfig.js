@@ -414,6 +414,10 @@ export const createEmptyUmrahComponent = (componentType = 'other') => {
 
     vendorId: '',
 
+    vendorType: 'vendor',
+
+    vendorPartyId: '',
+
     hotelId: '',
 
     serviceId: '',
@@ -455,6 +459,10 @@ export const createEmptyBookingItem = (itemType = 'air_ticket') => {
     travelerIds: [],
 
     vendorId: '',
+
+    vendorType: 'vendor',
+
+    vendorPartyId: '',
 
     title: '',
 
@@ -518,6 +526,10 @@ export const createInitialBookingForm = (serviceType = 'air_ticket') => {
     accountingStatus: 'unposted',
 
     customerId: '',
+
+    customerType: 'customer',
+
+    customerPartyId: '',
 
     travelers: [],
 
@@ -717,6 +729,10 @@ const prepareUmrahComponentForForm = (component = {}) => ({
 
   vendorId: getRecordId(component.vendorId),
 
+  vendorType: component.vendorType === 'party' || component.vendorPartyId ? 'party' : 'vendor',
+
+  vendorPartyId: getRecordId(component.vendorPartyId),
+
   hotelId: getRecordId(component.hotelId),
 
   serviceId: getRecordId(component.serviceId),
@@ -755,6 +771,10 @@ const prepareBookingItemForForm = (item = {}) => {
     serviceId: getRecordId(item.serviceId),
 
     vendorId: getRecordId(item.vendorId),
+
+    vendorType: item.vendorType === 'party' || item.vendorPartyId ? 'party' : 'vendor',
+
+    vendorPartyId: getRecordId(item.vendorPartyId),
 
     travelerIds: (item.travelerIds || []).map((traveler) => getRecordId(traveler)).filter(Boolean),
 
@@ -891,6 +911,10 @@ export const prepareBookingForForm = (booking = null) => {
     accountingStatus: booking.accountingStatus || 'unposted',
 
     customerId: getRecordId(booking.customerId),
+
+    customerType: booking.customerType === 'party' || booking.customerPartyId ? 'party' : 'customer',
+
+    customerPartyId: getRecordId(booking.customerPartyId),
 
     travelers: (booking.travelers || []).map((traveler) => getRecordId(traveler)).filter(Boolean),
 

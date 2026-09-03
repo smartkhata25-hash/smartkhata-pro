@@ -17,6 +17,7 @@ import {
   deleteTravelReceivePayment,
   deleteTravelVendorPayment,
   fetchTravelCustomers,
+  fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelReceivePayments,
   fetchTravelVendorPayments,
@@ -50,8 +51,12 @@ const TRAVEL_VENDOR_PAYMENT_ORIGIN = 'travel_vendor_payment';
 
 const FILTER_DEFAULTS = Object.freeze({
   search: '',
+  customerType: 'customer',
   customerId: '',
+  customerPartyId: '',
+  vendorType: 'vendor',
   vendorId: '',
+  vendorPartyId: '',
   fromDate: '',
   toDate: '',
   paymentType: '',
@@ -84,6 +89,11 @@ const getPartyName = (party) => party?.name || '-';
 
 const getPartyContact = (party) => party?.phone || party?.email || '-';
 
+const getRecordId = (record) => (typeof record === 'object' ? record?._id : record) || '';
+
+const isTravelPartyRecord = (party) =>
+  party?.counterpartyType === 'party' || party?.entityType === 'party' || Boolean(party?.role);
+
 const getAccountLabel = (account) =>
   [account?.name, account?.code].filter(Boolean).join(' - ') || '-';
 
@@ -110,9 +120,25 @@ const getFiltersFromParams = (searchParams, isVendorMode) => ({
     ? FILTER_DEFAULTS.customerId
     : searchParams.get('customerId') || FILTER_DEFAULTS.customerId,
 
+  customerType: isVendorMode
+    ? FILTER_DEFAULTS.customerType
+    : searchParams.get('customerType') || FILTER_DEFAULTS.customerType,
+
+  customerPartyId: isVendorMode
+    ? FILTER_DEFAULTS.customerPartyId
+    : searchParams.get('customerPartyId') || FILTER_DEFAULTS.customerPartyId,
+
   vendorId: isVendorMode
     ? searchParams.get('vendorId') || FILTER_DEFAULTS.vendorId
     : FILTER_DEFAULTS.vendorId,
+
+  vendorType: isVendorMode
+    ? searchParams.get('vendorType') || FILTER_DEFAULTS.vendorType
+    : FILTER_DEFAULTS.vendorType,
+
+  vendorPartyId: isVendorMode
+    ? searchParams.get('vendorPartyId') || FILTER_DEFAULTS.vendorPartyId
+    : FILTER_DEFAULTS.vendorPartyId,
 
   fromDate: searchParams.get('fromDate') || FILTER_DEFAULTS.fromDate,
 
@@ -125,7 +151,7 @@ const getFiltersFromParams = (searchParams, isVendorMode) => ({
   page: searchParams.get('page') || FILTER_DEFAULTS.page,
 });
 
-const buildSelectOptions = (records, allKey) => [
+const buildSelectOptions = (records, travelParties, allKey) => [
   {
     value: '',
     labelKey: allKey,
@@ -133,6 +159,17 @@ const buildSelectOptions = (records, allKey) => [
   ...records.map((record) => ({
     value: record._id,
     label: [record.name, record.phone].filter(Boolean).join(' - ') || record.name || '-',
+  })),
+  ...travelParties.map((record) => ({
+    value: `party:${record._id}`,
+    label:
+      [
+        record.name,
+        t('travel.counterparty.party'),
+        record.phone,
+      ]
+        .filter(Boolean)
+        .join(' - ') || record.name || '-',
   })),
 ];
 
@@ -189,6 +226,7 @@ const TravelPaymentHistoryPage = () => {
 
   const [records, setRecords] = useState([]);
   const [parties, setParties] = useState([]);
+  const [travelParties, setTravelParties] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
@@ -241,6 +279,46 @@ const TravelPaymentHistoryPage = () => {
     setSearchParams({}, { replace: true });
   }, [setSearchParams]);
 
+  const selectedCounterpartyFilterValue = isVendorMode
+    ? filters.vendorType === 'party' && filters.vendorPartyId
+      ? `party:${filters.vendorPartyId}`
+      : filters.vendorId
+    : filters.customerType === 'party' && filters.customerPartyId
+      ? `party:${filters.customerPartyId}`
+      : filters.customerId;
+
+  const updateCounterpartyFilter = useCallback(
+    (value) => {
+      const nextParams = new URLSearchParams(searchParams);
+      const isParty = typeof value === 'string' && value.startsWith('party:');
+      const sourceId = isParty ? value.slice('party:'.length) : value;
+
+      if (isVendorMode) {
+        nextParams.delete('vendorId');
+        nextParams.delete('vendorPartyId');
+        nextParams.delete('vendorType');
+
+        if (sourceId) {
+          nextParams.set(isParty ? 'vendorPartyId' : 'vendorId', sourceId);
+          nextParams.set('vendorType', isParty ? 'party' : 'vendor');
+        }
+      } else {
+        nextParams.delete('customerId');
+        nextParams.delete('customerPartyId');
+        nextParams.delete('customerType');
+
+        if (sourceId) {
+          nextParams.set(isParty ? 'customerPartyId' : 'customerId', sourceId);
+          nextParams.set('customerType', isParty ? 'party' : 'customer');
+        }
+      }
+
+      nextParams.delete('page');
+      setSearchParams(nextParams, { replace: true });
+    },
+    [isVendorMode, searchParams, setSearchParams]
+  );
+
   useEffect(() => {
     if (searchInput === (filters.search || '')) {
       return undefined;
@@ -255,13 +333,18 @@ const TravelPaymentHistoryPage = () => {
 
   const loadReferences = useCallback(async () => {
     try {
-      const [partyData, accountData] = await Promise.all([
+      const [partyData, travelPartyData, accountData] = await Promise.all([
         isVendorMode ? fetchTravelVendors() : fetchTravelCustomers(),
-
+        fetchTravelParties({
+          status: 'active',
+          eligibleRole: isVendorMode ? 'supplier' : 'customer',
+          includeBalance: 'true',
+        }),
         fetchTravelPaymentAccounts(),
       ]);
 
       setParties(Array.isArray(partyData) ? partyData : []);
+      setTravelParties(Array.isArray(travelPartyData) ? travelPartyData : []);
 
       setPaymentAccounts(Array.isArray(accountData) ? accountData : []);
     } catch (error) {
@@ -323,9 +406,10 @@ const TravelPaymentHistoryPage = () => {
     () =>
       buildSelectOptions(
         parties,
+        travelParties,
         isVendorMode ? 'travel.payments.filters.allVendors' : 'travel.payments.filters.allCustomers'
       ),
-    [isVendorMode, parties]
+    [isVendorMode, parties, travelParties]
   );
 
   const accountOptions = useMemo(
@@ -357,14 +441,15 @@ const TravelPaymentHistoryPage = () => {
         return;
       }
 
-      navigate(
-        isVendorMode
-          ? `/supplier-ledger/${party._id}?moduleScope=travel`
-          : `/customer-ledger/${party._id}?moduleScope=travel`,
-        {
-          state: buildTravelRouteState(`${location.pathname}${location.search}`),
-        }
-      );
+      const ledgerPath = isTravelPartyRecord(party)
+        ? `/party-ledger/${getRecordId(party)}?moduleScope=travel`
+        : isVendorMode
+          ? `/supplier-ledger/${getRecordId(party)}?moduleScope=travel`
+          : `/customer-ledger/${getRecordId(party)}?moduleScope=travel`;
+
+      navigate(ledgerPath, {
+        state: buildTravelRouteState(`${location.pathname}${location.search}`),
+      });
     },
     [isVendorMode, location.pathname, location.search, navigate]
   );
@@ -902,8 +987,8 @@ const TravelPaymentHistoryPage = () => {
           />
 
           <TravelFilterSelect
-            value={isVendorMode ? filters.vendorId : filters.customerId}
-            onChange={(value) => updateFilter(isVendorMode ? 'vendorId' : 'customerId', value)}
+            value={selectedCounterpartyFilterValue}
+            onChange={updateCounterpartyFilter}
             options={partyOptions}
           />
 

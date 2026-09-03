@@ -6,6 +6,7 @@ import { t } from '../../i18n/i18n';
 import {
   createTravelRefund,
   fetchTravelPaymentAccounts,
+  fetchTravelParties,
   fetchTravelRefundableInvoices,
   fetchTravelVendors,
 } from '../../services/travelMasterService';
@@ -52,8 +53,13 @@ const getRecordId = (record) => (typeof record === 'object' ? record?._id : reco
 
 const getInvoiceNumber = (invoice) => invoice?.invoiceNumber || invoice?.bookingNumber || '-';
 
+const getInvoiceCustomer = (invoice) =>
+  invoice?.customer || invoice?.customerPartyId || invoice?.customerId;
+
+const getInvoiceCustomerName = (invoice) => getCustomerName(getInvoiceCustomer(invoice));
+
 const getInvoiceLabel = (invoice) =>
-  [getInvoiceNumber(invoice), getCustomerName(invoice?.customerId)].filter(Boolean).join(' | ');
+  [getInvoiceNumber(invoice), getInvoiceCustomerName(invoice)].filter(Boolean).join(' | ');
 
 const getInvoiceMeta = (invoice) =>
   `${t('travel.refund.fields.remainingRefundable')}: ${formatBookingMoney(
@@ -62,6 +68,41 @@ const getInvoiceMeta = (invoice) =>
   )}`;
 
 const getVendorLabel = (vendor) => vendor?.name || '-';
+
+const buildCounterpartyOption = (record, type) => {
+  const sourceId = getRecordId(record);
+
+  return {
+    ...record,
+    _id: sourceId ? `${type}:${sourceId}` : '',
+    sourceId,
+    counterpartyType: type,
+    entityType: type,
+  };
+};
+
+const getVendorCounterpartyValue = (item = {}) =>
+  item.vendorType === 'party' && getRecordId(item.vendorPartyId)
+    ? `party:${getRecordId(item.vendorPartyId)}`
+    : getRecordId(item.vendorId)
+      ? `vendor:${getRecordId(item.vendorId)}`
+      : '';
+
+const getCounterpartySelection = (value, fallbackType = 'vendor') => {
+  if (typeof value === 'string' && value.includes(':')) {
+    const [type, id] = value.split(':');
+
+    return {
+      type: type || fallbackType,
+      id: id || '',
+    };
+  }
+
+  return {
+    type: fallbackType,
+    id: value || '',
+  };
+};
 
 const getItemLabel = (item) =>
   item.title || item.description || t(`travel.booking.itemTypes.${item.itemType || 'service'}`);
@@ -92,17 +133,24 @@ const getItemCostAmount = (item) => {
 };
 
 const buildRefundItems = (invoice) =>
-  (invoice?.bookingItems || []).map((item) => ({
-    bookingItemId: item._id,
-    title: getItemLabel(item),
-    itemType: item.itemType || 'service',
-    originalAmount: getProratedItemAmount(item, invoice),
-    costAmount: getItemCostAmount(item),
-    selected: false,
-    refundAmount: '',
-    vendorId: getRecordId(item.vendorId) || '',
-    vendorRecoveryAmount: '',
-  }));
+  (invoice?.bookingItems || []).map((item) => {
+    const vendorType = item.vendorType === 'party' || item.vendorPartyId ? 'party' : 'vendor';
+    const vendorPartyId = getRecordId(item.vendorPartyId);
+
+    return {
+      bookingItemId: item._id,
+      title: getItemLabel(item),
+      itemType: item.itemType || 'service',
+      originalAmount: getProratedItemAmount(item, invoice),
+      costAmount: getItemCostAmount(item),
+      selected: false,
+      refundAmount: '',
+      vendorType,
+      vendorId: vendorType === 'party' ? '' : getRecordId(item.vendorId) || '',
+      vendorPartyId: vendorType === 'party' ? vendorPartyId : '',
+      vendorRecoveryAmount: '',
+    };
+  });
 
 const FieldLabel = ({ children }) => (
   <span className="mb-1 block text-xs font-extrabold text-slate-500">{children}</span>
@@ -167,6 +215,7 @@ const TravelRefundFormPage = () => {
   const [invoices, setInvoices] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [parties, setParties] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -177,6 +226,14 @@ const TravelRefundFormPage = () => {
       invoices.find((invoice) => String(invoice._id) === String(formState.originalInvoiceId)) ||
       null,
     [formState.originalInvoiceId, invoices]
+  );
+
+  const vendorOptions = useMemo(
+    () => [
+      ...vendors.map((vendor) => buildCounterpartyOption(vendor, 'vendor')),
+      ...parties.map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [parties, vendors]
   );
 
   const computed = useMemo(() => {
@@ -226,10 +283,15 @@ const TravelRefundFormPage = () => {
       setLoading(true);
       setFormError('');
 
-      const [invoiceData, accountData, vendorData] = await Promise.all([
+      const [invoiceData, accountData, vendorData, partyData] = await Promise.all([
         fetchTravelRefundableInvoices(),
         fetchTravelPaymentAccounts(),
         fetchTravelVendors(),
+        fetchTravelParties({
+          status: 'active',
+          eligibleRole: 'supplier',
+          includeBalance: 'true',
+        }),
       ]);
 
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
@@ -237,6 +299,8 @@ const TravelRefundFormPage = () => {
       setPaymentAccounts(Array.isArray(accountData) ? accountData : []);
 
       setVendors(Array.isArray(vendorData) ? vendorData : []);
+
+      setParties(Array.isArray(partyData) ? partyData : []);
     } catch (error) {
       console.error('Travel refund references failed:', error);
 
@@ -291,6 +355,31 @@ const TravelRefundFormPage = () => {
       refundItems[index] = {
         ...row,
         [field]: value,
+      };
+
+      return {
+        ...current,
+        refundItems,
+      };
+    });
+  }, []);
+
+  const updateRefundItemVendor = useCallback((index, value) => {
+    const selection = getCounterpartySelection(value, 'vendor');
+
+    setFormState((current) => {
+      const refundItems = [...current.refundItems];
+      const row = refundItems[index];
+
+      if (!row) {
+        return current;
+      }
+
+      refundItems[index] = {
+        ...row,
+        vendorType: selection.type === 'party' ? 'party' : 'vendor',
+        vendorId: selection.type === 'party' ? '' : selection.id,
+        vendorPartyId: selection.type === 'party' ? selection.id : '',
       };
 
       return {
@@ -371,7 +460,9 @@ const TravelRefundFormPage = () => {
                 bookingItemId: item.bookingItemId,
                 title: item.title,
                 refundAmount: item.refundAmount,
+                vendorType: item.vendorType,
                 vendorId: item.vendorId,
+                vendorPartyId: item.vendorPartyId,
                 vendorRecoveryAmount: item.vendorRecoveryAmount,
               }))
           : [],
@@ -533,7 +624,7 @@ const TravelRefundFormPage = () => {
 
             <SummaryBox
               labelKey="travel.booking.fields.customer"
-              value={getCustomerName(selectedInvoice.customerId)}
+              value={getInvoiceCustomerName(selectedInvoice)}
             />
 
             <SummaryBox
@@ -600,16 +691,19 @@ const TravelRefundFormPage = () => {
                     <FieldLabel>{t('travel.booking.fields.vendor')}</FieldLabel>
 
                     <select
-                      value={item.vendorId || ''}
+                      value={getVendorCounterpartyValue(item)}
                       disabled={!item.selected}
-                      onChange={(event) => updateRefundItem(index, 'vendorId', event.target.value)}
+                      onChange={(event) => updateRefundItemVendor(index, event.target.value)}
                       className={`${inputClass} font-bold`}
                     >
                       <option value="">{t('travel.common.noneSelected')}</option>
 
-                      {vendors.map((vendor) => (
+                      {vendorOptions.map((vendor) => (
                         <option key={vendor._id} value={vendor._id}>
                           {getVendorLabel(vendor)}
+                          {vendor.counterpartyType === 'party'
+                            ? ` (${t('travel.counterparty.party')})`
+                            : ''}
                         </option>
                       ))}
                     </select>

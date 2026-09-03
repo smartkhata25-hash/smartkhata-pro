@@ -130,10 +130,11 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
     },
   })
     .select(
-      "date time description billNo originModule referenceId customerId supplierId lines",
+      "date time description billNo originModule referenceId customerId supplierId partyId lines",
     )
     .populate("customerId", "name phone email moduleScope")
     .populate("supplierId", "name phone email travelVendorType moduleScope")
+    .populate("partyId", "name phone email role moduleScope")
     .populate("lines.account", "name code category type")
     .lean();
 
@@ -158,7 +159,7 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
               : TRAVEL_RECEIVE_PAYMENT_ORIGIN,
           })
           .select(
-            "customer supplier date time amount finalAmount paymentType billNo account description originModule",
+            "customer supplier partyId date time amount finalAmount paymentType billNo account description originModule",
           )
           .populate(
             isVendor ? "supplier" : "customer",
@@ -166,6 +167,7 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
               ? "name phone email travelVendorType moduleScope"
               : "name phone email moduleScope",
           )
+          .populate("partyId", "name phone email role moduleScope")
           .populate("account", "name code category type")
           .lean()
       : null,
@@ -178,9 +180,10 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
           isVoided: { $ne: true },
         })
           .select(
-            "bookingNumber invoiceNumber customerId accountId paymentType vendorPaymentAccountId vendorPaymentType notes baseCurrency",
+            "bookingNumber invoiceNumber customerType customerId customerPartyId accountId paymentType vendorPaymentAccountId vendorPaymentType notes baseCurrency",
           )
           .populate("customerId", "name phone email moduleScope")
+          .populate("customerPartyId", "name phone email role moduleScope")
           .populate("accountId", "name code category type")
           .populate("vendorPaymentAccountId", "name code category type")
           .lean()
@@ -188,8 +191,18 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
   ]);
 
   const party = isVendor
-    ? standalonePayment?.supplier || journal.supplierId || null
-    : standalonePayment?.customer || journal.customerId || invoice?.customerId || null;
+    ? standalonePayment?.partyId ||
+      standalonePayment?.supplier ||
+      journal.partyId ||
+      journal.supplierId ||
+      null
+    : standalonePayment?.partyId ||
+      standalonePayment?.customer ||
+      journal.partyId ||
+      journal.customerId ||
+      invoice?.customerPartyId ||
+      invoice?.customerId ||
+      null;
   const paymentAccount =
     standalonePayment?.account ||
     (isVendor ? invoice?.vendorPaymentAccountId : invoice?.accountId) ||
@@ -246,11 +259,13 @@ const getTravelRefundDocument = async ({ req, autoPrint = false }) => {
     isReversed: { $ne: true },
   })
     .populate("customerId", "name phone email moduleScope")
+    .populate("customerPartyId", "name phone email role moduleScope")
     .populate(
       "originalInvoiceId",
-      "bookingNumber invoiceNumber serviceType bookingItems baseCurrency",
+      "bookingNumber invoiceNumber serviceType customerType customerId customerPartyId bookingItems baseCurrency",
     )
     .populate("refundItems.vendorId", "name phone travelVendorType moduleScope")
+    .populate("refundItems.vendorPartyId", "name phone email role moduleScope")
     .populate("accountId", "name code category type")
     .lean();
 
@@ -282,6 +297,7 @@ const getTravelVendorReturnDocument = async ({ req, autoPrint = false }) => {
     isReversed: { $ne: true },
   })
     .populate("vendorId", "name phone email travelVendorType moduleScope")
+    .populate("vendorPartyId", "name phone email role moduleScope")
     .populate(
       "originalInvoiceId",
       "bookingNumber invoiceNumber serviceType bookingItems baseCurrency",

@@ -42,6 +42,13 @@ const partySchema = new mongoose.Schema(
       required: true,
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "both"],
+      default: "trading",
+      index: true,
+    },
+
     /* Opening Balance */
     openingBalance: {
       type: Number,
@@ -98,6 +105,7 @@ partySchema.index({
   isActive: 1,
   hiddenReason: 1,
 });
+partySchema.index({ userId: 1, moduleScope: 1, isDeleted: 1, isActive: 1 });
 partySchema.index({ userId: 1, role: 1, isDeleted: 1 });
 partySchema.index({ userId: 1, account: 1 });
 

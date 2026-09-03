@@ -102,11 +102,23 @@ const getVendorName = (vendor) => {
   return vendor.name || '';
 };
 
+const getBookingCustomer = (booking) => booking?.customer || booking?.customerPartyId || booking?.customerId;
+
+const getBookingCustomerName = (booking) => getCustomerName(getBookingCustomer(booking));
+
+const getBookingCustomerPhone = (booking) => {
+  const customer = getBookingCustomer(booking);
+
+  return typeof customer === 'object' ? customer?.phone || '' : '';
+};
+
+const getItemVendor = (item) => item?.vendor || item?.vendorPartyId || item?.vendorId;
+
 const getBookingVendors = (booking) => {
   const vendorMap = new Map();
 
   (booking.bookingItems || []).forEach((item) => {
-    const directVendor = item?.vendorId;
+    const directVendor = getItemVendor(item);
     const directVendorName = getVendorName(directVendor);
     const directVendorId =
       typeof directVendor === 'object'
@@ -118,7 +130,7 @@ const getBookingVendors = (booking) => {
     }
 
     (item?.umrahDetails?.components || []).forEach((component) => {
-      const componentVendor = component?.vendorId;
+      const componentVendor = getItemVendor(component);
       const componentVendorName = getVendorName(componentVendor);
       const componentVendorId =
         typeof componentVendor === 'object'
@@ -596,11 +608,11 @@ const TravelBookingsPage = () => {
         render: (booking) => (
           <div className="min-w-0">
             <p className="truncate font-extrabold text-slate-900">
-              {getCustomerName(booking.customerId)}
+              {getBookingCustomerName(booking)}
             </p>
 
             <p className="truncate text-xs font-semibold text-slate-500">
-              {booking.customerId?.phone || '-'}
+              {getBookingCustomerPhone(booking) || '-'}
             </p>
           </div>
         ),
@@ -764,12 +776,12 @@ const TravelBookingsPage = () => {
                 </p>
 
                 <p className="truncate text-xs font-semibold text-slate-600">
-                  {getCustomerName(booking.customerId)}
+                  {getBookingCustomerName(booking)}
                 </p>
 
-                {booking.customerId?.phone && (
+                {getBookingCustomerPhone(booking) && (
                   <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
-                    {booking.customerId.phone}
+                    {getBookingCustomerPhone(booking)}
                   </p>
                 )}
               </div>

@@ -12,15 +12,20 @@ const getAuthHeaders = () => ({
 });
 
 // ✅ Get Party Ledger
-export const getPartyLedger = async (partyId, startDate = '', endDate = '') => {
+const normalizeOptions = (options = {}) =>
+  options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+
+export const getPartyLedger = async (partyId, startDate = '', endDate = '', options = {}) => {
   if (!partyId) {
     throw new Error('Party ID is required');
   }
 
   const params = {};
+  const safeOptions = normalizeOptions(options);
 
   if (startDate) params.startDate = startDate;
   if (endDate) params.endDate = endDate;
+  if (safeOptions.moduleScope) params.moduleScope = safeOptions.moduleScope;
 
   const res = await axios.get(`${API_URL}/${partyId}`, {
     ...getAuthHeaders(),
@@ -30,13 +35,19 @@ export const getPartyLedger = async (partyId, startDate = '', endDate = '') => {
   return res.data;
 };
 
-export const getPartyBalance = async (partyId) => {
+export const getPartyBalance = async (partyId, options = {}) => {
   if (!partyId) {
     throw new Error('Party ID is required');
   }
 
+  const safeOptions = normalizeOptions(options);
+  const params = {};
+
+  if (safeOptions.moduleScope) params.moduleScope = safeOptions.moduleScope;
+
   const res = await axios.get(`${API_URL}/balance/${partyId}`, {
     ...getAuthHeaders(),
+    params,
   });
 
   return res.data;

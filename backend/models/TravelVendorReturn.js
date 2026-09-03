@@ -37,7 +37,18 @@ const travelVendorReturnSchema = new mongoose.Schema(
     vendorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true,
+      default: null,
+      index: true,
+    },
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
       index: true,
     },
     originalInvoiceId: {
@@ -178,6 +189,7 @@ const travelVendorReturnSchema = new mongoose.Schema(
 
 travelVendorReturnSchema.index({ userId: 1, returnNumber: 1 }, { unique: true });
 travelVendorReturnSchema.index({ userId: 1, vendorId: 1, returnDate: -1 });
+travelVendorReturnSchema.index({ userId: 1, vendorPartyId: 1, returnDate: -1 });
 travelVendorReturnSchema.index({ userId: 1, originalInvoiceId: 1, bookingItemId: 1 });
 travelVendorReturnSchema.index({ userId: 1, isDeleted: 1, isReversed: 1 });
 

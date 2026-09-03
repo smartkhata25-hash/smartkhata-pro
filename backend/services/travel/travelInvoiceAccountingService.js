@@ -15,6 +15,12 @@ const {
 } = require("../../utils/moduleScope");
 
 const { createPaymentEntry } = require("../../utils/paymentService");
+const {
+  getCustomerJournalIdentity,
+  getVendorJournalIdentity,
+  resolveTravelCustomerCounterparty,
+  resolveTravelVendorCounterparty,
+} = require("./travelCounterpartyService");
 
 const { resolveTravelInvoiceNumber } = require("./travelInvoiceNumberService");
 
@@ -212,31 +218,6 @@ const assertConfirmedInvoiceIsPostable = (booking) => {
   }
 };
 
-const getTravelCustomer = async ({ booking, userId, session }) => {
-  const query = Customer.findOne(
-    applyModuleScopeFilter(
-      {
-        _id: booking.customerId,
-        createdBy: userId,
-        isActive: {
-          $ne: false,
-        },
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("name account moduleScope")
-    .lean();
-
-  const customer = await getSessionQuery(query, session);
-
-  if (!customer || !customer.account) {
-    throw createHttpError(404, "Customer or customer account not found");
-  }
-
-  return customer;
-};
-
 const getPaymentAccountById = async ({ accountId, userId, session, label }) => {
   if (!accountId) {
     return null;
@@ -302,6 +283,8 @@ const getTravelVendorPaymentAccount = async ({ booking, userId, session }) => {
 const pushVendorCostRow = ({
   rows,
   vendorId,
+  vendorType = "vendor",
+  vendorPartyId = null,
   costAmount,
   paidAmount,
   description,
@@ -323,7 +306,7 @@ const pushVendorCostRow = ({
     return;
   }
 
-  if (!vendorId) {
+  if (!vendorId && !vendorPartyId) {
     throw createHttpError(
       400,
       `Vendor is required for cost row: ${description || "Travel service"}`,
@@ -340,7 +323,9 @@ const pushVendorCostRow = ({
   }
 
   rows.push({
-    vendorId: String(vendorId),
+    vendorType: vendorType === "party" ? "party" : "vendor",
+    vendorId: vendorId ? String(vendorId) : null,
+    vendorPartyId: vendorPartyId ? String(vendorPartyId) : null,
     amount: cost,
     paidAmount: paid,
     description,
@@ -362,6 +347,8 @@ const collectVendorCostRows = (booking) => {
         pushVendorCostRow({
           rows,
           vendorId: component.vendorId,
+          vendorType: component.vendorType,
+          vendorPartyId: component.vendorPartyId,
           costAmount: component.estimatedCostBase,
           paidAmount: component.estimatedVendorPaidBase,
           description:
@@ -375,6 +362,8 @@ const collectVendorCostRows = (booking) => {
     pushVendorCostRow({
       rows,
       vendorId: item.vendorId,
+      vendorType: item.vendorType,
+      vendorPartyId: item.vendorPartyId,
       costAmount: item.estimatedCostBase,
       paidAmount: item.estimatedVendorPaidBase,
       description: item.title || serviceTypeLabel(item.itemType),
@@ -384,46 +373,31 @@ const collectVendorCostRows = (booking) => {
   return rows;
 };
 
+const getVendorCostKey = (row = {}) =>
+  row.vendorType === "party"
+    ? `party:${row.vendorPartyId || ""}`
+    : `vendor:${row.vendorId || ""}`;
+
 const loadVendorAccounts = async ({ costRows, userId, session }) => {
-  const vendorIds = [
-    ...new Set(costRows.map((row) => row.vendorId).filter(Boolean)),
-  ];
+  const vendorMap = new Map();
 
-  if (vendorIds.length === 0) {
-    return new Map();
-  }
+  await Promise.all(
+    costRows.map(async (row) => {
+      const key = getVendorCostKey(row);
 
-  const query = Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        _id: {
-          $in: vendorIds,
-        },
+      if (vendorMap.has(key)) {
+        return;
+      }
+
+      const vendor = await resolveTravelVendorCounterparty({
         userId,
-        isDeleted: false,
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("name account moduleScope travelVendorType isTravelVendor")
-    .lean();
+        source: row,
+        session,
+      });
 
-  const vendors = await getSessionQuery(query, session);
-
-  const vendorMap = new Map(
-    vendors.map((vendor) => [String(vendor._id), vendor]),
+      vendorMap.set(key, vendor);
+    }),
   );
-
-  for (const row of costRows) {
-    const vendor = vendorMap.get(row.vendorId);
-
-    if (!vendor || !vendor.account) {
-      throw createHttpError(
-        400,
-        `Vendor account not found for ${row.description || "travel cost"}`,
-      );
-    }
-  }
 
   return vendorMap;
 };
@@ -440,10 +414,12 @@ const groupVendorCosts = async ({ booking, userId, session }) => {
   const grouped = new Map();
 
   costRows.forEach((row) => {
-    const vendor = vendorMap.get(row.vendorId);
+    const key = getVendorCostKey(row);
+    const vendor = vendorMap.get(key);
 
-    const current = grouped.get(row.vendorId) || {
+    const current = grouped.get(key) || {
       vendor,
+      vendorType: row.vendorType,
       amount: 0,
       paidAmount: 0,
       descriptions: [],
@@ -455,7 +431,7 @@ const groupVendorCosts = async ({ booking, userId, session }) => {
 
     current.descriptions.push(row.description);
 
-    grouped.set(row.vendorId, current);
+    grouped.set(key, current);
   });
 
   return [...grouped.values()].filter((row) => roundMoney(row.amount) > 0);
@@ -477,7 +453,11 @@ const collectJournalAccountIds = (journals = []) => {
 
 const buildAccountingSnapshot = (source = {}) =>
   JSON.stringify({
+    customerType: source.customerType || "customer",
+
     customerId: String(source.customerId || ""),
+
+    customerPartyId: String(source.customerPartyId || ""),
 
     baseCurrency: source.baseCurrency || "",
 
@@ -506,7 +486,11 @@ const buildAccountingSnapshot = (source = {}) =>
 
       serviceId: String(item.serviceId || ""),
 
+      vendorType: item.vendorType || "vendor",
+
       vendorId: String(item.vendorId || ""),
+
+      vendorPartyId: String(item.vendorPartyId || ""),
 
       title: item.title || "",
 
@@ -527,7 +511,11 @@ const buildAccountingSnapshot = (source = {}) =>
       estimatedVendorPaidBase: roundMoney(item.estimatedVendorPaidBase),
 
       components: (item.umrahDetails?.components || []).map((component) => ({
+        vendorType: component.vendorType || "vendor",
+
         vendorId: String(component.vendorId || ""),
+
+        vendorPartyId: String(component.vendorPartyId || ""),
 
         serviceId: String(component.serviceId || ""),
 
@@ -679,16 +667,16 @@ const postTravelInvoiceAccounting = async ({
   });
 
   const [
-    customer,
+    customerCounterparty,
     paymentAccount,
     vendorPaymentAccount,
     salesAccount,
     costAccount,
     discountAccount,
   ] = await Promise.all([
-    getTravelCustomer({
-      booking,
+    resolveTravelCustomerCounterparty({
       userId,
+      source: booking,
       session,
     }),
 
@@ -728,10 +716,13 @@ const postTravelInvoiceAccounting = async ({
   const invoiceTime = invoiceDate.toTimeString().slice(0, 8);
 
   const journals = [];
+  const customerJournalIdentity = getCustomerJournalIdentity(
+    customerCounterparty,
+  );
 
   const saleLines = [
     {
-      account: new mongoose.Types.ObjectId(customer.account),
+      account: new mongoose.Types.ObjectId(customerCounterparty.accountId),
       type: "debit",
       amount: netSale,
     },
@@ -762,7 +753,7 @@ const postTravelInvoiceAccounting = async ({
     invoiceModel: "TravelBooking",
     billNo: invoiceNumber,
     createdBy: userId,
-    customerId: booking.customerId,
+    ...customerJournalIdentity,
     attachmentUrl: booking.attachmentUrl || "",
     attachmentType: booking.attachmentType || "",
     lines: saleLines,
@@ -810,7 +801,7 @@ const postTravelInvoiceAccounting = async ({
       },
 
       ...vendorCosts.map((vendorCost) => ({
-        account: new mongoose.Types.ObjectId(vendorCost.vendor.account),
+        account: new mongoose.Types.ObjectId(vendorCost.vendor.accountId),
         type: "credit",
         amount: roundMoney(vendorCost.amount),
       })),
@@ -827,7 +818,9 @@ const postTravelInvoiceAccounting = async ({
       invoiceModel: "TravelBooking",
       billNo: invoiceNumber,
       createdBy: userId,
-      supplierId: vendorCosts.length === 1 ? vendorCosts[0].vendor._id : null,
+      ...(vendorCosts.length === 1
+        ? getVendorJournalIdentity(vendorCosts[0].vendor)
+        : {}),
       attachmentUrl: booking.attachmentUrl || "",
       attachmentType: booking.attachmentType || "",
       lines: vendorCostLines,
@@ -877,7 +870,7 @@ const postTravelInvoiceAccounting = async ({
 
           accountId: vendorPaymentAccount._id,
 
-          counterPartyAccountId: vendorCost.vendor.account,
+          counterPartyAccountId: vendorCost.vendor.accountId,
 
           amount: paidAmount,
 
@@ -889,7 +882,7 @@ const postTravelInvoiceAccounting = async ({
             "Vendor"
           }`,
 
-          supplierId: vendorCost.vendor._id,
+          ...getVendorJournalIdentity(vendorCost.vendor),
 
           entryDate: invoiceDate,
 
@@ -934,7 +927,7 @@ const postTravelInvoiceAccounting = async ({
 
       accountId: paymentAccount._id,
 
-      counterPartyAccountId: customer.account,
+      counterPartyAccountId: customerCounterparty.accountId,
 
       amount: receivedAmount,
 
@@ -942,7 +935,7 @@ const postTravelInvoiceAccounting = async ({
 
       description: `Travel Invoice Payment ${invoiceNumber}`,
 
-      customerId: booking.customerId,
+      ...customerJournalIdentity,
 
       entryDate: invoiceDate,
 

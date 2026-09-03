@@ -29,6 +29,7 @@ const PartyLedgerHeader = ({
   showSuggestions,
   setShowSuggestions,
   printSize = 'A5',
+  moduleScope = '',
 }) => {
   const [showShareModal, setShowShareModal] = React.useState(false);
   const navigate = useNavigate();
@@ -40,13 +41,20 @@ const PartyLedgerHeader = ({
     .filter((p) => (p.name || '').toLowerCase().includes((partyName || '').toLowerCase()))
     .slice(0, 10);
 
-  const buildQuery = () =>
-    new URLSearchParams({
+  const buildQuery = () => {
+    const params = new URLSearchParams({
       startDate: start || '',
       endDate: end || '',
       size: printSize || 'A5',
       lang: localStorage.getItem('lang') || 'ur',
-    }).toString();
+    });
+
+    if (moduleScope) {
+      params.set('moduleScope', moduleScope);
+    }
+
+    return params.toString();
+  };
 
   const handleSelectParty = (party) => {
     setPartyName(party.name);
@@ -145,7 +153,13 @@ const PartyLedgerHeader = ({
   const handleDetailLedger = () => {
     if (!partyId) return;
 
-    navigate(`/party-ledger/${partyId}/detail`);
+    const params = new URLSearchParams();
+
+    if (moduleScope) {
+      params.set('moduleScope', moduleScope);
+    }
+
+    navigate(`/party-ledger/${partyId}/detail${params.toString() ? `?${params}` : ''}`);
   };
 
   return (
@@ -566,11 +580,17 @@ const PartyLedgerHeader = ({
 
           if (!partyId) return;
 
-          const query = new URLSearchParams({
+          const queryParams = new URLSearchParams({
             startDate: start || '',
             endDate: end || '',
             size: printSize || 'A5',
-          }).toString();
+          });
+
+          if (moduleScope) {
+            queryParams.set('moduleScope', moduleScope);
+          }
+
+          const query = queryParams.toString();
 
           const pdfUrl = `${API}/api/print/party-ledger/${partyId}/pdf?${query}`;
           const token = localStorage.getItem('token');

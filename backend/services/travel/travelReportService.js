@@ -4,6 +4,7 @@ const Account = require("../../models/Account");
 const Customer = require("../../models/Customer");
 const Expense = require("../../models/Expense");
 const JournalEntry = require("../../models/JournalEntry");
+const Party = require("../../models/Party");
 const Supplier = require("../../models/Supplier");
 const TravelBooking = require("../../models/TravelBooking");
 const TravelRefund = require("../../models/TravelRefund");
@@ -22,9 +23,11 @@ const {
   TRAVEL_VENDOR_PAYMENT_ORIGIN,
   TRAVEL_VENDOR_RETURN_ORIGIN,
   getTravelCustomerBalanceMap,
+  getTravelPartyBalanceMap,
   getTravelVendorBalanceMap,
   roundMoney,
 } = require("./travelAccountingMetricsService");
+const { buildTravelPartyRoleQuery } = require("./travelCounterpartyService");
 const {
   getCachedTravelReport,
   getTravelReportCacheKey,
@@ -851,9 +854,10 @@ const getRefundReport = async ({ objectUserId, dateContext }) => {
     ]),
     TravelRefund.find(match)
       .select(
-        "refundNumber refundDate refundTime originalInvoiceId originalInvoiceNumber customerId grossRefundAmount penaltyAmount customerRefundAmount paidBackAmount vendorRecoveryAmount",
+        "refundNumber refundDate refundTime originalInvoiceId originalInvoiceNumber customerId customerPartyId grossRefundAmount penaltyAmount customerRefundAmount paidBackAmount vendorRecoveryAmount",
       )
       .populate("customerId", "name phone email moduleScope")
+      .populate("customerPartyId", "name phone email role moduleScope")
       .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
       .sort({ refundDate: -1, createdAt: -1, _id: -1 })
       .limit(20)
@@ -885,7 +889,7 @@ const getRefundReport = async ({ objectUserId, dateContext }) => {
         refund.originalInvoiceId?.bookingNumber ||
         refund.originalInvoiceNumber ||
         "",
-      customer: refund.customerId || null,
+      customer: refund.customerPartyId || refund.customerId || null,
       grossRefund: roundMoney(refund.grossRefundAmount),
       penalty: roundMoney(refund.penaltyAmount),
       customerRefund: roundMoney(refund.customerRefundAmount),
@@ -923,13 +927,27 @@ const getVendorRecoveryReport = async ({ objectUserId, dateContext }) => {
       { $unwind: "$refundItems" },
       {
         $match: {
-          "refundItems.vendorId": { $ne: null },
+          $or: [
+            { "refundItems.vendorId": { $ne: null } },
+            { "refundItems.vendorPartyId": { $ne: null } },
+          ],
           "refundItems.vendorRecoveryAmount": { $gt: 0 },
         },
       },
       {
         $group: {
-          _id: "$refundItems.vendorId",
+          _id: {
+            entityType: {
+              $cond: [
+                { $ne: ["$refundItems.vendorPartyId", null] },
+                "party",
+                "supplier",
+              ],
+            },
+            id: {
+              $ifNull: ["$refundItems.vendorPartyId", "$refundItems.vendorId"],
+            },
+          },
           vendorRecovery: { $sum: "$refundItems.vendorRecoveryAmount" },
           count: { $sum: 1 },
         },
@@ -937,12 +955,21 @@ const getVendorRecoveryReport = async ({ objectUserId, dateContext }) => {
       {
         $lookup: {
           from: "suppliers",
-          localField: "_id",
+          localField: "_id.id",
           foreignField: "_id",
           as: "vendor",
         },
       },
+      {
+        $lookup: {
+          from: "parties",
+          localField: "_id.id",
+          foreignField: "_id",
+          as: "party",
+        },
+      },
       { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$party", preserveNullAndEmptyArrays: true } },
       { $sort: { vendorRecovery: -1 } },
       { $limit: 20 },
     ]),
@@ -960,9 +987,10 @@ const getVendorRecoveryReport = async ({ objectUserId, dateContext }) => {
     ]),
     TravelVendorReturn.find(returnMatch)
       .select(
-        "returnNumber returnDate returnTime vendorId originalInvoiceId originalInvoiceNumber serviceLabel vendorReturnAmount vendorPenaltyAmount amountReceivedNow",
+        "returnNumber returnDate returnTime vendorId vendorPartyId originalInvoiceId originalInvoiceNumber serviceLabel vendorReturnAmount vendorPenaltyAmount amountReceivedNow",
       )
       .populate("vendorId", "name phone email travelVendorType moduleScope")
+      .populate("vendorPartyId", "name phone email role moduleScope")
       .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
       .sort({ returnDate: -1, createdAt: -1, _id: -1 })
       .limit(20)
@@ -979,15 +1007,25 @@ const getVendorRecoveryReport = async ({ objectUserId, dateContext }) => {
       vendorReturnCashReceived: roundMoney(vendorReturnRow.cashReceived),
     },
     recoveriesByVendor: recoveriesByVendor.map((row) => ({
-      vendorId: row._id,
-      vendor: row.vendor
+      vendorId: row._id?.id || row._id,
+      vendor: row.party
+        ? {
+            _id: row.party._id,
+            name: row.party.name,
+            phone: row.party.phone,
+            role: row.party.role,
+            entityType: "party",
+          }
+        : row.vendor
         ? {
             _id: row.vendor._id,
             name: row.vendor.name,
             phone: row.vendor.phone,
             travelVendorType: row.vendor.travelVendorType,
+            entityType: "supplier",
           }
         : null,
+      entityType: row._id?.entityType || "supplier",
       vendorRecovery: roundMoney(row.vendorRecovery),
       count: Number(row.count || 0),
     })),
@@ -996,7 +1034,7 @@ const getVendorRecoveryReport = async ({ objectUserId, dateContext }) => {
       returnNumber: record.returnNumber || "",
       date: record.returnDate || null,
       time: record.returnTime || "",
-      vendor: record.vendorId || null,
+      vendor: record.vendorPartyId || record.vendorId || null,
       originalInvoiceId: record.originalInvoiceId?._id || record.originalInvoiceId || null,
       originalInvoiceNumber:
         record.originalInvoiceId?.invoiceNumber ||
@@ -1019,19 +1057,24 @@ const getMapFromRows = (rows = [], key = "_id", value = "total") =>
   new Map(rows.map((row) => [String(row[key] || ""), roundMoney(row[value])]));
 
 const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => {
-  const customers = await Customer.find(
-    applyModuleScopeFilter(
-      {
-        createdBy: objectUserId,
-        isActive: { $ne: false },
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id name phone email account openingBalance moduleScope")
-    .lean();
+  const [customers, parties] = await Promise.all([
+    Customer.find(
+      applyModuleScopeFilter(
+        {
+          createdBy: objectUserId,
+          isActive: { $ne: false },
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id name phone email account openingBalance moduleScope")
+      .lean(),
+    Party.find(buildTravelPartyRoleQuery(objectUserId, "customer"))
+      .select("_id name phone email role account openingBalance moduleScope")
+      .lean(),
+  ]);
 
-  if (customers.length === 0) {
+  if (customers.length === 0 && parties.length === 0) {
     return {
       totalReceivable: 0,
       totalCredit: 0,
@@ -1039,8 +1082,18 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
     };
   }
 
-  const [balanceMap, invoiceRows, paymentRows, refundRows] = await Promise.all([
+  const [
+    balanceMap,
+    partyBalanceMap,
+    invoiceRows,
+    partyInvoiceRows,
+    paymentRows,
+    partyPaymentRows,
+    refundRows,
+    partyRefundRows,
+  ] = await Promise.all([
     getTravelCustomerBalanceMap(userId, customers),
+    getTravelPartyBalanceMap(userId, parties),
     TravelBooking.aggregate([
       {
         $match: {
@@ -1050,6 +1103,7 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
           isVoided: { $ne: true },
           accountingPosted: true,
           status: { $in: [...POSTING_STATUSES] },
+          customerId: { $ne: null },
           ...getDateMatch(dateContext, "invoiceDate"),
         },
       },
@@ -1061,14 +1115,38 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
         },
       },
     ]),
+    TravelBooking.aggregate([
+      {
+        $match: {
+          userId: objectUserId,
+          isActive: true,
+          isDeleted: false,
+          isVoided: { $ne: true },
+          accountingPosted: true,
+          status: { $in: [...POSTING_STATUSES] },
+          customerPartyId: { $ne: null },
+          ...getDateMatch(dateContext, "invoiceDate"),
+        },
+      },
+      {
+        $group: {
+          _id: "$customerPartyId",
+          invoices: { $sum: 1 },
+          invoiceAmount: { $sum: "$netSale" },
+        },
+      },
+    ]),
     JournalEntry.aggregate([
       {
-      $match: {
-        createdBy: objectUserId,
-        isDeleted: false,
-        isReversed: { $ne: true },
-        sourceType: "receive_payment",
-          originModule: { $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_RECEIVE_PAYMENT_ORIGIN] },
+        $match: {
+          createdBy: objectUserId,
+          isDeleted: false,
+          isReversed: { $ne: true },
+          sourceType: "receive_payment",
+          originModule: {
+            $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_RECEIVE_PAYMENT_ORIGIN],
+          },
+          customerId: { $ne: null },
           ...getDateMatch(dateContext),
         },
       },
@@ -1081,18 +1159,60 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
         },
       },
     ]),
+    JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: objectUserId,
+          isDeleted: false,
+          isReversed: { $ne: true },
+          sourceType: "receive_payment",
+          originModule: {
+            $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_RECEIVE_PAYMENT_ORIGIN],
+          },
+          partyId: { $ne: null },
+          ...getDateMatch(dateContext),
+        },
+      },
+      { $unwind: "$lines" },
+      { $match: { "lines.type": "debit" } },
+      {
+        $group: {
+          _id: "$partyId",
+          total: { $sum: "$lines.amount" },
+        },
+      },
+    ]),
     TravelRefund.aggregate([
       {
         $match: {
           userId: objectUserId,
           isDeleted: false,
           isReversed: { $ne: true },
+          customerId: { $ne: null },
           ...getDateMatch(dateContext, "refundDate"),
         },
       },
       {
         $group: {
           _id: "$customerId",
+          refundCredit: { $sum: "$customerRefundAmount" },
+          refunds: { $sum: 1 },
+        },
+      },
+    ]),
+    TravelRefund.aggregate([
+      {
+        $match: {
+          userId: objectUserId,
+          isDeleted: false,
+          isReversed: { $ne: true },
+          customerPartyId: { $ne: null },
+          ...getDateMatch(dateContext, "refundDate"),
+        },
+      },
+      {
+        $group: {
+          _id: "$customerPartyId",
           refundCredit: { $sum: "$customerRefundAmount" },
           refunds: { $sum: 1 },
         },
@@ -1109,9 +1229,28 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
       },
     ]),
   );
+  const invoiceByParty = new Map(
+    partyInvoiceRows.map((row) => [
+      String(row._id || ""),
+      {
+        invoices: Number(row.invoices || 0),
+        invoiceAmount: roundMoney(row.invoiceAmount),
+      },
+    ]),
+  );
   const paymentByCustomer = getMapFromRows(paymentRows);
+  const paymentByParty = getMapFromRows(partyPaymentRows);
   const refundByCustomer = new Map(
     refundRows.map((row) => [
+      String(row._id || ""),
+      {
+        refunds: Number(row.refunds || 0),
+        refundCredit: roundMoney(row.refundCredit),
+      },
+    ]),
+  );
+  const refundByParty = new Map(
+    partyRefundRows.map((row) => [
       String(row._id || ""),
       {
         refunds: Number(row.refunds || 0),
@@ -1122,7 +1261,7 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
 
   let totalReceivable = 0;
   let totalCredit = 0;
-  const rows = customers.map((customer) => {
+  const customerRows = customers.map((customer) => {
     const accountId = String(customer.account || "");
     const balance = roundMoney(balanceMap.get(accountId) || 0);
     const invoice = invoiceByCustomer.get(String(customer._id)) || {};
@@ -1135,11 +1274,13 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
 
     return {
       customerId: customer._id,
+      entityType: "customer",
       customer: {
         _id: customer._id,
         name: customer.name,
         phone: customer.phone,
         email: customer.email,
+        entityType: "customer",
       },
       mobile: customer.phone || "",
       openingBalance: roundMoney(customer.openingBalance),
@@ -1153,18 +1294,54 @@ const getCustomerReceivables = async ({ userId, objectUserId, dateContext }) => 
     };
   });
 
+  const partyRows = parties.map((party) => {
+    const accountId = String(party.account || "");
+    const balance = roundMoney(partyBalanceMap.get(accountId) || 0);
+    const invoice = invoiceByParty.get(String(party._id)) || {};
+    const refund = refundByParty.get(String(party._id)) || {};
+    const currentDue = Math.max(balance, 0);
+
+    totalReceivable = addMoney(totalReceivable, currentDue);
+
+    return {
+      customerId: party._id,
+      partyId: party._id,
+      entityType: "party",
+      customer: {
+        _id: party._id,
+        name: party.name,
+        phone: party.phone,
+        email: party.email,
+        role: party.role,
+        entityType: "party",
+      },
+      mobile: party.phone || "",
+      openingBalance: roundMoney(party.openingBalance),
+      invoiceCount: Number(invoice.invoices || 0),
+      invoiceAmount: roundMoney(invoice.invoiceAmount),
+      payments: roundMoney(paymentByParty.get(String(party._id)) || 0),
+      refunds: Number(refund.refunds || 0),
+      refundCredit: roundMoney(refund.refundCredit),
+      currentDue,
+      customerCredit: 0,
+      netBalance: balance,
+    };
+  });
+
   return {
     totalReceivable,
     totalCredit,
-    customers: rows
-      .filter(
-        (row) =>
-          row.currentDue > 0 ||
-          row.customerCredit > 0 ||
-          row.invoiceCount > 0 ||
-          row.payments > 0 ||
-          row.refundCredit > 0,
-      )
+    customers: [...customerRows, ...partyRows]
+      .filter((row) => {
+        const hasActivity =
+          row.invoiceCount > 0 || row.payments > 0 || row.refundCredit > 0;
+
+        if (row.entityType === "party" && row.netBalance < 0) {
+          return false;
+        }
+
+        return row.currentDue > 0 || row.customerCredit > 0 || hasActivity;
+      })
       .sort((first, second) => Number(second.currentDue || 0) - Number(first.currentDue || 0))
       .slice(0, 25),
   };
@@ -1220,19 +1397,24 @@ const aggregateByLineAccount = async ({
 };
 
 const getVendorPayables = async ({ userId, objectUserId, dateContext }) => {
-  const vendors = await Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        userId: objectUserId,
-        isDeleted: false,
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id name phone email account openingBalance travelVendorType moduleScope isTravelVendor")
-    .lean();
+  const [vendors, parties] = await Promise.all([
+    Supplier.find(
+      applySupplierModuleScopeFilter(
+        {
+          userId: objectUserId,
+          isDeleted: false,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id name phone email account openingBalance travelVendorType moduleScope isTravelVendor")
+      .lean(),
+    Party.find(buildTravelPartyRoleQuery(objectUserId, "supplier"))
+      .select("_id name phone email role account openingBalance moduleScope")
+      .lean(),
+  ]);
 
-  if (vendors.length === 0) {
+  if (vendors.length === 0 && parties.length === 0) {
     return {
       totalPayable: 0,
       totalCredit: 0,
@@ -1240,40 +1422,46 @@ const getVendorPayables = async ({ userId, objectUserId, dateContext }) => {
     };
   }
 
-  const accountIds = vendors.map((vendor) => vendor.account).filter(Boolean);
-  const [balanceMap, costMap, paymentMap, recoveryReturnMap] = await Promise.all([
-    getTravelVendorBalanceMap(userId, vendors),
-    aggregateByLineAccount({
-      objectUserId,
-      accountIds,
-      dateContext,
-      journalMatch: { sourceType: "travel_vendor_cost" },
-      lineType: "credit",
-    }),
-    aggregateByLineAccount({
-      objectUserId,
-      accountIds,
-      dateContext,
-      journalMatch: {
-        sourceType: "pay_bill",
-        originModule: TRAVEL_VENDOR_PAYMENT_ORIGIN,
-      },
-      lineType: "debit",
-    }),
-    aggregateByLineAccount({
-      objectUserId,
-      accountIds,
-      dateContext,
-      journalMatch: {
-        sourceType: { $in: ["travel_refund", "travel_vendor_return"] },
-      },
-      lineType: "debit",
-    }),
-  ]);
+  const accountIds = [...vendors, ...parties]
+    .map((vendor) => vendor.account)
+    .filter(Boolean);
+  const [balanceMap, partyBalanceMap, costMap, paymentMap, recoveryReturnMap] =
+    await Promise.all([
+      getTravelVendorBalanceMap(userId, vendors),
+      getTravelPartyBalanceMap(userId, parties),
+      aggregateByLineAccount({
+        objectUserId,
+        accountIds,
+        dateContext,
+        journalMatch: { sourceType: "travel_vendor_cost" },
+        lineType: "credit",
+      }),
+      aggregateByLineAccount({
+        objectUserId,
+        accountIds,
+        dateContext,
+        journalMatch: {
+          sourceType: "pay_bill",
+          originModule: {
+            $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_VENDOR_PAYMENT_ORIGIN],
+          },
+        },
+        lineType: "debit",
+      }),
+      aggregateByLineAccount({
+        objectUserId,
+        accountIds,
+        dateContext,
+        journalMatch: {
+          sourceType: { $in: ["travel_refund", "travel_vendor_return"] },
+        },
+        lineType: "debit",
+      }),
+    ]);
 
   let totalPayable = 0;
   let totalCredit = 0;
-  const rows = vendors.map((vendor) => {
+  const vendorRows = vendors.map((vendor) => {
     const accountId = String(vendor.account || "");
     const balance = roundMoney(balanceMap.get(accountId) || 0);
     const currentPayable = Math.max(balance, 0);
@@ -1284,12 +1472,14 @@ const getVendorPayables = async ({ userId, objectUserId, dateContext }) => {
 
     return {
       vendorId: vendor._id,
+      entityType: "supplier",
       vendor: {
         _id: vendor._id,
         name: vendor.name,
         phone: vendor.phone,
         email: vendor.email,
         travelVendorType: vendor.travelVendorType,
+        entityType: "supplier",
       },
       vendorType: vendor.travelVendorType || "",
       openingBalance: roundMoney(vendor.openingBalance),
@@ -1301,18 +1491,50 @@ const getVendorPayables = async ({ userId, objectUserId, dateContext }) => {
     };
   });
 
+  const partyRows = parties.map((party) => {
+    const accountId = String(party.account || "");
+    const balance = roundMoney(partyBalanceMap.get(accountId) || 0);
+    const currentPayable = Math.max(roundMoney(-balance), 0);
+
+    totalPayable = addMoney(totalPayable, currentPayable);
+
+    return {
+      vendorId: party._id,
+      partyId: party._id,
+      entityType: "party",
+      vendor: {
+        _id: party._id,
+        name: party.name,
+        phone: party.phone,
+        email: party.email,
+        role: party.role,
+        entityType: "party",
+      },
+      vendorType: "party",
+      openingBalance: roundMoney(party.openingBalance),
+      costs: roundMoney(costMap.get(accountId)?.total || 0),
+      payments: roundMoney(paymentMap.get(accountId)?.total || 0),
+      recoveriesReturns: roundMoney(recoveryReturnMap.get(accountId)?.total || 0),
+      currentPayable,
+      vendorCredit: 0,
+      netBalance: balance,
+    };
+  });
+
   return {
     totalPayable,
     totalCredit,
-    vendors: rows
-      .filter(
-        (row) =>
-          row.currentPayable > 0 ||
-          row.vendorCredit > 0 ||
-          row.costs > 0 ||
-          row.payments > 0 ||
-          row.recoveriesReturns > 0,
-      )
+    vendors: [...vendorRows, ...partyRows]
+      .filter((row) => {
+        const hasActivity =
+          row.costs > 0 || row.payments > 0 || row.recoveriesReturns > 0;
+
+        if (row.entityType === "party" && row.netBalance > 0) {
+          return false;
+        }
+
+        return row.currentPayable > 0 || row.vendorCredit > 0 || hasActivity;
+      })
       .sort((first, second) => Number(second.currentPayable || 0) - Number(first.currentPayable || 0))
       .slice(0, 25),
   };
@@ -1417,9 +1639,10 @@ const getRecentPaymentRows = async ({
     originModule,
     ...getDateMatch(dateContext),
   })
-    .select("date time description billNo originModule referenceId invoiceId customerId supplierId lines createdAt")
+    .select("date time description billNo originModule referenceId invoiceId customerId supplierId partyId lines createdAt")
     .populate("customerId", "name phone email moduleScope")
     .populate("supplierId", "name phone email travelVendorType moduleScope")
+    .populate("partyId", "name phone email role moduleScope")
     .populate("lines.account", "name code category type")
     .sort({ date: -1, time: -1, createdAt: -1, _id: -1 })
     .limit(20)
@@ -1427,7 +1650,9 @@ const getRecentPaymentRows = async ({
 
   return journals.map((journal) => {
     const paymentLine = getPaymentLine(journal, lineType);
-    const party = partyField === "supplierId" ? journal.supplierId : journal.customerId;
+    const party =
+      journal.partyId ||
+      (partyField === "supplierId" ? journal.supplierId : journal.customerId);
 
     return {
       _id: journal._id,
@@ -1469,7 +1694,7 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
       objectUserId,
       dateContext,
       sourceType: "pay_bill",
-      originModule: TRAVEL_VENDOR_PAYMENT_ORIGIN,
+      originModule: { $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_VENDOR_PAYMENT_ORIGIN] },
       lineType: "credit",
     }),
     aggregatePaymentMovement({
@@ -1505,7 +1730,7 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
       objectUserId,
       dateContext,
       sourceType: "pay_bill",
-      originModule: TRAVEL_VENDOR_PAYMENT_ORIGIN,
+      originModule: { $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_VENDOR_PAYMENT_ORIGIN] },
       lineType: "credit",
       partyField: "supplierId",
     }),

@@ -128,6 +128,12 @@ const tabConfig = [
   },
 ];
 
+const getBookingCustomer = (booking) => booking?.customer || booking?.customerPartyId || booking?.customerId;
+
+const getBookingCustomerName = (booking) => getCustomerName(getBookingCustomer(booking));
+
+const getBookingVendor = (source) => source?.vendor || source?.vendorPartyId || source?.vendorId;
+
 const sectionClass = 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm';
 
 const numberValue = (value) => {
@@ -977,7 +983,7 @@ const renderUmrahComponent = (component, index) => {
 
       <div className="space-y-4 p-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <InfoCard icon={FaUser} label="Vendor" value={getVendorName(component.vendorId)} />
+          <InfoCard icon={FaUser} label="Vendor" value={getVendorName(getBookingVendor(component))} />
 
           {type === 'hotel' && (
             <InfoCard
@@ -1291,13 +1297,17 @@ const TravelBookingDetailPage = () => {
     const map = new Map();
 
     (booking?.bookingItems || []).forEach((item) => {
-      if (item.vendorId && typeof item.vendorId === 'object') {
-        map.set(String(item.vendorId._id), item.vendorId);
+      const itemVendor = getBookingVendor(item);
+
+      if (itemVendor && typeof itemVendor === 'object') {
+        map.set(String(itemVendor._id), itemVendor);
       }
 
       (item.umrahDetails?.components || []).forEach((component) => {
-        if (component.vendorId && typeof component.vendorId === 'object') {
-          map.set(String(component.vendorId._id), component.vendorId);
+        const componentVendor = getBookingVendor(component);
+
+        if (componentVendor && typeof componentVendor === 'object') {
+          map.set(String(componentVendor._id), componentVendor);
         }
       });
     });
@@ -1518,7 +1528,7 @@ const TravelBookingDetailPage = () => {
           <InfoCard
             icon={FaUser}
             label="Customer"
-            value={getCustomerName(booking.customerId)}
+            value={getBookingCustomerName(booking)}
             tone="cyan"
           />
 
@@ -1721,7 +1731,7 @@ const TravelBookingDetailPage = () => {
                 <InfoCard
                   icon={FaUser}
                   label="Vendor"
-                  value={getVendorName(item.vendorId)}
+                  value={getVendorName(getBookingVendor(item))}
                   tone="violet"
                 />
 
@@ -2080,7 +2090,7 @@ const TravelBookingDetailPage = () => {
                       <span className="inline-flex items-center gap-1.5">
                         <FaUser className="text-cyan-600" />
 
-                        {getCustomerName(booking.customerId)}
+                        {getBookingCustomerName(booking)}
                       </span>
 
                       <span className="inline-flex items-center gap-1.5">

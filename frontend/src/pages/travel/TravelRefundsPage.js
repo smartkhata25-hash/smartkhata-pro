@@ -38,6 +38,16 @@ const getRefundInvoiceNumber = (refund) =>
   refund.originalInvoiceId?.bookingNumber ||
   '-';
 
+const getRefundCustomer = (refund) => refund?.customer || refund?.customerPartyId || refund?.customerId;
+
+const getRefundCustomerName = (refund) => getCustomerName(getRefundCustomer(refund));
+
+const getRefundCustomerPhone = (refund) => {
+  const customer = getRefundCustomer(refund);
+
+  return typeof customer === 'object' ? customer?.phone || '' : '';
+};
+
 const getFiltersFromParams = (searchParams) =>
   Object.keys(FILTER_DEFAULTS).reduce(
     (filters, field) => ({
@@ -321,12 +331,12 @@ const TravelRefundsPage = () => {
         render: (refund) => (
           <div className="min-w-0">
             <p className="truncate font-extrabold text-slate-900">
-              {getCustomerName(refund.customerId)}
+              {getRefundCustomerName(refund)}
             </p>
 
-            {refund.customerId?.phone && (
+            {getRefundCustomerPhone(refund) && (
               <p className="truncate text-xs font-semibold text-slate-500">
-                {refund.customerId.phone}
+                {getRefundCustomerPhone(refund)}
               </p>
             )}
           </div>
@@ -444,7 +454,7 @@ const TravelRefundsPage = () => {
           <div className="mt-3 grid grid-cols-2 gap-3">
             <TravelCardLine
               labelKey="travel.booking.fields.customer"
-              value={getCustomerName(refund.customerId)}
+              value={getRefundCustomerName(refund)}
             />
 
             <TravelCardLine

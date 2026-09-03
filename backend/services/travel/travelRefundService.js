@@ -1,20 +1,24 @@
 const mongoose = require("mongoose");
 
 const Account = require("../../models/Account");
-const Customer = require("../../models/Customer");
 const JournalEntry = require("../../models/JournalEntry");
-const Supplier = require("../../models/Supplier");
 const TravelBooking = require("../../models/TravelBooking");
 const TravelRefund = require("../../models/TravelRefund");
 const { recalculateAccountBalances } = require("../../utils/accountHelper");
 const {
   applyModuleScopeFilter,
-  applySupplierModuleScopeFilter,
   MODULE_SCOPES,
 } = require("../../utils/moduleScope");
 const { createPaymentEntry } = require("../../utils/paymentService");
 const { POSTING_STATUSES, getServiceSummary } = require("./travelInvoiceAccountingService");
 const { formatTravelInvoiceAttachments } = require("./travelInvoiceAttachmentService");
+const {
+  getCustomerJournalIdentity,
+  getVendorJournalIdentity,
+  normalizeVendorCounterpartyInput,
+  resolveTravelCustomerCounterparty,
+  resolveTravelVendorCounterparty,
+} = require("./travelCounterpartyService");
 
 const TRAVEL_REFUND_ORIGIN = "travel_refund";
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
@@ -211,29 +215,6 @@ const getOriginalInvoice = async ({ userId, originalInvoiceId, session = null })
   return invoice;
 };
 
-const getTravelCustomer = async ({ userId, customerId, session = null }) => {
-  const query = Customer.findOne(
-    applyModuleScopeFilter(
-      {
-        _id: customerId,
-        createdBy: userId,
-        isActive: { $ne: false },
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("name phone account moduleScope")
-    .lean();
-
-  const customer = await getSessionQuery(query, session);
-
-  if (!customer || !customer.account) {
-    throw createHttpError(404, "Customer or customer account not found");
-  }
-
-  return customer;
-};
-
 const getPaymentAccount = async ({ userId, accountId, paidBackAmount, session = null }) => {
   if (paidBackAmount <= 0) {
     return null;
@@ -371,6 +352,8 @@ const buildFullRefundItems = ({ invoice, itemMap, priorTotals }) =>
         originalAmount: row.originalAmount,
         refundAmount: remaining,
         vendorId: row.item.vendorId || null,
+        vendorType: row.item.vendorType === "party" ? "party" : "vendor",
+        vendorPartyId: row.item.vendorPartyId || null,
         vendorRecoveryAmount: 0,
       };
     })
@@ -406,10 +389,12 @@ const normalizeRefundItems = ({ body, invoice, priorTotals }) => {
         rawItem.vendorRecoveryAmount,
         "vendor recovery amount",
       );
-      const vendorId = ensureObjectIdString(
-        rawItem.vendorId || row.item.vendorId,
-        "vendor",
-      ) || null;
+      const vendorCounterparty = normalizeVendorCounterpartyInput(
+        rawItem,
+        row.item || {},
+      );
+      const vendorId = vendorCounterparty.vendorId || null;
+      const vendorPartyId = vendorCounterparty.vendorPartyId || null;
 
       if (refundAmount <= 0 && vendorRecoveryAmount <= 0) {
         return null;
@@ -422,7 +407,7 @@ const normalizeRefundItems = ({ body, invoice, priorTotals }) => {
         );
       }
 
-      if (vendorRecoveryAmount > 0 && !vendorId) {
+      if (vendorRecoveryAmount > 0 && !vendorId && !vendorPartyId) {
         throw createHttpError(400, "Vendor is required when vendor recovery is entered");
       }
 
@@ -443,6 +428,8 @@ const normalizeRefundItems = ({ body, invoice, priorTotals }) => {
         originalAmount: row.originalAmount,
         refundAmount,
         vendorId,
+        vendorType: vendorCounterparty.vendorType,
+        vendorPartyId,
         vendorRecoveryAmount,
       };
     })
@@ -523,7 +510,7 @@ const buildRefundPayload = async ({ body = {}, userId, session = null }) => {
   }
 
   const [customer, paymentAccount] = await Promise.all([
-    getTravelCustomer({ userId, customerId: invoice.customerId, session }),
+    resolveTravelCustomerCounterparty({ userId, source: invoice, session }),
     getPaymentAccount({ userId, accountId, paidBackAmount, session }),
   ]);
 
@@ -535,7 +522,9 @@ const buildRefundPayload = async ({ body = {}, userId, session = null }) => {
       originalInvoiceId: invoice._id,
       originalInvoiceNumber: invoice.invoiceNumber || invoice.bookingNumber || "",
       refundDate,
+      customerType: customer.customerType,
       customerId: invoice.customerId,
+      customerPartyId: invoice.customerPartyId || null,
       refundMode,
       refundItems,
       grossRefundAmount,
@@ -552,43 +541,30 @@ const buildRefundPayload = async ({ body = {}, userId, session = null }) => {
 };
 
 const loadVendorAccounts = async ({ refundItems, userId, session = null }) => {
-  const vendorIds = [
-    ...new Set(
-      refundItems
-        .filter((item) => Number(item.vendorRecoveryAmount || 0) > 0)
-        .map((item) => item.vendorId)
-        .filter(Boolean)
-        .map(String),
-    ),
-  ];
+  const vendorMap = new Map();
 
-  if (vendorIds.length === 0) {
-    return new Map();
-  }
+  await Promise.all(
+    refundItems
+      .filter((item) => Number(item.vendorRecoveryAmount || 0) > 0)
+      .map(async (item) => {
+        const key =
+          item.vendorType === "party"
+            ? `party:${item.vendorPartyId || ""}`
+            : `vendor:${item.vendorId || ""}`;
 
-  const query = Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        _id: { $in: vendorIds },
-        userId,
-        isDeleted: false,
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("name account moduleScope isTravelVendor travelVendorType")
-    .lean();
+        if (vendorMap.has(key)) {
+          return;
+        }
 
-  const vendors = await getSessionQuery(query, session);
-  const vendorMap = new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
+        const vendor = await resolveTravelVendorCounterparty({
+          userId,
+          source: item,
+          session,
+        });
 
-  vendorIds.forEach((vendorId) => {
-    const vendor = vendorMap.get(vendorId);
-
-    if (!vendor || !vendor.account) {
-      throw createHttpError(400, "Vendor account not found for recovery");
-    }
-  });
+        vendorMap.set(key, vendor);
+      }),
+  );
 
   return vendorMap;
 };
@@ -604,14 +580,18 @@ const groupVendorRecoveries = async ({ refundItems, userId, session = null }) =>
       return;
     }
 
-    const vendor = vendorMap.get(String(item.vendorId));
-    const current = grouped.get(String(item.vendorId)) || {
+    const key =
+      item.vendorType === "party"
+        ? `party:${item.vendorPartyId || ""}`
+        : `vendor:${item.vendorId || ""}`;
+    const vendor = vendorMap.get(key);
+    const current = grouped.get(key) || {
       vendor,
       amount: 0,
     };
 
     current.amount = roundMoney(current.amount + amount);
-    grouped.set(String(item.vendorId), current);
+    grouped.set(key, current);
   });
 
   return [...grouped.values()];
@@ -649,6 +629,7 @@ const postTravelRefundAccounting = async ({
   const refundDate = refund.refundDate || new Date();
   const refundTime = cleanString(refund.refundTime) || refundDate.toTimeString().slice(0, 5);
   const journals = [];
+  const customerJournalIdentity = getCustomerJournalIdentity(customer);
 
   const customerLines = [
     {
@@ -660,7 +641,7 @@ const postTravelRefundAccounting = async ({
 
   if (roundMoney(refund.customerRefundAmount) > 0) {
     customerLines.push({
-      account: new mongoose.Types.ObjectId(customer.account),
+      account: new mongoose.Types.ObjectId(customer.accountId),
       type: "credit",
       amount: roundMoney(refund.customerRefundAmount),
     });
@@ -685,7 +666,7 @@ const postTravelRefundAccounting = async ({
     invoiceModel: "TravelBooking",
     billNo: refundNumber,
     createdBy: userId,
-    customerId: refund.customerId,
+    ...customerJournalIdentity,
     attachmentUrl: refund.attachmentUrl || "",
     attachmentType: refund.attachmentType || "",
     lines: customerLines,
@@ -720,12 +701,14 @@ const postTravelRefundAccounting = async ({
       invoiceModel: "TravelBooking",
       billNo: refundNumber,
       createdBy: userId,
-      supplierId: recoveries.length === 1 ? recoveries[0].vendor._id : null,
+      ...(recoveries.length === 1
+        ? getVendorJournalIdentity(recoveries[0].vendor)
+        : {}),
       attachmentUrl: refund.attachmentUrl || "",
       attachmentType: refund.attachmentType || "",
       lines: [
         ...recoveries.map((recovery) => ({
-          account: new mongoose.Types.ObjectId(recovery.vendor.account),
+          account: new mongoose.Types.ObjectId(recovery.vendor.accountId),
           type: "debit",
           amount: roundMoney(recovery.amount),
         })),
@@ -750,11 +733,11 @@ const postTravelRefundAccounting = async ({
       originModule: TRAVEL_REFUND_ORIGIN,
       billNo: refundNumber,
       accountId: paymentAccount._id,
-      counterPartyAccountId: customer.account,
+      counterPartyAccountId: customer.accountId,
       amount: roundMoney(refund.paidBackAmount),
       paymentType: refund.paymentType,
       description: `Travel Refund Payment ${refundNumber}`,
-      customerId: refund.customerId,
+      ...customerJournalIdentity,
       entryDate: refundDate,
       entryTime: refundTime,
       session,
@@ -838,9 +821,21 @@ const serializeTravelRefund = (refund) => {
   }
 
   const plain = refund.toObject ? refund.toObject() : { ...refund };
+  const customer =
+    plain.customerType === "party" && plain.customerPartyId
+      ? plain.customerPartyId
+      : plain.customerId;
 
   return {
     ...plain,
+    customer,
+    refundItems: (plain.refundItems || []).map((item) => ({
+      ...item,
+      vendor:
+        item.vendorType === "party" && item.vendorPartyId
+          ? item.vendorPartyId
+          : item.vendorId,
+    })),
     attachments: formatTravelInvoiceAttachments(plain),
   };
 };

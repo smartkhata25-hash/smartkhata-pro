@@ -426,6 +426,18 @@ const umrahComponentSchema = new mongoose.Schema(
       default: null,
     },
 
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
+
     hotelId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "TravelHotel",
@@ -505,6 +517,18 @@ const bookingItemSchema = new mongoose.Schema(
     vendorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
+      default: null,
+    },
+
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
       default: null,
     },
 
@@ -1004,7 +1028,20 @@ const travelBookingSchema = new mongoose.Schema(
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      default: null,
+      index: true,
+    },
+
+    customerType: {
+      type: String,
+      enum: ["customer", "party"],
+      default: "customer",
+    },
+
+    customerPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
       index: true,
     },
 
@@ -1332,6 +1369,18 @@ travelBookingSchema.index({
 travelBookingSchema.index({
   userId: 1,
   customerId: 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  customerPartyId: 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.vendorPartyId": 1,
   updatedAt: -1,
 });
 

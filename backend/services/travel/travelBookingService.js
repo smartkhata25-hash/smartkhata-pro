@@ -32,6 +32,12 @@ const {
   applyModuleScopeFilter,
   applySupplierModuleScopeFilter,
 } = require("../../utils/moduleScope");
+const {
+  normalizeCustomerCounterpartyInput,
+  normalizeVendorCounterpartyInput,
+  buildTravelPartyRoleQuery,
+} = require("./travelCounterpartyService");
+const Party = require("../../models/Party");
 
 const BOOKING_STATUSES = TravelBooking.TRAVEL_BOOKING_STATUSES;
 const SERVICE_TYPES = TravelBooking.TRAVEL_BOOKING_SERVICE_TYPES;
@@ -667,10 +673,12 @@ const calculateItemSourceTotals = (item = {}) => {
 
 const createReferenceCollector = () => ({
   customerIds: new Set(),
+  customerPartyIds: new Set(),
   travelerIds: new Set(),
   serviceIds: new Set(),
   hotelIds: new Set(),
   vendorIds: new Set(),
+  vendorPartyIds: new Set(),
   airlineIds: new Set(),
   airportIds: new Set(),
 });
@@ -1033,8 +1041,9 @@ const normalizeUmrahComponentType = (value = "other") => {
 const normalizeUmrahComponent = (component = {}) => {
   const vendorPaidAmount = moneyNumber(component.vendorPaidAmount);
 
-  const vendorId =
-    ensureObjectIdString(component.vendorId, "vendor ID") || null;
+  const vendorCounterparty = normalizeVendorCounterpartyInput(component);
+  const vendorId = vendorCounterparty.vendorId || null;
+  const vendorPartyId = vendorCounterparty.vendorPartyId || null;
 
   const normalized = {
     componentType: normalizeUmrahComponentType(component.componentType),
@@ -1042,6 +1051,10 @@ const normalizeUmrahComponent = (component = {}) => {
     label: cleanString(component.label),
 
     vendorId,
+
+    vendorType: vendorCounterparty.vendorType,
+
+    vendorPartyId,
 
     hotelId: ensureObjectIdString(component.hotelId, "hotel ID") || null,
 
@@ -1081,7 +1094,7 @@ const normalizeUmrahComponent = (component = {}) => {
     );
   }
 
-  if (vendorPaidAmount > 0 && !vendorId) {
+  if (vendorPaidAmount > 0 && !vendorId && !vendorPartyId) {
     throw createHttpError(
       400,
       "Vendor is required when vendor payment is greater than zero",
@@ -1178,7 +1191,9 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
     }
   });
 
-  const vendorId = ensureObjectIdString(rawItem.vendorId, "vendor ID") || null;
+  const vendorCounterparty = normalizeVendorCounterpartyInput(rawItem);
+  const vendorId = vendorCounterparty.vendorId || null;
+  const vendorPartyId = vendorCounterparty.vendorPartyId || null;
 
   const item = {
     itemType,
@@ -1188,6 +1203,10 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
     travelerIds,
 
     vendorId,
+
+    vendorType: vendorCounterparty.vendorType,
+
+    vendorPartyId,
 
     title: cleanString(rawItem.title),
 
@@ -1250,6 +1269,7 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
   if (
     item.vendorPaidAmount > 0 &&
     !vendorId &&
+    !vendorPartyId &&
     !(
       item.itemType === "umrah_package" &&
       item.umrahDetails.packageMode === "custom_component_package"
@@ -1268,6 +1288,7 @@ const collectItemReferences = (collector, item) => {
   addReference(collector, "serviceIds", item.serviceId);
 
   addReference(collector, "vendorIds", item.vendorId);
+  addReference(collector, "vendorPartyIds", item.vendorPartyId);
 
   item.travelerIds.forEach((id) => addReference(collector, "travelerIds", id));
 
@@ -1331,6 +1352,7 @@ const collectItemReferences = (collector, item) => {
     addReference(collector, "serviceIds", component.serviceId);
 
     addReference(collector, "vendorIds", component.vendorId);
+    addReference(collector, "vendorPartyIds", component.vendorPartyId);
 
     addReference(collector, "hotelIds", component.hotelId);
   });
@@ -1356,6 +1378,8 @@ const assertCountMatches = async ({ Model, query, ids, label }) => {
 const assertReferencesBelongToUser = async ({ collector, userId }) => {
   const customerIds = [...collector.customerIds];
 
+  const customerPartyIds = [...collector.customerPartyIds];
+
   const travelerIds = [...collector.travelerIds];
 
   const serviceIds = [...collector.serviceIds];
@@ -1363,6 +1387,8 @@ const assertReferencesBelongToUser = async ({ collector, userId }) => {
   const hotelIds = [...collector.hotelIds];
 
   const vendorIds = [...collector.vendorIds];
+
+  const vendorPartyIds = [...collector.vendorPartyIds];
 
   const airlineIds = [...collector.airlineIds];
 
@@ -1385,6 +1411,16 @@ const assertReferencesBelongToUser = async ({ collector, userId }) => {
       ids: customerIds,
 
       label: "Customer",
+    }),
+
+    assertCountMatches({
+      Model: Party,
+
+      query: buildTravelPartyRoleQuery(userId, "customer"),
+
+      ids: customerPartyIds,
+
+      label: "Travel customer party",
     }),
 
     assertCountMatches({
@@ -1449,6 +1485,16 @@ const assertReferencesBelongToUser = async ({ collector, userId }) => {
       ids: vendorIds,
 
       label: "Travel vendor",
+    }),
+
+    assertCountMatches({
+      Model: Party,
+
+      query: buildTravelPartyRoleQuery(userId, "supplier"),
+
+      ids: vendorPartyIds,
+
+      label: "Travel vendor party",
     }),
 
     assertCountMatches({
@@ -1905,10 +1951,12 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
     body.status || existingBooking?.status || "draft",
   );
 
-  const customerId = ensureObjectIdString(
-    body.customerId || existingBooking?.customerId,
-    "customer ID",
+  const customerCounterparty = normalizeCustomerCounterpartyInput(
+    body,
+    existingBooking || {},
   );
+  const customerId = customerCounterparty.customerId;
+  const customerPartyId = customerCounterparty.customerPartyId;
 
   const invoiceDate =
     nullableDate(body.invoiceDate) ||
@@ -1934,7 +1982,7 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
         )
       : null;
 
-  if (!customerId) {
+  if (!customerId && !customerPartyId) {
     throw createHttpError(400, "Customer is required");
   }
 
@@ -1966,6 +2014,7 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
   const collector = createReferenceCollector();
 
   addReference(collector, "customerIds", customerId);
+  addReference(collector, "customerPartyIds", customerPartyId);
 
   rootTravelers.forEach((id) => addReference(collector, "travelerIds", id));
 
@@ -2070,7 +2119,11 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
     status,
 
+    customerType: customerCounterparty.customerType,
+
     customerId,
+
+    customerPartyId,
 
     travelers: rootTravelers,
 
@@ -2147,6 +2200,7 @@ const generateBookingNumber = async (
 const populateBooking = (query) =>
   query
     .populate("customerId", "name phone email moduleScope")
+    .populate("customerPartyId", "name phone email role moduleScope")
     .populate("travelers", "fullName passportNumber mobile")
     .populate("bookingItems.travelerIds", "fullName passportNumber mobile")
     .populate(
@@ -2166,12 +2220,20 @@ const populateBooking = (query) =>
       "bookingItems.vendorId",
       "name phone travelVendorType moduleScope",
     )
+    .populate(
+      "bookingItems.vendorPartyId",
+      "name phone email role moduleScope",
+    )
     .populate("bookingItems.hotelDetails.hotelId", "name city country")
     .populate("bookingItems.umrahDetails.makkahHotelId", "name city country")
     .populate("bookingItems.umrahDetails.madinahHotelId", "name city country")
     .populate(
       "bookingItems.umrahDetails.components.vendorId",
       "name phone travelVendorType moduleScope",
+    )
+    .populate(
+      "bookingItems.umrahDetails.components.vendorPartyId",
+      "name phone email role moduleScope",
     )
     .populate(
       "bookingItems.umrahDetails.components.hotelId",
@@ -2215,6 +2277,10 @@ const serializeBooking = (booking) => {
   const costTotal = Number(plain.costTotal || 0);
 
   const vendorPaidTotal = Number(plain.vendorPaidTotal || 0);
+  const customer =
+    plain.customerType === "party" && plain.customerPartyId
+      ? plain.customerPartyId
+      : plain.customerId;
 
   return {
     ...plain,
@@ -2222,6 +2288,8 @@ const serializeBooking = (booking) => {
     invoiceId: plain._id,
 
     invoiceNumber,
+
+    customer,
 
     attachments: formatTravelInvoiceAttachments(plain),
 

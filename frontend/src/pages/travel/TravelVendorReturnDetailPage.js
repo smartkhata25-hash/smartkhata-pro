@@ -75,7 +75,10 @@ const TravelVendorReturnDetailPage = () => {
     loadRecord();
   }, [loadRecord]);
 
-  const vendorName = typeof record?.vendorId === 'object' ? record.vendorId?.name : '';
+  const vendorName =
+    record?.vendor?.name ||
+    (typeof record?.vendorPartyId === 'object' ? record.vendorPartyId?.name : '') ||
+    (typeof record?.vendorId === 'object' ? record.vendorId?.name : '');
   const invoiceId =
     typeof record?.originalInvoiceId === 'object'
       ? record.originalInvoiceId?._id

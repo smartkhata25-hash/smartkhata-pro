@@ -11,6 +11,7 @@ export const TRAVEL_CACHE_DOMAINS = Object.freeze({
   PAYMENT_ACCOUNTS: 'travelPaymentAccounts',
   CURRENCY_SETTINGS: 'travelCurrencySettings',
   TRAVEL_CUSTOMERS: 'travelCustomers',
+  TRAVEL_PARTIES: 'travelParties',
   BOOKINGS: 'travelBookings',
   VENDOR_RETURNS: 'travelVendorReturns',
   DASHBOARD: 'travelDashboard',

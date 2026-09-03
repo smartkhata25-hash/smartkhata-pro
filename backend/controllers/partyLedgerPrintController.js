@@ -8,11 +8,62 @@ const JournalEntry = require("../models/JournalEntry");
 const buildPartyLedgerPrint = require("../services/partyLedgerPrintBuilder");
 const generatePartyLedgerHTML = require("../templates/partyLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  TRAVEL_PARTY_OPENING_ORIGIN,
+} = require("../services/travel/travelCounterpartyService");
+
+const TRAVEL_PARTY_LEDGER_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  TRAVEL_PARTY_OPENING_ORIGIN,
+]);
+
+const getLedgerModuleScope = (query = {}) =>
+  normalizeModuleScope(
+    getRequestedModuleScope(query, MODULE_SCOPES.TRADING),
+    MODULE_SCOPES.TRADING,
+  );
+
+const applyPartyLedgerJournalScope = (match, moduleScope) => {
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    match.originModule = {
+      $in: TRAVEL_PARTY_LEDGER_ORIGINS,
+    };
+
+    return match;
+  }
+
+  match.$and = [
+    ...(match.$and || []),
+    {
+      $or: [
+        { originModule: { $exists: false } },
+        { originModule: null },
+        { originModule: "" },
+        { originModule: { $nin: TRAVEL_PARTY_LEDGER_ORIGINS } },
+      ],
+    },
+  ];
+
+  return match;
+};
 
 const getPartySourceLabel = (entry) => {
   const type = entry.sourceType || "";
 
   if (type === "opening_balance") return "Opening Balance";
+  if (entry.originModule === TRAVEL_PARTY_OPENING_ORIGIN) {
+    return "Travel Opening Balance";
+  }
 
   if (type === "sale_invoice") return "Sale Invoice";
   if (type === "opening_sale_invoice") return "Opening Balance";
@@ -27,6 +78,10 @@ const getPartySourceLabel = (entry) => {
   if (type === "opening_purchase_return") return "Opening Balance";
 
   if (type === "receive_payment") return "Receive Payment";
+  if (type === "travel_booking") return "Travel Invoice";
+  if (type === "travel_vendor_cost") return "Travel Vendor Cost";
+  if (type === "travel_refund") return "Travel Refund";
+  if (type === "travel_vendor_return") return "Travel Vendor Return";
   if (type === "receive_payment_discount") {
     return "Receive Payment Discount";
   }
@@ -77,6 +132,7 @@ const fetchPartyLedgerData = async ({
   userId,
   startDate,
   endDate,
+  moduleScope = MODULE_SCOPES.TRADING,
 }) => {
   if (!mongoose.Types.ObjectId.isValid(partyId)) {
     throw new Error("Invalid party ID");
@@ -89,11 +145,16 @@ const fetchPartyLedgerData = async ({
   const partyObjectId = new mongoose.Types.ObjectId(partyId);
   const userObjectId = new mongoose.Types.ObjectId(userId);
 
-  const party = await Party.findOne({
-    _id: partyObjectId,
-    userId: userObjectId,
-    isDeleted: false,
-  })
+  const party = await Party.findOne(
+    applyModuleScopeFilter(
+      {
+        _id: partyObjectId,
+        userId: userObjectId,
+        isDeleted: false,
+      },
+      moduleScope,
+    ),
+  )
     .populate("account")
     .lean();
 
@@ -115,12 +176,15 @@ const fetchPartyLedgerData = async ({
   const start = getStartOfDay(startDate);
   const end = getEndOfDay(endDate);
 
-  const matchFilter = {
-    createdBy: userObjectId,
-    isDeleted: false,
-    sourceType: { $ne: "reversal" },
-    "lines.account": accountObjectId,
-  };
+  const matchFilter = applyPartyLedgerJournalScope(
+    {
+      createdBy: userObjectId,
+      isDeleted: false,
+      sourceType: { $ne: "reversal" },
+      "lines.account": accountObjectId,
+    },
+    moduleScope,
+  );
 
   if (start || end) {
     matchFilter.date = {};
@@ -140,13 +204,18 @@ const fetchPartyLedgerData = async ({
     const result = await JournalEntry.aggregate([
       {
         $match: {
-          createdBy: userObjectId,
-          isDeleted: false,
-          sourceType: { $ne: "reversal" },
-          "lines.account": accountObjectId,
-          date: {
-            $lt: start,
-          },
+          ...applyPartyLedgerJournalScope(
+            {
+              createdBy: userObjectId,
+              isDeleted: false,
+              sourceType: { $ne: "reversal" },
+              "lines.account": accountObjectId,
+              date: {
+                $lt: start,
+              },
+            },
+            moduleScope,
+          ),
         },
       },
       {
@@ -242,6 +311,7 @@ const fetchPartyLedgerData = async ({
     partyName: party.name || "-",
     partyPhone: party.phone || "",
     role: party.role || "both",
+    moduleScope,
     openingBalance: Number(openingBalance.toFixed(2)),
     ledger,
   };
@@ -253,18 +323,21 @@ const getPartyLedgerHtml = async (req, res) => {
     const { partyId } = req.params;
 
     const { startDate, endDate, size, lang } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     const rawData = await fetchPartyLedgerData({
       partyId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
       partyPhone: rawData.partyPhone,
       role: rawData.role,
+      moduleScope: rawData.moduleScope,
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
@@ -293,18 +366,21 @@ const generatePartyLedgerPdf = async (req, res) => {
     const { partyId } = req.params;
 
     const { startDate, endDate, size, lang } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     const rawData = await fetchPartyLedgerData({
       partyId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
       partyPhone: rawData.partyPhone,
       role: rawData.role,
+      moduleScope: rawData.moduleScope,
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,

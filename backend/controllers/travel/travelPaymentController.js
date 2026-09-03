@@ -5,6 +5,7 @@ const Counter = require("../../models/Counter");
 const Customer = require("../../models/Customer");
 const JournalEntry = require("../../models/JournalEntry");
 const PayBill = require("../../models/PayBill");
+const Party = require("../../models/Party");
 const ReceivePayment = require("../../models/ReceivePayment");
 const Supplier = require("../../models/Supplier");
 const TravelBooking = require("../../models/TravelBooking");
@@ -20,6 +21,7 @@ const {
   TRAVEL_RECEIVE_PAYMENT_ORIGIN,
   TRAVEL_VENDOR_PAYMENT_ORIGIN,
   getTravelCustomerBalanceMap,
+  getTravelPartyBalanceMap,
   getTravelVendorBalanceMap,
   roundMoney,
 } = require("../../services/travel/travelAccountingMetricsService");
@@ -34,6 +36,16 @@ const {
 const {
   clearTravelReportCache,
 } = require("../../services/travel/travelReportCacheService");
+const {
+  buildTravelPartyRoleQuery,
+  getCustomerJournalIdentity,
+  getVendorJournalIdentity,
+  normalizeCustomerCounterpartyInput,
+  normalizeVendorCounterpartyInput,
+  resolveTravelCustomerCounterparty,
+  resolveTravelVendorCounterparty,
+  serializeCounterparty,
+} = require("../../services/travel/travelCounterpartyService");
 const {
   getSoftDeleteReason,
   recalculateTravelSoftDeleteAccounts,
@@ -198,55 +210,97 @@ const mapRecordById = (records = []) =>
 
 const findTravelCustomersForSearch = async (userId, search) => {
   if (!search) {
-    return [];
+    return {
+      customerIds: [],
+      partyIds: [],
+    };
   }
 
   const safeSearch = escapeRegex(search);
 
-  return Customer.find(
-    applyModuleScopeFilter(
-      {
-        createdBy: toObjectId(userId, "user"),
-        isActive: { $ne: false },
-        $or: [
-          { name: { $regex: safeSearch, $options: "i" } },
-          { phone: { $regex: safeSearch, $options: "i" } },
-          { email: { $regex: safeSearch, $options: "i" } },
-        ],
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id")
-    .limit(50)
-    .lean();
+  const [customers, parties] = await Promise.all([
+    Customer.find(
+      applyModuleScopeFilter(
+        {
+          createdBy: toObjectId(userId, "user"),
+          isActive: { $ne: false },
+          $or: [
+            { name: { $regex: safeSearch, $options: "i" } },
+            { phone: { $regex: safeSearch, $options: "i" } },
+            { email: { $regex: safeSearch, $options: "i" } },
+          ],
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id")
+      .limit(50)
+      .lean(),
+    Party.find({
+      ...buildTravelPartyRoleQuery(toObjectId(userId, "user"), "customer"),
+      $or: [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+      ],
+    })
+      .select("_id")
+      .limit(50)
+      .lean(),
+  ]);
+
+  return {
+    customerIds: customers.map((customer) => customer._id),
+    partyIds: parties.map((party) => party._id),
+  };
 };
 
 const findTravelVendorsForSearch = async (userId, search) => {
   if (!search) {
-    return [];
+    return {
+      vendorIds: [],
+      partyIds: [],
+    };
   }
 
   const safeSearch = escapeRegex(search);
 
-  return Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        userId: toObjectId(userId, "user"),
-        isDeleted: false,
-        $or: [
-          { name: { $regex: safeSearch, $options: "i" } },
-          { phone: { $regex: safeSearch, $options: "i" } },
-          { email: { $regex: safeSearch, $options: "i" } },
-          { contactPerson: { $regex: safeSearch, $options: "i" } },
-        ],
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id")
-    .limit(50)
-    .lean();
+  const [vendors, parties] = await Promise.all([
+    Supplier.find(
+      applySupplierModuleScopeFilter(
+        {
+          userId: toObjectId(userId, "user"),
+          isDeleted: false,
+          $or: [
+            { name: { $regex: safeSearch, $options: "i" } },
+            { phone: { $regex: safeSearch, $options: "i" } },
+            { email: { $regex: safeSearch, $options: "i" } },
+            { contactPerson: { $regex: safeSearch, $options: "i" } },
+          ],
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id")
+      .limit(50)
+      .lean(),
+    Party.find({
+      ...buildTravelPartyRoleQuery(toObjectId(userId, "user"), "supplier"),
+      $or: [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+      ],
+    })
+      .select("_id")
+      .limit(50)
+      .lean(),
+  ]);
+
+  return {
+    vendorIds: vendors.map((vendor) => vendor._id),
+    partyIds: parties.map((party) => party._id),
+  };
 };
 
 const findTravelInvoicesForSearch = async (userId, search) => {
@@ -312,9 +366,11 @@ exports.getTravelReceivePayments = async (req, res) => {
     const objectUserId = toObjectId(userId, "user");
     const { page, limit, skip } = getPagedQueryOptions(req.query);
     const search = cleanString(req.query.search);
-    const customerId = optionalObjectId(
-      req.query.customerId || req.query.customer,
-      "customer",
+    const customerFilter = normalizeCustomerCounterpartyInput(req.query);
+    const customerId = optionalObjectId(customerFilter.customerId, "customer");
+    const customerPartyId = optionalObjectId(
+      customerFilter.customerPartyId,
+      "party",
     );
     const accountId = optionalObjectId(
       req.query.accountId || req.query.account,
@@ -332,7 +388,9 @@ exports.getTravelReceivePayments = async (req, res) => {
       },
     };
 
-    if (customerId) {
+    if (customerPartyId) {
+      query.partyId = customerPartyId;
+    } else if (customerId) {
       query.customerId = customerId;
     }
 
@@ -364,7 +422,12 @@ exports.getTravelReceivePayments = async (req, res) => {
             { description: { $regex: safeSearch, $options: "i" } },
             {
               customerId: {
-                $in: matchingCustomers.map((customer) => customer._id),
+                $in: matchingCustomers.customerIds,
+              },
+            },
+            {
+              partyId: {
+                $in: matchingCustomers.partyIds,
               },
             },
             {
@@ -380,9 +443,10 @@ exports.getTravelReceivePayments = async (req, res) => {
     const [journals, total] = await Promise.all([
       JournalEntry.find(query)
         .select(
-          "date time description billNo originModule referenceId customerId lines createdAt",
+          "date time description billNo originModule referenceId customerId partyId lines createdAt",
         )
         .populate("customerId", "name phone email moduleScope")
+        .populate("partyId", "name phone email role moduleScope")
         .populate("lines.account", "name code category type")
         .sort({ date: -1, time: -1, createdAt: -1, _id: -1 })
         .skip(skip)
@@ -411,9 +475,10 @@ exports.getTravelReceivePayments = async (req, res) => {
             isReversed: { $ne: true },
           })
             .select(
-              "customer date time amount finalAmount paymentType billNo account description originModule",
+              "customer partyId date time amount finalAmount paymentType billNo account description originModule",
             )
             .populate("customer", "name phone email moduleScope")
+            .populate("partyId", "name phone email role moduleScope")
             .populate("account", "name code category type")
             .lean()
         : [],
@@ -426,9 +491,10 @@ exports.getTravelReceivePayments = async (req, res) => {
             isVoided: { $ne: true },
           })
             .select(
-              "bookingNumber invoiceNumber customerId accountId paymentType notes",
+              "bookingNumber invoiceNumber customerType customerId customerPartyId accountId paymentType notes",
             )
             .populate("customerId", "name phone email moduleScope")
+            .populate("customerPartyId", "name phone email role moduleScope")
             .populate("accountId", "name code category type")
             .lean()
         : [],
@@ -445,8 +511,11 @@ exports.getTravelReceivePayments = async (req, res) => {
         const invoice = invoiceMap.get(String(journal.referenceId || ""));
         const paymentLine = buildPaymentAccount(journal, "debit");
         const customer =
+          payment?.partyId ||
           payment?.customer ||
+          journal.partyId ||
           journal.customerId ||
+          invoice?.customerPartyId ||
           invoice?.customerId ||
           null;
         const paymentAccount =
@@ -491,10 +560,9 @@ exports.getTravelVendorPayments = async (req, res) => {
     const objectUserId = toObjectId(userId, "user");
     const { page, limit, skip } = getPagedQueryOptions(req.query);
     const search = cleanString(req.query.search);
-    const vendorId = optionalObjectId(
-      req.query.vendorId || req.query.supplier,
-      "vendor",
-    );
+    const vendorFilter = normalizeVendorCounterpartyInput(req.query);
+    const vendorId = optionalObjectId(vendorFilter.vendorId, "vendor");
+    const vendorPartyId = optionalObjectId(vendorFilter.vendorPartyId, "party");
     const accountId = optionalObjectId(
       req.query.accountId || req.query.account,
       "payment account",
@@ -511,7 +579,9 @@ exports.getTravelVendorPayments = async (req, res) => {
       },
     };
 
-    if (vendorId) {
+    if (vendorPartyId) {
+      query.partyId = vendorPartyId;
+    } else if (vendorId) {
       query.supplierId = vendorId;
     }
 
@@ -539,7 +609,10 @@ exports.getTravelVendorPayments = async (req, res) => {
             { billNo: { $regex: safeSearch, $options: "i" } },
             { description: { $regex: safeSearch, $options: "i" } },
             {
-              supplierId: { $in: matchingVendors.map((vendor) => vendor._id) },
+              supplierId: { $in: matchingVendors.vendorIds },
+            },
+            {
+              partyId: { $in: matchingVendors.partyIds },
             },
           ],
         },
@@ -549,9 +622,10 @@ exports.getTravelVendorPayments = async (req, res) => {
     const [journals, total] = await Promise.all([
       JournalEntry.find(query)
         .select(
-          "date time description billNo originModule referenceId supplierId lines createdAt",
+          "date time description billNo originModule referenceId supplierId partyId lines createdAt",
         )
         .populate("supplierId", "name phone email travelVendorType moduleScope")
+        .populate("partyId", "name phone email role moduleScope")
         .populate("lines.account", "name code category type")
         .sort({ date: -1, time: -1, createdAt: -1, _id: -1 })
         .skip(skip)
@@ -582,12 +656,13 @@ exports.getTravelVendorPayments = async (req, res) => {
             originModule: TRAVEL_VENDOR_PAYMENT_ORIGIN,
           })
             .select(
-              "supplier date time amount finalAmount paymentType billNo account description originModule",
+              "supplier partyId date time amount finalAmount paymentType billNo account description originModule",
             )
             .populate(
               "supplier",
               "name phone email travelVendorType moduleScope",
             )
+            .populate("partyId", "name phone email role moduleScope")
             .populate("account", "name code category type")
             .lean()
         : [],
@@ -618,7 +693,7 @@ exports.getTravelVendorPayments = async (req, res) => {
         const bill = billMap.get(String(journal.referenceId || ""));
         const invoice = invoiceMap.get(String(journal.referenceId || ""));
         const paymentLine = buildPaymentAccount(journal, "credit");
-        const vendor = bill?.supplier || journal.supplierId || null;
+        const vendor = bill?.partyId || bill?.supplier || journal.partyId || journal.supplierId || null;
 
         return {
           _id: journal._id,
@@ -681,10 +756,6 @@ exports.createTravelReceivePayment = async (req, res) => {
   try {
     const userId = getUserId(req);
     const actorId = getActorId(req);
-    const customerId = toObjectId(
-      req.body.customerId || req.body.customer,
-      "customer",
-    );
     const amount = moneyNumber(req.body.amount, "payment amount");
     const paymentType = normalizePaymentType(req.body.paymentType);
     const paymentDate = normalizePaymentDate(req.body.date);
@@ -693,20 +764,14 @@ exports.createTravelReceivePayment = async (req, res) => {
     const reference = cleanString(req.body.reference || req.body.referenceNo);
 
     const [customer, paymentAccount] = await Promise.all([
-      Customer.findOne(
-        applyModuleScopeFilter(
-          {
-            _id: customerId,
-            createdBy: toObjectId(userId, "user"),
-            isActive: { $ne: false },
-          },
-          MODULE_SCOPES.TRAVEL,
-        ),
-      ).populate("account"),
+      resolveTravelCustomerCounterparty({
+        userId: toObjectId(userId, "user"),
+        source: req.body,
+      }),
       getPaymentAccount(userId, req.body.accountId || req.body.account),
     ]);
 
-    if (!customer || !customer.account) {
+    if (!customer || !customer.accountId) {
       throw createHttpError(404, "Travel customer account not found");
     }
 
@@ -723,8 +788,8 @@ exports.createTravelReceivePayment = async (req, res) => {
     );
 
     const payment = await ReceivePayment.create({
-      customer: customer._id,
-      partyId: null,
+      customer: customer.customerId,
+      partyId: customer.partyId,
       date: formatDateInput(paymentDate, req.body.date),
       time,
       amount,
@@ -746,11 +811,11 @@ exports.createTravelReceivePayment = async (req, res) => {
       originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
       billNo,
       accountId: paymentAccount._id,
-      counterPartyAccountId: customer.account._id,
+      counterPartyAccountId: customer.accountId,
       amount,
       paymentType,
       description,
-      customerId: customer._id,
+      ...getCustomerJournalIdentity(customer),
       entryDate: paymentDate,
       entryTime: time,
     });
@@ -758,8 +823,11 @@ exports.createTravelReceivePayment = async (req, res) => {
     payment.journalEntryId = journal._id;
     await payment.save();
 
-    const balanceMap = await getTravelCustomerBalanceMap(userId, [customer]);
-    const accountId = String(customer.account._id);
+    const balanceMap =
+      customer.entityType === "party"
+        ? await getTravelPartyBalanceMap(userId, [customer.record])
+        : await getTravelCustomerBalanceMap(userId, [customer.record]);
+    const accountId = String(customer.accountId);
     const balance = roundMoney(balanceMap.get(accountId) || 0);
 
     try {
@@ -787,11 +855,7 @@ exports.createTravelReceivePayment = async (req, res) => {
     return res.status(201).json({
       payment,
       journalEntryId: journal._id,
-      customer: {
-        _id: customer._id,
-        name: customer.name,
-        phone: customer.phone,
-      },
+      customer: serializeCounterparty(customer),
       balance,
       currentReceivable: Math.max(balance, 0),
       customerCredit: Math.max(-balance, 0),
@@ -805,10 +869,6 @@ exports.createTravelVendorPayment = async (req, res) => {
   try {
     const userId = getUserId(req);
     const actorId = getActorId(req);
-    const vendorId = toObjectId(
-      req.body.vendorId || req.body.supplier,
-      "vendor",
-    );
     const amount = moneyNumber(req.body.amount, "payment amount");
     const paymentType = normalizePaymentType(req.body.paymentType);
     const paymentDate = normalizePaymentDate(req.body.date);
@@ -817,20 +877,14 @@ exports.createTravelVendorPayment = async (req, res) => {
     const reference = cleanString(req.body.reference || req.body.referenceNo);
 
     const [vendor, paymentAccount] = await Promise.all([
-      Supplier.findOne(
-        applySupplierModuleScopeFilter(
-          {
-            _id: vendorId,
-            userId: toObjectId(userId, "user"),
-            isDeleted: false,
-          },
-          MODULE_SCOPES.TRAVEL,
-        ),
-      ).populate("account"),
+      resolveTravelVendorCounterparty({
+        userId: toObjectId(userId, "user"),
+        source: req.body,
+      }),
       getPaymentAccount(userId, req.body.accountId || req.body.account),
     ]);
 
-    if (!vendor || !vendor.account) {
+    if (!vendor || !vendor.accountId) {
       throw createHttpError(404, "Travel vendor account not found");
     }
 
@@ -847,8 +901,8 @@ exports.createTravelVendorPayment = async (req, res) => {
     );
 
     const bill = await PayBill.create({
-      supplier: vendor._id,
-      partyId: null,
+      supplier: vendor.supplierId,
+      partyId: vendor.partyId,
       date: formatDateInput(paymentDate, req.body.date),
       time,
       billNo,
@@ -869,11 +923,11 @@ exports.createTravelVendorPayment = async (req, res) => {
       originModule: TRAVEL_VENDOR_PAYMENT_ORIGIN,
       billNo,
       accountId: paymentAccount._id,
-      counterPartyAccountId: vendor.account._id,
+      counterPartyAccountId: vendor.accountId,
       amount,
       paymentType,
       description,
-      supplierId: vendor._id,
+      ...getVendorJournalIdentity(vendor),
       entryDate: paymentDate,
       entryTime: time,
     });
@@ -881,9 +935,14 @@ exports.createTravelVendorPayment = async (req, res) => {
     bill.journalEntryId = journal._id;
     await bill.save();
 
-    const balanceMap = await getTravelVendorBalanceMap(userId, [vendor]);
-    const accountId = String(vendor.account._id);
+    const balanceMap =
+      vendor.entityType === "party"
+        ? await getTravelPartyBalanceMap(userId, [vendor.record])
+        : await getTravelVendorBalanceMap(userId, [vendor.record]);
+    const accountId = String(vendor.accountId);
     const balance = roundMoney(balanceMap.get(accountId) || 0);
+    const payableBalance =
+      vendor.entityType === "party" ? roundMoney(-balance) : balance;
 
     try {
       await logActivity({
@@ -910,14 +969,10 @@ exports.createTravelVendorPayment = async (req, res) => {
     return res.status(201).json({
       payment: bill,
       journalEntryId: journal._id,
-      vendor: {
-        _id: vendor._id,
-        name: vendor.name,
-        phone: vendor.phone,
-      },
+      vendor: serializeCounterparty(vendor),
       balance,
-      currentPayable: Math.max(balance, 0),
-      vendorCredit: Math.max(-balance, 0),
+      currentPayable: Math.max(payableBalance, 0),
+      vendorCredit: Math.max(-payableBalance, 0),
     });
   } catch (error) {
     return sendError(res, error, "Travel vendor payment failed");

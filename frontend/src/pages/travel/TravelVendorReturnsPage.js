@@ -16,6 +16,7 @@ import { t } from '../../i18n/i18n';
 import {
   createTravelVendorReturn,
   deleteTravelVendorReturn,
+  fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelVendorReturnInvoices,
   fetchTravelVendorReturns,
@@ -52,7 +53,9 @@ const FILTER_DEFAULTS = Object.freeze({
 });
 
 const createInitialForm = () => ({
+  vendorType: 'vendor',
   vendorId: '',
+  vendorPartyId: '',
   originalInvoiceId: '',
   originalInvoiceNumber: '',
   serviceLabel: '',
@@ -85,18 +88,82 @@ const paymentTypeOptions = [
 
 const getVendorLabel = (vendor) => vendor?.name || '-';
 
+const getRecordId = (record) => (typeof record === 'object' ? record?._id : record) || '';
+
+const buildCounterpartyOption = (record, type) => {
+  const sourceId = getRecordId(record);
+
+  return {
+    ...record,
+    _id: sourceId ? `${type}:${sourceId}` : '',
+    sourceId,
+    counterpartyType: type,
+    entityType: type,
+  };
+};
+
+const getVendorCounterpartyValue = (formState) =>
+  formState.vendorType === 'party' && getRecordId(formState.vendorPartyId)
+    ? `party:${getRecordId(formState.vendorPartyId)}`
+    : getRecordId(formState.vendorId)
+      ? `vendor:${getRecordId(formState.vendorId)}`
+      : '';
+
+const getCounterpartySelection = (value, record, fallbackType = 'vendor') => {
+  if (record?.counterpartyType) {
+    return {
+      type: record.counterpartyType,
+      id: record.sourceId || getRecordId(record),
+    };
+  }
+
+  if (typeof value === 'string' && value.includes(':')) {
+    const [type, id] = value.split(':');
+
+    return {
+      type: type || fallbackType,
+      id: id || '',
+    };
+  }
+
+  return {
+    type: fallbackType,
+    id: value || '',
+  };
+};
+
+const getVendorPayable = (vendor) => {
+  if (vendor?.counterpartyType === 'party' || vendor?.entityType === 'party') {
+    return Math.max(-Number(vendor?.balance || 0), 0);
+  }
+
+  return Number(vendor?.currentPayable || 0);
+};
+
 const getVendorMeta = (vendor) =>
-  [vendor?.phone, formatTravelMoney(vendor?.currentPayable)].filter(Boolean).join(' | ');
+  [
+    vendor?.counterpartyType === 'party' ? t('travel.counterparty.party') : '',
+    vendor?.phone,
+    formatTravelMoney(getVendorPayable(vendor)),
+  ]
+    .filter(Boolean)
+    .join(' | ');
 
 const getInvoiceLabel = (invoice) => invoice?.invoiceNumber || invoice?.bookingNumber || '-';
 
 const getAccountLabel = (account) => [account?.name, account?.code].filter(Boolean).join(' - ');
 
 const getVendorReturnVendorName = (record) =>
-  typeof record?.vendorId === 'object' ? record.vendorId?.name || '-' : '-';
+  record?.vendor?.name ||
+  (typeof record?.vendorPartyId === 'object' ? record.vendorPartyId?.name : '') ||
+  (typeof record?.vendorId === 'object' ? record.vendorId?.name : '') ||
+  '-';
 
 const getVendorReturnVendorPhone = (record) =>
-  typeof record?.vendorId === 'object' ? record.vendorId?.phone || '' : '';
+  record?.vendor?.phone ||
+  (typeof record?.vendorPartyId === 'object' ? record.vendorPartyId?.phone : '') ||
+  (typeof record?.vendorId === 'object' ? record.vendorId?.phone : '') ||
+  '';
 
 const getVendorReturnReference = (record) =>
   [record.originalInvoiceNumber, record.serviceLabel].filter(Boolean).join(' - ') || '-';
@@ -210,6 +277,7 @@ const TravelVendorReturnsPage = () => {
 
   const [returns, setReturns] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [parties, setParties] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
 
@@ -240,9 +308,20 @@ const TravelVendorReturnsPage = () => {
     setSearchInput(filters.search || '');
   }, [filters.search]);
 
+  const vendorOptions = useMemo(
+    () => [
+      ...vendors.map((vendor) => buildCounterpartyOption(vendor, 'vendor')),
+      ...parties.map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [parties, vendors]
+  );
+
   const selectedVendor = useMemo(
-    () => vendors.find((vendor) => String(vendor._id) === String(formState.vendorId)) || null,
-    [formState.vendorId, vendors]
+    () =>
+      vendorOptions.find(
+        (vendor) => String(vendor._id) === String(getVendorCounterpartyValue(formState))
+      ) || null,
+    [formState, vendorOptions]
   );
 
   const selectedInvoice = useMemo(
@@ -302,16 +381,23 @@ const TravelVendorReturnsPage = () => {
     try {
       setFormError('');
 
-      const [vendorData, accountData] = await Promise.all([
+      const [vendorData, partyData, accountData] = await Promise.all([
         fetchTravelVendors({ includeBalance: 'true' }),
+        fetchTravelParties({
+          status: 'active',
+          eligibleRole: 'supplier',
+          includeBalance: 'true',
+        }),
         fetchTravelPaymentAccounts(),
       ]);
 
       const safeVendors = Array.isArray(vendorData) ? vendorData : [];
+      const safeParties = Array.isArray(partyData) ? partyData : [];
 
       const safeAccounts = Array.isArray(accountData) ? accountData : [];
 
       setVendors(safeVendors);
+      setParties(safeParties);
       setPaymentAccounts(safeAccounts);
 
       setFormState((current) => ({
@@ -338,7 +424,7 @@ const TravelVendorReturnsPage = () => {
   }, [formVisible, loadReferences]);
 
   useEffect(() => {
-    if (!formVisible || !formState.vendorId) {
+    if (!formVisible || (!formState.vendorId && !formState.vendorPartyId)) {
       setInvoices([]);
       return undefined;
     }
@@ -348,7 +434,9 @@ const TravelVendorReturnsPage = () => {
     const loadInvoices = async () => {
       try {
         const rows = await fetchTravelVendorReturnInvoices({
+          vendorType: formState.vendorType,
           vendorId: formState.vendorId,
+          vendorPartyId: formState.vendorPartyId,
           limit: 100,
         });
 
@@ -371,7 +459,7 @@ const TravelVendorReturnsPage = () => {
     return () => {
       active = false;
     };
-  }, [formState.vendorId, formVisible]);
+  }, [formState.vendorId, formState.vendorPartyId, formState.vendorType, formVisible]);
 
   const updateField = useCallback((field, value) => {
     setFormState((current) => ({
@@ -382,10 +470,14 @@ const TravelVendorReturnsPage = () => {
     setSuccessMessage('');
   }, []);
 
-  const selectVendor = useCallback((id) => {
+  const selectVendor = useCallback((value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
+
     setFormState((current) => ({
       ...current,
-      vendorId: id,
+      vendorType: selection.type === 'party' ? 'party' : 'vendor',
+      vendorId: selection.type === 'party' ? '' : selection.id,
+      vendorPartyId: selection.type === 'party' ? selection.id : '',
       originalInvoiceId: '',
       originalInvoiceNumber: '',
       serviceLabel: '',
@@ -453,6 +545,9 @@ const TravelVendorReturnsPage = () => {
 
         setFormState((current) => ({
           ...createInitialForm(),
+          vendorType: current.vendorType,
+          vendorId: current.vendorId,
+          vendorPartyId: current.vendorPartyId,
           accountId: current.accountId,
           paymentType: current.paymentType,
         }));
@@ -853,9 +948,9 @@ const TravelVendorReturnsPage = () => {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.vendor"
-              value={formState.vendorId}
+              value={getVendorCounterpartyValue(formState)}
               onChange={selectVendor}
-              records={vendors}
+              records={vendorOptions}
               getLabel={getVendorLabel}
               getMeta={getVendorMeta}
               placeholderKey="travel.payments.vendorPlaceholder"
@@ -870,7 +965,7 @@ const TravelVendorReturnsPage = () => {
               <select
                 value={formState.originalInvoiceId}
                 onChange={selectInvoice}
-                disabled={!formState.vendorId}
+                disabled={!formState.vendorId && !formState.vendorPartyId}
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-50 disabled:text-slate-500"
               >
                 <option value="">{t('travel.vendorReturns.noInvoice')}</option>
@@ -1043,7 +1138,7 @@ const TravelVendorReturnsPage = () => {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <SummaryBox
               labelKey="travel.fields.currentPayable"
-              value={formatTravelMoney(selectedVendor?.currentPayable)}
+              value={formatTravelMoney(getVendorPayable(selectedVendor))}
               accent="text-rose-700"
             />
 

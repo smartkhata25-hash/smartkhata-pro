@@ -1,22 +1,76 @@
 const mongoose = require("mongoose");
 const Party = require("../models/Party");
 const JournalEntry = require("../models/JournalEntry");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  TRAVEL_PARTY_OPENING_ORIGIN,
+} = require("../services/travel/travelCounterpartyService");
+
+const TRAVEL_PARTY_LEDGER_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  TRAVEL_PARTY_OPENING_ORIGIN,
+]);
+
+const getLedgerModuleScope = (query = {}) =>
+  normalizeModuleScope(
+    getRequestedModuleScope(query, MODULE_SCOPES.TRADING),
+    MODULE_SCOPES.TRADING,
+  );
+
+const applyPartyLedgerJournalScope = (match, moduleScope) => {
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    match.originModule = {
+      $in: TRAVEL_PARTY_LEDGER_ORIGINS,
+    };
+
+    return match;
+  }
+
+  match.$and = [
+    ...(match.$and || []),
+    {
+      $or: [
+        { originModule: { $exists: false } },
+        { originModule: null },
+        { originModule: "" },
+        { originModule: { $nin: TRAVEL_PARTY_LEDGER_ORIGINS } },
+      ],
+    },
+  ];
+
+  return match;
+};
 
 const getPartyLedger = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
     const { partyId } = req.params;
     const { startDate, endDate } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     if (!mongoose.Types.ObjectId.isValid(partyId)) {
       return res.status(400).json({ message: "Invalid party ID" });
     }
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-    }).populate("account");
+    const party = await Party.findOne(
+      applyModuleScopeFilter(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    ).populate("account");
 
     if (!party || !party.account) {
       return res.status(404).json({ message: "Party not found" });
@@ -25,12 +79,15 @@ const getPartyLedger = async (req, res) => {
     const accountId = party.account._id || party.account;
     const accountObjectId = new mongoose.Types.ObjectId(accountId);
 
-    const matchFilter = {
-      createdBy: userId,
-      isDeleted: false,
-      sourceType: { $ne: "reversal" },
-      "lines.account": accountObjectId,
-    };
+    const matchFilter = applyPartyLedgerJournalScope(
+      {
+        createdBy: userId,
+        isDeleted: false,
+        sourceType: { $ne: "reversal" },
+        "lines.account": accountObjectId,
+      },
+      moduleScope,
+    );
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -50,13 +107,16 @@ const getPartyLedger = async (req, res) => {
 
       const result = await JournalEntry.aggregate([
         {
-          $match: {
-            createdBy: userId,
-            isDeleted: false,
-            sourceType: { $ne: "reversal" },
-            "lines.account": accountObjectId,
-            date: { $lt: start },
-          },
+          $match: applyPartyLedgerJournalScope(
+            {
+              createdBy: userId,
+              isDeleted: false,
+              sourceType: { $ne: "reversal" },
+              "lines.account": accountObjectId,
+              date: { $lt: start },
+            },
+            moduleScope,
+          ),
         },
         { $unwind: "$lines" },
         {
@@ -138,6 +198,7 @@ const getPartyLedger = async (req, res) => {
       partyName: party.name,
       partyPhone: party.phone || "",
       role: party.role,
+      moduleScope,
 
       isActive: party.isActive,
       isDeleted: party.isDeleted,
@@ -165,6 +226,9 @@ const getPartySourceLabel = (entry) => {
   const type = entry.sourceType || "";
 
   if (type === "opening_balance") return "Opening Balance";
+  if (entry.originModule === TRAVEL_PARTY_OPENING_ORIGIN) {
+    return "Travel Opening Balance";
+  }
 
   if (type === "sale_invoice") return "Sale Invoice";
   if (type === "opening_sale_invoice") return "Opening Sale Invoice";
@@ -179,6 +243,10 @@ const getPartySourceLabel = (entry) => {
   if (type === "opening_purchase_return") return "Opening Balance";
 
   if (type === "receive_payment") return "Receive Payment";
+  if (type === "travel_booking") return "Travel Invoice";
+  if (type === "travel_vendor_cost") return "Travel Vendor Cost";
+  if (type === "travel_refund") return "Travel Refund";
+  if (type === "travel_vendor_return") return "Travel Vendor Return";
   if (type === "receive_payment_discount") return "Receive Payment Discount";
 
   if (type === "pay_bill") return "Pay Bill";
@@ -200,6 +268,7 @@ const getPartyBalance = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
     const { partyId } = req.params;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     if (!mongoose.Types.ObjectId.isValid(partyId)) {
       return res.status(400).json({
@@ -207,11 +276,16 @@ const getPartyBalance = async (req, res) => {
       });
     }
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-    })
+    const party = await Party.findOne(
+      applyModuleScopeFilter(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    )
       .select("_id account")
       .lean();
 
@@ -226,10 +300,15 @@ const getPartyBalance = async (req, res) => {
     const result = await JournalEntry.aggregate([
       {
         $match: {
-          createdBy: userId,
-          isDeleted: false,
-          sourceType: { $ne: "reversal" },
-          "lines.account": accountObjectId,
+          ...applyPartyLedgerJournalScope(
+            {
+              createdBy: userId,
+              isDeleted: false,
+              sourceType: { $ne: "reversal" },
+              "lines.account": accountObjectId,
+            },
+            moduleScope,
+          ),
         },
       },
       {
@@ -261,6 +340,7 @@ const getPartyBalance = async (req, res) => {
     return res.json({
       partyId: party._id,
       accountId: party.account,
+      moduleScope,
       balance,
     });
   } catch (err) {

@@ -34,6 +34,14 @@ export const travelSidebarItems = Object.freeze([
     anyPermissions: ['travel.bookings.view', 'travel.customers', 'travel.payments'],
   },
   {
+    key: 'travelParties',
+    to: '/travel/parties',
+    labelKey: 'travel.sidebar.parties',
+    icon: FaUsers,
+    module: MODULE_KEYS.TRAVEL,
+    anyPermissions: ['travel.parties.view', 'travel.parties.manage'],
+  },
+  {
     key: 'travelVendors',
     to: '/travel/vendors',
     labelKey: 'travel.sidebar.vendors',

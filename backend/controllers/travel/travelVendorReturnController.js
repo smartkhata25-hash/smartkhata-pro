@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Account = require("../../models/Account");
 const JournalEntry = require("../../models/JournalEntry");
+const Party = require("../../models/Party");
 const Supplier = require("../../models/Supplier");
 const TravelBooking = require("../../models/TravelBooking");
 const TravelRefund = require("../../models/TravelRefund");
@@ -40,6 +41,12 @@ const {
   sendError,
 } = require("../../services/travel/travelBookingService");
 const { generateTravelVendorReturnNumber } = require("../../services/travel/travelVendorReturnNumberService");
+const {
+  buildTravelPartyRoleQuery,
+  getVendorJournalIdentity,
+  normalizeVendorCounterpartyInput,
+  resolveTravelVendorCounterparty,
+} = require("../../services/travel/travelCounterpartyService");
 
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
 
@@ -169,9 +176,14 @@ const getPaymentAccount = async ({ userId, accountId, amountReceivedNow, session
   return account;
 };
 
-const collectVendorCostRows = (invoice, vendorId) => {
+const getVendorMatchKey = (vendor = {}) =>
+  vendor.vendorType === "party"
+    ? `party:${vendor.vendorPartyId || ""}`
+    : `vendor:${vendor.vendorId || ""}`;
+
+const collectVendorCostRows = (invoice, vendor) => {
   const rows = [];
-  const vendorKey = String(vendorId || "");
+  const vendorKey = getVendorMatchKey(vendor);
 
   (invoice.bookingItems || []).forEach((item) => {
     const useComponents =
@@ -182,7 +194,13 @@ const collectVendorCostRows = (invoice, vendorId) => {
 
     if (useComponents) {
       item.umrahDetails.components.forEach((component) => {
-        if (String(component.vendorId || "") !== vendorKey) {
+        if (
+          getVendorMatchKey({
+            vendorType: component.vendorType === "party" ? "party" : "vendor",
+            vendorId: component.vendorId,
+            vendorPartyId: component.vendorPartyId,
+          }) !== vendorKey
+        ) {
           return;
         }
 
@@ -196,7 +214,13 @@ const collectVendorCostRows = (invoice, vendorId) => {
       return;
     }
 
-    if (String(item.vendorId || "") !== vendorKey) {
+    if (
+      getVendorMatchKey({
+        vendorType: item.vendorType === "party" ? "party" : "vendor",
+        vendorId: item.vendorId,
+        vendorPartyId: item.vendorPartyId,
+      }) !== vendorKey
+    ) {
       return;
     }
 
@@ -214,6 +238,8 @@ const sumPriorRefundRecoveries = async ({
   userId,
   invoiceId,
   vendorId,
+  vendorType = "vendor",
+  vendorPartyId = null,
   bookingItemId = null,
   session = null,
 }) => {
@@ -234,7 +260,17 @@ const sumPriorRefundRecoveries = async ({
   return roundMoney(
     refunds.reduce((sum, refund) => {
       const itemSum = (refund.refundItems || []).reduce((itemTotal, item) => {
-        const sameVendor = String(item.vendorId || "") === String(vendorId);
+        const sameVendor =
+          getVendorMatchKey({
+            vendorType: item.vendorType === "party" ? "party" : "vendor",
+            vendorId: item.vendorId,
+            vendorPartyId: item.vendorPartyId,
+          }) ===
+          getVendorMatchKey({
+            vendorType,
+            vendorId,
+            vendorPartyId,
+          });
         const sameItem =
           !bookingItemId || String(item.bookingItemId || "") === String(bookingItemId);
 
@@ -252,6 +288,8 @@ const sumPriorVendorReturns = async ({
   userId,
   invoiceId,
   vendorId,
+  vendorType = "vendor",
+  vendorPartyId = null,
   bookingItemId = null,
   session = null,
 }) => {
@@ -261,11 +299,16 @@ const sumPriorVendorReturns = async ({
 
   const query = {
     userId: toObjectId(userId, "user"),
-    vendorId,
     originalInvoiceId: invoiceId,
     isDeleted: false,
     isReversed: { $ne: true },
   };
+
+  if (vendorType === "party") {
+    query.vendorPartyId = vendorPartyId;
+  } else {
+    query.vendorId = vendorId;
+  }
 
   if (bookingItemId) {
     query.$or = [{ bookingItemId }, { bookingItemId: null }];
@@ -282,7 +325,13 @@ const sumPriorVendorReturns = async ({
 };
 
 const buildReturnPayload = async ({ body, userId, session = null }) => {
-  const vendorId = toObjectId(body.vendorId || body.supplierId, "vendor");
+  const vendorCounterparty = normalizeVendorCounterpartyInput(body);
+  const vendorId = vendorCounterparty.vendorId
+    ? toObjectId(vendorCounterparty.vendorId, "vendor")
+    : null;
+  const vendorPartyId = vendorCounterparty.vendorPartyId
+    ? toObjectId(vendorCounterparty.vendorPartyId, "party")
+    : null;
   const originalInvoiceId = optionalObjectId(body.originalInvoiceId, "travel invoice");
   const bookingItemId = optionalObjectId(body.bookingItemId, "travel service");
   const returnDate = normalizeDate(body.returnDate || body.date);
@@ -300,23 +349,11 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
     throw createHttpError(400, "Amount received now cannot exceed vendor return amount");
   }
 
-  const vendor = await getSessionQuery(
-    Supplier.findOne(
-      applySupplierModuleScopeFilter(
-        {
-          _id: vendorId,
-          userId: toObjectId(userId, "user"),
-          isDeleted: false,
-        },
-        MODULE_SCOPES.TRAVEL,
-      ),
-    ).populate("account"),
+  const vendor = await resolveTravelVendorCounterparty({
+    userId,
+    source: vendorCounterparty,
     session,
-  );
-
-  if (!vendor || !vendor.account) {
-    throw createHttpError(404, "Travel vendor account not found");
-  }
+  });
 
   let invoice = null;
   let originalCost = moneyNumber(body.originalCost, "original cost", { allowZero: true });
@@ -341,7 +378,11 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
       throw createHttpError(404, "Posted travel invoice not found");
     }
 
-    const rows = collectVendorCostRows(invoice, vendorId);
+    const rows = collectVendorCostRows(invoice, {
+      vendorType: vendor.vendorType,
+      vendorId,
+      vendorPartyId,
+    });
     const selectedRows = bookingItemId
       ? rows.filter((row) => String(row.id || "") === String(bookingItemId))
       : rows;
@@ -357,6 +398,8 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
       userId,
       invoiceId: invoice._id,
       vendorId,
+      vendorType: vendor.vendorType,
+      vendorPartyId,
       bookingItemId,
       session,
     });
@@ -364,6 +407,8 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
       userId,
       invoiceId: invoice._id,
       vendorId,
+      vendorType: vendor.vendorType,
+      vendorPartyId,
       bookingItemId,
       session,
     });
@@ -386,7 +431,7 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
 
   const balanceMap = await getTravelVendorBalanceMap(userId, [vendor], { session });
   const currentVendorBalance = roundMoney(
-    balanceMap.get(String(vendor.account._id || vendor.account)) || 0,
+    balanceMap.get(String(vendor.accountId)) || 0,
   );
   const balanceAfterReturnCredit = roundMoney(currentVendorBalance - vendorReturnAmount);
   const availableVendorCredit = Math.max(-balanceAfterReturnCredit, 0);
@@ -411,6 +456,8 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
     paymentAccount,
     data: {
       vendorId,
+      vendorType: vendor.vendorType,
+      vendorPartyId,
       originalInvoiceId: invoice?._id || null,
       originalInvoiceNumber,
       bookingItemId: bookingItemId || null,
@@ -454,12 +501,12 @@ const postVendorReturnAccounting = async ({
     invoiceModel: vendorReturn.originalInvoiceId ? "TravelBooking" : null,
     billNo: vendorReturn.returnNumber,
     createdBy: userId,
-    supplierId: vendor._id,
+    ...getVendorJournalIdentity(vendor),
     attachmentUrl: vendorReturn.attachmentUrl || "",
     attachmentType: vendorReturn.attachmentType || "",
     lines: [
       {
-        account: vendor.account._id || vendor.account,
+        account: vendor.accountId,
         type: "debit",
         amount: roundMoney(vendorReturn.vendorReturnAmount),
       },
@@ -483,11 +530,11 @@ const postVendorReturnAccounting = async ({
       originModule: TRAVEL_VENDOR_RETURN_ORIGIN,
       billNo: vendorReturn.returnNumber,
       accountId: paymentAccount._id,
-      counterPartyAccountId: vendor.account._id || vendor.account,
+      counterPartyAccountId: vendor.accountId,
       amount: roundMoney(vendorReturn.amountReceivedNow),
       paymentType: vendorReturn.paymentType,
       description: `Travel Vendor Return Receipt ${vendorReturn.returnNumber}`,
-      supplierId: vendor._id,
+      ...getVendorJournalIdentity(vendor),
       entryDate: returnDate,
       entryTime: returnTime,
       session,
@@ -514,9 +561,14 @@ const serializeVendorReturn = (record) => {
   }
 
   const plain = record.toObject ? record.toObject() : { ...record };
+  const vendor =
+    plain.vendorType === "party" && plain.vendorPartyId
+      ? plain.vendorPartyId
+      : plain.vendorId;
 
   return {
     ...plain,
+    vendor,
     returnId: plain._id,
     invoiceNumber: plain.originalInvoiceNumber,
   };
@@ -551,24 +603,42 @@ const buildReturnDateRange = (fromDate, toDate) => {
 const findTravelVendorsForSearch = async (userId, search) => {
   const safeSearch = escapeRegex(search);
 
-  return Supplier.find(
-    applySupplierModuleScopeFilter(
-      {
-        userId: toObjectId(userId, "user"),
-        isDeleted: false,
-        $or: [
-          { name: { $regex: safeSearch, $options: "i" } },
-          { phone: { $regex: safeSearch, $options: "i" } },
-          { email: { $regex: safeSearch, $options: "i" } },
-          { contactPerson: { $regex: safeSearch, $options: "i" } },
-        ],
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id")
-    .limit(50)
-    .lean();
+  const [vendors, parties] = await Promise.all([
+    Supplier.find(
+      applySupplierModuleScopeFilter(
+        {
+          userId: toObjectId(userId, "user"),
+          isDeleted: false,
+          $or: [
+            { name: { $regex: safeSearch, $options: "i" } },
+            { phone: { $regex: safeSearch, $options: "i" } },
+            { email: { $regex: safeSearch, $options: "i" } },
+            { contactPerson: { $regex: safeSearch, $options: "i" } },
+          ],
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id")
+      .limit(50)
+      .lean(),
+    Party.find({
+      ...buildTravelPartyRoleQuery(toObjectId(userId, "user"), "supplier"),
+      $or: [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+      ],
+    })
+      .select("_id")
+      .limit(50)
+      .lean(),
+  ]);
+
+  return {
+    vendorIds: vendors.map((vendor) => vendor._id),
+    partyIds: parties.map((party) => party._id),
+  };
 };
 
 exports.getTravelVendorReturns = async (req, res) => {
@@ -581,7 +651,13 @@ exports.getTravelVendorReturns = async (req, res) => {
     const originalInvoice = cleanString(
       req.query.originalInvoice || req.query.originalInvoiceNumber,
     );
-    const vendorId = optionalObjectId(req.query.vendorId || req.query.supplier, "vendor");
+    const vendorFilter = normalizeVendorCounterpartyInput(req.query);
+    const vendorId = vendorFilter.vendorId
+      ? toObjectId(vendorFilter.vendorId, "vendor")
+      : null;
+    const vendorPartyId = vendorFilter.vendorPartyId
+      ? toObjectId(vendorFilter.vendorPartyId, "party")
+      : null;
     const receivedStatus = cleanString(req.query.receivedStatus).toLowerCase();
     const dateRange = buildReturnDateRange(req.query.fromDate, req.query.toDate);
     const query = {
@@ -601,7 +677,9 @@ exports.getTravelVendorReturns = async (req, res) => {
       };
     }
 
-    if (vendorId) {
+    if (vendorPartyId) {
+      query.vendorPartyId = vendorPartyId;
+    } else if (vendorId) {
       query.vendorId = vendorId;
     }
 
@@ -640,7 +718,8 @@ exports.getTravelVendorReturns = async (req, res) => {
           { originalInvoiceNumber: { $regex: safeSearch, $options: "i" } },
           { serviceLabel: { $regex: safeSearch, $options: "i" } },
           { notes: { $regex: safeSearch, $options: "i" } },
-          { vendorId: { $in: matchingVendors.map((vendor) => vendor._id) } },
+          { vendorId: { $in: matchingVendors.vendorIds } },
+          { vendorPartyId: { $in: matchingVendors.partyIds } },
         ],
       });
     }
@@ -648,6 +727,7 @@ exports.getTravelVendorReturns = async (req, res) => {
     const [records, total] = await Promise.all([
       TravelVendorReturn.find(query)
         .populate("vendorId", "name phone travelVendorType moduleScope")
+        .populate("vendorPartyId", "name phone email role moduleScope")
         .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
         .populate("accountId", "name code category type")
         .sort({ returnDate: -1, createdAt: -1, _id: -1 })
@@ -683,6 +763,7 @@ exports.getTravelVendorReturnById = async (req, res) => {
       isReversed: { $ne: true },
     })
       .populate("vendorId", "name phone travelVendorType moduleScope")
+      .populate("vendorPartyId", "name phone email role moduleScope")
       .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType bookingItems")
       .populate("accountId", "name code category type")
       .lean();
@@ -700,7 +781,13 @@ exports.getTravelVendorReturnById = async (req, res) => {
 exports.getTravelVendorReturnInvoices = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const vendorId = optionalObjectId(req.query.vendorId, "vendor");
+    const vendorFilter = normalizeVendorCounterpartyInput(req.query);
+    const vendorId = vendorFilter.vendorId
+      ? toObjectId(vendorFilter.vendorId, "vendor")
+      : null;
+    const vendorPartyId = vendorFilter.vendorPartyId
+      ? toObjectId(vendorFilter.vendorPartyId, "party")
+      : null;
     const search = cleanString(req.query.search);
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 100);
     const query = {
@@ -712,7 +799,12 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
       status: { $in: [...POSTING_STATUSES] },
     };
 
-    if (vendorId) {
+    if (vendorPartyId) {
+      query.$or = [
+        { "bookingItems.vendorPartyId": vendorPartyId },
+        { "bookingItems.umrahDetails.components.vendorPartyId": vendorPartyId },
+      ];
+    } else if (vendorId) {
       query.$or = [
         { "bookingItems.vendorId": vendorId },
         { "bookingItems.umrahDetails.components.vendorId": vendorId },
@@ -739,7 +831,15 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
     return res.json(
       invoices.map((invoice) => {
         const costRows = vendorId
-          ? collectVendorCostRows(invoice, vendorId)
+          ? collectVendorCostRows(invoice, {
+              vendorType: "vendor",
+              vendorId,
+            })
+          : vendorPartyId
+            ? collectVendorCostRows(invoice, {
+                vendorType: "party",
+                vendorPartyId,
+              })
           : [];
         const eligibleCost = roundMoney(
           costRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
@@ -833,6 +933,7 @@ exports.createTravelVendorReturn = async (req, res) => {
 
     const populated = await TravelVendorReturn.findById(vendorReturn._id)
       .populate("vendorId", "name phone travelVendorType moduleScope")
+      .populate("vendorPartyId", "name phone email role moduleScope")
       .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
       .populate("accountId", "name code category type")
       .lean();

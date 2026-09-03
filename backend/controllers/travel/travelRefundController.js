@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const Customer = require("../../models/Customer");
+const Party = require("../../models/Party");
 const TravelBooking = require("../../models/TravelBooking");
 const TravelRefund = require("../../models/TravelRefund");
 const { logActivity } = require("../../utils/activityLogger");
@@ -26,6 +27,7 @@ const {
 const { clearTravelReportCache } = require("../../services/travel/travelReportCacheService");
 const { generateTravelRefundNumber } = require("../../services/travel/travelRefundNumberService");
 const { cleanString, escapeRegex, getActorId, getUserId } = require("../../services/travel/travelBookingService");
+const { buildTravelPartyRoleQuery } = require("../../services/travel/travelCounterpartyService");
 const {
   getSoftDeleteReason,
   recalculateTravelSoftDeleteAccounts,
@@ -73,23 +75,41 @@ const buildDateRange = (fromDate, toDate) => {
 const findTravelCustomersForSearch = async (userId, search) => {
   const safeSearch = escapeRegex(search);
 
-  return Customer.find(
-    applyModuleScopeFilter(
-      {
-        createdBy: userId,
-        isActive: { $ne: false },
-        $or: [
-          { name: { $regex: safeSearch, $options: "i" } },
-          { phone: { $regex: safeSearch, $options: "i" } },
-          { email: { $regex: safeSearch, $options: "i" } },
-        ],
-      },
-      MODULE_SCOPES.TRAVEL,
-    ),
-  )
-    .select("_id")
-    .limit(50)
-    .lean();
+  const [customers, parties] = await Promise.all([
+    Customer.find(
+      applyModuleScopeFilter(
+        {
+          createdBy: userId,
+          isActive: { $ne: false },
+          $or: [
+            { name: { $regex: safeSearch, $options: "i" } },
+            { phone: { $regex: safeSearch, $options: "i" } },
+            { email: { $regex: safeSearch, $options: "i" } },
+          ],
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    )
+      .select("_id")
+      .limit(50)
+      .lean(),
+    Party.find({
+      ...buildTravelPartyRoleQuery(userId, "customer"),
+      $or: [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+      ],
+    })
+      .select("_id")
+      .limit(50)
+      .lean(),
+  ]);
+
+  return {
+    customerIds: customers.map((customer) => customer._id),
+    partyIds: parties.map((party) => party._id),
+  };
 };
 
 const getRemainingRefundable = (invoice) =>
@@ -131,10 +151,13 @@ exports.getRefundableTravelInvoices = async (req, res) => {
 
     const invoices = await TravelBooking.find(query)
       .select(
-        "bookingNumber invoiceNumber invoiceDate status serviceType customerId bookingItems sellingTotal discountAmount netSale costTotal refundedAmount customerRefundedAmount vendorRecoveredAmount baseCurrency",
+        "bookingNumber invoiceNumber invoiceDate status serviceType customerType customerId customerPartyId bookingItems sellingTotal discountAmount netSale costTotal refundedAmount customerRefundedAmount vendorRecoveredAmount baseCurrency",
       )
       .populate("customerId", "name phone email moduleScope")
+      .populate("customerPartyId", "name phone email role moduleScope")
       .populate("bookingItems.vendorId", "name phone travelVendorType moduleScope")
+      .populate("bookingItems.vendorPartyId", "name phone email role moduleScope")
+      .populate("bookingItems.umrahDetails.components.vendorPartyId", "name phone email role moduleScope")
       .sort({ invoiceDate: -1, updatedAt: -1, _id: -1 })
       .limit(limit)
       .lean();
@@ -165,7 +188,14 @@ exports.getTravelRefunds = async (req, res) => {
     const originalInvoice = cleanString(
       req.query.originalInvoice || req.query.originalInvoiceNumber,
     );
-    const customerId = optionalObjectId(req.query.customerId || req.query.customer);
+    const requestedCustomerType = cleanString(req.query.customerType).toLowerCase();
+    const customerSource = req.query.customerId || req.query.customer;
+    const customerId =
+      requestedCustomerType === "party" ? null : optionalObjectId(customerSource);
+    const customerPartyId = optionalObjectId(
+      req.query.customerPartyId ||
+        (requestedCustomerType === "party" ? customerSource : null),
+    );
     const penaltyStatus = cleanString(req.query.penaltyStatus).toLowerCase();
     const paymentStatus = cleanString(req.query.paymentStatus).toLowerCase();
     const dateRange = buildDateRange(req.query.fromDate, req.query.toDate);
@@ -186,7 +216,9 @@ exports.getTravelRefunds = async (req, res) => {
       };
     }
 
-    if (customerId) {
+    if (customerPartyId) {
+      query.customerPartyId = customerPartyId;
+    } else if (customerId) {
       query.customerId = customerId;
     }
 
@@ -232,7 +264,8 @@ exports.getTravelRefunds = async (req, res) => {
           { refundNumber: { $regex: safeSearch, $options: "i" } },
           { originalInvoiceNumber: { $regex: safeSearch, $options: "i" } },
           { notes: { $regex: safeSearch, $options: "i" } },
-          { customerId: { $in: matchingCustomers.map((customer) => customer._id) } },
+          { customerId: { $in: matchingCustomers.customerIds } },
+          { customerPartyId: { $in: matchingCustomers.partyIds } },
         ],
       });
     }
@@ -240,6 +273,7 @@ exports.getTravelRefunds = async (req, res) => {
     const [refunds, total] = await Promise.all([
       TravelRefund.find(query)
         .populate("customerId", "name phone email moduleScope")
+        .populate("customerPartyId", "name phone email role moduleScope")
         .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
         .populate("accountId", "name code category type")
         .sort({ refundDate: -1, createdAt: -1, _id: -1 })
@@ -275,8 +309,10 @@ exports.getTravelRefundById = async (req, res) => {
       isReversed: { $ne: true },
     })
       .populate("customerId", "name phone email moduleScope")
-      .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType bookingItems")
+      .populate("customerPartyId", "name phone email role moduleScope")
+      .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType customerType customerId customerPartyId bookingItems")
       .populate("refundItems.vendorId", "name phone travelVendorType moduleScope")
+      .populate("refundItems.vendorPartyId", "name phone email role moduleScope")
       .populate("accountId", "name code category type")
       .lean();
 
@@ -371,8 +407,10 @@ exports.createTravelRefund = async (req, res) => {
 
     const populated = await TravelRefund.findById(refund._id)
       .populate("customerId", "name phone email moduleScope")
+      .populate("customerPartyId", "name phone email role moduleScope")
       .populate("originalInvoiceId", "bookingNumber invoiceNumber serviceType")
       .populate("refundItems.vendorId", "name phone travelVendorType moduleScope")
+      .populate("refundItems.vendorPartyId", "name phone email role moduleScope")
       .populate("accountId", "name code category type")
       .lean();
 

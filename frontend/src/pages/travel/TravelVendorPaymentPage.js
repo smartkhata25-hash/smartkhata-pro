@@ -5,6 +5,7 @@ import { FaHistory, FaMoneyBillWave, FaSave, FaUserTie } from 'react-icons/fa';
 import { t } from '../../i18n/i18n';
 import {
   createTravelVendorPayment,
+  fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelVendors,
 } from '../../services/travelMasterService';
@@ -17,7 +18,9 @@ import {
 } from '../../components/travel/master/TravelMasterUI';
 
 const createInitialForm = () => ({
+  vendorType: 'vendor',
   vendorId: '',
+  vendorPartyId: '',
   amount: '',
   accountId: '',
   paymentType: 'cash',
@@ -46,7 +49,55 @@ const paymentTypeOptions = [
   },
 ];
 
+const getRecordId = (record) => (typeof record === 'object' ? record?._id : record) || '';
+
+const buildCounterpartyOption = (record, type) => {
+  const sourceId = getRecordId(record);
+
+  return {
+    ...record,
+    _id: sourceId ? `${type}:${sourceId}` : '',
+    sourceId,
+    counterpartyType: type,
+    entityType: type,
+  };
+};
+
+const getVendorCounterpartyValue = (formState) =>
+  formState.vendorType === 'party' && getRecordId(formState.vendorPartyId)
+    ? `party:${getRecordId(formState.vendorPartyId)}`
+    : getRecordId(formState.vendorId)
+      ? `vendor:${getRecordId(formState.vendorId)}`
+      : '';
+
+const getCounterpartySelection = (value, record, fallbackType = 'vendor') => {
+  if (record?.counterpartyType) {
+    return {
+      type: record.counterpartyType,
+      id: record.sourceId || getRecordId(record),
+    };
+  }
+
+  if (typeof value === 'string' && value.includes(':')) {
+    const [type, id] = value.split(':');
+
+    return {
+      type: type || fallbackType,
+      id: id || '',
+    };
+  }
+
+  return {
+    type: fallbackType,
+    id: value || '',
+  };
+};
+
 const getVendorBalance = (vendor) => {
+  if (vendor?.counterpartyType === 'party' || vendor?.entityType === 'party') {
+    return -Number(vendor?.balance || 0);
+  }
+
   const payable = Number(vendor?.currentPayable || 0);
   const credit = Number(vendor?.vendorCredit || 0);
 
@@ -58,7 +109,11 @@ const getVendorLabel = (vendor) => vendor?.name || '-';
 const getVendorMeta = (vendor) => {
   const balance = getVendorBalance(vendor);
 
-  return [vendor?.phone, `${t('travel.fields.balance')}: ${formatTravelMoney(balance)}`]
+  return [
+    vendor?.counterpartyType === 'party' ? t('travel.counterparty.party') : '',
+    vendor?.phone,
+    `${t('travel.fields.balance')}: ${formatTravelMoney(balance)}`,
+  ]
     .filter(Boolean)
     .join(' | ');
 };
@@ -126,6 +181,7 @@ const TravelVendorPaymentPage = () => {
 
   const [formState, setFormState] = useState(createInitialForm);
   const [vendors, setVendors] = useState([]);
+  const [parties, setParties] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
 
   const [loading, setLoading] = useState(false);
@@ -135,10 +191,23 @@ const TravelVendorPaymentPage = () => {
   const [successMessage, setSuccessMessage] = useState('');
 
   const queryVendorId = searchParams.get('vendorId') || '';
+  const queryVendorType = searchParams.get('vendorType') === 'party' ? 'party' : 'vendor';
+  const queryVendorPartyId = searchParams.get('vendorPartyId') || '';
+
+  const vendorOptions = useMemo(
+    () => [
+      ...vendors.map((vendor) => buildCounterpartyOption(vendor, 'vendor')),
+      ...parties.map((party) => buildCounterpartyOption(party, 'party')),
+    ],
+    [vendors, parties]
+  );
 
   const selectedVendor = useMemo(
-    () => vendors.find((vendor) => String(vendor._id) === String(formState.vendorId)) || null,
-    [formState.vendorId, vendors]
+    () =>
+      vendorOptions.find(
+        (vendor) => String(vendor._id) === String(getVendorCounterpartyValue(formState))
+      ) || null,
+    [formState, vendorOptions]
   );
 
   const selectedVendorBalance = useMemo(() => getVendorBalance(selectedVendor), [selectedVendor]);
@@ -160,9 +229,19 @@ const TravelVendorPaymentPage = () => {
       setLoading(true);
       setFormError('');
 
-      const [vendorData, accountData] = await Promise.all([
+      const [vendorData, partyData, accountData] = await Promise.all([
         fetchTravelVendors(
           {
+            includeBalance: 'true',
+          },
+          {
+            forceRefresh: true,
+          }
+        ),
+        fetchTravelParties(
+          {
+            status: 'active',
+            eligibleRole: 'supplier',
             includeBalance: 'true',
           },
           {
@@ -173,9 +252,11 @@ const TravelVendorPaymentPage = () => {
       ]);
 
       const safeVendors = Array.isArray(vendorData) ? vendorData : [];
+      const safeParties = Array.isArray(partyData) ? partyData : [];
       const safeAccounts = Array.isArray(accountData) ? accountData : [];
 
       setVendors(safeVendors);
+      setParties(safeParties);
       setPaymentAccounts(safeAccounts);
 
       const firstCashAccount = safeAccounts.find(
@@ -200,15 +281,31 @@ const TravelVendorPaymentPage = () => {
   }, [loadReferences]);
 
   useEffect(() => {
-    if (!queryVendorId) {
+    if (!queryVendorId && !queryVendorPartyId) {
       return;
     }
 
     setFormState((current) => ({
       ...current,
-      vendorId: queryVendorId,
+      vendorType: queryVendorType,
+      vendorId: queryVendorType === 'party' ? '' : queryVendorId,
+      vendorPartyId: queryVendorType === 'party' ? queryVendorPartyId || queryVendorId : '',
     }));
-  }, [queryVendorId]);
+  }, [queryVendorId, queryVendorPartyId, queryVendorType]);
+
+  const updateVendorCounterparty = (value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
+
+    setFormState((current) => ({
+      ...current,
+      vendorType: selection.type === 'party' ? 'party' : 'vendor',
+      vendorId: selection.type === 'party' ? '' : selection.id,
+      vendorPartyId: selection.type === 'party' ? selection.id : '',
+    }));
+
+    setFormError('');
+    setSuccessMessage('');
+  };
 
   const updateField = useCallback((field, value) => {
     setFormState((current) => ({
@@ -245,7 +342,7 @@ const TravelVendorPaymentPage = () => {
 
     const numericAmount = Number(formState.amount || 0);
 
-    if (!formState.vendorId) {
+    if (!formState.vendorId && !formState.vendorPartyId) {
       setFormError(t('travel.payments.vendorPlaceholder'));
       return;
     }
@@ -270,24 +367,47 @@ const TravelVendorPaymentPage = () => {
         amount: numericAmount,
       });
 
-      setVendors((current) =>
-        current.map((vendor) => {
-          if (String(vendor._id) !== String(saved?.vendor?._id)) {
-            return vendor;
-          }
+      const savedVendorId = getRecordId(saved?.vendor);
+      const isSavedParty =
+        saved?.vendor?.counterpartyType === 'party' || saved?.vendor?.entityType === 'party';
 
-          return {
-            ...vendor,
-            balance: saved?.balance,
-            currentPayable: saved?.currentPayable,
-            vendorCredit: saved?.vendorCredit,
-          };
-        })
-      );
+      if (isSavedParty) {
+        setParties((current) =>
+          current.map((party) => {
+            if (String(party._id) !== String(savedVendorId)) {
+              return party;
+            }
+
+            return {
+              ...party,
+              balance: saved?.balance,
+              currentPayable: saved?.currentPayable,
+              vendorCredit: saved?.vendorCredit,
+            };
+          })
+        );
+      } else {
+        setVendors((current) =>
+          current.map((vendor) => {
+            if (String(vendor._id) !== String(savedVendorId)) {
+              return vendor;
+            }
+
+            return {
+              ...vendor,
+              balance: saved?.balance,
+              currentPayable: saved?.currentPayable,
+              vendorCredit: saved?.vendorCredit,
+            };
+          })
+        );
+      }
 
       setFormState((current) => ({
         ...createInitialForm(),
+        vendorType: current.vendorType,
         vendorId: current.vendorId,
+        vendorPartyId: current.vendorPartyId,
         accountId: current.accountId,
         paymentType: current.paymentType,
       }));
@@ -345,9 +465,9 @@ const TravelVendorPaymentPage = () => {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.vendor"
-              value={formState.vendorId}
-              onChange={(id) => updateField('vendorId', id)}
-              records={vendors}
+              value={getVendorCounterpartyValue(formState)}
+              onChange={updateVendorCounterparty}
+              records={vendorOptions}
               getLabel={getVendorLabel}
               getMeta={getVendorMeta}
               placeholderKey="travel.payments.vendorPlaceholder"

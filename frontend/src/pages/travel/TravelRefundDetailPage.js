@@ -45,6 +45,12 @@ const getInvoiceNumber = (refund) =>
   refund?.originalInvoiceId?.bookingNumber ||
   '-';
 
+const getRefundCustomerName = (refund) =>
+  getCustomerName(refund?.customer || refund?.customerPartyId || refund?.customerId);
+
+const getRefundItemVendorName = (item) =>
+  getVendorName(item?.vendor || item?.vendorPartyId || item?.vendorId);
+
 const openDocumentUrl = (url) => {
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
 
@@ -217,7 +223,7 @@ const TravelRefundDetailPage = () => {
                 labelKey="travel.refund.fields.refundDate"
                 value={formatDateWithOptionalTime(refund.refundDate, refund.refundTime)}
               />
-              <DetailLine labelKey="travel.booking.fields.customer" value={getCustomerName(refund.customerId)} />
+              <DetailLine labelKey="travel.booking.fields.customer" value={getRefundCustomerName(refund)} />
               <DetailLine labelKey="travel.refund.fields.refundMode" value={t(`travel.refund.modes.${refund.refundMode || 'partial'}`)} />
               <DetailLine labelKey="travel.refund.fields.grossRefundAmount" value={formatBookingMoney(refund.grossRefundAmount)} />
               <DetailLine labelKey="travel.refund.fields.penaltyAmount" value={formatBookingMoney(refund.penaltyAmount)} />
@@ -237,7 +243,7 @@ const TravelRefundDetailPage = () => {
                   <DetailLine labelKey="travel.booking.fields.itemTitle" value={item.title} />
                   <DetailLine labelKey="travel.booking.fields.bookingItem" value={t(`travel.booking.itemTypes.${item.itemType || 'service'}`)} />
                   <DetailLine labelKey="travel.refund.fields.refundAmount" value={formatBookingMoney(item.refundAmount)} />
-                  <DetailLine labelKey="travel.booking.fields.vendor" value={getVendorName(item.vendorId)} />
+                  <DetailLine labelKey="travel.booking.fields.vendor" value={getRefundItemVendorName(item)} />
                   <DetailLine labelKey="travel.refund.fields.vendorRecoveryAmount" value={formatBookingMoney(item.vendorRecoveryAmount)} />
                 </div>
               ))}

@@ -243,6 +243,7 @@ const buildTravelInvoicePrint = (booking, printSetting) => {
   const headerSettings = doc.header || {};
   const layout = doc.layout || {};
   const currency = booking.baseCurrency || "PKR";
+  const customer = booking.customer || booking.customerPartyId || booking.customerId;
 
   return {
     documentTitle: "Travel Invoice",
@@ -269,9 +270,9 @@ const buildTravelInvoicePrint = (booking, printSetting) => {
       serviceType: humanize(booking.serviceType || "mixed"),
     },
     customer: {
-      name: getName(booking.customerId, "Customer"),
-      phone: booking.customerId?.phone || "",
-      email: booking.customerId?.email || "",
+      name: getName(customer, "Customer"),
+      phone: customer?.phone || "",
+      email: customer?.email || "",
     },
     travelers: (booking.travelers || []).map((traveler) => ({
       name: getName(traveler),
@@ -353,6 +354,7 @@ const buildTravelPaymentReceiptPrint = (payment, printSetting) => {
 
 const buildTravelRefundPrint = (refund, printSetting) => {
   const currency = refund.baseCurrency || refund.originalInvoiceId?.baseCurrency || "PKR";
+  const customer = refund.customer || refund.customerPartyId || refund.customerId;
 
   return {
     ...buildSharedTravelPrintShell(printSetting),
@@ -368,9 +370,9 @@ const buildTravelRefundPrint = (refund, printSetting) => {
         "",
     },
     customer: {
-      name: getName(refund.customerId, "Customer"),
-      phone: refund.customerId?.phone || "",
-      email: refund.customerId?.email || "",
+      name: getName(customer, "Customer"),
+      phone: customer?.phone || "",
+      email: customer?.email || "",
     },
     items: (refund.refundItems || []).map((item, index) => ({
       index: index + 1,
@@ -402,6 +404,7 @@ const buildTravelRefundPrint = (refund, printSetting) => {
 const buildTravelVendorReturnPrint = (vendorReturn, printSetting) => {
   const currency =
     vendorReturn.baseCurrency || vendorReturn.originalInvoiceId?.baseCurrency || "PKR";
+  const vendor = vendorReturn.vendor || vendorReturn.vendorPartyId || vendorReturn.vendorId;
 
   return {
     ...buildSharedTravelPrintShell(printSetting),
@@ -417,9 +420,9 @@ const buildTravelVendorReturnPrint = (vendorReturn, printSetting) => {
         "",
     },
     vendor: {
-      name: getName(vendorReturn.vendorId, "Vendor"),
-      phone: vendorReturn.vendorId?.phone || "",
-      email: vendorReturn.vendorId?.email || "",
+      name: getName(vendor, "Vendor"),
+      phone: vendor?.phone || "",
+      email: vendor?.email || "",
     },
     service: {
       label: vendorReturn.serviceLabel || "Travel service",

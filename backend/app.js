@@ -36,6 +36,7 @@ app.use("/api/travel/hotels", require("./routes/travelHotelRoutes"));
 app.use("/api/travel/airlines", require("./routes/travelAirlineRoutes"));
 
 app.use("/api/travel/airports", require("./routes/travelAirportRoutes"));
+app.use("/api/travel/parties", require("./routes/travelPartyRoutes"));
 
 app.use(
   "/api/travel/currency-settings",

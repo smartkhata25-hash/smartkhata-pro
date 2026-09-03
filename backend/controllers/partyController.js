@@ -11,6 +11,25 @@ const PurchaseReturn = require("../models/PurchaseReturn");
 const Counter = require("../models/Counter");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  applySupplierModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  TRAVEL_PARTY_OPENING_ORIGIN,
+} = require("../services/travel/travelCounterpartyService");
+
+const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  TRAVEL_PARTY_OPENING_ORIGIN,
+]);
 
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,9 +37,52 @@ const escapeRegex = (text = "") => {
 
 const getUserId = (req) => req.user?.id || req.userId;
 
+const getRequestModuleScope = (req) =>
+  normalizeModuleScope(
+    req.partyModuleScope ||
+      getRequestedModuleScope(
+        {
+          ...(req.query || {}),
+          ...(req.body || {}),
+        },
+        MODULE_SCOPES.TRADING,
+      ),
+    MODULE_SCOPES.TRADING,
+  );
+
+const isTravelScope = (moduleScope) => moduleScope === MODULE_SCOPES.TRAVEL;
+
+const withPartyScope = (query, moduleScope) =>
+  applyModuleScopeFilter(query, moduleScope, "moduleScope");
+
+const applyJournalScopeFilter = (match, moduleScope) => {
+  if (isTravelScope(moduleScope)) {
+    match.originModule = {
+      $in: TRAVEL_PARTY_BALANCE_ORIGINS,
+    };
+
+    return match;
+  }
+
+  match.$and = [
+    ...(match.$and || []),
+    {
+      $or: [
+        { originModule: { $exists: false } },
+        { originModule: null },
+        { originModule: "" },
+        { originModule: { $nin: TRAVEL_PARTY_BALANCE_ORIGINS } },
+      ],
+    },
+  ];
+
+  return match;
+};
+
 exports.getPartyDataVersion = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const moduleScope = getRequestModuleScope(req);
 
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(401).json({ message: "Invalid user" });
@@ -28,9 +90,14 @@ exports.getPartyDataVersion = async (req, res) => {
 
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    const partyAccounts = await Party.find({
-      userId: userObjectId,
-    })
+    const partyAccounts = await Party.find(
+      withPartyScope(
+        {
+          userId: userObjectId,
+        },
+        moduleScope,
+      ),
+    )
       .select("account")
       .lean();
 
@@ -48,9 +115,14 @@ exports.getPartyDataVersion = async (req, res) => {
 
       accountIds.length > 0
         ? JournalEntry.findOne({
-            createdBy: userObjectId,
-            isDeleted: { $ne: true },
-            "lines.account": { $in: accountIds },
+            ...applyJournalScopeFilter(
+              {
+                createdBy: userObjectId,
+                isDeleted: { $ne: true },
+                "lines.account": { $in: accountIds },
+              },
+              moduleScope,
+            ),
           })
             .sort({ updatedAt: -1 })
             .select("updatedAt")
@@ -96,21 +168,29 @@ const generateAccountCode = async (userId) => {
   return `ACC-${String(nextNumber).padStart(4, "0")}`;
 };
 
-const getOrCreateOpeningBalanceAccount = async (userId) => {
+const getOrCreateOpeningBalanceAccount = async (
+  userId,
+  moduleScope = MODULE_SCOPES.TRADING,
+) => {
+  const travelScope = isTravelScope(moduleScope);
+  const code = travelScope ? "TRAVEL_OPENING_BALANCE" : "OPENING_BALANCE";
+  const name = travelScope ? "travel opening balance equity" : "opening balance equity";
+
   let openingAccount = await Account.findOne({
     userId,
-    code: "OPENING_BALANCE",
+    code,
   });
 
   if (!openingAccount) {
     openingAccount = await Account.create({
       userId,
-      name: "opening balance equity",
+      name,
       type: "Equity",
       normalBalance: "credit",
-      code: "OPENING_BALANCE",
+      code,
       category: "other",
       isSystem: true,
+      moduleScope,
     });
   }
 
@@ -264,18 +344,91 @@ const createPartyOpeningEntry = async ({
   }
 };
 
-const getPartyBalance = async (partyAccountId, userId) => {
+const createTravelPartyOpeningEntry = async ({
+  userId,
+  party,
+  partyAccountId,
+  openingBalance,
+}) => {
+  const amount = Number(openingBalance) || 0;
+  if (amount === 0) return null;
+
+  const absAmount = Math.abs(amount);
+  const openingBalanceAccount = await getOrCreateOpeningBalanceAccount(
+    userId,
+    MODULE_SCOPES.TRAVEL,
+  );
+
+  const journal = await JournalEntry.create({
+    date: new Date(),
+    time: new Date().toTimeString().slice(0, 8),
+    description: "Travel Party Opening Balance",
+    createdBy: userId,
+    partyId: party._id,
+    sourceType: "travel_adjustment",
+    originModule: TRAVEL_PARTY_OPENING_ORIGIN,
+    referenceId: party._id,
+    billNo: `TPO-${String(party._id).slice(-6).toUpperCase()}`,
+    lines:
+      amount > 0
+        ? [
+            {
+              account: partyAccountId,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: openingBalanceAccount._id,
+              type: "credit",
+              amount: absAmount,
+            },
+          ]
+        : [
+            {
+              account: openingBalanceAccount._id,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: partyAccountId,
+              type: "credit",
+              amount: absAmount,
+            },
+          ],
+  });
+
+  await recalculateAccountBalance(partyAccountId);
+  await recalculateAccountBalance(openingBalanceAccount._id);
+
+  return journal;
+};
+
+const createScopedPartyOpeningEntry = (args) =>
+  isTravelScope(args.moduleScope)
+    ? createTravelPartyOpeningEntry(args)
+    : createPartyOpeningEntry(args);
+
+const getPartyBalance = async (
+  partyAccountId,
+  userId,
+  moduleScope = MODULE_SCOPES.TRADING,
+) => {
   if (!partyAccountId) return 0;
 
   const objectId = new mongoose.Types.ObjectId(partyAccountId);
+  const match = applyJournalScopeFilter(
+    {
+      createdBy: new mongoose.Types.ObjectId(userId),
+      isDeleted: false,
+      sourceType: { $ne: "reversal" },
+      "lines.account": objectId,
+    },
+    moduleScope,
+  );
 
   const result = await JournalEntry.aggregate([
     {
-      $match: {
-        createdBy: new mongoose.Types.ObjectId(userId),
-        isDeleted: false,
-        "lines.account": objectId,
-      },
+      $match: match,
     },
     { $unwind: "$lines" },
     {
@@ -535,6 +688,7 @@ const createSupplierOpeningEntryFromParty = async ({
 exports.createParty = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const moduleScope = getRequestModuleScope(req);
 
     const {
       name,
@@ -556,11 +710,16 @@ exports.createParty = async (req, res) => {
 
     const cleanName = name.trim();
 
-    const existing = await Party.findOne({
-      userId,
-      isDeleted: false,
-      name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
-    });
+    const existing = await Party.findOne(
+      withPartyScope(
+        {
+          userId,
+          isDeleted: false,
+          name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
+        },
+        moduleScope,
+      ),
+    );
 
     if (existing) {
       return res.status(400).json({
@@ -588,6 +747,7 @@ exports.createParty = async (req, res) => {
           category: "party",
           openingBalance: Number(openingBalance) || 0,
           isSystem: false,
+          moduleScope,
         });
 
         break;
@@ -612,21 +772,23 @@ exports.createParty = async (req, res) => {
       openingBalance: Number(openingBalance) || 0,
       account: account._id,
       userId,
+      moduleScope,
     });
 
-    await createPartyOpeningEntry({
+    await createScopedPartyOpeningEntry({
       userId,
       party,
       partyAccountId: account._id,
       openingBalance: Number(openingBalance) || 0,
+      moduleScope,
     });
 
-    const balance = await getPartyBalance(account._id, userId);
+    const balance = await getPartyBalance(account._id, userId, moduleScope);
 
     await logActivity({
       req,
       action: "create",
-      module: "parties",
+      module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
       entityType: "Party",
       entityId: party._id,
       title: `Party ${party.name}`,
@@ -640,6 +802,7 @@ exports.createParty = async (req, res) => {
         role: party.role,
         openingBalance: party.openingBalance,
         account: party.account,
+        moduleScope,
         balance,
       },
     });
@@ -662,20 +825,25 @@ exports.createParty = async (req, res) => {
 exports.getParties = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const moduleScope = getRequestModuleScope(req);
 
     const {
       search = "",
       role = "",
+      eligibleRole = "",
       status = "active",
       limit = 0,
       page = 1,
       includeBalance = "true",
     } = req.query;
 
-    const query = {
-      userId,
-      isDeleted: false,
-    };
+    const query = withPartyScope(
+      {
+        userId,
+        isDeleted: false,
+      },
+      moduleScope,
+    );
 
     // ✅ Active / Hidden / All
     if (status === "active") {
@@ -685,7 +853,13 @@ exports.getParties = async (req, res) => {
     }
 
     // ✅ Role filter
-    if (role && ["customer", "supplier", "both"].includes(role)) {
+    const cleanEligibleRole = String(eligibleRole || "").trim().toLowerCase();
+
+    if (cleanEligibleRole === "customer") {
+      query.role = { $in: ["customer", "both"] };
+    } else if (cleanEligibleRole === "supplier") {
+      query.role = { $in: ["supplier", "both"] };
+    } else if (role && ["customer", "supplier", "both"].includes(role)) {
       query.role = role;
     }
 
@@ -707,7 +881,7 @@ exports.getParties = async (req, res) => {
 
     let partyQuery = Party.find(query)
       .select(
-        "name phone email address notes role openingBalance account isActive isDeleted hiddenReason createdAt",
+        "name phone email address notes role moduleScope openingBalance account isActive isDeleted hiddenReason createdAt",
       )
       .sort({ createdAt: -1 })
       .lean();
@@ -748,11 +922,15 @@ exports.getParties = async (req, res) => {
       // ✅ تمام Party balances صرف ایک query سے
       balanceRows = await JournalEntry.aggregate([
         {
-          $match: {
-            createdBy: new mongoose.Types.ObjectId(userId),
-            isDeleted: false,
-            "lines.account": { $in: accountIds },
-          },
+          $match: applyJournalScopeFilter(
+            {
+              createdBy: new mongoose.Types.ObjectId(userId),
+              isDeleted: false,
+              sourceType: { $ne: "reversal" },
+              "lines.account": { $in: accountIds },
+            },
+            moduleScope,
+          ),
         },
         {
           $unwind: "$lines",
@@ -804,19 +982,25 @@ exports.getParties = async (req, res) => {
 exports.getPartyById = async (req, res) => {
   try {
     const userId = getUserId(req);
+    const moduleScope = getRequestModuleScope(req);
 
-    const party = await Party.findOne({
-      _id: req.params.id,
-      userId,
-      isDeleted: false,
-    }).populate("account");
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: req.params.id,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    ).populate("account");
 
     if (!party) {
       return res.status(404).json({ message: "Party not found" });
     }
 
     const accountId = party.account?._id || party.account;
-    const balance = await getPartyBalance(accountId, userId);
+    const balance = await getPartyBalance(accountId, userId, moduleScope);
 
     return res.json({
       ...party.toObject(),
@@ -835,6 +1019,7 @@ exports.updateParty = async (req, res) => {
   try {
     const userId = getUserId(req);
     const partyId = req.params.id;
+    const moduleScope = getRequestModuleScope(req);
 
     const {
       name,
@@ -847,11 +1032,16 @@ exports.updateParty = async (req, res) => {
       isActive,
     } = req.body;
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-    });
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    );
 
     if (!party) {
       return res.status(404).json({ message: "Party not found" });
@@ -868,6 +1058,7 @@ exports.updateParty = async (req, res) => {
       isActive: party.isActive,
       hiddenReason: party.hiddenReason,
       account: party.account,
+      moduleScope: party.moduleScope,
     };
 
     if (!name || !name.trim()) {
@@ -876,12 +1067,17 @@ exports.updateParty = async (req, res) => {
 
     const cleanName = name.trim();
 
-    const duplicate = await Party.findOne({
-      userId,
-      isDeleted: false,
-      _id: { $ne: party._id },
-      name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
-    });
+    const duplicate = await Party.findOne(
+      withPartyScope(
+        {
+          userId,
+          isDeleted: false,
+          _id: { $ne: party._id },
+          name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
+        },
+        moduleScope,
+      ),
+    );
 
     if (duplicate) {
       return res.status(400).json({
@@ -923,17 +1119,23 @@ exports.updateParty = async (req, res) => {
     );
 
     if (oldOpening !== newOpening) {
+      const openingOrigin = isTravelScope(moduleScope)
+        ? TRAVEL_PARTY_OPENING_ORIGIN
+        : "party_opening_balance";
+      const openingSourceTypes = isTravelScope(moduleScope)
+        ? ["travel_adjustment"]
+        : [
+            "opening_balance",
+            "opening_sale_invoice",
+            "opening_refund_invoice",
+          ];
       const oldJournals = await JournalEntry.find({
         partyId: party._id,
         createdBy: userId,
         sourceType: {
-          $in: [
-            "opening_balance",
-            "opening_sale_invoice",
-            "opening_refund_invoice",
-          ],
+          $in: openingSourceTypes,
         },
-        originModule: "party_opening_balance",
+        originModule: openingOrigin,
         isDeleted: false,
       });
 
@@ -942,12 +1144,9 @@ exports.updateParty = async (req, res) => {
           partyId: party._id,
           createdBy: userId,
           sourceType: {
-            $in: [
-              "opening_balance",
-              "opening_sale_invoice",
-              "opening_refund_invoice",
-            ],
+            $in: openingSourceTypes,
           },
+          originModule: openingOrigin,
           isDeleted: false,
         },
         {
@@ -955,29 +1154,31 @@ exports.updateParty = async (req, res) => {
         },
       );
 
-      await Invoice.updateMany(
-        {
-          partyId: party._id,
-          createdBy: userId,
-          isOpening: true,
-          isDeleted: false,
-        },
-        {
-          $set: { isDeleted: true },
-        },
-      );
+      if (!isTravelScope(moduleScope)) {
+        await Invoice.updateMany(
+          {
+            partyId: party._id,
+            createdBy: userId,
+            isOpening: true,
+            isDeleted: false,
+          },
+          {
+            $set: { isDeleted: true },
+          },
+        );
 
-      await RefundInvoice.updateMany(
-        {
-          partyId: party._id,
-          createdBy: userId,
-          isOpening: true,
-          isDeleted: false,
-        },
-        {
-          $set: { isDeleted: true },
-        },
-      );
+        await RefundInvoice.updateMany(
+          {
+            partyId: party._id,
+            createdBy: userId,
+            isOpening: true,
+            isDeleted: false,
+          },
+          {
+            $set: { isDeleted: true },
+          },
+        );
+      }
 
       for (const journal of oldJournals) {
         for (const line of journal.lines) {
@@ -985,27 +1186,33 @@ exports.updateParty = async (req, res) => {
         }
       }
 
-      await createPartyOpeningEntry({
+      await createScopedPartyOpeningEntry({
         userId,
         party,
         partyAccountId: party.account,
         openingBalance: newOpening,
+        moduleScope,
       });
     }
     await recalculateAccountBalance(party.account);
 
-    const updatedParty = await Party.findOne({
-      _id: party._id,
-      userId,
-      isDeleted: false,
-    }).populate("account");
+    const updatedParty = await Party.findOne(
+      withPartyScope(
+        {
+          _id: party._id,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    ).populate("account");
 
-    const balance = await getPartyBalance(party.account, userId);
+    const balance = await getPartyBalance(party.account, userId, moduleScope);
 
     await logActivity({
       req,
       action: "update",
-      module: "parties",
+      module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
       entityType: "Party",
       entityId: party._id,
       title: `Party ${party.name}`,
@@ -1022,6 +1229,7 @@ exports.updateParty = async (req, res) => {
         isActive: party.isActive,
         hiddenReason: party.hiddenReason,
         account: party.account,
+        moduleScope,
         balance,
       },
     });
@@ -1043,12 +1251,18 @@ exports.deleteParty = async (req, res) => {
   try {
     const userId = getUserId(req);
     const partyId = req.params.id;
+    const moduleScope = getRequestModuleScope(req);
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-    });
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    );
 
     if (!party) {
       return res.status(404).json({ message: "Party not found" });
@@ -1065,6 +1279,7 @@ exports.deleteParty = async (req, res) => {
       isActive: party.isActive,
       hiddenReason: party.hiddenReason,
       account: party.account,
+      moduleScope: party.moduleScope,
     };
 
     const hasLedger = await JournalEntry.exists({
@@ -1087,7 +1302,7 @@ exports.deleteParty = async (req, res) => {
       await logActivity({
         req,
         action: "delete",
-        module: "parties",
+        module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
         entityType: "Party",
         entityId: party._id,
         title: `Party ${party.name}`,
@@ -1113,7 +1328,7 @@ exports.deleteParty = async (req, res) => {
     await logActivity({
       req,
       action: "delete",
-      module: "parties",
+      module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
       entityType: "Party",
       entityId: party._id,
       title: `Party ${party.name}`,
@@ -1143,13 +1358,19 @@ exports.restoreParty = async (req, res) => {
   try {
     const userId = getUserId(req);
     const partyId = req.params.id;
+    const moduleScope = getRequestModuleScope(req);
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-      isActive: false,
-    });
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+          isActive: false,
+        },
+        moduleScope,
+      ),
+    );
 
     if (!party) {
       return res.status(404).json({
@@ -1164,13 +1385,18 @@ exports.restoreParty = async (req, res) => {
     }
 
     // ✅ Same-name active Party check
-    const activePartyExists = await Party.exists({
-      _id: { $ne: party._id },
-      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
-      userId,
-      isDeleted: false,
-      isActive: true,
-    });
+    const activePartyExists = await Party.exists(
+      withPartyScope(
+        {
+          _id: { $ne: party._id },
+          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+          userId,
+          isDeleted: false,
+          isActive: true,
+        },
+        moduleScope,
+      ),
+    );
 
     if (activePartyExists) {
       return res.status(400).json({
@@ -1179,11 +1405,16 @@ exports.restoreParty = async (req, res) => {
     }
 
     // ✅ Same-name active Customer check
-    const activeCustomerExists = await Customer.exists({
-      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
-      createdBy: userId,
-      isActive: true,
-    });
+    const activeCustomerExists = await Customer.exists(
+      applyModuleScopeFilter(
+        {
+          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+          createdBy: userId,
+          isActive: true,
+        },
+        moduleScope,
+      ),
+    );
 
     if (activeCustomerExists) {
       return res.status(400).json({
@@ -1192,11 +1423,16 @@ exports.restoreParty = async (req, res) => {
     }
 
     // ✅ Same-name active Supplier check
-    const activeSupplierExists = await Supplier.exists({
-      name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
-      userId,
-      isDeleted: false,
-    });
+    const activeSupplierExists = await Supplier.exists(
+      applySupplierModuleScopeFilter(
+        {
+          name: new RegExp(`^${escapeRegex(party.name)}$`, "i"),
+          userId,
+          isDeleted: false,
+        },
+        moduleScope,
+      ),
+    );
 
     if (activeSupplierExists) {
       return res.status(400).json({
@@ -1224,7 +1460,7 @@ exports.restoreParty = async (req, res) => {
     await logActivity({
       req,
       action: "restore",
-      module: "parties",
+      module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
       entityType: "Party",
       entityId: party._id,
       title: `Party ${party.name}`,
@@ -1258,12 +1494,17 @@ exports.convertPartyToCustomer = async (req, res) => {
     const userId = getUserId(req);
     const partyId = req.params.id;
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-      isActive: true,
-    });
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRADING,
+      ),
+    );
 
     if (!party) {
       return res.status(404).json({ message: "Party not found" });
@@ -1368,12 +1609,17 @@ exports.convertPartyToSupplier = async (req, res) => {
     const userId = getUserId(req);
     const partyId = req.params.id;
 
-    const party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-      isActive: true,
-    });
+    const party = await Party.findOne(
+      withPartyScope(
+        {
+          _id: partyId,
+          userId,
+          isDeleted: false,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRADING,
+      ),
+    );
 
     if (!party) {
       return res.status(404).json({ message: "Party not found" });

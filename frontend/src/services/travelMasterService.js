@@ -81,7 +81,16 @@ const getRequestCacheKey = (domain, params = {}) =>
 
 const isCacheableListRequest = (params = {}) => {
   const safeParams = normalizeParams(params);
-  const nonCacheKeys = ['search', 'categoryId', 'city', 'country', 'vendorId', 'vendorType'];
+  const nonCacheKeys = [
+    'search',
+    'categoryId',
+    'city',
+    'country',
+    'vendorId',
+    'vendorType',
+    'role',
+    'eligibleRole',
+  ];
 
   return !nonCacheKeys.some((key) => safeParams[key]);
 };
@@ -204,6 +213,7 @@ const clearTravelBookingFinancialCaches = () => {
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.BOOKINGS);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS);
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.VENDORS);
   clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
 };
@@ -212,6 +222,7 @@ const clearTravelCustomerFinancialCaches = () => {
   clearAccountsCache();
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS);
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES);
   clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
 };
 
@@ -219,6 +230,14 @@ const clearTravelVendorFinancialCaches = () => {
   clearAccountsCache();
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.VENDORS);
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES);
+  clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
+};
+
+const clearTravelPartyFinancialCaches = () => {
+  clearAccountsCache();
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES);
   clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
 };
 
@@ -230,6 +249,7 @@ const clearTravelVendorReturnFinancialCaches = () => {
   clearAccountsCache();
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.VENDORS);
+  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES);
   clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.VENDOR_RETURNS);
   clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
 };
@@ -470,6 +490,70 @@ export const deleteTravelCustomer = async (id, options = {}) => {
 
   removeCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS, id);
   clearTravelCustomerFinancialCaches();
+
+  return response.data;
+};
+
+export const fetchTravelParties = (params = {}, options = {}) =>
+  fetchList(
+    TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES,
+    `${TRAVEL_API}/parties`,
+    { status: 'active', limit: 500, includeBalance: 'true', ...params },
+    options
+  );
+
+export const createTravelParty = async (data) => {
+  const response = await axios.post(
+    `${TRAVEL_API}/parties`,
+    { ...data, moduleScope: 'travel' },
+    getConfig()
+  );
+
+  if (response.data?._id) {
+    upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES, response.data);
+  }
+
+  clearTravelPartyFinancialCaches();
+
+  return response.data;
+};
+
+export const updateTravelParty = async (id, data) => {
+  const response = await axios.put(
+    `${TRAVEL_API}/parties/${id}`,
+    { ...data, moduleScope: 'travel' },
+    getConfig()
+  );
+
+  if (response.data?._id) {
+    upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES, response.data);
+  }
+
+  clearTravelPartyFinancialCaches();
+
+  return response.data;
+};
+
+export const deleteTravelParty = async (id, options = {}) => {
+  const response = await axios.delete(
+    `${TRAVEL_API}/parties/${id}`,
+    getConfig(normalizeParams(options))
+  );
+
+  removeCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES, id);
+  clearTravelPartyFinancialCaches();
+
+  return response.data;
+};
+
+export const restoreTravelParty = async (id) => {
+  const response = await axios.post(`${TRAVEL_API}/parties/${id}/restore`, {}, getConfig());
+
+  if (response.data?.party?._id) {
+    upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES, response.data.party);
+  }
+
+  clearTravelPartyFinancialCaches();
 
   return response.data;
 };

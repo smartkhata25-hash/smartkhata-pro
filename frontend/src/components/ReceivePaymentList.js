@@ -7,6 +7,7 @@ import { fetchSaleParties } from '../services/partyService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const ReceivePaymentList = () => {
   const navigate = useNavigate();
@@ -146,20 +147,7 @@ const ReceivePaymentList = () => {
     Date Display
   */
   const formatDate = useCallback((dateValue) => {
-    if (!dateValue) return '-';
-
-    try {
-      const dateOnly = String(dateValue).slice(0, 10);
-      const date = new Date(`${dateOnly}T00:00:00`);
-
-      if (Number.isNaN(date.getTime())) {
-        return dateValue;
-      }
-
-      return date.toLocaleDateString();
-    } catch (error) {
-      return dateValue;
-    }
+    return formatBusinessDateForDisplay(dateValue);
   }, []);
 
   /*

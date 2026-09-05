@@ -5,6 +5,7 @@ import { fetchSaleParties } from '../services/partyService';
 import { getAllRefunds, deleteRefund } from '../services/refundService';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const RefundInvoiceList = () => {
   const [refunds, setRefunds] = useState([]);
@@ -327,7 +328,7 @@ const RefundInvoiceList = () => {
               refunds.map((refund) => (
                 <tr key={refund._id} className="text-center">
                   <td className="border p-2">
-                    {refund.invoiceDate ? new Date(refund.invoiceDate).toLocaleDateString() : '-'}
+                    {formatBusinessDateForDisplay(refund.invoiceDate)}
                   </td>
 
                   <td className="border p-2">{refund.billNo || '-'}</td>

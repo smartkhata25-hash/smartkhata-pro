@@ -12,12 +12,14 @@ import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 
 const PurchaseReturnForm = ({ token }) => {
-  const getCurrentTime = () => {
-    const now = new Date();
-    return now.toTimeString().slice(0, 5);
-  };
+  const getCurrentTime = () => getBusinessTimeInputValue();
 
   const { id } = useParams();
   const navigate = useNavigate();
@@ -37,7 +39,7 @@ const PurchaseReturnForm = ({ token }) => {
 
   const [items, setItems] = useState([]);
   const [billNo, setBillNo] = useState('');
-  const [returnDate, setReturnDate] = useState(new Date().toISOString().slice(0, 10));
+  const [returnDate, setReturnDate] = useState(getBusinessDateInputValue());
   const [returnTime, setReturnTime] = useState(getCurrentTime());
   const [supplierName, setSupplierName] = useState('');
   const [supplierPhone, setSupplierPhone] = useState('');
@@ -85,7 +87,7 @@ const PurchaseReturnForm = ({ token }) => {
       } else {
         setSelectedSupplierType('supplier');
       }
-      setReturnDate(data.returnDate?.slice(0, 10) || '');
+      setReturnDate(getBusinessDateInputValue(data.returnDate) || '');
       setReturnTime(data.returnTime || '');
       setNotes(data.notes || '');
       setReturnMethod(data.paymentType ? 'cash' : 'adjust');
@@ -313,8 +315,6 @@ const PurchaseReturnForm = ({ token }) => {
   };
 
   const restorePurchaseReturnDraft = useCallback((valueOrUpdater) => {
-    const now = new Date();
-
     const makeBlankRow = () => ({
       productId: '',
       name: '',
@@ -326,8 +326,8 @@ const PurchaseReturnForm = ({ token }) => {
     const defaultState = {
       items: [],
       billNo: '',
-      returnDate: now.toISOString().slice(0, 10),
-      returnTime: now.toTimeString().slice(0, 5),
+      returnDate: getBusinessDateInputValue(),
+      returnTime: getBusinessTimeInputValue(),
       supplierName: '',
       supplierPhone: '',
       supplierId: '',
@@ -348,9 +348,9 @@ const PurchaseReturnForm = ({ token }) => {
 
     setBillNo(data.billNo || '');
 
-    setReturnDate(data.returnDate || now.toISOString().slice(0, 10));
+    setReturnDate(getBusinessDateInputValue(data.returnDate) || getBusinessDateInputValue());
 
-    setReturnTime(data.returnTime || now.toTimeString().slice(0, 5));
+    setReturnTime(data.returnTime || getBusinessTimeInputValue());
 
     setSupplierName(data.supplierName || '');
     setSupplierPhone(data.supplierPhone || '');
@@ -455,10 +455,8 @@ const PurchaseReturnForm = ({ token }) => {
       setItemHistory([]);
       setShowHistory(false);
 
-      const now = new Date();
-
-      setReturnDate(now.toISOString().slice(0, 10));
-      setReturnTime(now.toTimeString().slice(0, 5));
+      setReturnDate(getBusinessDateInputValue());
+      setReturnTime(getBusinessTimeInputValue());
 
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -1062,7 +1060,7 @@ const PurchaseReturnForm = ({ token }) => {
                       <div>
                         📅 Date:{' '}
                         {history.invoiceDate
-                          ? new Date(history.invoiceDate).toLocaleDateString()
+                          ? formatBusinessDateForDisplay(history.invoiceDate)
                           : '-'}
                       </div>
 

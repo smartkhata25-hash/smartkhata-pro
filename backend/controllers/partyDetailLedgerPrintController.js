@@ -14,31 +14,31 @@ const buildPartyDetailLedgerPrint = require("../services/partyDetailLedgerPrintB
 const generatePartyDetailLedgerHTML = require("../templates/partyDetailLedgerTemplate");
 
 const { generatePdfFromHtml } = require("../services/pdfService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
 const getStartOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) return null;
-
-  date.setHours(0, 0, 0, 0);
-
-  return date;
+  try {
+    return startOfBusinessDay(value);
+  } catch {
+    return null;
+  }
 };
 
 const getEndOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) return null;
-
-  date.setHours(23, 59, 59, 999);
-
-  return date;
+  try {
+    return buildBusinessDateRange({ endDate: value }).date?.$lt || null;
+  } catch {
+    return null;
+  }
 };
 
 const getSourceLabel = (type = "") => {
@@ -250,7 +250,7 @@ const fetchPartyDetailedLedgerData = async ({
     }
 
     if (end) {
-      matchFilter.date.$lte = end;
+      matchFilter.date.$lt = end;
     }
   }
 

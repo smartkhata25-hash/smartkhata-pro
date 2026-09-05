@@ -23,6 +23,10 @@ const {
 } = require("../services/r2FileService");
 
 const { logActivity } = require("../utils/activityLogger");
+const {
+  buildBusinessDateRange,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const getUserId = (req) => req.user?.id || req.userId;
 
@@ -71,13 +75,10 @@ const getAccountingOpeningMode = ({ explicitOpeningMode, billNo, notes }) => {
 };
 
 const getReturnDateTime = (returnDate, returnTime) => {
-  let dateTime = new Date(`${returnDate}T${returnTime || "00:00"}`);
-
-  if (Number.isNaN(dateTime.getTime())) {
-    dateTime = new Date(returnDate);
-  }
-
-  return dateTime;
+  return parseBusinessDateTime(returnDate || new Date(), returnTime, {
+    defaultTime: "00:00",
+    label: "purchase return date",
+  });
 };
 
 function formatPurchaseReturnAttachments(pr) {
@@ -379,6 +380,7 @@ const createReturnInventoryEntries = async ({
   billNo,
   userId,
   notePrefix,
+  entryDate = null,
 }) => {
   const rateMap = new Map();
 
@@ -397,6 +399,7 @@ const createReturnInventoryEntries = async ({
         invoiceModel: "PurchaseReturn",
         userId,
         rate: Number(rateMap.get(getProductId(item.productId)) || 0),
+        date: entryDate,
       }),
     ),
   );
@@ -683,10 +686,16 @@ exports.createPurchaseReturn = async (req, res) => {
 
     const attachmentType = uploadedAttachments[0]?.type || "";
 
+    const resolvedReturnTime = returnTime || "";
+    const returnDateTime = getReturnDateTime(
+      returnDate || new Date(),
+      resolvedReturnTime,
+    );
+
     const purchaseReturn = new PurchaseReturn({
       billNo,
-      returnDate,
-      returnTime,
+      returnDate: returnDateTime,
+      returnTime: resolvedReturnTime,
 
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
@@ -756,9 +765,9 @@ exports.createPurchaseReturn = async (req, res) => {
         ];
 
     const journal = new JournalEntry({
-      date: getReturnDateTime(returnDate, returnTime),
+      date: returnDateTime,
 
-      time: returnTime || "",
+      time: resolvedReturnTime || "",
 
       description: `Purchase Return - ${
         supplier?.name || party?.name || ""
@@ -798,6 +807,8 @@ exports.createPurchaseReturn = async (req, res) => {
         description: `Purchase Return Payment - ${purchaseReturn.billNo}`,
         supplierId: supplier?._id || null,
         partyId: party?._id || null,
+        entryDate: returnDateTime,
+        entryTime: resolvedReturnTime || "",
       });
     }
 
@@ -809,6 +820,7 @@ exports.createPurchaseReturn = async (req, res) => {
         billNo,
         userId,
         notePrefix: "Purchase Return",
+        entryDate: returnDateTime,
       });
     }
 
@@ -1036,32 +1048,13 @@ exports.getAllPurchaseReturns = async (req, res) => {
       }
     }
 
-    if (fromDate || toDate) {
-      filter.returnDate = {};
-
-      if (fromDate) {
-        const start = new Date(`${fromDate}T00:00:00.000+05:00`);
-
-        if (Number.isNaN(start.getTime())) {
-          return res.status(400).json({
-            error: "Invalid from date",
-          });
-        }
-
-        filter.returnDate.$gte = start;
-      }
-
-      if (toDate) {
-        const end = new Date(`${toDate}T23:59:59.999+05:00`);
-
-        if (Number.isNaN(end.getTime())) {
-          return res.status(400).json({
-            error: "Invalid to date",
-          });
-        }
-
-        filter.returnDate.$lte = end;
-      }
+    const returnDateRange = buildBusinessDateRange({
+      startDate: fromDate,
+      endDate: toDate,
+      field: "returnDate",
+    }).returnDate;
+    if (returnDateRange) {
+      filter.returnDate = returnDateRange;
     }
 
     const [returns, totalReturns] = await Promise.all([
@@ -1405,9 +1398,16 @@ exports.updatePurchaseReturn = async (req, res) => {
       userId,
     });
 
+    const resolvedReturnTime =
+      returnTime !== undefined ? returnTime || "" : pr.returnTime || "";
+    const returnDateTime = getReturnDateTime(
+      returnDate || pr.returnDate || new Date(),
+      resolvedReturnTime,
+    );
+
     pr.billNo = billNo;
-    pr.returnDate = returnDate;
-    pr.returnTime = returnTime;
+    pr.returnDate = returnDateTime;
+    pr.returnTime = resolvedReturnTime;
 
     pr.supplierId = supplier?._id || null;
 
@@ -1469,9 +1469,9 @@ exports.updatePurchaseReturn = async (req, res) => {
         ];
 
     const journal = new JournalEntry({
-      date: getReturnDateTime(returnDate, returnTime),
+      date: returnDateTime,
 
-      time: returnTime || "",
+      time: resolvedReturnTime || "",
 
       description: `Purchase Return - ${
         supplier?.name || party?.name || ""
@@ -1521,6 +1521,10 @@ exports.updatePurchaseReturn = async (req, res) => {
         supplierId: supplier?._id || null,
 
         partyId: party?._id || null,
+
+        entryDate: returnDateTime,
+
+        entryTime: resolvedReturnTime || "",
       });
     }
 
@@ -1532,6 +1536,7 @@ exports.updatePurchaseReturn = async (req, res) => {
         billNo,
         userId,
         notePrefix: "Updated Purchase Return",
+        entryDate: returnDateTime,
       });
     }
 

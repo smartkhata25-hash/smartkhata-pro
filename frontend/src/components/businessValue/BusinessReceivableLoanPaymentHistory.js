@@ -7,6 +7,7 @@ import {
   formatReceivableLoanAmount,
   reverseBusinessReceivableLoanPayment,
 } from '../../services/businessReceivableLoanService';
+import { formatBusinessDateForDisplay } from '../../utils/localDateTime';
 
 const METHOD_META = {
   cash: {
@@ -37,17 +38,7 @@ const METHOD_META = {
 const formatDate = (value) => {
   if (!value) return '-';
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleDateString('en-PK', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatBusinessDateForDisplay(value, { locale: 'en-PK' });
 };
 
 const BusinessReceivableLoanPaymentHistory = ({

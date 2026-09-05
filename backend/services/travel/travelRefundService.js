@@ -19,6 +19,11 @@ const {
   resolveTravelCustomerCounterparty,
   resolveTravelVendorCounterparty,
 } = require("./travelCounterpartyService");
+const {
+  extractBusinessTime,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../../utils/businessDate");
 
 const TRAVEL_REFUND_ORIGIN = "travel_refund";
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
@@ -61,30 +66,25 @@ const moneyNumber = (value, label = "amount") => {
   return roundMoney(amount);
 };
 
-const nullableDate = (value) => {
+const nullableDate = (value, timeValue = "") => {
   if (!value) {
     return null;
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
+  try {
+    return parseBusinessDateTime(value, timeValue || extractTimeFromDateInput(value), {
+      defaultTime: "00:00",
+      label: "refund date",
+    });
+  } catch {
     throw createHttpError(400, "Invalid refund date");
   }
-
-  return date;
 };
 
-const formatCurrentTimeInput = () => new Date().toTimeString().slice(0, 5);
+const formatCurrentTimeInput = () => getCurrentBusinessTimeInput();
 
 const extractTimeFromDateInput = (value) => {
-  if (!value || !String(value).includes("T")) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? "" : date.toTimeString().slice(0, 5);
+  return extractBusinessTime(value);
 };
 
 const normalizeTimeInput = (value, dateValue = null) =>
@@ -470,8 +470,13 @@ const buildRefundPayload = async ({ body = {}, userId, session = null }) => {
     paidBackAmount > 0 ? cleanString(body.paymentType || "cash").toLowerCase() : "credit";
   const accountId =
     paidBackAmount > 0 ? ensureObjectIdString(body.accountId, "payment account") : null;
-  const refundDate = nullableDate(body.refundDate) || new Date();
   const refundTime = normalizeTimeInput(body.refundTime || body.time, body.refundDate);
+  const refundDate =
+    nullableDate(body.refundDate, refundTime) ||
+    parseBusinessDateTime(new Date(), refundTime, {
+      defaultTime: "00:00",
+      label: "refund date",
+    });
 
   if (grossRefundAmount <= 0) {
     throw createHttpError(400, "Refund amount is required");
@@ -626,8 +631,9 @@ const postTravelRefundAccounting = async ({
   ]);
   const refundNumber = refund.refundNumber;
   const serviceSummary = getServiceSummary(invoice);
-  const refundDate = refund.refundDate || new Date();
-  const refundTime = cleanString(refund.refundTime) || refundDate.toTimeString().slice(0, 5);
+  const sourceRefundDate = refund.refundDate || new Date();
+  const refundTime = cleanString(refund.refundTime) || extractBusinessTime(sourceRefundDate);
+  const refundDate = nullableDate(sourceRefundDate, refundTime) || sourceRefundDate;
   const journals = [];
   const customerJournalIdentity = getCustomerJournalIdentity(customer);
 

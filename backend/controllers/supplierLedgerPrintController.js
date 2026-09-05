@@ -7,6 +7,10 @@ const JournalEntry = require("../models/JournalEntry");
 const {
   getTravelVendorJournalFilter,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const buildSupplierLedgerPrint = require("../services/supplierLedgerPrintBuilder");
 const generateSupplierLedgerHTML = require("../templates/supplierLedgerTemplate");
@@ -99,11 +103,13 @@ const fetchSupplierLedgerData = async ({
     ...travelJournalFilter,
   };
 
-  if (startDate && endDate) {
-    matchFilter.date = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
-    };
+  const ledgerDateRange = buildBusinessDateRange({
+    startDate,
+    endDate,
+  }).date;
+
+  if (ledgerDateRange) {
+    matchFilter.date = ledgerDateRange;
   }
 
   const entries = await JournalEntry.find(matchFilter)
@@ -122,7 +128,7 @@ const fetchSupplierLedgerData = async ({
       isDeleted: false,
       "lines.account": accountObjectId,
       ...travelJournalFilter,
-      date: { $lt: new Date(startDate) },
+      date: { $lt: startOfBusinessDay(startDate) },
     }).lean();
 
     for (const entry of prevEntries) {

@@ -3,114 +3,14 @@ const mongoose = require("mongoose");
 const JournalEntry = require("../../models/JournalEntry");
 
 const { calculateProfitMetrics } = require("./profitCalculationService");
+const { buildBusinessPresetDateRange } = require("../../utils/businessDate");
 
 const buildDateFilter = ({ filterType, startDate, endDate }) => {
-  let dateFilter = {};
-
-  const now = new Date();
-
-  const pakistanNow = new Date(
-    now.toLocaleString("en-US", {
-      timeZone: "Asia/Karachi",
-    }),
-  );
-
-  const formatDate = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-
-    return `${year}-${month}-${day}`;
-  };
-
-  if (filterType === "today") {
-    const today = formatDate(pakistanNow);
-
-    dateFilter = {
-      date: {
-        $gte: new Date(`${today}T00:00:00.000+05:00`),
-        $lte: new Date(`${today}T23:59:59.999+05:00`),
-      },
-    };
-  } else if (filterType === "this_month") {
-    const start = new Date(
-      pakistanNow.getFullYear(),
-      pakistanNow.getMonth(),
-      1,
-    );
-
-    const end = new Date(
-      pakistanNow.getFullYear(),
-      pakistanNow.getMonth() + 1,
-      0,
-    );
-
-    dateFilter = {
-      date: {
-        $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
-        $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
-      },
-    };
-  } else if (filterType === "last_month") {
-    const start = new Date(
-      pakistanNow.getFullYear(),
-      pakistanNow.getMonth() - 1,
-      1,
-    );
-
-    const end = new Date(pakistanNow.getFullYear(), pakistanNow.getMonth(), 0);
-
-    dateFilter = {
-      date: {
-        $gte: new Date(`${formatDate(start)}T00:00:00.000+05:00`),
-        $lte: new Date(`${formatDate(end)}T23:59:59.999+05:00`),
-      },
-    };
-  } else if (filterType === "this_year") {
-    const currentYear = pakistanNow.getFullYear();
-
-    dateFilter = {
-      date: {
-        $gte: new Date(`${currentYear}-01-01T00:00:00.000+05:00`),
-        $lte: new Date(`${currentYear}-12-31T23:59:59.999+05:00`),
-      },
-    };
-  } else if (filterType === "last_year") {
-    const lastYear = pakistanNow.getFullYear() - 1;
-
-    dateFilter = {
-      date: {
-        $gte: new Date(`${lastYear}-01-01T00:00:00.000+05:00`),
-        $lte: new Date(`${lastYear}-12-31T23:59:59.999+05:00`),
-      },
-    };
-  } else if (
-    (filterType === "custom" ||
-      filterType === "month" ||
-      filterType === "year") &&
-    startDate &&
-    endDate
-  ) {
-    const startHasTime = String(startDate).includes("T");
-    const endHasTime = String(endDate).includes("T");
-
-    const parsedStartDate = startHasTime
-      ? new Date(startDate)
-      : new Date(`${startDate}T00:00:00.000+05:00`);
-
-    const parsedEndDate = endHasTime
-      ? new Date(endDate)
-      : new Date(`${endDate}T23:59:59.999+05:00`);
-
-    dateFilter = {
-      date: {
-        $gte: parsedStartDate,
-        $lte: parsedEndDate,
-      },
-    };
-  }
-
-  return dateFilter;
+  return buildBusinessPresetDateRange({
+    dateFilter: filterType,
+    fromDate: startDate,
+    toDate: endDate,
+  });
 };
 
 const buildInvoiceDateFilter = ({ filterType, startDate, endDate }) => {

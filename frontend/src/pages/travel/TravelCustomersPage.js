@@ -24,6 +24,7 @@ import { hasPermission } from '../../utils/permissionHelper';
 import { sendWhatsAppReminder } from '../../utils/whatsapp';
 import {
   TravelActionButton,
+  TravelCardLine,
   TravelFilterSelect,
   TravelFormModal,
   TravelMasterList,
@@ -49,6 +50,8 @@ const emptyCustomerForm = {
   email: '',
   address: '',
   moduleScope: 'travel',
+  openingBalanceAmount: '',
+  openingBalanceDirection: 'receivable',
 };
 
 const quickCustomerFields = [
@@ -83,6 +86,29 @@ const customerFields = [
     ],
   },
   {
+    name: 'openingBalanceAmount',
+    labelKey: 'travel.openingBalance.amount',
+    placeholderKey: 'travel.openingBalance.amountPlaceholder',
+    type: 'number',
+    step: '0.01',
+    min: '0',
+  },
+  {
+    name: 'openingBalanceDirection',
+    labelKey: 'travel.openingBalance.direction',
+    type: 'select',
+    options: [
+      {
+        value: 'receivable',
+        labelKey: 'travel.openingBalance.customerReceivable',
+      },
+      {
+        value: 'credit',
+        labelKey: 'travel.openingBalance.customerCredit',
+      },
+    ],
+  },
+  {
     name: 'email',
     labelKey: 'travel.fields.email',
     placeholderKey: 'travel.placeholders.email',
@@ -110,6 +136,32 @@ const getCustomerBalance = (customer) => {
   }
 
   return Number(customer?.currentReceivable || 0) - Number(customer?.customerCredit || 0);
+};
+
+const getCustomerOpeningDirection = (openingBalance = 0) =>
+  Number(openingBalance || 0) < 0 ? 'credit' : 'receivable';
+
+const getOpeningBalanceAmount = (openingBalance = 0) => {
+  const amount = Math.abs(Number(openingBalance || 0));
+  return amount || '';
+};
+
+const withCustomerOpeningFormValues = (customer = {}) => ({
+  ...customer,
+  openingBalanceAmount: getOpeningBalanceAmount(customer.openingBalance),
+  openingBalanceDirection: getCustomerOpeningDirection(customer.openingBalance),
+});
+
+const buildCustomerOpeningPayload = (values = {}) => {
+  const amount = Math.abs(Number(values.openingBalanceAmount || 0));
+  const direction = values.openingBalanceDirection || 'receivable';
+
+  return {
+    ...values,
+    openingBalance: direction === 'credit' ? -amount : amount,
+    openingBalanceAmount: amount,
+    openingBalanceDirection: direction,
+  };
 };
 
 const upsertCustomer = (records, record) => {
@@ -418,7 +470,7 @@ const TravelCustomersPage = () => {
         ...emptyCustomerForm,
         ...(isEditing
           ? {
-              ...customer,
+              ...withCustomerOpeningFormValues(customer),
               moduleScope: customer.moduleScope === 'both' ? 'both' : 'travel',
             }
           : {
@@ -485,7 +537,7 @@ const TravelCustomersPage = () => {
 
   const saveCustomer = async (values, customerId = '') => {
     const payload = {
-      ...values,
+      ...buildCustomerOpeningPayload(values),
       moduleScope: values.moduleScope || 'travel',
     };
 
@@ -605,7 +657,7 @@ const TravelCustomersPage = () => {
       {
         key: 'name',
         labelKey: 'travel.fields.customerName',
-        className: 'w-[35%]',
+        className: 'w-[28%]',
         render: (customer) => (
           <div className="min-w-0">
             <p className="truncate font-extrabold text-slate-900">{customer.name}</p>
@@ -619,13 +671,23 @@ const TravelCustomersPage = () => {
       {
         key: 'mobile',
         labelKey: 'travel.fields.mobile',
-        className: 'w-[20%]',
+        className: 'w-[16%]',
         render: (customer) => customer.phone || '-',
+      },
+      {
+        key: 'openingBalance',
+        labelKey: 'travel.openingBalance.short',
+        className: 'w-[16%]',
+        render: (customer) => (
+          <span className="font-bold text-slate-700">
+            {formatTravelMoney(customer.openingBalance || 0)}
+          </span>
+        ),
       },
       {
         key: 'balance',
         labelKey: 'travel.fields.balance',
-        className: 'w-[20%]',
+        className: 'w-[18%]',
         render: (customer) => {
           const balance = getCustomerBalance(customer);
 
@@ -643,7 +705,7 @@ const TravelCustomersPage = () => {
       {
         key: 'actions',
         labelKey: 'travel.fields.actions',
-        className: 'w-[25%]',
+        className: 'w-[22%]',
         cellClassName: '!px-2 !py-2',
         render: (customer) => (
           <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
@@ -741,6 +803,14 @@ const TravelCustomersPage = () => {
             >
               {formatTravelMoney(balance)}
             </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <TravelCardLine
+              labelKey="travel.openingBalance.short"
+              value={formatTravelMoney(customer.openingBalance || 0)}
+            />
+            <TravelCardLine labelKey="travel.fields.balance" value={formatTravelMoney(balance)} />
           </div>
 
           <div className="mt-3 flex flex-wrap justify-end gap-1.5">

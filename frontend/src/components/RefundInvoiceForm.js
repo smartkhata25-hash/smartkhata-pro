@@ -18,6 +18,11 @@ import useFormPersist from '../hooks/useFormPersist';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const RefundInvoiceForm = ({
@@ -27,10 +32,7 @@ const RefundInvoiceForm = ({
   salesHistory = [],
   loadingHistory = false,
 }) => {
-  const getCurrentTime = () => {
-    const now = new Date();
-    return now.toTimeString().slice(0, 5);
-  };
+  const getCurrentTime = () => getBusinessTimeInputValue();
 
   const [productList, setProductList] = useState([]);
 
@@ -64,7 +66,7 @@ const RefundInvoiceForm = ({
 
     setSelectedCustomerType(isPartyRefund ? 'party' : 'customer');
 
-    setInvoiceDate(data.invoiceDate?.slice(0, 10) || '');
+    setInvoiceDate(getBusinessDateInputValue(data.invoiceDate) || '');
 
     setInvoiceTime(data.invoiceTime || getCurrentTime());
 
@@ -136,7 +138,7 @@ const RefundInvoiceForm = ({
 
   const [items, setItems] = useState([]);
   const [billNo, setBillNo] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invoiceDate, setInvoiceDate] = useState(getBusinessDateInputValue());
   const [invoiceTime, setInvoiceTime] = useState(getCurrentTime());
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -360,7 +362,7 @@ const RefundInvoiceForm = ({
 
     setBillNo('');
 
-    setInvoiceDate(new Date().toISOString().slice(0, 10));
+    setInvoiceDate(getBusinessDateInputValue());
     setInvoiceTime(getCurrentTime());
 
     setCustomerName('');
@@ -502,7 +504,7 @@ const RefundInvoiceForm = ({
     const defaultState = {
       items: [],
       billNo: '',
-      invoiceDate: new Date().toISOString().slice(0, 10),
+      invoiceDate: getBusinessDateInputValue(),
       invoiceTime: getCurrentTime(),
       customerName: '',
       customerPhone: '',
@@ -532,7 +534,7 @@ const RefundInvoiceForm = ({
 
     setBillNo(data.billNo || '');
 
-    setInvoiceDate(data.invoiceDate || new Date().toISOString().slice(0, 10));
+    setInvoiceDate(getBusinessDateInputValue(data.invoiceDate) || getBusinessDateInputValue());
 
     setInvoiceTime(data.invoiceTime || getCurrentTime());
 
@@ -1732,7 +1734,7 @@ disabled:opacity-60 disabled:cursor-not-allowed"
                 <ul className="space-y-2 text-sm">
                   {salesHistory.map((h) => {
                     const safeDate = h.invoiceDate
-                      ? new Date(h.invoiceDate).toLocaleDateString()
+                      ? formatBusinessDateForDisplay(h.invoiceDate)
                       : 'N/A';
 
                     return (

@@ -16,6 +16,11 @@ const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
 } = require("../utils/moduleScope");
+const {
+  extractBusinessTime,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const PAYMENT_METHOD_CATEGORIES = {
   cash: ["cash"],
@@ -195,9 +200,20 @@ exports.createLiabilityPayment = async (req, res) => {
       });
     }
 
-    const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    const paymentTime =
+      extractBusinessTime(paymentDate) || getCurrentBusinessTimeInput();
+    let parsedPaymentDate = null;
 
-    if (Number.isNaN(parsedPaymentDate.getTime())) {
+    try {
+      parsedPaymentDate = parseBusinessDateTime(
+        paymentDate || new Date(),
+        paymentTime,
+        {
+          defaultTime: "00:00",
+          label: "payment date",
+        },
+      );
+    } catch {
       return res.status(400).json({
         success: false,
         message: "Invalid payment date",
@@ -284,6 +300,7 @@ exports.createLiabilityPayment = async (req, res) => {
 
     createdJournal = await JournalEntry.create({
       date: parsedPaymentDate,
+      time: paymentTime,
 
       description,
 
@@ -609,8 +626,14 @@ exports.reverseLiabilityPayment = async (req, res) => {
       paymentType: line.paymentType,
     }));
 
+    const reversalTime = getCurrentBusinessTimeInput();
+
     reversalJournal = await JournalEntry.create({
-      date: new Date(),
+      date: parseBusinessDateTime(new Date(), reversalTime, {
+        defaultTime: "00:00",
+        label: "liability payment reversal date",
+      }),
+      time: reversalTime,
 
       description: `Reversal - Liability payment - ${liability.title}`,
 

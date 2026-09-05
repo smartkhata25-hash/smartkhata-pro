@@ -5,12 +5,16 @@ import { getPartyLedger } from '../services/partyLedgerService';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { createPayBill, updatePayBill, getPayBillById } from '../services/payBillService';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
-import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import Select from 'react-select';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 const PayBillForm = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [parties, setParties] = useState([]);
@@ -32,8 +36,8 @@ const PayBillForm = () => {
   const [formData, setFormData] = useState({
     supplier: '',
     partyId: '',
-    date: dayjs().format('YYYY-MM-DD'),
-    time: dayjs().format('HH:mm'),
+    date: getBusinessDateInputValue(),
+    time: getBusinessTimeInputValue(),
     paymentType: 'Cash',
     discountAmount: '',
     description: '',
@@ -141,9 +145,9 @@ const PayBillForm = () => {
 
           partyId: supplierType === 'party' ? existingPartyId : '',
 
-          date: existing.date?.slice(0, 10) || dayjs().format('YYYY-MM-DD'),
+          date: getBusinessDateInputValue(existing.date),
 
-          time: existing.time || dayjs().format('HH:mm'),
+          time: existing.time || getBusinessTimeInputValue(),
 
           paymentType: normalizePaymentType(
             existing.paymentEntries?.[0]?.paymentType || existing.paymentType
@@ -329,8 +333,8 @@ const PayBillForm = () => {
     setFormData({
       supplier: '',
       partyId: '',
-      date: dayjs().format('YYYY-MM-DD'),
-      time: dayjs().format('HH:mm'),
+      date: getBusinessDateInputValue(),
+      time: getBusinessTimeInputValue(),
       paymentType: 'Cash',
       discountAmount: '',
       description: '',
@@ -390,8 +394,8 @@ const PayBillForm = () => {
       setFormData({
         supplier: supplierType === 'supplier' ? existingSupplierId : '',
         partyId: supplierType === 'party' ? existingPartyId : '',
-        date: existing.date?.slice(0, 10) || dayjs().format('YYYY-MM-DD'),
-        time: existing.time || dayjs().format('HH:mm'),
+        date: getBusinessDateInputValue(existing.date),
+        time: existing.time || getBusinessTimeInputValue(),
         paymentType: existing.paymentEntries?.[0]?.paymentType || existing.paymentType || 'Cash',
         discountAmount: existing.discountAmount ?? '',
         description: existing.description || '',
@@ -457,8 +461,8 @@ const PayBillForm = () => {
       formData: {
         supplier: '',
         partyId: '',
-        date: dayjs().format('YYYY-MM-DD'),
-        time: dayjs().format('HH:mm'),
+        date: getBusinessDateInputValue(),
+        time: getBusinessTimeInputValue(),
         paymentType: 'Cash',
         discountAmount: '',
         description: '',
@@ -484,8 +488,8 @@ const PayBillForm = () => {
     setFormData({
       supplier: savedFormData.supplier || '',
       partyId: savedFormData.partyId || '',
-      date: savedFormData.date || dayjs().format('YYYY-MM-DD'),
-      time: savedFormData.time || dayjs().format('HH:mm'),
+      date: savedFormData.date || getBusinessDateInputValue(),
+      time: savedFormData.time || getBusinessTimeInputValue(),
       paymentType: savedFormData.paymentType || 'Cash',
       discountAmount: savedFormData.discountAmount || '',
       description: savedFormData.description || '',
@@ -1073,7 +1077,7 @@ const PayBillForm = () => {
               <tbody>
                 {supplierLedger.map((e, i) => (
                   <tr key={i}>
-                    <td className="border p-1">{new Date(e.date).toLocaleDateString()}</td>
+                    <td className="border p-1">{formatBusinessDateForDisplay(e.date)}</td>
                     <td className="border p-1">{e.billNo || '-'}</td>
                     <td className="border p-1">{e.description || '-'}</td>
                     <td className="border p-1 text-right">{e.debit?.toFixed(2) || '0.00'}</td>

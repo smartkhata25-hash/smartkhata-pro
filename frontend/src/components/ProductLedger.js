@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const ProductLedger = ({ productId }) => {
   const [ledger, setLedger] = useState(null);
@@ -381,7 +382,7 @@ const ProductLedger = ({ productId }) => {
                             : '#fff7e6',
                   }}
                 >
-                  <td className="border p-2">{entry.date.toLocaleDateString()}</td>
+                  <td className="border p-2">{formatBusinessDateForDisplay(entry.date)}</td>
                   <td className="border p-2">{entry.billNo}</td>
                   <td className="border p-2">{entry.type}</td>
                   <td className="border p-2">{entry.party}</td>

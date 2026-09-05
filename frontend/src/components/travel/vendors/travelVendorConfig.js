@@ -17,6 +17,8 @@ export const emptyVendorForm = {
   notes: '',
   travelServiceCategories: [],
   moduleScope: 'travel',
+  openingBalanceAmount: '',
+  openingBalanceDirection: 'payable',
 };
 
 export const emptyHotelVendorForm = {
@@ -29,6 +31,8 @@ export const createEmptyQuickVendorForm = (name = '') => ({
   travelVendorType: 'other',
   phone: '',
   moduleScope: 'travel',
+  openingBalanceAmount: '',
+  openingBalanceDirection: 'payable',
 });
 
 export const vendorFields = [
@@ -51,6 +55,23 @@ export const vendorFields = [
     options: [
       { value: 'travel', labelKey: 'travel.booking.moduleScope.travel' },
       { value: 'both', labelKey: 'travel.booking.moduleScope.both' },
+    ],
+  },
+  {
+    name: 'openingBalanceAmount',
+    labelKey: 'travel.openingBalance.amount',
+    placeholderKey: 'travel.openingBalance.amountPlaceholder',
+    type: 'number',
+    step: '0.01',
+    min: '0',
+  },
+  {
+    name: 'openingBalanceDirection',
+    labelKey: 'travel.openingBalance.direction',
+    type: 'select',
+    options: [
+      { value: 'payable', labelKey: 'travel.openingBalance.vendorPayable' },
+      { value: 'advance', labelKey: 'travel.openingBalance.vendorAdvance' },
     ],
   },
   {

@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("./accountHelper");
 const Account = require("../models/Account");
+const {
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("./businessDate");
 
 const recalculateUniqueAccounts = async (lines = []) => {
   const uniqueAccounts = [
@@ -32,7 +36,7 @@ const createPaymentEntry = async ({
   supplierId = null,
   partyId = null,
   entryDate = new Date(),
-  entryTime = new Date().toTimeString().slice(0, 8),
+  entryTime = getCurrentBusinessTimeInput(),
   session = null,
 }) => {
   amount = Number(amount);
@@ -129,8 +133,11 @@ const createPaymentEntry = async ({
   }
 
   const journal = new JournalEntry({
-    date: entryDate || new Date(),
-    time: entryTime || new Date().toTimeString().slice(0, 8),
+    date: parseBusinessDateTime(entryDate || new Date(), entryTime, {
+      defaultTime: "00:00",
+      label: "payment entry date",
+    }),
+    time: entryTime || "",
     sourceType,
     originModule,
     referenceId,
@@ -170,7 +177,7 @@ const createDiscountEntry = async ({
   discountAccountCode = "SALES_DISCOUNT",
   discountAccountName = "sales discount",
   entryDate = new Date(),
-  entryTime = new Date().toTimeString().slice(0, 8),
+  entryTime = getCurrentBusinessTimeInput(),
   customerId = null,
   supplierId = null,
   partyId = null,
@@ -263,8 +270,11 @@ const createDiscountEntry = async ({
   }
 
   const journal = new JournalEntry({
-    date: entryDate || new Date(),
-    time: entryTime || new Date().toTimeString().slice(0, 8),
+    date: parseBusinessDateTime(entryDate || new Date(), entryTime, {
+      defaultTime: "00:00",
+      label: "discount entry date",
+    }),
+    time: entryTime || "",
     sourceType,
     originModule,
     referenceId,
@@ -303,7 +313,7 @@ const createReceivePaymentDiscountEntry = async ({
   customerId = null,
   partyId = null,
   entryDate = new Date(),
-  entryTime = new Date().toTimeString().slice(0, 8),
+  entryTime = getCurrentBusinessTimeInput(),
   session = null,
 }) => {
   discountAmount = Number(discountAmount);
@@ -376,8 +386,11 @@ const createReceivePaymentDiscountEntry = async ({
   ];
 
   const journal = new JournalEntry({
-    date: entryDate || new Date(),
-    time: entryTime || new Date().toTimeString().slice(0, 8),
+    date: parseBusinessDateTime(entryDate || new Date(), entryTime, {
+      defaultTime: "00:00",
+      label: "receive payment discount date",
+    }),
+    time: entryTime || "",
     sourceType: "receive_payment_discount",
     originModule,
     referenceId,

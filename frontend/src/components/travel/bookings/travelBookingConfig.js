@@ -1,6 +1,11 @@
 import { DEFAULT_TRAVEL_CURRENCY, getTravelCurrencyOptions } from '../../../config/travelConfig';
 
-import { getLocalDateInputValue } from '../../../utils/localDateTime';
+import {
+  formatBusinessDateForDisplay,
+  formatTimestampForDisplay,
+  getLocalDateInputValue,
+  getLocalTimeInputValue,
+} from '../../../utils/localDateTime';
 
 export const BOOKING_STATUSES = Object.freeze([
   'draft',
@@ -582,9 +587,10 @@ export const normalizeDateForInput = (value, includeTime = false) => {
     return getLocalDateInputValue(date);
   }
 
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  const datePart = getLocalDateInputValue(date);
+  const timePart = getLocalTimeInputValue(date);
 
-  return localDate.toISOString().slice(0, 16);
+  return datePart && timePart ? `${datePart}T${timePart}` : '';
 };
 
 const preparePaxPricingForForm = (rows = []) => {
@@ -963,11 +969,7 @@ export const formatDate = (value) => {
     return '-';
   }
 
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatBusinessDateForDisplay(date);
 };
 
 export const formatDateTime = (value) => {
@@ -981,13 +983,7 @@ export const formatDateTime = (value) => {
     return '-';
   }
 
-  return date.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatTimestampForDisplay(date);
 };
 
 export const formatBookingMoney = (amount, currency = DEFAULT_TRAVEL_CURRENCY) =>

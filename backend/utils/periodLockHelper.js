@@ -1,9 +1,17 @@
 const PeriodLock = require("../models/PeriodLock");
+const { getBusinessDateKey } = require("./businessDate");
 
 const isPeriodLocked = async (userId, date) => {
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = d.getMonth();
+  let dateKey = "";
+
+  try {
+    dateKey = getBusinessDateKey(date || new Date());
+  } catch {
+    return false;
+  }
+
+  const [year, monthNumber] = dateKey.split("-").map(Number);
+  const month = monthNumber - 1;
 
   const lock = await PeriodLock.findOne({
     userId,

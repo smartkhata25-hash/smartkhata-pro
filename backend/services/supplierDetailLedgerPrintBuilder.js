@@ -1,11 +1,8 @@
 //Supplier Detail Ledger Print Builder
 
-const formatDate = (date) => {
-  if (!date) return "-";
-  const d = new Date(date);
-  if (isNaN(d)) return "-";
-  return d.toLocaleDateString("en-GB");
-};
+const { formatBusinessDate } = require("../utils/businessDate");
+
+const formatDate = (date) => formatBusinessDate(date) || "-";
 
 const safeNumber = (value) => {
   const num = Number(value);

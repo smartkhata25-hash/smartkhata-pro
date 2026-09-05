@@ -23,6 +23,13 @@ const {
   deleteTransactionsByReference,
 } = require("../utils/stockHelper");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  BUSINESS_TIME_ZONE,
+  buildBusinessDateRange,
+  buildBusinessPresetDateRange,
+  parseBusinessDateTime,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 function formatAttachments(invoice) {
   if (invoice.attachments?.length > 0) {
@@ -150,9 +157,14 @@ exports.createInvoice = async (req, res) => {
       });
     }
 
-    const parsedInvoiceDate = new Date(invoiceDate);
+    let parsedInvoiceDate;
 
-    if (Number.isNaN(parsedInvoiceDate.getTime())) {
+    try {
+      parsedInvoiceDate = parseBusinessDateTime(invoiceDate, invoiceTime, {
+        defaultTime: "00:00",
+        label: "invoice date",
+      });
+    } catch (error) {
       return res.status(400).json({
         message: "Invalid invoice date.",
       });
@@ -533,21 +545,14 @@ exports.createInvoice = async (req, res) => {
             invoiceModel: "Invoice",
             userId,
             rate: Number(item.costPrice || 0),
+            date: parsedInvoiceDate,
 
             session,
           });
         }
       }
 
-      let invoiceDateTime = new Date(parsedInvoiceDate);
-
-      if (invoiceTime) {
-        const combined = new Date(`${invoiceDate}T${invoiceTime}`);
-
-        if (!Number.isNaN(combined.getTime())) {
-          invoiceDateTime = combined;
-        }
-      }
+      const invoiceDateTime = parsedInvoiceDate;
 
       let totalCogs = 0;
 
@@ -639,6 +644,8 @@ exports.createInvoice = async (req, res) => {
           originModule: "sale_invoice",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          entryDate: invoiceDateTime,
+          entryTime: invoiceTime || "",
 
           session,
         });
@@ -658,6 +665,8 @@ exports.createInvoice = async (req, res) => {
           description: "Sale Invoice Payment",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          entryDate: invoiceDateTime,
+          entryTime: invoiceTime || "",
 
           session,
         });
@@ -873,130 +882,15 @@ exports.getInvoices = async (req, res) => {
       });
     }
 
-    const now = new Date();
+    const businessInvoiceDateFilter = buildBusinessPresetDateRange({
+      dateFilter,
+      fromDate,
+      toDate,
+      field: "invoiceDate",
+    }).invoiceDate;
 
-    let startDate = null;
-    let endDate = null;
-
-    const startOfDay = (date) => {
-      const d = new Date(date);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    };
-
-    const endOfDay = (date) => {
-      const d = new Date(date);
-      d.setHours(23, 59, 59, 999);
-      return d;
-    };
-
-    if (dateFilter === "today") {
-      startDate = startOfDay(now);
-      endDate = endOfDay(now);
-    }
-
-    if (dateFilter === "yesterday") {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-
-      startDate = startOfDay(yesterday);
-      endDate = endOfDay(yesterday);
-    }
-
-    if (dateFilter === "this_week") {
-      const current = new Date(now);
-      const day = current.getDay();
-
-      // Monday = start of week
-      const diff = day === 0 ? -6 : 1 - day;
-
-      current.setDate(current.getDate() + diff);
-
-      startDate = startOfDay(current);
-      endDate = endOfDay(now);
-    }
-
-    if (dateFilter === "last_week") {
-      const current = new Date(now);
-      const day = current.getDay();
-
-      const diff = day === 0 ? -6 : 1 - day;
-
-      const thisMonday = new Date(current);
-      thisMonday.setDate(current.getDate() + diff);
-
-      const lastMonday = new Date(thisMonday);
-      lastMonday.setDate(lastMonday.getDate() - 7);
-
-      const lastSunday = new Date(thisMonday);
-      lastSunday.setDate(lastSunday.getDate() - 1);
-
-      startDate = startOfDay(lastMonday);
-      endDate = endOfDay(lastSunday);
-    }
-
-    if (dateFilter === "this_month") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-
-      endDate = endOfDay(now);
-    }
-
-    if (dateFilter === "last_month") {
-      startDate = new Date(
-        now.getFullYear(),
-        now.getMonth() - 1,
-        1,
-        0,
-        0,
-        0,
-        0,
-      );
-
-      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-    }
-
-    if (dateFilter === "this_year") {
-      startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-
-      endDate = endOfDay(now);
-    }
-
-    if (dateFilter === "last_year") {
-      startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
-
-      endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-    }
-
-    // Custom Date
-    if (dateFilter === "custom") {
-      if (fromDate) {
-        const parsedFromDate = new Date(`${fromDate}T00:00:00`);
-
-        if (!Number.isNaN(parsedFromDate.getTime())) {
-          startDate = parsedFromDate;
-        }
-      }
-
-      if (toDate) {
-        const parsedToDate = new Date(`${toDate}T23:59:59.999`);
-
-        if (!Number.isNaN(parsedToDate.getTime())) {
-          endDate = parsedToDate;
-        }
-      }
-    }
-
-    // Apply date filter on Invoice Date
-    if (startDate || endDate) {
-      filter.invoiceDate = {};
-
-      if (startDate) {
-        filter.invoiceDate.$gte = startDate;
-      }
-
-      if (endDate) {
-        filter.invoiceDate.$lte = endDate;
-      }
+    if (businessInvoiceDateFilter) {
+      filter.invoiceDate = businessInvoiceDateFilter;
     }
 
     const [invoices, totalInvoices, salesSummary] = await Promise.all([
@@ -1381,9 +1275,22 @@ exports.updateInvoice = async (req, res) => {
       });
     }
 
-    const parsedInvoiceDate = new Date(invoiceDate);
+    const resolvedInvoiceTime =
+      invoiceTime !== undefined
+        ? invoiceTime || ""
+        : existingInvoice.invoiceTime || "";
+    let parsedInvoiceDate;
 
-    if (Number.isNaN(parsedInvoiceDate.getTime())) {
+    try {
+      parsedInvoiceDate = parseBusinessDateTime(
+        invoiceDate || existingInvoice.invoiceDate,
+        resolvedInvoiceTime,
+        {
+          defaultTime: "00:00",
+          label: "invoice date",
+        },
+      );
+    } catch (error) {
       return res.status(400).json({
         message: "Invalid invoice date.",
       });
@@ -1753,7 +1660,7 @@ exports.updateInvoice = async (req, res) => {
       invoice.by = by || "";
 
       invoice.invoiceDate = parsedInvoiceDate;
-      invoice.invoiceTime = invoiceTime || "";
+      invoice.invoiceTime = resolvedInvoiceTime || "";
       invoice.dueDate = dueDate || null;
 
       invoice.items = snapshotItems;
@@ -1804,20 +1711,13 @@ exports.updateInvoice = async (req, res) => {
             invoiceModel: "Invoice",
             userId,
             rate: Number(item.costPrice || 0),
+            date: parsedInvoiceDate,
             session,
           });
         }
       }
 
-      let journalDateTime = new Date(parsedInvoiceDate);
-
-      if (invoiceTime) {
-        const combined = new Date(`${invoiceDate}T${invoiceTime}`);
-
-        if (!Number.isNaN(combined.getTime())) {
-          journalDateTime = combined;
-        }
-      }
+      const journalDateTime = parsedInvoiceDate;
 
       const totalCogs = openingInvoice
         ? 0
@@ -1865,7 +1765,7 @@ exports.updateInvoice = async (req, res) => {
 
       const journal = new JournalEntry({
         date: journalDateTime,
-        time: invoiceTime || "",
+        time: resolvedInvoiceTime || "",
 
         description:
           numericDiscountAmount > 0
@@ -1913,6 +1813,8 @@ exports.updateInvoice = async (req, res) => {
           originModule: "sale_invoice",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          entryDate: journalDateTime,
+          entryTime: resolvedInvoiceTime || "",
           session,
         });
       }
@@ -1931,6 +1833,8 @@ exports.updateInvoice = async (req, res) => {
           description: "Sale Invoice Payment",
           customerId: customer?._id || null,
           partyId: party?._id || null,
+          entryDate: journalDateTime,
+          entryTime: resolvedInvoiceTime || "",
           session,
         });
 
@@ -2262,25 +2166,19 @@ exports.searchInvoices = async (req, res) => {
       }
 
       if (key === "startDate") {
-        const startDate = new Date(`${value}T00:00:00`);
-
-        if (!Number.isNaN(startDate.getTime())) {
-          filters.invoiceDate = {
-            ...filters.invoiceDate,
-            $gte: startDate,
-          };
-        }
+        filters.invoiceDate = {
+          ...filters.invoiceDate,
+          ...buildBusinessDateRange({ startDate: value, field: "invoiceDate" })
+            .invoiceDate,
+        };
       }
 
       if (key === "endDate") {
-        const endDate = new Date(`${value}T23:59:59.999`);
-
-        if (!Number.isNaN(endDate.getTime())) {
-          filters.invoiceDate = {
-            ...filters.invoiceDate,
-            $lte: endDate,
-          };
-        }
+        filters.invoiceDate = {
+          ...filters.invoiceDate,
+          ...buildBusinessDateRange({ endDate: value, field: "invoiceDate" })
+            .invoiceDate,
+        };
       }
     });
 

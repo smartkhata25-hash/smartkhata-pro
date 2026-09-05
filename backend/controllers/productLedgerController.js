@@ -5,6 +5,10 @@ const PurchaseInvoice = require("../models/purchaseInvoice");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const RefundInvoice = require("../models/RefundInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 exports.getProductLedger = async (req, res) => {
   try {
@@ -16,9 +20,12 @@ exports.getProductLedger = async (req, res) => {
       return res.status(400).json({ message: "Product ID is required." });
     }
 
-    const dateFilter = {};
-    if (startDate) dateFilter.$gte = new Date(startDate);
-    if (endDate) dateFilter.$lte = new Date(endDate);
+    const dateFilter =
+      buildBusinessDateRange({
+        startDate,
+        endDate,
+      }).date || {};
+    const hasDateFilter = Object.keys(dateFilter).length > 0;
 
     // 🔹 Get Product
     const product = await Product.findById(productId);
@@ -33,7 +40,7 @@ exports.getProductLedger = async (req, res) => {
       previousTransactions = await InventoryTransaction.find({
         productId,
         userId,
-        date: { $lt: new Date(startDate) },
+        date: { $lt: startOfBusinessDay(startDate) },
       });
     } else {
       previousTransactions = await InventoryTransaction.find({
@@ -57,7 +64,7 @@ exports.getProductLedger = async (req, res) => {
       type: "IN",
       invoiceModel: "PurchaseInvoice",
       userId,
-      ...(startDate || endDate ? { date: dateFilter } : {}),
+      ...(hasDateFilter ? { date: dateFilter } : {}),
     })
       .populate({
         path: "invoiceId",
@@ -85,7 +92,7 @@ exports.getProductLedger = async (req, res) => {
       type: "IN",
       invoiceModel: "RefundInvoice",
       userId,
-      ...(startDate || endDate ? { date: dateFilter } : {}),
+      ...(hasDateFilter ? { date: dateFilter } : {}),
     })
       .populate({
         path: "invoiceId",
@@ -113,7 +120,7 @@ exports.getProductLedger = async (req, res) => {
       type: "OUT",
       invoiceModel: "PurchaseReturn",
       userId,
-      ...(startDate || endDate ? { date: dateFilter } : {}),
+      ...(hasDateFilter ? { date: dateFilter } : {}),
     })
       .populate({
         path: "invoiceId",
@@ -138,7 +145,7 @@ exports.getProductLedger = async (req, res) => {
     const salesInvoices = await Invoice.find({
       "items.productId": new mongoose.Types.ObjectId(productId),
       createdBy: userId,
-      ...(startDate || endDate ? { invoiceDate: dateFilter } : {}),
+      ...(hasDateFilter ? { invoiceDate: dateFilter } : {}),
     }).sort({ invoiceDate: 1 });
 
     const saleEntries = [];
@@ -147,7 +154,7 @@ exports.getProductLedger = async (req, res) => {
       productId,
       userId,
       type: { $in: ["ADJUST_IN", "ADJUST_OUT"] },
-      ...(startDate || endDate ? { date: dateFilter } : {}),
+      ...(hasDateFilter ? { date: dateFilter } : {}),
     }).sort({ date: 1 });
 
     const adjustmentEntries = adjustments.map((a) => {

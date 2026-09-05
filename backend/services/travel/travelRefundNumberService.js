@@ -1,10 +1,8 @@
 const Counter = require("../../models/Counter");
+const { getBusinessDateKey } = require("../../utils/businessDate");
 
 const generateTravelRefundNumber = async (userId, date = new Date(), session = null) => {
-  const parsedDate = new Date(date);
-  const year = Number.isNaN(parsedDate.getTime())
-    ? new Date().getFullYear()
-    : parsedDate.getFullYear();
+  const year = getBusinessDateKey(date, { fallback: new Date() }).slice(0, 4);
 
   const counter = await Counter.findOneAndUpdate(
     {

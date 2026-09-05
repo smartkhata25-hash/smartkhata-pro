@@ -8,6 +8,9 @@ const User = require("../../models/User");
 const {
   DEFAULT_TRAVEL_REMINDER_TEMPLATES,
 } = require("../../models/TravelReminderSettings");
+const {
+  BUSINESS_TIME_ZONE,
+} = require("../../utils/businessDate");
 
 const getUserId = (req) => req.user?.id || req.userId;
 
@@ -835,7 +838,7 @@ const formatDatePart = (value) => {
     day: "2-digit",
     month: "short",
     year: "numeric",
-    timeZone: "Asia/Karachi",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 };
 
@@ -858,7 +861,7 @@ const formatTimePart = (value) => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Asia/Karachi",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 };
 

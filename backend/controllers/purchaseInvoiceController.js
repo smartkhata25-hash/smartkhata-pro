@@ -30,6 +30,11 @@ const {
   createPaymentEntry,
   createDiscountEntry,
 } = require("../utils/paymentService");
+const {
+  buildBusinessDateRange,
+  buildBusinessPresetDateRange,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 const canPayPurchaseBill = (req) => {
   if (req.user?.accountRole === "owner") {
     return true;
@@ -203,6 +208,7 @@ const applyPurchaseStockBatch = async ({
   billNo,
   userId,
   updated = false,
+  entryDate = null,
 }) => {
   if (!Array.isArray(items) || items.length === 0) {
     return;
@@ -261,6 +267,7 @@ const applyPurchaseStockBatch = async ({
     invoiceId,
     invoiceModel: "PurchaseInvoice",
     userId,
+    ...(entryDate ? { date: entryDate } : {}),
   }));
 
   await InventoryTransaction.insertMany(inventoryRows, {
@@ -507,7 +514,10 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
   }
 
   // 💾 Save invoice
-  const parsedInvoiceDate = new Date(`${invoiceDate}T12:00:00`);
+  const parsedInvoiceDate = parseBusinessDateTime(invoiceDate || new Date(), invoiceTime, {
+    defaultTime: "00:00",
+    label: "purchase invoice date",
+  });
 
   const invoice = await PurchaseInvoice.create({
     billNo,
@@ -660,6 +670,7 @@ const addPurchaseInvoice = asyncHandler(async (req, res) => {
       billNo,
       userId,
       updated: false,
+      entryDate: parsedInvoiceDate,
     });
   }
 
@@ -795,7 +806,16 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  const parsedInvoiceDate = new Date(`${invoiceDate}T12:00:00`);
+  const resolvedInvoiceTime =
+    invoiceTime !== undefined ? invoiceTime || "" : invoice.invoiceTime || "";
+  const parsedInvoiceDate = parseBusinessDateTime(
+    invoiceDate || invoice.invoiceDate || new Date(),
+    resolvedInvoiceTime,
+    {
+      defaultTime: "00:00",
+      label: "purchase invoice date",
+    },
+  );
 
   let parsedItems = typeof items === "string" ? JSON.parse(items) : items;
 
@@ -944,7 +964,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   Object.assign(invoice, {
     billNo,
     invoiceDate: parsedInvoiceDate,
-    invoiceTime,
+    invoiceTime: resolvedInvoiceTime,
     supplier: supplier?._id || null,
     partyId: party?._id || null,
     supplierName,
@@ -1013,7 +1033,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   await JournalEntry.create({
     date: parsedInvoiceDate,
-    time: invoiceTime || "",
+    time: resolvedInvoiceTime || "",
     billNo,
     description: req.body.description || "",
     createdBy: userId,
@@ -1055,7 +1075,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
       entryDate: parsedInvoiceDate,
 
-      entryTime: invoiceTime || "",
+      entryTime: resolvedInvoiceTime || "",
 
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
@@ -1077,7 +1097,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       description: `Payment against Purchase Invoice ${invoice.billNo}`,
       entryDate: parsedInvoiceDate,
 
-      entryTime: invoiceTime || "",
+      entryTime: resolvedInvoiceTime || "",
 
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
@@ -1091,6 +1111,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       billNo,
       userId,
       updated: true,
+      entryDate: parsedInvoiceDate,
     });
   }
 
@@ -1366,129 +1387,15 @@ const getAllPurchaseInvoices = asyncHandler(async (req, res) => {
     });
   }
 
-  // =========================
-  // DATE FILTER
-  // =========================
+  const businessInvoiceDateFilter = buildBusinessPresetDateRange({
+    dateFilter,
+    fromDate,
+    toDate,
+    field: "invoiceDate",
+  }).invoiceDate;
 
-  const now = new Date();
-
-  let startDate = null;
-  let endDate = null;
-
-  const startOfDay = (date) => {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  };
-
-  const endOfDay = (date) => {
-    const d = new Date(date);
-    d.setHours(23, 59, 59, 999);
-    return d;
-  };
-
-  if (dateFilter === "today") {
-    startDate = startOfDay(now);
-    endDate = endOfDay(now);
-  }
-
-  if (dateFilter === "yesterday") {
-    const yesterday = new Date(now);
-
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    startDate = startOfDay(yesterday);
-    endDate = endOfDay(yesterday);
-  }
-
-  if (dateFilter === "this_week") {
-    const current = new Date(now);
-
-    const day = current.getDay();
-
-    const diff = day === 0 ? -6 : 1 - day;
-
-    current.setDate(current.getDate() + diff);
-
-    startDate = startOfDay(current);
-    endDate = endOfDay(now);
-  }
-
-  if (dateFilter === "last_week") {
-    const current = new Date(now);
-
-    const day = current.getDay();
-
-    const diff = day === 0 ? -6 : 1 - day;
-
-    const thisMonday = new Date(current);
-
-    thisMonday.setDate(current.getDate() + diff);
-
-    const lastMonday = new Date(thisMonday);
-
-    lastMonday.setDate(lastMonday.getDate() - 7);
-
-    const lastSunday = new Date(thisMonday);
-
-    lastSunday.setDate(lastSunday.getDate() - 1);
-
-    startDate = startOfDay(lastMonday);
-    endDate = endOfDay(lastSunday);
-  }
-
-  if (dateFilter === "this_month") {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-
-    endDate = endOfDay(now);
-  }
-
-  if (dateFilter === "last_month") {
-    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-
-    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-  }
-
-  if (dateFilter === "this_year") {
-    startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-
-    endDate = endOfDay(now);
-  }
-
-  if (dateFilter === "last_year") {
-    startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
-
-    endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-  }
-
-  if (dateFilter === "custom") {
-    if (fromDate) {
-      const parsedFromDate = new Date(`${fromDate}T00:00:00`);
-
-      if (!Number.isNaN(parsedFromDate.getTime())) {
-        startDate = parsedFromDate;
-      }
-    }
-
-    if (toDate) {
-      const parsedToDate = new Date(`${toDate}T23:59:59.999`);
-
-      if (!Number.isNaN(parsedToDate.getTime())) {
-        endDate = parsedToDate;
-      }
-    }
-  }
-
-  if (startDate || endDate) {
-    filter.invoiceDate = {};
-
-    if (startDate) {
-      filter.invoiceDate.$gte = startDate;
-    }
-
-    if (endDate) {
-      filter.invoiceDate.$lte = endDate;
-    }
+  if (businessInvoiceDateFilter) {
+    filter.invoiceDate = businessInvoiceDateFilter;
   }
 
   // =========================
@@ -1640,27 +1547,11 @@ const searchPurchaseInvoices = asyncHandler(async (req, res) => {
     }
 
     if (key === "startDate") {
-      const date = new Date(`${value}T00:00:00`);
-
-      if (!Number.isNaN(date.getTime())) {
-        conditions.push({
-          invoiceDate: {
-            $gte: date,
-          },
-        });
-      }
+      conditions.push(buildBusinessDateRange({ startDate: value, field: "invoiceDate" }));
     }
 
     if (key === "endDate") {
-      const date = new Date(`${value}T23:59:59.999`);
-
-      if (!Number.isNaN(date.getTime())) {
-        conditions.push({
-          invoiceDate: {
-            $lte: date,
-          },
-        });
-      }
+      conditions.push(buildBusinessDateRange({ endDate: value, field: "invoiceDate" }));
     }
   }
 

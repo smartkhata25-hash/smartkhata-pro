@@ -7,6 +7,10 @@ const { MODULE_SCOPES, normalizeModuleScope } = require("../utils/moduleScope");
 const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 } = require("../utils/businessValueModuleScope");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -172,17 +176,13 @@ const getCustomerLedger = async (req, res) => {
       ...journalScopeFilter,
     };
 
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
 
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      matchFilter.date = {
-        $gte: start,
-        $lte: end,
-      };
+    if (ledgerDateRange) {
+      matchFilter.date = ledgerDateRange;
     }
 
     // ✅ Step 4: Get entries
@@ -200,8 +200,7 @@ const getCustomerLedger = async (req, res) => {
     let opening = 0;
 
     if (startDate) {
-      const openingStart = new Date(startDate);
-      openingStart.setHours(0, 0, 0, 0);
+      const openingStart = startOfBusinessDay(startDate);
 
       const result = await JournalEntry.aggregate([
         {

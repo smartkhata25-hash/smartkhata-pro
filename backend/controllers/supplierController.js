@@ -29,6 +29,12 @@ const {
   getTravelVendorJournalFilter,
   roundMoney,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 const PurchaseInvoice = require("../models/purchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 const escapeRegex = (text = "") => {
@@ -45,6 +51,205 @@ const hasOwn = (object, key) =>
   Object.prototype.hasOwnProperty.call(object || {}, key);
 
 const cleanString = (value = "") => String(value || "").trim();
+
+const TRAVEL_VENDOR_OPENING_ORIGIN = "travel_vendor_opening_balance";
+const TRAVEL_OPENING_BALANCE_CODE = "TRAVEL_OPENING_BALANCE";
+
+const getCurrentTravelOpeningTimestamp = () => {
+  const time = getCurrentBusinessTimeInput();
+
+  return {
+    date: parseBusinessDateTime(new Date(), time, {
+      defaultTime: "00:00",
+      label: "travel opening balance date",
+    }),
+    time,
+  };
+};
+
+const getOrCreateTravelOpeningBalanceAccount = async (userId) => {
+  let openingAccount = await Account.findOne({
+    userId,
+    code: TRAVEL_OPENING_BALANCE_CODE,
+  });
+
+  if (!openingAccount) {
+    return Account.create({
+      userId,
+      name: "travel opening balance equity",
+      type: "Equity",
+      normalBalance: "credit",
+      code: TRAVEL_OPENING_BALANCE_CODE,
+      category: "other",
+      isSystem: true,
+      isActive: true,
+      moduleScope: MODULE_SCOPES.TRAVEL,
+    });
+  }
+
+  if (
+    openingAccount.moduleScope !== MODULE_SCOPES.TRAVEL ||
+    openingAccount.isSystem !== true
+  ) {
+    openingAccount.moduleScope = MODULE_SCOPES.TRAVEL;
+    openingAccount.isSystem = true;
+    openingAccount.isActive = true;
+    await openingAccount.save();
+  }
+
+  return openingAccount;
+};
+
+const resolveTravelVendorOpeningBalance = (body = {}, fallback = 0) => {
+  const hasAmount = hasOwn(body, "openingBalanceAmount");
+  const hasDirection = hasOwn(body, "openingBalanceDirection");
+  const hasSigned = hasOwn(body, "openingBalance");
+
+  if (!hasAmount && !hasDirection && !hasSigned) {
+    return Number(fallback) || 0;
+  }
+
+  const rawAmount = hasAmount ? body.openingBalanceAmount : body.openingBalance;
+  const amount = Math.abs(Number(rawAmount) || 0);
+
+  if (amount === 0) {
+    return 0;
+  }
+
+  const direction = String(
+    body.openingBalanceDirection || body.openingBalanceType || "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (["advance", "receivable", "debit"].includes(direction)) {
+    return -amount;
+  }
+
+  if (["payable", "credit", "due"].includes(direction)) {
+    return amount;
+  }
+
+  if (hasSigned) {
+    return Number(body.openingBalance) || 0;
+  }
+
+  return amount;
+};
+
+const replaceTravelVendorOpeningBalanceJournal = async ({
+  userId,
+  supplier,
+  accountId,
+  openingBalance,
+}) => {
+  const amount = Number(openingBalance) || 0;
+  const oldJournals = await JournalEntry.find({
+    supplierId: supplier._id,
+    createdBy: userId,
+    sourceType: "travel_adjustment",
+    originModule: TRAVEL_VENDOR_OPENING_ORIGIN,
+    isDeleted: false,
+  }).lean();
+
+  if (oldJournals.length > 0) {
+    await JournalEntry.updateMany(
+      {
+        supplierId: supplier._id,
+        createdBy: userId,
+        sourceType: "travel_adjustment",
+        originModule: TRAVEL_VENDOR_OPENING_ORIGIN,
+        isDeleted: false,
+      },
+      {
+        $set: { isDeleted: true },
+      },
+    );
+
+    const oldAccountIds = new Set();
+    oldJournals.forEach((journal) => {
+      (journal.lines || []).forEach((line) => {
+        if (line?.account) oldAccountIds.add(String(line.account));
+      });
+    });
+
+    for (const oldAccountId of oldAccountIds) {
+      await recalculateAccountBalance(oldAccountId);
+    }
+  }
+
+  if (amount === 0) {
+    await recalculateAccountBalance(accountId);
+    return null;
+  }
+
+  const absAmount = Math.abs(amount);
+  const openingBalanceAccount = await getOrCreateTravelOpeningBalanceAccount(userId);
+  const journal = await JournalEntry.create({
+    ...getCurrentTravelOpeningTimestamp(),
+    description: "Travel Vendor Opening Balance",
+    createdBy: userId,
+    supplierId: supplier._id,
+    sourceType: "travel_adjustment",
+    originModule: TRAVEL_VENDOR_OPENING_ORIGIN,
+    referenceId: supplier._id,
+    billNo: `TVO-${String(supplier._id).slice(-6).toUpperCase()}`,
+    lines:
+      amount > 0
+        ? [
+            {
+              account: openingBalanceAccount._id,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: accountId,
+              type: "credit",
+              amount: absAmount,
+            },
+          ]
+        : [
+            {
+              account: accountId,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: openingBalanceAccount._id,
+              type: "credit",
+              amount: absAmount,
+            },
+          ],
+  });
+
+  await recalculateAccountBalance(accountId);
+  await recalculateAccountBalance(openingBalanceAccount._id);
+
+  return journal;
+};
+
+const buildTravelVendorResponse = async (userId, supplier) => {
+  const record = await Supplier.findOne({
+    _id: supplier._id,
+    userId,
+  })
+    .select(
+      "name phone email address notes openingBalance supplierType moduleScope account isDeleted hiddenReason isTravelVendor travelVendorType travelServiceCategories contactPerson preferredCurrency createdAt updatedAt",
+    )
+    .populate("travelServiceCategories", "name code isActive")
+    .lean();
+
+  const balanceMap = await getTravelVendorBalanceMap(userId, [record]);
+  const accountId = String(record?.account?._id || record?.account || "");
+  const balance = roundMoney(balanceMap.get(accountId) || 0);
+
+  return {
+    ...record,
+    balance,
+    currentPayable: Math.max(balance, 0),
+    vendorCredit: Math.max(-balance, 0),
+  };
+};
 
 exports.getSupplierDataVersion = async (req, res) => {
   try {
@@ -752,23 +957,118 @@ exports.getTravelVendors = async (req, res) => {
 };
 
 exports.createTravelVendor = async (req, res) => {
-  const requestedScope = normalizeModuleScope(
-    req.body?.moduleScope,
-    MODULE_SCOPES.TRAVEL,
-  );
+  try {
+    const userId = req.user?.id || req.userId;
+    const { name, phone = "", email = "", address = "", notes = "" } =
+      req.body || {};
+    const cleanName = cleanString(name);
 
-  req.body = {
-    ...req.body,
-    isTravelVendor: true,
-    moduleScope:
+    if (!cleanName) {
+      return res.status(400).json({ message: "Supplier name is required" });
+    }
+
+    const requestedScope = normalizeModuleScope(
+      req.body?.moduleScope,
+      MODULE_SCOPES.TRAVEL,
+    );
+    const safeModuleScope =
       requestedScope === MODULE_SCOPES.TRADING
         ? MODULE_SCOPES.TRAVEL
-        : requestedScope,
-    supplierType: "vendor",
-    openingBalance: 0,
-  };
+        : requestedScope;
+    const openingBalance = resolveTravelVendorOpeningBalance(req.body, 0);
 
-  return exports.createSupplier(req, res);
+    const existing = await Supplier.findOne({
+      name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
+      userId,
+      isDeleted: false,
+    });
+
+    if (existing) {
+      return res.status(400).json({ message: "Supplier already exists" });
+    }
+
+    const travelPayload = await buildTravelSupplierPayload(
+      {
+        ...req.body,
+        isTravelVendor: true,
+      },
+      userId,
+    );
+
+    const account = await Account.create({
+      userId,
+      name: cleanName,
+      code: await generateAccountCode(userId),
+      type: "Liability",
+      normalBalance: "credit",
+      category: "supplier",
+      openingBalance,
+      isActive: true,
+      moduleScope: MODULE_SCOPES.TRAVEL,
+    });
+
+    const supplier = await Supplier.create({
+      name: cleanName,
+      phone,
+      email,
+      address,
+      notes,
+      openingBalance,
+      moduleScope: safeModuleScope,
+      supplierType: "vendor",
+      ...travelPayload,
+      isTravelVendor: true,
+      userId,
+      account: account._id,
+    });
+
+    await replaceTravelVendorOpeningBalanceJournal({
+      userId,
+      supplier,
+      accountId: account._id,
+      openingBalance,
+    });
+
+    const responseSupplier = await buildTravelVendorResponse(userId, supplier);
+
+    await logActivity({
+      req,
+      action: "create",
+      module: "travel.vendors",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Travel vendor ${supplier.name}`,
+      description: `Travel vendor ${supplier.name} created`,
+      after: {
+        name: supplier.name,
+        phone: supplier.phone,
+        email: supplier.email,
+        address: supplier.address,
+        notes: supplier.notes,
+        moduleScope: supplier.moduleScope,
+        isTravelVendor: supplier.isTravelVendor,
+        travelVendorType: supplier.travelVendorType,
+        travelServiceCategories: supplier.travelServiceCategories,
+        contactPerson: supplier.contactPerson,
+        preferredCurrency: supplier.preferredCurrency,
+        openingBalance: supplier.openingBalance,
+        account: supplier.account,
+      },
+    });
+
+    return res.status(201).json(responseSupplier);
+  } catch (error) {
+    console.error("Travel vendor create error:", error);
+
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return res.status(500).json({
+      message: "Travel vendor create failed",
+      error: error.message,
+    });
+  }
 };
 
 exports.updateSupplierTravelMetadata = async (req, res) => {
@@ -780,14 +1080,19 @@ exports.updateSupplierTravelMetadata = async (req, res) => {
       return res.status(400).json({ message: "Invalid supplier ID" });
     }
 
-    const supplier = await Supplier.findOne({
-      _id: supplierId,
-      userId,
-      isDeleted: false,
-    });
+    const supplier = await Supplier.findOne(
+      applySupplierModuleScopeFilter(
+        {
+          _id: supplierId,
+          userId,
+          isDeleted: false,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
 
     if (!supplier) {
-      return res.status(404).json({ message: "Supplier not found" });
+      return res.status(404).json({ message: "Travel vendor not found" });
     }
 
     const before = {
@@ -802,7 +1107,14 @@ exports.updateSupplierTravelMetadata = async (req, res) => {
       travelServiceCategories: supplier.travelServiceCategories,
       contactPerson: supplier.contactPerson,
       preferredCurrency: supplier.preferredCurrency,
+      openingBalance: supplier.openingBalance,
+      account: supplier.account,
     };
+    const oldOpeningBalance = Number(supplier.openingBalance) || 0;
+    const openingBalance = resolveTravelVendorOpeningBalance(
+      req.body,
+      oldOpeningBalance,
+    );
 
     if (hasOwn(req.body, "name")) {
       const name = cleanString(req.body.name);
@@ -865,10 +1177,41 @@ exports.updateSupplierTravelMetadata = async (req, res) => {
         requestedModuleScope === MODULE_SCOPES.TRADING
           ? MODULE_SCOPES.TRAVEL
           : requestedModuleScope,
+      openingBalance,
     });
 
     await supplier.save();
+    await Account.updateOne(
+      {
+        _id: supplier.account,
+        userId,
+      },
+      {
+        $set: {
+          name: supplier.name,
+          type: "Liability",
+          normalBalance: "credit",
+          category: "supplier",
+          openingBalance,
+          moduleScope: MODULE_SCOPES.TRAVEL,
+          isActive: true,
+        },
+      },
+    );
+
+    if (oldOpeningBalance !== openingBalance) {
+      await replaceTravelVendorOpeningBalanceJournal({
+        userId,
+        supplier,
+        accountId: supplier.account,
+        openingBalance,
+      });
+    } else {
+      await recalculateAccountBalance(supplier.account);
+    }
+
     await supplier.populate("travelServiceCategories", "name code isActive");
+    const responseSupplier = await buildTravelVendorResponse(userId, supplier);
 
     await logActivity({
       req,
@@ -891,10 +1234,12 @@ exports.updateSupplierTravelMetadata = async (req, res) => {
         travelServiceCategories: supplier.travelServiceCategories,
         contactPerson: supplier.contactPerson,
         preferredCurrency: supplier.preferredCurrency,
+        openingBalance: supplier.openingBalance,
+        account: supplier.account,
       },
     });
 
-    return res.json(supplier);
+    return res.json(responseSupplier);
   } catch (error) {
     console.error("Travel vendor update error:", error);
 
@@ -941,8 +1286,30 @@ exports.deleteTravelVendor = async (req, res) => {
     ).trim();
 
     if (supplier.moduleScope === MODULE_SCOPES.BOTH) {
+      if (Number(supplier.openingBalance || 0) !== 0) {
+        await replaceTravelVendorOpeningBalanceJournal({
+          userId,
+          supplier,
+          accountId: supplier.account,
+          openingBalance: 0,
+        });
+      }
+
       supplier.moduleScope = MODULE_SCOPES.TRADING;
       supplier.isTravelVendor = false;
+      supplier.openingBalance = 0;
+      await Account.updateOne(
+        {
+          _id: supplier.account,
+          userId,
+        },
+        {
+          $set: {
+            moduleScope: MODULE_SCOPES.TRADING,
+            openingBalance: 0,
+          },
+        },
+      );
     } else {
       supplier.isDeleted = true;
       supplier.supplierType = "blocked";
@@ -1997,7 +2364,7 @@ exports.getSupplierDetailedLedger = async (req, res) => {
         "lines.account": new mongoose.Types.ObjectId(accountId),
         isDeleted: false,
         ...travelJournalFilter,
-        date: { $lt: new Date(startDate) },
+        date: { $lt: startOfBusinessDay(startDate) },
       }).lean();
 
       for (const entry of prevJournals) {
@@ -2019,14 +2386,13 @@ exports.getSupplierDetailedLedger = async (req, res) => {
       ...travelJournalFilter,
     };
 
-    if (startDate && endDate) {
-      const s = new Date(startDate);
-      s.setHours(0, 0, 0, 0);
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
 
-      const e = new Date(endDate);
-      e.setHours(23, 59, 59, 999);
-
-      match.date = { $gte: s, $lte: e };
+    if (ledgerDateRange) {
+      match.date = ledgerDateRange;
     }
 
     const journals = await JournalEntry.find(match)
@@ -2070,6 +2436,9 @@ exports.getSupplierDetailedLedger = async (req, res) => {
           entry.originModule === "travel_vendor_payment" &&
           entry.sourceType === "pay_bill"
             ? "Travel Vendor Payment"
+            : entry.originModule === TRAVEL_VENDOR_OPENING_ORIGIN &&
+                entry.sourceType === "travel_adjustment"
+              ? "Travel Vendor Opening Balance"
             : entry.originModule === "travel_vendor_return" &&
                 entry.sourceType === "purchase_return_payment"
               ? "Travel Vendor Return Receipt"

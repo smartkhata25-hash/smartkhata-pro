@@ -79,6 +79,32 @@ const getVendorBalance = (vendor) => {
   return payable - credit;
 };
 
+const getVendorOpeningDirection = (openingBalance = 0) =>
+  Number(openingBalance || 0) < 0 ? 'advance' : 'payable';
+
+const getOpeningBalanceAmount = (openingBalance = 0) => {
+  const amount = Math.abs(Number(openingBalance || 0));
+  return amount || '';
+};
+
+const withVendorOpeningFormValues = (vendor = {}) => ({
+  ...vendor,
+  openingBalanceAmount: getOpeningBalanceAmount(vendor.openingBalance),
+  openingBalanceDirection: getVendorOpeningDirection(vendor.openingBalance),
+});
+
+const buildVendorOpeningPayload = (values = {}) => {
+  const amount = Math.abs(Number(values.openingBalanceAmount || 0));
+  const direction = values.openingBalanceDirection || 'payable';
+
+  return {
+    ...values,
+    openingBalance: direction === 'advance' ? -amount : amount,
+    openingBalanceAmount: amount,
+    openingBalanceDirection: direction,
+  };
+};
+
 const getBalanceTextClass = (balance) => {
   if (balance > 0) {
     return 'text-rose-700';
@@ -366,7 +392,7 @@ const TravelVendorsPage = () => {
         vendor
           ? {
               ...emptyVendorForm,
-              ...vendor,
+              ...withVendorOpeningFormValues(vendor),
               travelVendorType: vendor.travelVendorType || 'other',
               travelServiceCategories: normalizeCategoryIds(vendor.travelServiceCategories),
             }
@@ -435,9 +461,10 @@ const TravelVendorsPage = () => {
       setSubmitting(true);
       setFormError('');
 
+      const payload = buildVendorOpeningPayload(vendorValues);
       const saved = editingVendor
-        ? await updateTravelVendor(editingVendor._id, vendorValues)
-        : await createTravelVendor(vendorValues);
+        ? await updateTravelVendor(editingVendor._id, payload)
+        : await createTravelVendor(payload);
 
       setVendors((current) => upsertRecord(current, saved));
 
@@ -613,7 +640,7 @@ const TravelVendorsPage = () => {
       {
         key: 'name',
         labelKey: 'travel.fields.vendor',
-        className: 'w-[32%]',
+        className: 'w-[27%]',
         render: (vendor) => (
           <div className="min-w-0">
             <p className="truncate font-extrabold text-slate-900">{vendor.name}</p>
@@ -627,15 +654,25 @@ const TravelVendorsPage = () => {
       {
         key: 'mobile',
         labelKey: 'travel.fields.mobile',
-        className: 'w-[20%]',
+        className: 'w-[15%]',
         render: (vendor) => (
           <span className="font-semibold text-slate-700">{vendor.phone || '-'}</span>
         ),
       },
       {
+        key: 'openingBalance',
+        labelKey: 'travel.openingBalance.short',
+        className: 'w-[16%]',
+        render: (vendor) => (
+          <span className="font-bold text-slate-700">
+            {formatTravelMoney(vendor.openingBalance || 0)}
+          </span>
+        ),
+      },
+      {
         key: 'balance',
         labelKey: 'travel.fields.balance',
-        className: 'w-[20%]',
+        className: 'w-[18%]',
         render: (vendor) => {
           const balance = getVendorBalance(vendor);
 
@@ -649,7 +686,7 @@ const TravelVendorsPage = () => {
       {
         key: 'actions',
         labelKey: 'travel.fields.actions',
-        className: 'w-[28%]',
+        className: 'w-[24%]',
         cellClassName: '!px-2 !py-2',
         render: (vendor) => (
           <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
@@ -768,6 +805,10 @@ const TravelVendorsPage = () => {
 
           <div className="mt-3 grid grid-cols-1 gap-2">
             <TravelCardLine labelKey="travel.fields.mobile" value={vendor.phone} />
+            <TravelCardLine
+              labelKey="travel.openingBalance.short"
+              value={formatTravelMoney(vendor.openingBalance || 0)}
+            />
           </div>
 
           {(canViewLedger || canPayVendor || canManage || vendor.phone) && (

@@ -4,10 +4,13 @@ import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
 import { getExpenseTitles, createExpenseTitle } from '../services/expenseTitleService';
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
-import dayjs from 'dayjs';
 import jsPDF from 'jspdf';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 
 const ExpenseForm = () => {
   const [accounts, setAccounts] = useState([]);
@@ -24,8 +27,8 @@ const ExpenseForm = () => {
   const [formData, setFormData] = useState({
     title: '',
     titleId: null,
-    date: dayjs().format('YYYY-MM-DD'),
-    time: dayjs().format('HH:mm'),
+    date: getBusinessDateInputValue(),
+    time: getBusinessTimeInputValue(),
     paymentType: 'Cash',
     category: '',
     description: '',
@@ -110,7 +113,7 @@ const ExpenseForm = () => {
           setFormData({
             title: existing.title || '',
             titleId: existing.titleId?._id || existing.titleId || null,
-            date: existing.date ? dayjs(existing.date).format('YYYY-MM-DD') : '',
+            date: getBusinessDateInputValue(existing.date) || '',
             time: existing.time || '',
             description: existing.description || '',
             attachment: null,
@@ -195,8 +198,8 @@ const ExpenseForm = () => {
     setFormData({
       title: '',
       titleId: null,
-      date: dayjs().format('YYYY-MM-DD'),
-      time: dayjs().format('HH:mm'),
+      date: getBusinessDateInputValue(),
+      time: getBusinessTimeInputValue(),
       paymentType: 'Cash',
       category: '',
       description: '',

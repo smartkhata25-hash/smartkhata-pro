@@ -51,6 +51,13 @@ const {
   recalculateTravelSoftDeleteAccounts,
   reverseTravelJournals,
 } = require("../../services/travel/travelSoftDeleteService");
+const {
+  buildBusinessDateRange,
+  extractBusinessTime,
+  getBusinessDateKey,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../../utils/businessDate");
 
 const PAYMENT_ACCOUNT_CATEGORIES = ["cash", "bank", "online", "cheque"];
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
@@ -109,65 +116,42 @@ const normalizeHistoryPaymentType = (value = "") => {
   return HISTORY_PAYMENT_TYPES.has(clean) ? clean : "";
 };
 
-const normalizePaymentDate = (value) => {
-  const date = value ? new Date(value) : new Date();
-
-  if (Number.isNaN(date.getTime())) {
+const normalizePaymentDate = (value, timeValue = "") => {
+  try {
+    return parseBusinessDateTime(
+      value || new Date(),
+      timeValue || extractTimeFromDateInput(value),
+      {
+        defaultTime: "00:00",
+        label: "payment date",
+      },
+    );
+  } catch {
     throw createHttpError(400, "Invalid payment date");
   }
-
-  return date;
 };
 
 const buildDateRange = (fromDate, toDate) => {
-  if (!fromDate && !toDate) {
-    return null;
-  }
+  const range = buildBusinessDateRange({
+    startDate: fromDate,
+    endDate: toDate,
+  }).date;
 
-  const range = {};
-
-  if (fromDate) {
-    const start = normalizePaymentDate(fromDate);
-    start.setHours(0, 0, 0, 0);
-    range.$gte = start;
-  }
-
-  if (toDate) {
-    const end = normalizePaymentDate(toDate);
-    end.setHours(23, 59, 59, 999);
-    range.$lte = end;
-  }
-
-  return range;
+  return range || null;
 };
-
-const padDatePart = (value) => String(value).padStart(2, "0");
 
 const formatDateInput = (date, rawValue = "") => {
-  const clean = cleanString(rawValue);
-  const dateMatch = clean.match(/^(\d{4}-\d{2}-\d{2})/);
-
-  if (dateMatch) {
-    return dateMatch[1];
+  try {
+    return getBusinessDateKey(rawValue || date);
+  } catch {
+    return getBusinessDateKey(date);
   }
-
-  return [
-    date.getFullYear(),
-    padDatePart(date.getMonth() + 1),
-    padDatePart(date.getDate()),
-  ].join("-");
 };
 
-const formatCurrentTimeInput = () => new Date().toTimeString().slice(0, 5);
+const formatCurrentTimeInput = () => getCurrentBusinessTimeInput();
 
 const extractTimeFromDateInput = (value) => {
-  if (!value || !String(value).includes("T")) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? "" : date.toTimeString().slice(0, 5);
+  return extractBusinessTime(value);
 };
 
 const normalizeTimeInput = (value, dateValue = null) =>
@@ -333,10 +317,7 @@ const generateTravelPaymentNumber = async ({
   counterType,
   prefix,
 }) => {
-  const parsedDate = new Date(date);
-  const year = Number.isNaN(parsedDate.getTime())
-    ? new Date().getFullYear()
-    : parsedDate.getFullYear();
+  const year = getBusinessDateKey(date, { fallback: new Date() }).slice(0, 4);
 
   const counter = await Counter.findOneAndUpdate(
     {
@@ -758,8 +739,8 @@ exports.createTravelReceivePayment = async (req, res) => {
     const actorId = getActorId(req);
     const amount = moneyNumber(req.body.amount, "payment amount");
     const paymentType = normalizePaymentType(req.body.paymentType);
-    const paymentDate = normalizePaymentDate(req.body.date);
     const time = normalizeTimeInput(req.body.time, req.body.date);
+    const paymentDate = normalizePaymentDate(req.body.date, time);
     const notes = cleanString(req.body.notes || req.body.description);
     const reference = cleanString(req.body.reference || req.body.referenceNo);
 
@@ -871,8 +852,8 @@ exports.createTravelVendorPayment = async (req, res) => {
     const actorId = getActorId(req);
     const amount = moneyNumber(req.body.amount, "payment amount");
     const paymentType = normalizePaymentType(req.body.paymentType);
-    const paymentDate = normalizePaymentDate(req.body.date);
     const time = normalizeTimeInput(req.body.time, req.body.date);
+    const paymentDate = normalizePaymentDate(req.body.date, time);
     const notes = cleanString(req.body.notes || req.body.description);
     const reference = cleanString(req.body.reference || req.body.referenceNo);
 

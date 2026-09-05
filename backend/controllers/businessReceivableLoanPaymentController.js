@@ -17,6 +17,11 @@ const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
 } = require("../utils/moduleScope");
+const {
+  extractBusinessTime,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const PAYMENT_METHOD_CATEGORIES = {
   cash: ["cash"],
@@ -201,9 +206,20 @@ exports.createReceivableLoanPayment = async (req, res) => {
       });
     }
 
-    const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    const paymentTime =
+      extractBusinessTime(paymentDate) || getCurrentBusinessTimeInput();
+    let parsedPaymentDate = null;
 
-    if (Number.isNaN(parsedPaymentDate.getTime())) {
+    try {
+      parsedPaymentDate = parseBusinessDateTime(
+        paymentDate || new Date(),
+        paymentTime,
+        {
+          defaultTime: "00:00",
+          label: "payment date",
+        },
+      );
+    } catch {
       return res.status(400).json({
         success: false,
         message: "Invalid payment date",
@@ -292,6 +308,7 @@ exports.createReceivableLoanPayment = async (req, res) => {
 
     createdJournal = await JournalEntry.create({
       date: parsedPaymentDate,
+      time: paymentTime,
 
       description: `Loan repayment received - ${loan.borrowerName}`,
 
@@ -645,8 +662,14 @@ exports.reverseReceivableLoanPayment = async (req, res) => {
       return reversalLine;
     });
 
+    const reversalTime = getCurrentBusinessTimeInput();
+
     reversalJournal = await JournalEntry.create({
-      date: new Date(),
+      date: parseBusinessDateTime(new Date(), reversalTime, {
+        defaultTime: "00:00",
+        label: "loan payment reversal date",
+      }),
+      time: reversalTime,
 
       description: `Reversal - Loan repayment received - ${loan.borrowerName}`,
 

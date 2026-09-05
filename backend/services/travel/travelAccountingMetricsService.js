@@ -26,6 +26,8 @@ const TRAVEL_RECEIVE_PAYMENT_ORIGIN = "travel_receive_payment";
 const TRAVEL_VENDOR_PAYMENT_ORIGIN = "travel_vendor_payment";
 const TRAVEL_VENDOR_RETURN_ORIGIN = "travel_vendor_return";
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
+const TRAVEL_CUSTOMER_OPENING_ORIGIN = "travel_customer_opening_balance";
+const TRAVEL_VENDOR_OPENING_ORIGIN = "travel_vendor_opening_balance";
 
 const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
   TRAVEL_INVOICE_ORIGIN,
@@ -78,6 +80,10 @@ const getTravelCustomerJournalFilter = () => ({
       sourceType: "travel_refund",
     },
     {
+      sourceType: "travel_adjustment",
+      originModule: TRAVEL_CUSTOMER_OPENING_ORIGIN,
+    },
+    {
       sourceType: "receive_payment",
       originModule: {
         $in: [TRAVEL_INVOICE_ORIGIN, TRAVEL_RECEIVE_PAYMENT_ORIGIN],
@@ -110,6 +116,10 @@ const getTravelVendorJournalFilter = () => ({
     },
     {
       sourceType: "travel_vendor_return",
+    },
+    {
+      sourceType: "travel_adjustment",
+      originModule: TRAVEL_VENDOR_OPENING_ORIGIN,
     },
     {
       sourceType: "pay_bill",
@@ -1091,6 +1101,8 @@ module.exports = {
   TRAVEL_VENDOR_PAYMENT_ORIGIN,
   TRAVEL_VENDOR_RETURN_ORIGIN,
   TRAVEL_EXPENSE_ORIGIN,
+  TRAVEL_CUSTOMER_OPENING_ORIGIN,
+  TRAVEL_VENDOR_OPENING_ORIGIN,
 
   getTravelCustomerBalanceMap,
   getTravelCustomerBalanceTotals,

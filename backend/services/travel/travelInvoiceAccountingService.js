@@ -7,6 +7,10 @@ const Supplier = require("../../models/Supplier");
 const TravelBooking = require("../../models/TravelBooking");
 
 const { recalculateAccountBalances } = require("../../utils/accountHelper");
+const {
+  extractBusinessTime,
+  parseBusinessDateTime,
+} = require("../../utils/businessDate");
 
 const {
   applyModuleScopeFilter,
@@ -43,6 +47,21 @@ const roundMoney = (value) => Number(Number(value || 0).toFixed(2));
 
 const getSessionQuery = (query, session) =>
   session ? query.session(session) : query;
+
+const resolveInvoiceBusinessDate = (booking) => {
+  try {
+    return parseBusinessDateTime(
+      booking.invoiceDate || booking.confirmedAt || new Date(),
+      "",
+      {
+        defaultTime: "00:00",
+        label: "travel invoice date",
+      },
+    );
+  } catch {
+    throw createHttpError(400, "Invalid travel invoice date");
+  }
+};
 
 const ensureSystemAccount = async ({
   userId,
@@ -628,7 +647,7 @@ const postTravelInvoiceAccounting = async ({
 
   assertConfirmedInvoiceIsPostable(booking);
 
-  const invoiceDate = booking.invoiceDate || booking.confirmedAt || new Date();
+  const invoiceDate = resolveInvoiceBusinessDate(booking);
 
   const locked = await TravelBooking.findOneAndUpdate(
     {
@@ -713,7 +732,7 @@ const postTravelInvoiceAccounting = async ({
 
   const vendorPaidTotal = roundMoney(booking.vendorPaidTotal);
 
-  const invoiceTime = invoiceDate.toTimeString().slice(0, 8);
+  const invoiceTime = extractBusinessTime(invoiceDate) || "00:00";
 
   const journals = [];
   const customerJournalIdentity = getCustomerJournalIdentity(

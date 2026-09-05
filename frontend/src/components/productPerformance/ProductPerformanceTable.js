@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { t } from '../../i18n/i18n';
+import { formatBusinessDateForDisplay } from '../../utils/localDateTime';
 
 const TABLE_COLUMNS = Object.freeze([
   {
@@ -120,13 +121,7 @@ const formatDate = (value) => {
     return '-';
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleDateString();
+  return formatBusinessDateForDisplay(value);
 };
 
 const getTextAlignmentClass = (align) => {

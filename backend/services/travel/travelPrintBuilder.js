@@ -1,14 +1,6 @@
-const formatDate = (date) => {
-  if (!date) return "";
+const { formatBusinessDate } = require("../../utils/businessDate");
 
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-
-  return parsed.toLocaleDateString("en-GB");
-};
+const formatDate = (date) => formatBusinessDate(date) || "";
 
 const safeNumber = (value) => {
   const amount = Number(value || 0);

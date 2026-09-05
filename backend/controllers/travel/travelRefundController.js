@@ -33,6 +33,7 @@ const {
   recalculateTravelSoftDeleteAccounts,
   reverseTravelJournals,
 } = require("../../services/travel/travelSoftDeleteService");
+const { buildBusinessDateRange } = require("../../utils/businessDate");
 
 const optionalObjectId = (value) => {
   if (!value) {
@@ -51,25 +52,13 @@ const addAndClause = (query, clause) => {
 const roundMoneyValue = (value) => Number(Number(value || 0).toFixed(2));
 
 const buildDateRange = (fromDate, toDate) => {
-  if (!fromDate && !toDate) {
-    return null;
-  }
-
-  const range = {};
-
-  if (fromDate) {
-    const start = new Date(fromDate);
-    start.setHours(0, 0, 0, 0);
-    range.$gte = start;
-  }
-
-  if (toDate) {
-    const end = new Date(toDate);
-    end.setHours(23, 59, 59, 999);
-    range.$lte = end;
-  }
-
-  return range;
+  return (
+    buildBusinessDateRange({
+      startDate: fromDate,
+      endDate: toDate,
+      field: "refundDate",
+    }).refundDate || null
+  );
 };
 
 const findTravelCustomersForSearch = async (userId, search) => {

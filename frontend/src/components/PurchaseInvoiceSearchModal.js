@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { searchPurchaseInvoices } from '../services/purchaseInvoiceService';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { t } from '../i18n/i18n';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
   const [query, setQuery] = useState({
@@ -235,7 +236,7 @@ const PurchaseInvoiceSearchModal = ({ onSelect, onClose }) => {
               >
                 {inv.billNo} - {inv.supplierName} ({t('date')}:{' '}
                 {inv.invoiceDate || inv.date
-                  ? new Date(inv.invoiceDate || inv.date).toLocaleDateString('en-GB')
+                  ? formatBusinessDateForDisplay(inv.invoiceDate || inv.date, { fallback: '' })
                   : ''}
                 )
               </li>

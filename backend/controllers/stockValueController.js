@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const Product = require("../models/Product");
+const { buildBusinessDateRange } = require("../utils/businessDate");
 
 const escapeRegex = (value = "") => {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -64,27 +65,11 @@ exports.getStockValueReport = async (req, res) => {
       productMatch.categoryId = new mongoose.Types.ObjectId(categoryId);
     }
 
-    const transactionDateMatch = {};
-
-    if (startDate) {
-      const start = new Date(startDate);
-
-      if (!Number.isNaN(start.getTime())) {
-        start.setHours(0, 0, 0, 0);
-
-        transactionDateMatch.$gte = start;
-      }
-    }
-
-    if (endDate) {
-      const end = new Date(endDate);
-
-      if (!Number.isNaN(end.getTime())) {
-        end.setHours(23, 59, 59, 999);
-
-        transactionDateMatch.$lte = end;
-      }
-    }
+    const transactionDateMatch =
+      buildBusinessDateRange({
+        startDate,
+        endDate,
+      }).date || {};
 
     const inventoryMatchExpr = [
       {
@@ -100,9 +85,9 @@ exports.getStockValueReport = async (req, res) => {
         $gte: ["$date", transactionDateMatch.$gte || new Date(0)],
       });
 
-      if (transactionDateMatch.$lte) {
+      if (transactionDateMatch.$lt) {
         inventoryMatchExpr.push({
-          $lte: ["$date", transactionDateMatch.$lte],
+          $lt: ["$date", transactionDateMatch.$lt],
         });
       }
     }

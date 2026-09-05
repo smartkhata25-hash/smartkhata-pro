@@ -1,4 +1,9 @@
 const JournalEntry = require("../models/JournalEntry");
+const {
+  buildBusinessDateRange,
+  getBusinessDateKey,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 exports.getIncomeStatement = async (req, res) => {
   try {
@@ -11,14 +16,16 @@ exports.getIncomeStatement = async (req, res) => {
       });
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const dateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
 
     // Fetch journal entries for period
     const entries = await JournalEntry.find({
       createdBy: userId,
       isDeleted: false,
-      date: { $gte: start, $lte: end },
+      date: dateRange,
     }).populate("lines.account");
 
     let sales = 0;
@@ -138,20 +145,20 @@ exports.getMonthVsMonthIncome = async (req, res) => {
       });
     }
 
-    const start = new Date(`${year}-01-01`);
-    const end = new Date(`${year}-12-31`);
+    const start = startOfBusinessDay(`${year}-01-01`);
+    const end = startOfBusinessDay(`${Number(year) + 1}-01-01`);
 
     const entries = await JournalEntry.find({
       createdBy: userId,
       isDeleted: false,
-      date: { $gte: start, $lte: end },
+      date: { $gte: start, $lt: end },
     }).populate("lines.account");
 
     // 🧺 Month container
     const months = {};
 
     entries.forEach((entry) => {
-      const monthKey = entry.date.toISOString().slice(0, 7); // YYYY-MM
+      const monthKey = getBusinessDateKey(entry.date).slice(0, 7); // YYYY-MM
 
       if (!months[monthKey]) {
         months[monthKey] = {

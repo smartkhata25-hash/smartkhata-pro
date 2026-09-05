@@ -10,6 +10,10 @@ const generateSupplierDetailLedgerHTML = require("../templates/supplierDetailLed
 const {
   getTravelVendorJournalFilter,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const { generatePdfFromHtml } = require("../services/pdfService");
 
@@ -97,7 +101,7 @@ const fetchSupplierDetailedLedgerData = async ({
           "lines.account": new mongoose.Types.ObjectId(accountId),
           isDeleted: false,
           ...travelJournalFilter,
-          date: { $lt: new Date(startDate) },
+          date: { $lt: startOfBusinessDay(startDate) },
         },
       },
       { $unwind: "$lines" },
@@ -136,14 +140,13 @@ const fetchSupplierDetailedLedgerData = async ({
     ...travelJournalFilter,
   };
 
-  if (startDate && endDate) {
-    const s = new Date(startDate);
-    s.setHours(0, 0, 0, 0);
+  const ledgerDateRange = buildBusinessDateRange({
+    startDate,
+    endDate,
+  }).date;
 
-    const e = new Date(endDate);
-    e.setHours(23, 59, 59, 999);
-
-    matchFilter.date = { $gte: s, $lte: e };
+  if (ledgerDateRange) {
+    matchFilter.date = ledgerDateRange;
   }
 
   const journals = await JournalEntry.find(matchFilter)

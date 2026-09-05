@@ -437,10 +437,20 @@ export const fetchTravelVendors = (params = {}, options = {}) =>
   );
 
 export const createTravelVendor = (data) =>
-  createRecord(TRAVEL_CACHE_DOMAINS.VENDORS, `${SUPPLIER_API}/travel-vendors`, data);
+  createRecord(TRAVEL_CACHE_DOMAINS.VENDORS, `${SUPPLIER_API}/travel-vendors`, data).then(
+    (record) => {
+      clearTravelVendorFinancialCaches();
+      return record;
+    }
+  );
 
 export const updateTravelVendor = (id, data) =>
-  updateRecord(TRAVEL_CACHE_DOMAINS.VENDORS, `${SUPPLIER_API}/travel-vendors/${id}`, data);
+  updateRecord(TRAVEL_CACHE_DOMAINS.VENDORS, `${SUPPLIER_API}/travel-vendors/${id}`, data).then(
+    (record) => {
+      clearTravelVendorFinancialCaches();
+      return record;
+    }
+  );
 
 export const deleteTravelVendor = async (id, options = {}) => {
   const response = await axios.delete(
@@ -469,6 +479,8 @@ export const createTravelCustomer = async (data) => {
     upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS, response.data);
   }
 
+  clearTravelCustomerFinancialCaches();
+
   return response.data;
 };
 
@@ -478,6 +490,8 @@ export const updateTravelCustomer = async (id, data) => {
   if (response.data?._id) {
     upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS, response.data);
   }
+
+  clearTravelCustomerFinancialCaches();
 
   return response.data;
 };

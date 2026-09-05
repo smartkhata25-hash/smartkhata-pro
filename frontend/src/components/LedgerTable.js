@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { t } from '../i18n/i18n';
 import './LedgerTable.css';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const FILE_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
@@ -242,14 +243,7 @@ const LedgerTable = ({
                         return <td key={col}>-</td>;
                       }
 
-                      const formattedDate = new Date(e.date).toLocaleDateString('en-US', {
-                        timeZone: 'Asia/Karachi',
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                      });
-
-                      return <td key={col}>{formattedDate}</td>;
+                      return <td key={col}>{formatBusinessDateForDisplay(e.date)}</td>;
                     }
                     if (col === 'time')
                       return (

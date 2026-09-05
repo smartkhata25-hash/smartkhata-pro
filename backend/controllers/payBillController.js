@@ -14,6 +14,10 @@ const {
 } = require("../services/r2FileService");
 
 const { logActivity } = require("../utils/activityLogger");
+const {
+  getBusinessDateKey,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const ALLOWED_PAYMENT_TYPES = ["cash", "online", "cheque"];
 
@@ -143,6 +147,15 @@ exports.createPayBill = async (req, res) => {
     }
 
     const finalAmount = totalAmount + parsedDiscount;
+    const businessDate = getBusinessDateKey(date, {
+      fallback: new Date(),
+      label: "pay bill date",
+    });
+    const businessTime = time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "pay bill date",
+    });
 
     const userId = req.user?.id || req.userId;
 
@@ -200,8 +213,8 @@ exports.createPayBill = async (req, res) => {
     const newBill = await PayBill.create({
       supplier: supplierData?._id || null,
       partyId: partyData?._id || null,
-      date,
-      time,
+      date: businessDate,
+      time: businessTime,
       billNo,
       amount: totalAmount,
       discountAmount: parsedDiscount,
@@ -226,6 +239,8 @@ exports.createPayBill = async (req, res) => {
         description: description || "Pay Bill",
         supplierId: supplierData?._id || null,
         partyId: partyData?._id || null,
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 
@@ -251,8 +266,8 @@ exports.createPayBill = async (req, res) => {
         createdBy: userId,
         referenceId: newBill._id,
         sourceType: "pay_bill",
-        date,
-        time,
+        date: journalDate,
+        time: businessTime,
         billNo,
         description: "Pay Bill Discount",
         supplierId: supplierData?._id || null,
@@ -376,11 +391,15 @@ exports.getAllPayBills = async (req, res) => {
       filter.date = {};
 
       if (fromDate) {
-        filter.date.$gte = fromDate;
+        filter.date.$gte = getBusinessDateKey(fromDate, {
+          label: "from date",
+        });
       }
 
       if (toDate) {
-        filter.date.$lte = toDate;
+        filter.date.$lte = getBusinessDateKey(toDate, {
+          label: "to date",
+        });
       }
     }
 
@@ -711,6 +730,15 @@ exports.updatePayBill = async (req, res) => {
     }
 
     const billNo = bill.billNo || "PB-1001";
+    const businessDate = getBusinessDateKey(date || bill.date, {
+      fallback: bill.date || new Date(),
+      label: "pay bill date",
+    });
+    const businessTime = time !== undefined ? time || "" : bill.time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "pay bill date",
+    });
 
     const currentAttachments = formatPayBillAttachments(bill).map((att) => ({
       key: att.key,
@@ -753,8 +781,8 @@ exports.updatePayBill = async (req, res) => {
 
     bill.partyId = partyData?._id || null;
 
-    bill.date = date;
-    bill.time = time;
+    bill.date = businessDate;
+    bill.time = businessTime;
     bill.amount = totalAmount;
 
     bill.discountAmount = parsedDiscount;
@@ -835,6 +863,8 @@ exports.updatePayBill = async (req, res) => {
         description: description || "Pay Bill",
         supplierId: supplierData?._id || null,
         partyId: partyData?._id || null,
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 
@@ -860,8 +890,8 @@ exports.updatePayBill = async (req, res) => {
         createdBy: userId,
         referenceId: bill._id,
         sourceType: "pay_bill",
-        date,
-        time,
+        date: journalDate,
+        time: businessTime,
         billNo,
         description: "Pay Bill Discount",
         supplierId: supplierData?._id || null,

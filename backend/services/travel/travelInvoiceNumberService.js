@@ -1,13 +1,10 @@
 const Counter = require("../../models/Counter");
+const { getBusinessDateKey } = require("../../utils/businessDate");
 
 const FINAL_TRAVEL_INVOICE_PATTERN = /^TR-\d{4}-\d{5}$/;
 
 const getYear = (date = new Date()) => {
-  const parsedDate = new Date(date);
-
-  return Number.isNaN(parsedDate.getTime())
-    ? new Date().getFullYear()
-    : parsedDate.getFullYear();
+  return getBusinessDateKey(date, { fallback: new Date() }).slice(0, 4);
 };
 
 const isFinalTravelInvoiceNumber = (value = "") =>

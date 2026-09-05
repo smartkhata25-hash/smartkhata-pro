@@ -1,8 +1,6 @@
-const formatDate = (date) => {
-  if (!date) return "";
-  const d = new Date(date);
-  return d.toLocaleDateString("en-GB");
-};
+const { formatBusinessDate } = require("../utils/businessDate");
+
+const formatDate = (date) => formatBusinessDate(date) || "";
 
 const safeNumber = (num) => {
   return Number(num || 0);

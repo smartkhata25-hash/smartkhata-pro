@@ -14,6 +14,11 @@ import AttachmentViewerModal from './AttachmentViewerModal';
 import { useNavigate } from 'react-router-dom';
 
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
@@ -102,11 +107,9 @@ const PurchaseInvoiceForm = () => {
   }, [selectedProductId, showHistory]);
 
   useEffect(() => {
-    const now = new Date();
-
     if (!id) {
-      setInvoiceDate(now.toISOString().split('T')[0]);
-      setInvoiceTime(now.toTimeString().slice(0, 5));
+      setInvoiceDate(getBusinessDateInputValue());
+      setInvoiceTime(getBusinessTimeInputValue());
     }
 
     if (!token) return;
@@ -186,7 +189,7 @@ const PurchaseInvoiceForm = () => {
         setIsEdit(true);
         setInvoiceId(invoice._id);
         setBillNo(invoice.billNo || '');
-        setInvoiceDate(invoice.invoiceDate?.slice(0, 10) || '');
+        setInvoiceDate(getBusinessDateInputValue(invoice.invoiceDate) || '');
         setInvoiceTime(invoice.invoiceTime || '');
         setSupplierName(invoice.supplierName || '');
         setSupplierPhone(invoice.supplierPhone || '');
@@ -434,16 +437,14 @@ const PurchaseInvoiceForm = () => {
   };
 
   const restorePurchaseDraft = useCallback((valueOrUpdater) => {
-    const now = new Date();
-
     const defaultState = {
       supplierName: '',
       supplierPhone: '',
       selectedSupplierId: '',
       selectedSupplierType: 'supplier',
       billNo: '',
-      invoiceDate: now.toISOString().split('T')[0],
-      invoiceTime: now.toTimeString().slice(0, 5),
+      invoiceDate: getBusinessDateInputValue(),
+      invoiceTime: getBusinessTimeInputValue(),
       items: [],
       discountPercent: 0,
       discountAmount: 0,
@@ -467,9 +468,9 @@ const PurchaseInvoiceForm = () => {
 
     setBillNo(data.billNo || '');
 
-    setInvoiceDate(data.invoiceDate || now.toISOString().split('T')[0]);
+    setInvoiceDate(data.invoiceDate || getBusinessDateInputValue());
 
-    setInvoiceTime(data.invoiceTime || now.toTimeString().slice(0, 5));
+    setInvoiceTime(data.invoiceTime || getBusinessTimeInputValue());
 
     const restoredItems = Array.isArray(data.items) ? data.items : [];
 
@@ -770,10 +771,8 @@ const PurchaseInvoiceForm = () => {
         fileInputRef.current.value = '';
       }
 
-      const now = new Date();
-
-      setInvoiceDate(now.toISOString().split('T')[0]);
-      setInvoiceTime(now.toTimeString().slice(0, 5));
+      setInvoiceDate(getBusinessDateInputValue());
+      setInvoiceTime(getBusinessTimeInputValue());
     } catch (err) {
       console.error('❌ Error in Save & New:', err?.response?.data || err.message);
 
@@ -911,7 +910,7 @@ const PurchaseInvoiceForm = () => {
 
       setBillNo(invoice.billNo || '');
 
-      setInvoiceDate(invoice.invoiceDate?.slice(0, 10) || '');
+      setInvoiceDate(getBusinessDateInputValue(invoice.invoiceDate) || '');
       setInvoiceTime(invoice.invoiceTime || '');
 
       setSupplierName(invoice.supplierName || '');
@@ -1024,10 +1023,8 @@ const PurchaseInvoiceForm = () => {
     setItemHistory([]);
     setSelectedProductId(null);
 
-    const now = new Date();
-
-    setInvoiceDate(now.toISOString().split('T')[0]);
-    setInvoiceTime(now.toTimeString().slice(0, 5));
+    setInvoiceDate(getBusinessDateInputValue());
+    setInvoiceTime(getBusinessTimeInputValue());
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -1697,7 +1694,7 @@ const PurchaseInvoiceForm = () => {
                     <div key={index} className="border rounded p-2 bg-white shadow-sm">
                       <p className="font-semibold">{record.supplierName}</p>
                       <p>
-                        {t('date')}: {new Date(record.invoiceDate).toLocaleDateString()}
+                        {t('date')}: {formatBusinessDateForDisplay(record.invoiceDate)}
                       </p>
                       <p>
                         {t('rate')}: Rs. {record.price}
@@ -1724,7 +1721,7 @@ const PurchaseInvoiceForm = () => {
             setInvoiceId(invoice._id);
 
             setBillNo(invoice.billNo);
-            setInvoiceDate(invoice.invoiceDate?.slice(0, 10));
+            setInvoiceDate(getBusinessDateInputValue(invoice.invoiceDate));
             setInvoiceTime(invoice.invoiceTime || '');
 
             setSupplierName(invoice.supplierName);

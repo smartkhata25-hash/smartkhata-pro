@@ -21,6 +21,10 @@ const {
 const {
   TRAVEL_PARTY_OPENING_ORIGIN,
 } = require("../services/travel/travelCounterpartyService");
+const {
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -33,6 +37,18 @@ const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
 
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const currentBusinessJournalTimestamp = () => {
+  const time = getCurrentBusinessTimeInput();
+
+  return {
+    date: parseBusinessDateTime(new Date(), time, {
+      defaultTime: "00:00",
+      label: "opening balance date",
+    }),
+    time,
+  };
 };
 
 const getUserId = (req) => req.user?.id || req.userId;
@@ -194,6 +210,17 @@ const getOrCreateOpeningBalanceAccount = async (
     });
   }
 
+  if (
+    travelScope &&
+    (openingAccount.moduleScope !== MODULE_SCOPES.TRAVEL ||
+      openingAccount.isSystem !== true)
+  ) {
+    openingAccount.moduleScope = MODULE_SCOPES.TRAVEL;
+    openingAccount.isSystem = true;
+    openingAccount.isActive = true;
+    await openingAccount.save();
+  }
+
   return openingAccount;
 };
 
@@ -243,8 +270,7 @@ const createPartyOpeningEntry = async ({
     });
 
     const journal = await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Balance Party Invoice",
       createdBy: userId,
       partyId: party._id,
@@ -313,8 +339,7 @@ const createPartyOpeningEntry = async ({
     });
 
     const journal = await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Balance Party Refund",
       createdBy: userId,
       partyId: party._id,
@@ -360,8 +385,7 @@ const createTravelPartyOpeningEntry = async ({
   );
 
   const journal = await JournalEntry.create({
-    date: new Date(),
-    time: new Date().toTimeString().slice(0, 8),
+    ...currentBusinessJournalTimestamp(),
     description: "Travel Party Opening Balance",
     createdBy: userId,
     partyId: party._id,
@@ -500,8 +524,7 @@ const createCustomerOpeningEntryFromParty = async ({
     });
 
     const journal = await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Balance Customer From Party",
       createdBy: userId,
       customerId: customer._id,
@@ -565,8 +588,7 @@ const createCustomerOpeningEntryFromParty = async ({
     });
 
     return await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Balance Customer Refund From Party",
       createdBy: userId,
       customerId: customer._id,
@@ -618,8 +640,7 @@ const createSupplierOpeningEntryFromParty = async ({
     });
 
     return await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Purchase Invoice From Party",
       createdBy: userId,
       supplierId: supplier._id,
@@ -660,8 +681,7 @@ const createSupplierOpeningEntryFromParty = async ({
     });
 
     return await JournalEntry.create({
-      date: new Date(),
-      time: new Date().toTimeString().slice(0, 8),
+      ...currentBusinessJournalTimestamp(),
       description: "Opening Purchase Return From Party",
       createdBy: userId,
       supplierId: supplier._id,

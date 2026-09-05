@@ -6,6 +6,10 @@ const Customer = require("../models/Customer");
 const {
   getTravelCustomerJournalFilter,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const buildCustomerLedgerPrint = require("../services/ledgerPrintBuilder");
 const generateCustomerLedgerHTML = require("../templates/customerLedgerTemplate");
@@ -14,29 +18,21 @@ const { generatePdfFromHtml } = require("../services/pdfService");
 const getStartOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) {
+  try {
+    return startOfBusinessDay(value);
+  } catch {
     return null;
   }
-
-  date.setHours(0, 0, 0, 0);
-
-  return date;
 };
 
 const getEndOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) {
+  try {
+    return buildBusinessDateRange({ endDate: value }).date?.$lt || null;
+  } catch {
     return null;
   }
-
-  date.setHours(23, 59, 59, 999);
-
-  return date;
 };
 
 const resolveSourceLabel = (entry = {}) => {
@@ -161,7 +157,7 @@ const fetchCustomerLedgerData = async ({
     }
 
     if (end) {
-      matchFilter.date.$lte = end;
+      matchFilter.date.$lt = end;
     }
   }
 

@@ -17,6 +17,10 @@ const {
 const {
   TRAVEL_PARTY_OPENING_ORIGIN,
 } = require("../services/travel/travelCounterpartyService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const TRAVEL_PARTY_LEDGER_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -106,25 +110,21 @@ const getPartySourceLabel = (entry) => {
 const getStartOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) return null;
-
-  date.setHours(0, 0, 0, 0);
-
-  return date;
+  try {
+    return startOfBusinessDay(value);
+  } catch {
+    return null;
+  }
 };
 
 const getEndOfDay = (value) => {
   if (!value) return null;
 
-  const date = new Date(value);
-
-  if (isNaN(date.getTime())) return null;
-
-  date.setHours(23, 59, 59, 999);
-
-  return date;
+  try {
+    return buildBusinessDateRange({ endDate: value }).date?.$lt || null;
+  } catch {
+    return null;
+  }
 };
 
 const fetchPartyLedgerData = async ({
@@ -194,7 +194,7 @@ const fetchPartyLedgerData = async ({
     }
 
     if (end) {
-      matchFilter.date.$lte = end;
+      matchFilter.date.$lt = end;
     }
   }
 

@@ -10,6 +10,13 @@ const { isPeriodLocked } = require("../utils/periodLockHelper");
 const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 } = require("../utils/businessValueModuleScope");
+const {
+  BUSINESS_TIME_ZONE,
+  buildBusinessDateRange,
+  getBusinessDateKey,
+  parseBusinessDateTime,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -86,7 +93,13 @@ exports.createEntry = async (req, res) => {
     } = req.body;
 
     // 🔒 PERIOD LOCK CHECK (CREATE)
-    if (await isPeriodLocked(userId, date)) {
+    const resolvedTime = time !== undefined ? time || "" : "";
+    const entryDate = parseBusinessDateTime(date || new Date(), resolvedTime, {
+      defaultTime: "00:00",
+      label: "journal date",
+    });
+
+    if (await isPeriodLocked(userId, entryDate)) {
       return res.status(403).json({
         message: "This accounting period is locked.",
       });
@@ -139,8 +152,8 @@ exports.createEntry = async (req, res) => {
     }
 
     const entry = new JournalEntry({
-      date,
-      time,
+      date: entryDate,
+      time: resolvedTime,
       description,
       lines,
       customerId: customerId || null,
@@ -284,8 +297,8 @@ exports.updateEntry = async (req, res) => {
     const beforeUpdate = entry.toObject();
     const oldLines = entry.lines;
 
-    entry.date = date;
-    entry.time = time;
+    entry.date = entryDate;
+    entry.time = resolvedTime;
     entry.description = description;
     entry.lines = lines;
     entry.customerId = customerId || null;
@@ -338,11 +351,12 @@ exports.getEntries = async (req, res) => {
       ...getTradingJournalFilter(),
     };
 
-    if (startDate && endDate) {
-      filter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
+    const entryDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
+    if (entryDateRange) {
+      filter.date = entryDateRange;
     }
 
     const entries = await JournalEntry.find(filter)
@@ -438,11 +452,12 @@ exports.getTrialBalance = async (req, res) => {
       ...getTradingJournalFilter(),
     };
 
-    if (startDate && endDate) {
-      matchFilter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
+    const trialDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
+    if (trialDateRange) {
+      matchFilter.date = trialDateRange;
     }
 
     const summary = await JournalEntry.aggregate([
@@ -579,11 +594,12 @@ exports.getLedgerByAccount = async (req, res) => {
       ...getTradingJournalFilter(),
     };
 
-    if (startDate && endDate) {
-      filter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
+    if (ledgerDateRange) {
+      filter.date = ledgerDateRange;
     }
 
     const entries = await JournalEntry.find(filter)
@@ -603,7 +619,7 @@ exports.getLedgerByAccount = async (req, res) => {
         createdBy: userId,
         "lines.account": objectId,
         date: {
-          $lt: new Date(startDate),
+          $lt: startOfBusinessDay(startDate),
         },
         isDeleted: false,
         ...getTradingJournalFilter(),
@@ -693,10 +709,12 @@ exports.getMonthlyCashFlow = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
-    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const year =
+      parseInt(req.query.year) ||
+      Number(getBusinessDateKey(new Date()).slice(0, 4));
 
-    const start = new Date(`${year}-01-01`);
-    const end = new Date(`${year}-12-31`);
+    const start = startOfBusinessDay(`${year}-01-01`);
+    const end = startOfBusinessDay(`${year + 1}-01-01`);
 
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
@@ -707,7 +725,7 @@ exports.getMonthlyCashFlow = async (req, res) => {
           isDeleted: false,
           date: {
             $gte: start,
-            $lte: end,
+            $lt: end,
           },
           ...getTradingJournalFilter(),
         },
@@ -742,7 +760,10 @@ exports.getMonthlyCashFlow = async (req, res) => {
         $group: {
           _id: {
             month: {
-              $month: "$date",
+              $month: {
+                date: "$date",
+                timezone: BUSINESS_TIME_ZONE,
+              },
             },
             type: "$lines.type",
           },

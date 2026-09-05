@@ -1,14 +1,8 @@
 // 📁 services/partyDetailLedgerPrintBuilder.js
 
-const formatDate = (date) => {
-  if (!date) return "-";
+const { formatBusinessDate } = require("../utils/businessDate");
 
-  const d = new Date(date);
-
-  if (isNaN(d.getTime())) return "-";
-
-  return d.toLocaleDateString("en-GB");
-};
+const formatDate = (date) => formatBusinessDate(date) || "-";
 
 const formatTime = (time) => {
   if (!time) return "";

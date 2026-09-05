@@ -19,6 +19,7 @@ const {
 const {
   executeProductPerformanceCached,
 } = require("./productPerformanceCacheService");
+const { buildBusinessDateRange } = require("../../utils/businessDate");
 
 // BASIC HELPERS
 
@@ -47,23 +48,11 @@ const createMap = (rows = []) => {
 };
 
 const buildDateMatch = (fieldName, startDate = null, endDate = null) => {
-  if (!startDate && !endDate) {
-    return {};
-  }
-
-  const range = {};
-
-  if (startDate) {
-    range.$gte = startDate;
-  }
-
-  if (endDate) {
-    range.$lte = endDate;
-  }
-
-  return {
-    [fieldName]: range,
-  };
+  return buildBusinessDateRange({
+    startDate,
+    endDate,
+    field: fieldName,
+  });
 };
 
 //📦 PRODUCT FILTER

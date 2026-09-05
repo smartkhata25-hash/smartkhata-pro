@@ -25,6 +25,11 @@ import { useNavigate } from 'react-router-dom';
 import CustomerForm from './CustomerForm';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const InvoiceForm = ({
@@ -348,7 +353,6 @@ const InvoiceForm = ({
   }, [paidAmount, paymentType, accounts]);
 
   useEffect(() => {
-    const now = new Date();
     const params = new URLSearchParams(location.search);
     const invoiceIdFromURL = params.get('invoiceId');
 
@@ -360,8 +364,8 @@ const InvoiceForm = ({
         setEditLoading(false);
         setEditingInvoiceFromAPI(null);
 
-        setInvoiceDate(now.toISOString().split('T')[0]);
-        setInvoiceTime(now.toTimeString().slice(0, 5));
+        setInvoiceDate(getBusinessDateInputValue());
+        setInvoiceTime(getBusinessTimeInputValue());
 
         try {
           const lastBillNo = await getLastInvoiceNo(token);
@@ -458,7 +462,7 @@ const InvoiceForm = ({
     } else {
       // ✅ عام Edit Mode میں Database والا محفوظ Data
       setBillNo(editingInvoiceFromAPI.billNo);
-      setInvoiceDate(editingInvoiceFromAPI.invoiceDate?.split('T')[0] || '');
+      setInvoiceDate(getBusinessDateInputValue(editingInvoiceFromAPI.invoiceDate) || '');
       setInvoiceTime(editingInvoiceFromAPI.invoiceTime?.slice(0, 5) || '');
       setCustomerName(editingInvoiceFromAPI.customerName);
       setCustomerPhone(editingInvoiceFromAPI.customerPhone);
@@ -977,8 +981,8 @@ const InvoiceForm = ({
       customerPhone: '',
       selectedCustomerId: '',
       selectedCustomerType: 'customer',
-      invoiceDate: new Date().toISOString().split('T')[0],
-      invoiceTime: new Date().toTimeString().slice(0, 5),
+      invoiceDate: getBusinessDateInputValue(),
+      invoiceTime: getBusinessTimeInputValue(),
       items: [],
       discountPercent: 0,
       discountAmount: 0,
@@ -1003,10 +1007,10 @@ const InvoiceForm = ({
     const safeDate =
       data.invoiceDate && !Number.isNaN(new Date(data.invoiceDate).getTime())
         ? data.invoiceDate
-        : new Date().toISOString().split('T')[0];
+        : getBusinessDateInputValue();
 
     setInvoiceDate(safeDate);
-    setInvoiceTime(data.invoiceTime || new Date().toTimeString().slice(0, 5));
+    setInvoiceTime(data.invoiceTime || getBusinessTimeInputValue());
 
     const restoredItems = Array.isArray(data.items)
       ? data.items.map((item) => (item?.productId ? item : blankRow()))
@@ -1119,10 +1123,8 @@ const InvoiceForm = ({
 
     setBy('');
 
-    const now = new Date();
-
-    setInvoiceDate(now.toISOString().split('T')[0]);
-    setInvoiceTime(now.toTimeString().slice(0, 5));
+    setInvoiceDate(getBusinessDateInputValue());
+    setInvoiceTime(getBusinessTimeInputValue());
 
     setAttachments([]);
     setExistingAttachments([]);
@@ -1307,11 +1309,9 @@ const InvoiceForm = ({
       clear();
 
       const resetSavedInvoiceForm = () => {
-        const now = new Date();
-
         setBillNo('Auto');
-        setInvoiceDate(now.toISOString().split('T')[0]);
-        setInvoiceTime(now.toTimeString().slice(0, 5));
+        setInvoiceDate(getBusinessDateInputValue());
+        setInvoiceTime(getBusinessTimeInputValue());
 
         setCustomerName('');
         setCustomerPhone('');
@@ -2642,9 +2642,9 @@ const InvoiceForm = ({
               <ul className="space-y-2 text-sm mt-2 max-h-28 overflow-auto">
                 {salesHistory.map((h) => {
                   const safeDate = h.invoiceDate
-                    ? new Date(h.invoiceDate).toLocaleDateString()
+                    ? formatBusinessDateForDisplay(h.invoiceDate)
                     : h.createdAt
-                      ? new Date(h.createdAt).toLocaleDateString()
+                      ? formatBusinessDateForDisplay(h.createdAt)
                       : 'N/A';
 
                   return (

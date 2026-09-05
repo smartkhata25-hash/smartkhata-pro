@@ -1,6 +1,10 @@
 import React, { useEffect } from 'react';
 
 import { t } from '../../i18n/i18n';
+import {
+  formatBusinessDateForDisplay,
+  formatTimestampForDisplay,
+} from '../../utils/localDateTime';
 
 const STOCK_TYPE_LABEL_KEYS = Object.freeze({
   IN: 'productPerformance.drawer.stockType.in',
@@ -59,13 +63,9 @@ const formatDate = (value, includeTime = false) => {
     return '-';
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return includeTime ? date.toLocaleString() : date.toLocaleDateString();
+  return includeTime
+    ? formatTimestampForDisplay(value)
+    : formatBusinessDateForDisplay(value);
 };
 
 const DetailCard = ({ label, value, valueClassName = 'text-gray-900' }) => {

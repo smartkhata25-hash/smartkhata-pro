@@ -20,6 +20,12 @@ const {
   getTravelCustomerJournalFilter,
   roundMoney,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -27,6 +33,223 @@ const escapeRegex = (text = "") => {
 
 const hasOwn = (object, key) =>
   Object.prototype.hasOwnProperty.call(object || {}, key);
+
+const TRAVEL_CUSTOMER_OPENING_ORIGIN = "travel_customer_opening_balance";
+const TRAVEL_OPENING_BALANCE_CODE = "TRAVEL_OPENING_BALANCE";
+
+const getCurrentTravelOpeningTimestamp = () => {
+  const time = getCurrentBusinessTimeInput();
+
+  return {
+    date: parseBusinessDateTime(new Date(), time, {
+      defaultTime: "00:00",
+      label: "travel opening balance date",
+    }),
+    time,
+  };
+};
+
+const generateCustomerAccountCode = async (userId) => {
+  const lastAcc = await Account.findOne({
+    userId,
+    code: { $regex: /^ACC-\d+$/ },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  let code = "ACC-0001";
+
+  if (lastAcc?.code) {
+    const lastNum = Number(lastAcc.code.replace("ACC-", ""));
+    if (!isNaN(lastNum)) {
+      code = `ACC-${String(lastNum + 1).padStart(4, "0")}`;
+    }
+  }
+
+  return code;
+};
+
+const getOrCreateTravelOpeningBalanceAccount = async (userId) => {
+  let openingAccount = await Account.findOne({
+    userId,
+    code: TRAVEL_OPENING_BALANCE_CODE,
+  });
+
+  if (!openingAccount) {
+    return Account.create({
+      userId,
+      name: "travel opening balance equity",
+      type: "Equity",
+      normalBalance: "credit",
+      code: TRAVEL_OPENING_BALANCE_CODE,
+      category: "other",
+      isSystem: true,
+      isActive: true,
+      moduleScope: MODULE_SCOPES.TRAVEL,
+    });
+  }
+
+  if (
+    openingAccount.moduleScope !== MODULE_SCOPES.TRAVEL ||
+    openingAccount.isSystem !== true
+  ) {
+    openingAccount.moduleScope = MODULE_SCOPES.TRAVEL;
+    openingAccount.isSystem = true;
+    openingAccount.isActive = true;
+    await openingAccount.save();
+  }
+
+  return openingAccount;
+};
+
+const resolveTravelCustomerOpeningBalance = (body = {}, fallback = 0) => {
+  const hasAmount = hasOwn(body, "openingBalanceAmount");
+  const hasDirection = hasOwn(body, "openingBalanceDirection");
+  const hasSigned = hasOwn(body, "openingBalance");
+
+  if (!hasAmount && !hasDirection && !hasSigned) {
+    return Number(fallback) || 0;
+  }
+
+  const rawAmount = hasAmount ? body.openingBalanceAmount : body.openingBalance;
+  const amount = Math.abs(Number(rawAmount) || 0);
+
+  if (amount === 0) {
+    return 0;
+  }
+
+  const direction = String(
+    body.openingBalanceDirection || body.openingBalanceType || "",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (["credit", "payable", "advance"].includes(direction)) {
+    return -amount;
+  }
+
+  if (["receivable", "debit", "due"].includes(direction)) {
+    return amount;
+  }
+
+  if (hasSigned) {
+    return Number(body.openingBalance) || 0;
+  }
+
+  return amount;
+};
+
+const replaceTravelCustomerOpeningBalanceJournal = async ({
+  userId,
+  customer,
+  accountId,
+  openingBalance,
+}) => {
+  const amount = Number(openingBalance) || 0;
+  const oldJournals = await JournalEntry.find({
+    customerId: customer._id,
+    createdBy: userId,
+    sourceType: "travel_adjustment",
+    originModule: TRAVEL_CUSTOMER_OPENING_ORIGIN,
+    isDeleted: false,
+  }).lean();
+
+  if (oldJournals.length > 0) {
+    await JournalEntry.updateMany(
+      {
+        customerId: customer._id,
+        createdBy: userId,
+        sourceType: "travel_adjustment",
+        originModule: TRAVEL_CUSTOMER_OPENING_ORIGIN,
+        isDeleted: false,
+      },
+      {
+        $set: { isDeleted: true },
+      },
+    );
+
+    const oldAccountIds = new Set();
+    oldJournals.forEach((journal) => {
+      (journal.lines || []).forEach((line) => {
+        if (line?.account) oldAccountIds.add(String(line.account));
+      });
+    });
+
+    for (const oldAccountId of oldAccountIds) {
+      await recalculateAccountBalance(oldAccountId);
+    }
+  }
+
+  if (amount === 0) {
+    await recalculateAccountBalance(accountId);
+    return null;
+  }
+
+  const absAmount = Math.abs(amount);
+  const openingBalanceAccount = await getOrCreateTravelOpeningBalanceAccount(userId);
+  const journal = await JournalEntry.create({
+    ...getCurrentTravelOpeningTimestamp(),
+    description: "Travel Customer Opening Balance",
+    createdBy: userId,
+    customerId: customer._id,
+    sourceType: "travel_adjustment",
+    originModule: TRAVEL_CUSTOMER_OPENING_ORIGIN,
+    referenceId: customer._id,
+    billNo: `TCO-${String(customer._id).slice(-6).toUpperCase()}`,
+    lines:
+      amount > 0
+        ? [
+            {
+              account: accountId,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: openingBalanceAccount._id,
+              type: "credit",
+              amount: absAmount,
+            },
+          ]
+        : [
+            {
+              account: openingBalanceAccount._id,
+              type: "debit",
+              amount: absAmount,
+            },
+            {
+              account: accountId,
+              type: "credit",
+              amount: absAmount,
+            },
+          ],
+  });
+
+  await recalculateAccountBalance(accountId);
+  await recalculateAccountBalance(openingBalanceAccount._id);
+
+  return journal;
+};
+
+const buildTravelCustomerResponse = async (userId, customer) => {
+  const record = await Customer.findOne({
+    _id: customer._id,
+    createdBy: userId,
+  })
+    .select("name email phone address type moduleScope isActive openingBalance account createdAt updatedAt")
+    .populate("account", "_id name code type category normalBalance isActive moduleScope")
+    .lean();
+
+  const balanceMap = await getTravelCustomerBalanceMap(userId, [record]);
+  const accountId = String(record?.account?._id || record?.account || "");
+  const balance = roundMoney(balanceMap.get(accountId) || 0);
+
+  return {
+    ...record,
+    balance,
+    currentReceivable: Math.max(balance, 0),
+    customerCredit: Math.max(-balance, 0),
+  };
+};
 
 const getCustomerDataVersion = async (req, res) => {
   try {
@@ -1220,15 +1443,7 @@ const getCustomerDetailedLedger = async (req, res) => {
     let openingBalance = 0;
 
     if (startDate) {
-      const start = new Date(startDate);
-
-      if (Number.isNaN(start.getTime())) {
-        return res.status(400).json({
-          message: "Invalid start date",
-        });
-      }
-
-      start.setHours(0, 0, 0, 0);
+      const start = startOfBusinessDay(startDate);
 
       const result = await JournalEntry.aggregate([
         {
@@ -1284,36 +1499,13 @@ const getCustomerDetailedLedger = async (req, res) => {
       ...travelJournalFilter,
     };
 
-    if (startDate || endDate) {
-      match.date = {};
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
 
-      if (startDate) {
-        const start = new Date(startDate);
-
-        if (Number.isNaN(start.getTime())) {
-          return res.status(400).json({
-            message: "Invalid start date",
-          });
-        }
-
-        start.setHours(0, 0, 0, 0);
-
-        match.date.$gte = start;
-      }
-
-      if (endDate) {
-        const end = new Date(endDate);
-
-        if (Number.isNaN(end.getTime())) {
-          return res.status(400).json({
-            message: "Invalid end date",
-          });
-        }
-
-        end.setHours(23, 59, 59, 999);
-
-        match.date.$lte = end;
-      }
+    if (ledgerDateRange) {
+      match.date = ledgerDateRange;
     }
 
     const journals = await JournalEntry.find(match)
@@ -1382,6 +1574,9 @@ const getCustomerDetailedLedger = async (req, res) => {
           entry.originModule === "travel_receive_payment" &&
           entry.sourceType === "receive_payment"
             ? "Travel Payment"
+            : entry.originModule === TRAVEL_CUSTOMER_OPENING_ORIGIN &&
+          entry.sourceType === "travel_adjustment"
+            ? "Travel Customer Opening Balance"
             : entry.originModule === "travel_invoice" &&
           entry.sourceType === "receive_payment"
             ? "Travel Invoice Payment"
@@ -1557,7 +1752,7 @@ const getTravelCustomers = async (req, res) => {
 
       const limitNumber = Math.min(Math.max(Number(limit) || 500, 1), 1000);
       const customers = await Customer.find(query)
-        .select("name email phone address type moduleScope isActive account createdAt updatedAt")
+        .select("name email phone address type moduleScope isActive openingBalance account createdAt updatedAt")
         .populate("account", "_id name code type category normalBalance isActive")
         .sort({ name: 1, createdAt: -1 })
         .limit(limitNumber)
@@ -1601,21 +1796,108 @@ const getTravelCustomers = async (req, res) => {
 };
 
 const addTravelCustomer = async (req, res) => {
-  const requestedScope = normalizeModuleScope(
-    req.body?.moduleScope,
-    MODULE_SCOPES.TRAVEL,
-  );
+  try {
+    const userId = req.user?.id || req.userId;
+    const {
+      name,
+      email = "",
+      phone = "",
+      address = "",
+      type = "regular",
+    } = req.body || {};
 
-  req.body = {
-    ...req.body,
-    moduleScope:
+    const cleanName = String(name || "").trim();
+
+    if (!cleanName) {
+      return res.status(400).json({ message: "Customer name is required" });
+    }
+
+    const requestedScope = normalizeModuleScope(
+      req.body?.moduleScope,
+      MODULE_SCOPES.TRAVEL,
+    );
+    const safeModuleScope =
       requestedScope === MODULE_SCOPES.TRADING
         ? MODULE_SCOPES.TRAVEL
-        : requestedScope,
-    openingBalance: 0,
-  };
+        : requestedScope;
+    const openingBalance = resolveTravelCustomerOpeningBalance(req.body, 0);
 
-  return addCustomer(req, res);
+    const existingCustomer = await Customer.findOne({
+      name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
+      createdBy: userId,
+      isActive: true,
+    });
+
+    if (existingCustomer) {
+      return res.status(200).json({
+        duplicate: true,
+        message: "Customer already exists",
+        customerId: existingCustomer._id,
+      });
+    }
+
+    const account = await Account.create({
+      userId,
+      name: `Customer: ${cleanName}`,
+      type: "Asset",
+      normalBalance: "debit",
+      code: await generateCustomerAccountCode(userId),
+      category: "customer",
+      isActive: true,
+      openingBalance,
+      moduleScope: MODULE_SCOPES.TRAVEL,
+    });
+
+    const customer = await Customer.create({
+      name: cleanName,
+      email,
+      phone,
+      address,
+      type,
+      moduleScope: safeModuleScope,
+      openingBalance,
+      account: account._id,
+      createdBy: userId,
+    });
+
+    await replaceTravelCustomerOpeningBalanceJournal({
+      userId,
+      customer,
+      accountId: account._id,
+      openingBalance,
+    });
+
+    const responseCustomer = await buildTravelCustomerResponse(userId, customer);
+
+    await logActivity({
+      req,
+      action: "create",
+      module: "travel.customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Travel customer ${customer.name}`,
+      description: `Travel customer ${customer.name} created`,
+      after: {
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        type: customer.type,
+        moduleScope: customer.moduleScope,
+        openingBalance: customer.openingBalance,
+        account: customer.account,
+      },
+    });
+
+    return res.status(201).json(responseCustomer);
+  } catch (error) {
+    console.error("Travel customer create failed:", error);
+
+    return res.status(500).json({
+      message: "Travel customer create failed",
+      error: error.message,
+    });
+  }
 };
 
 const updateTravelCustomer = async (req, res) => {
@@ -1636,10 +1918,34 @@ const updateTravelCustomer = async (req, res) => {
         },
         MODULE_SCOPES.TRAVEL,
       ),
-    ).select("_id moduleScope");
+    ).select("_id name email phone address type moduleScope openingBalance account isActive");
 
     if (!customer) {
       return res.status(404).json({ message: "Travel customer not found" });
+    }
+
+    const before = customer.toObject();
+    const cleanName = hasOwn(req.body, "name")
+      ? String(req.body.name || "").trim()
+      : customer.name;
+
+    if (!cleanName) {
+      return res.status(400).json({ message: "Customer name is required" });
+    }
+
+    if (cleanName.toLowerCase() !== String(customer.name || "").toLowerCase()) {
+      const duplicate = await Customer.findOne({
+        name: new RegExp(`^${escapeRegex(cleanName)}$`, "i"),
+        createdBy: userId,
+        isActive: true,
+        _id: { $ne: customer._id },
+      }).select("_id");
+
+      if (duplicate) {
+        return res.status(400).json({
+          message: "Customer name already exists. Please choose another name.",
+        });
+      }
     }
 
     const requestedScope = normalizeModuleScope(
@@ -1647,16 +1953,79 @@ const updateTravelCustomer = async (req, res) => {
       customer.moduleScope || MODULE_SCOPES.TRAVEL,
     );
 
-    req.body = {
-      ...req.body,
-      moduleScope:
-        requestedScope === MODULE_SCOPES.TRADING
-          ? MODULE_SCOPES.TRAVEL
-          : requestedScope,
-      openingBalance: 0,
-    };
+    const safeModuleScope =
+      requestedScope === MODULE_SCOPES.TRADING
+        ? MODULE_SCOPES.TRAVEL
+        : requestedScope;
+    const oldOpeningBalance = Number(customer.openingBalance) || 0;
+    const openingBalance = resolveTravelCustomerOpeningBalance(
+      req.body,
+      oldOpeningBalance,
+    );
 
-    return updateCustomer(req, res);
+    customer.name = cleanName;
+    if (hasOwn(req.body, "email")) customer.email = req.body.email || "";
+    if (hasOwn(req.body, "phone")) customer.phone = req.body.phone || "";
+    if (hasOwn(req.body, "address")) customer.address = req.body.address || "";
+    if (hasOwn(req.body, "type")) customer.type = req.body.type || customer.type;
+    customer.moduleScope = safeModuleScope;
+    customer.openingBalance = openingBalance;
+
+    await customer.save();
+
+    await Account.updateOne(
+      {
+        _id: customer.account,
+        userId,
+      },
+      {
+        $set: {
+          name: `Customer: ${customer.name}`,
+          type: "Asset",
+          normalBalance: "debit",
+          category: "customer",
+          openingBalance,
+          moduleScope: MODULE_SCOPES.TRAVEL,
+          isActive: customer.isActive,
+        },
+      },
+    );
+
+    if (oldOpeningBalance !== openingBalance) {
+      await replaceTravelCustomerOpeningBalanceJournal({
+        userId,
+        customer,
+        accountId: customer.account,
+        openingBalance,
+      });
+    } else {
+      await recalculateAccountBalance(customer.account);
+    }
+
+    const responseCustomer = await buildTravelCustomerResponse(userId, customer);
+
+    await logActivity({
+      req,
+      action: "update",
+      module: "travel.customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Travel customer ${customer.name}`,
+      description: `Travel customer ${customer.name} updated`,
+      before,
+      after: {
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        address: customer.address,
+        type: customer.type,
+        moduleScope: customer.moduleScope,
+        openingBalance: customer.openingBalance,
+        account: customer.account,
+      },
+    });
+
+    return res.json(responseCustomer);
   } catch (error) {
     console.error("Travel customer update failed:", error);
 
@@ -1696,7 +2065,29 @@ const deleteTravelCustomer = async (req, res) => {
     const reason = String(req.body?.deleteReason || req.query?.reason || "").trim();
 
     if (customer.moduleScope === MODULE_SCOPES.BOTH) {
+      if (Number(customer.openingBalance || 0) !== 0) {
+        await replaceTravelCustomerOpeningBalanceJournal({
+          userId,
+          customer,
+          accountId: customer.account,
+          openingBalance: 0,
+        });
+      }
+
       customer.moduleScope = MODULE_SCOPES.TRADING;
+      customer.openingBalance = 0;
+      await Account.updateOne(
+        {
+          _id: customer.account,
+          userId,
+        },
+        {
+          $set: {
+            moduleScope: MODULE_SCOPES.TRADING,
+            openingBalance: 0,
+          },
+        },
+      );
     } else {
       customer.isActive = false;
       customer.hiddenReason = "deleted";

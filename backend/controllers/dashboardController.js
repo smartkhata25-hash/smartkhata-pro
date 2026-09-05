@@ -12,6 +12,13 @@ const { getProfitSummary } = require("../services/accounting/profitService");
 const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 } = require("../utils/businessValueModuleScope");
+const {
+  BUSINESS_TIME_ZONE,
+  buildBusinessDateRange,
+  buildBusinessPresetDateRange,
+  getBusinessDateKey,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const {
   getDashboardCache,
@@ -88,29 +95,11 @@ const getDashboardSummary = async (req, res) => {
       }
     }
 
-    let dateFilter = {};
-
-    if (filterType === "today") {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
-
-      dateFilter = {
-        date: {
-          $gte: todayStart,
-          $lte: todayEnd,
-        },
-      };
-    } else if (startDate && endDate) {
-      dateFilter = {
-        date: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate),
-        },
-      };
-    }
+    const dateFilter = buildBusinessPresetDateRange({
+      dateFilter: filterType,
+      fromDate: startDate,
+      toDate: endDate,
+    });
 
     const [profitData, activeCustomers, activeSuppliers, activeParties] =
       await Promise.all([
@@ -470,7 +459,11 @@ const getMonthlySales = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const year =
+      parseInt(req.query.year) ||
+      Number(getBusinessDateKey(new Date()).slice(0, 4));
+    const yearStart = startOfBusinessDay(`${year}-01-01`);
+    const nextYearStart = startOfBusinessDay(`${year + 1}-01-01`);
 
     const salesData = await JournalEntry.aggregate([
       {
@@ -481,9 +474,9 @@ const getMonthlySales = async (req, res) => {
           ...getTradingJournalFilter(),
 
           date: {
-            $gte: new Date(`${year}-01-01T00:00:00.000Z`),
+            $gte: yearStart,
 
-            $lte: new Date(`${year}-12-31T23:59:59.999Z`),
+            $lt: nextYearStart,
           },
         },
       },
@@ -538,7 +531,10 @@ const getMonthlySales = async (req, res) => {
       {
         $group: {
           _id: {
-            $month: "$date",
+            $month: {
+              date: "$date",
+              timezone: BUSINESS_TIME_ZONE,
+            },
           },
 
           total: {
@@ -594,7 +590,11 @@ const getMonthlyCashFlow = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
 
-    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const year =
+      parseInt(req.query.year) ||
+      Number(getBusinessDateKey(new Date()).slice(0, 4));
+    const yearStart = startOfBusinessDay(`${year}-01-01`);
+    const nextYearStart = startOfBusinessDay(`${year + 1}-01-01`);
 
     const cashFlowData = await JournalEntry.aggregate([
       {
@@ -605,9 +605,9 @@ const getMonthlyCashFlow = async (req, res) => {
           ...getTradingJournalFilter(),
 
           date: {
-            $gte: new Date(`${year}-01-01T00:00:00.000Z`),
+            $gte: yearStart,
 
-            $lte: new Date(`${year}-12-31T23:59:59.999Z`),
+            $lt: nextYearStart,
           },
         },
       },
@@ -641,7 +641,10 @@ const getMonthlyCashFlow = async (req, res) => {
         $group: {
           _id: {
             month: {
-              $month: "$date",
+              $month: {
+                date: "$date",
+                timezone: BUSINESS_TIME_ZONE,
+              },
             },
 
             type: "$lines.type",
@@ -713,16 +716,11 @@ const getDashboardAlerts = async (req, res) => {
 
     const today = new Date();
 
-    let invoiceDateFilter = {};
-
-    if (startDate && endDate) {
-      invoiceDateFilter = {
-        invoiceDate: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate),
-        },
-      };
-    }
+    const invoiceDateFilter = buildBusinessDateRange({
+      startDate,
+      endDate,
+      field: "invoiceDate",
+    });
 
     const activeCustomers = await Customer.find({
       createdBy: userId,

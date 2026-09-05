@@ -5,6 +5,7 @@ import {
   getCachedInvoiceFormOptions,
 } from '../services/invoiceFormOptionsService';
 import { t } from '../i18n/i18n';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const InvoiceSearchModal = ({ onSelect, onClose }) => {
   const [query, setQuery] = useState({
@@ -236,7 +237,7 @@ const InvoiceSearchModal = ({ onSelect, onClose }) => {
                 className="p-2 hover:bg-blue-100 cursor-pointer border-b"
               >
                 {inv.billNo} - {inv.customerName} (
-                {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-GB') : ''})
+                {inv.invoiceDate ? formatBusinessDateForDisplay(inv.invoiceDate, { fallback: '' }) : ''})
               </li>
             ))}
           </ul>

@@ -11,6 +11,7 @@ import { getAllPurchaseReturns, deletePurchaseReturn } from '../services/purchas
 import { t } from '../i18n/i18n';
 
 import { hasPermission } from '../utils/permissionHelper';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const PurchaseReturnList = () => {
   // ✅ صرف موجودہ page کے Purchase Returns
@@ -447,7 +448,7 @@ const PurchaseReturnList = () => {
               returns.map((row) => (
                 <tr key={row._id} className="text-center">
                   <td className="border p-2 whitespace-nowrap">
-                    {row.returnDate ? new Date(row.returnDate).toLocaleDateString() : '-'}
+                    {formatBusinessDateForDisplay(row.returnDate)}
                   </td>
 
                   <td className="border p-2">{row.billNo || '-'}</td>

@@ -30,6 +30,11 @@ import {
 } from '../../../services/travelReminderService';
 import { generateWhatsAppLink } from '../../../utils/whatsapp';
 import { hasPermission } from '../../../utils/permissionHelper';
+import {
+  BUSINESS_TIME_ZONE,
+  formatBusinessDateForDisplay,
+  formatTimestampForDisplay,
+} from '../../../utils/localDateTime';
 
 /* -------------------------------------------------------------------------- */
 /*                                BASIC CONFIG                                */
@@ -150,36 +155,13 @@ const normalizeSettingsDraft = (settings = {}) => {
 const formatDateTime = (value) => {
   if (!value) return '-';
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return formatTimestampForDisplay(value);
 };
 
 const formatShortDate = (value) => {
   if (!value) return '-';
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatBusinessDateForDisplay(value);
 };
 
 const formatShortTime = (value) => {
@@ -195,6 +177,7 @@ const formatShortTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    timeZone: BUSINESS_TIME_ZONE,
   });
 };
 

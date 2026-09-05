@@ -10,6 +10,10 @@ const {
 const {
   TRAVEL_PARTY_OPENING_ORIGIN,
 } = require("../services/travel/travelCounterpartyService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const TRAVEL_PARTY_LEDGER_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -89,21 +93,19 @@ const getPartyLedger = async (req, res) => {
       moduleScope,
     );
 
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate,
+      endDate,
+    }).date;
 
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-
-      matchFilter.date = { $gte: start, $lte: end };
+    if (ledgerDateRange) {
+      matchFilter.date = ledgerDateRange;
     }
 
     let openingBalance = 0;
 
     if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      const start = startOfBusinessDay(startDate);
 
       const result = await JournalEntry.aggregate([
         {

@@ -15,10 +15,14 @@ import {
   getCachedInvoiceFormOptions,
 } from '../services/invoiceFormOptionsService';
 import { useNavigate, useParams } from 'react-router-dom';
-import dayjs from 'dayjs';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+  getBusinessTimeInputValue,
+} from '../utils/localDateTime';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import './ReceivePaymentForm.css';
 
@@ -42,8 +46,8 @@ const ReceivePaymentForm = () => {
   const [formData, setFormData] = useState({
     customer: '',
     partyId: '',
-    date: dayjs().format('YYYY-MM-DD'),
-    time: dayjs().format('HH:mm'),
+    date: getBusinessDateInputValue(),
+    time: getBusinessTimeInputValue(),
     amount: '',
     paymentType: 'Cash',
     discountAmount: '',
@@ -132,8 +136,8 @@ const ReceivePaymentForm = () => {
         setFormData({
           customer: isPartyPayment ? '' : customerId,
           partyId: isPartyPayment ? partyId : '',
-          date: existing.date || dayjs().format('YYYY-MM-DD'),
-          time: existing.time || dayjs().format('HH:mm'),
+          date: getBusinessDateInputValue(existing.date),
+          time: existing.time || getBusinessTimeInputValue(),
           amount: existing.amount || '',
           paymentType: normalizePaymentType(existing.paymentType),
           discountAmount: existing.discountAmount || '',
@@ -365,8 +369,8 @@ const ReceivePaymentForm = () => {
     setFormData({
       customer: '',
       partyId: '',
-      date: dayjs().format('YYYY-MM-DD'),
-      time: dayjs().format('HH:mm'),
+      date: getBusinessDateInputValue(),
+      time: getBusinessTimeInputValue(),
       amount: '',
       paymentType: 'Cash',
       discountAmount: '',
@@ -716,8 +720,8 @@ const ReceivePaymentForm = () => {
       formData: {
         customer: '',
         partyId: '',
-        date: dayjs().format('YYYY-MM-DD'),
-        time: dayjs().format('HH:mm'),
+        date: getBusinessDateInputValue(),
+        time: getBusinessTimeInputValue(),
         amount: '',
         paymentType: 'Cash',
         discountAmount: '',
@@ -746,8 +750,8 @@ const ReceivePaymentForm = () => {
     setFormData({
       customer: savedFormData.customer || '',
       partyId: savedFormData.partyId || '',
-      date: savedFormData.date || dayjs().format('YYYY-MM-DD'),
-      time: savedFormData.time || dayjs().format('HH:mm'),
+      date: savedFormData.date || getBusinessDateInputValue(),
+      time: savedFormData.time || getBusinessTimeInputValue(),
       amount: savedFormData.amount || '',
       paymentType: savedFormData.paymentType || 'Cash',
       discountAmount: savedFormData.discountAmount || '',
@@ -1378,7 +1382,7 @@ const ReceivePaymentForm = () => {
                 <tbody>
                   {customerLedger.map((e, i) => (
                     <tr key={i} className="hover:bg-blue-50 even:bg-gray-50 transition">
-                      <td className="p-2 border">{new Date(e.date).toLocaleDateString()}</td>
+                      <td className="p-2 border">{formatBusinessDateForDisplay(e.date)}</td>
                       <td className="p-2 border">{e.billNo || '-'}</td>
                       <td className="p-2 border">{e.description || '-'}</td>
                       <td className="p-2 border text-right font-medium text-green-700">

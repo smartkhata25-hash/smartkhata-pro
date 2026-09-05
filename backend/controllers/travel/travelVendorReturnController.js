@@ -47,6 +47,12 @@ const {
   normalizeVendorCounterpartyInput,
   resolveTravelVendorCounterparty,
 } = require("../../services/travel/travelCounterpartyService");
+const {
+  buildBusinessDateRange,
+  extractBusinessTime,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../../utils/businessDate");
 
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
 
@@ -77,26 +83,21 @@ const moneyNumber = (value, label, { allowZero = false } = {}) => {
   return roundMoney(numeric);
 };
 
-const normalizeDate = (value) => {
-  const date = value ? new Date(value) : new Date();
-
-  if (Number.isNaN(date.getTime())) {
+const normalizeDate = (value, timeValue = "") => {
+  try {
+    return parseBusinessDateTime(value || new Date(), timeValue, {
+      defaultTime: "00:00",
+      label: "return date",
+    });
+  } catch {
     throw createHttpError(400, "Invalid return date");
   }
-
-  return date;
 };
 
-const formatCurrentTimeInput = () => new Date().toTimeString().slice(0, 5);
+const formatCurrentTimeInput = () => getCurrentBusinessTimeInput();
 
 const extractTimeFromDateInput = (value) => {
-  if (!value || !String(value).includes("T")) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? "" : date.toTimeString().slice(0, 5);
+  return extractBusinessTime(value);
 };
 
 const normalizeTimeInput = (value, dateValue = null) =>
@@ -334,8 +335,8 @@ const buildReturnPayload = async ({ body, userId, session = null }) => {
     : null;
   const originalInvoiceId = optionalObjectId(body.originalInvoiceId, "travel invoice");
   const bookingItemId = optionalObjectId(body.bookingItemId, "travel service");
-  const returnDate = normalizeDate(body.returnDate || body.date);
   const returnTime = normalizeTimeInput(body.returnTime || body.time, body.returnDate || body.date);
+  const returnDate = normalizeDate(body.returnDate || body.date, returnTime);
   const vendorReturnAmount = moneyNumber(body.vendorReturnAmount, "vendor return amount");
   const amountReceivedNow = moneyNumber(body.amountReceivedNow, "amount received now", {
     allowZero: true,
@@ -486,8 +487,9 @@ const postVendorReturnAccounting = async ({
   session = null,
 }) => {
   const travelCostAccount = await getTravelCostAccount(userId, session);
-  const returnDate = vendorReturn.returnDate || new Date();
-  const returnTime = cleanString(vendorReturn.returnTime) || returnDate.toTimeString().slice(0, 5);
+  const sourceReturnDate = vendorReturn.returnDate || new Date();
+  const returnTime = cleanString(vendorReturn.returnTime) || extractBusinessTime(sourceReturnDate);
+  const returnDate = normalizeDate(sourceReturnDate, returnTime);
   const journals = [];
 
   const costJournal = new JournalEntry({
@@ -579,25 +581,13 @@ const addAndClause = (query, clause) => {
 };
 
 const buildReturnDateRange = (fromDate, toDate) => {
-  if (!fromDate && !toDate) {
-    return null;
-  }
-
-  const range = {};
-
-  if (fromDate) {
-    const start = normalizeDate(fromDate);
-    start.setHours(0, 0, 0, 0);
-    range.$gte = start;
-  }
-
-  if (toDate) {
-    const end = normalizeDate(toDate);
-    end.setHours(23, 59, 59, 999);
-    range.$lte = end;
-  }
-
-  return range;
+  return (
+    buildBusinessDateRange({
+      startDate: fromDate,
+      endDate: toDate,
+      field: "returnDate",
+    }).returnDate || null
+  );
 };
 
 const findTravelVendorsForSearch = async (userId, search) => {

@@ -4,6 +4,10 @@ const mongoose = require("mongoose");
 const {
   getTravelVendorJournalFilter,
 } = require("../services/travel/travelAccountingMetricsService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../utils/businessDate");
 
 const resolveSupplierSourceLabel = (entry) => {
   if (
@@ -93,9 +97,13 @@ exports.getSupplierLedger = async (req, res) => {
       ...travelJournalFilter,
     };
 
-    if (fromDate)
-      query.date = { ...(query.date || {}), $gte: new Date(fromDate) };
-    if (toDate) query.date = { ...(query.date || {}), $lte: new Date(toDate) };
+    const ledgerDateRange = buildBusinessDateRange({
+      startDate: fromDate,
+      endDate: toDate,
+    }).date;
+    if (ledgerDateRange) {
+      query.date = ledgerDateRange;
+    }
     if (type) query.sourceType = type;
 
     const entries = await JournalEntry.find(query)
@@ -115,7 +123,7 @@ exports.getSupplierLedger = async (req, res) => {
         createdBy: req.user.id,
         isDeleted: false,
         ...travelJournalFilter,
-        date: { $lt: new Date(fromDate) },
+        date: { $lt: startOfBusinessDay(fromDate) },
       }).lean();
 
       for (const entry of openingEntries) {

@@ -21,6 +21,10 @@ const {
   getFileUrl,
 } = require("../services/r2FileService");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  buildBusinessDateRange,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 // ✅ Create Refund - Updated Version (with InventoryTransaction)
 exports.createRefundInvoice = async (req, res) => {
@@ -162,11 +166,15 @@ exports.createRefundInvoice = async (req, res) => {
     }
 
     let originalInvoice = null;
+    const refundDateTime = parseBusinessDateTime(invoiceDate || new Date(), invoiceTime, {
+      defaultTime: "00:00",
+      label: "refund date",
+    });
 
     // ✅ Save Refund Invoice
     const refundInvoice = new RefundInvoice({
       billNo: refundBillNo,
-      invoiceDate,
+      invoiceDate: refundDateTime,
       invoiceTime,
       customerId: customer?._id || null,
       partyId: party?._id || null,
@@ -246,11 +254,6 @@ exports.createRefundInvoice = async (req, res) => {
     // Refund بعد میں Save ہوگی
 
     // ✅ Date handling
-    let refundDateTime = new Date(`${invoiceDate}T${invoiceTime}`);
-    if (isNaN(refundDateTime.getTime())) {
-      refundDateTime = new Date(invoiceDate);
-    }
-
     // ✅ Calculate refund cost
     let totalRefundCost = 0;
     const refundCostMap = {};
@@ -379,6 +382,8 @@ exports.createRefundInvoice = async (req, res) => {
         description: `Refund Payment - ${refundInvoice.billNo}`,
         customerId: customer?._id || null,
         partyId: party?._id || null,
+        entryDate: refundDateTime,
+        entryTime: invoiceTime || "",
       });
       await recalculateAccountBalance(counterPartyAccountId);
       if (accountId) await recalculateAccountBalance(accountId);
@@ -395,6 +400,7 @@ exports.createRefundInvoice = async (req, res) => {
           invoiceModel: "RefundInvoice",
           userId,
           rate: Number(refundCostMap[item.productId?.toString()] || 0),
+          date: refundDateTime,
         });
       }
     }
@@ -741,9 +747,20 @@ exports.updateRefundInvoice = async (req, res) => {
 
     // ✅ Update refund invoice
 
+    const resolvedInvoiceTime =
+      invoiceTime !== undefined ? invoiceTime || "" : refund.invoiceTime || "";
+    const refundDateTime = parseBusinessDateTime(
+      invoiceDate || refund.invoiceDate || new Date(),
+      resolvedInvoiceTime,
+      {
+        defaultTime: "00:00",
+        label: "refund date",
+      },
+    );
+
     refund.billNo = billNo;
-    refund.invoiceDate = invoiceDate;
-    refund.invoiceTime = invoiceTime;
+    refund.invoiceDate = refundDateTime;
+    refund.invoiceTime = resolvedInvoiceTime;
     refund.customerId = customer?._id || null;
     refund.partyId = party?._id || null;
     refund.customerName = customer?.name || party?.name || "";
@@ -850,11 +867,6 @@ exports.updateRefundInvoice = async (req, res) => {
     }
 
     // ✅ Date handling
-    let refundDateTime = new Date(`${invoiceDate}T${invoiceTime}`);
-    if (isNaN(refundDateTime.getTime())) {
-      refundDateTime = new Date(invoiceDate);
-    }
-
     // ✅ Calculate refund cost
     let totalRefundCost = 0;
     const refundCostMap = {};
@@ -947,7 +959,7 @@ exports.updateRefundInvoice = async (req, res) => {
     // ✅ New journal entry
     const journal = new JournalEntry({
       date: refundDateTime,
-      time: invoiceTime || "",
+      time: resolvedInvoiceTime || "",
       description: notes || "",
       sourceType: openingRefund ? "opening_refund_invoice" : "refund_invoice",
       referenceId: refund._id,
@@ -984,6 +996,8 @@ exports.updateRefundInvoice = async (req, res) => {
         description: `Refund Payment - ${refund.billNo}`,
         customerId: customer?._id || null,
         partyId: party?._id || null,
+        entryDate: refundDateTime,
+        entryTime: resolvedInvoiceTime || "",
       });
       await recalculateAccountBalance(counterPartyAccountId);
       if (accountId) await recalculateAccountBalance(accountId);
@@ -1001,6 +1015,7 @@ exports.updateRefundInvoice = async (req, res) => {
           invoiceModel: "RefundInvoice",
           userId,
           rate: Number(refundCostMap[item.productId?.toString()] || 0),
+          date: refundDateTime,
         });
       }
     }
@@ -1150,16 +1165,13 @@ exports.getAllRefunds = async (req, res) => {
     }
 
     // ✅ Date filters
-    if (fromDate || toDate) {
-      filter.invoiceDate = {};
-
-      if (fromDate) {
-        filter.invoiceDate.$gte = new Date(`${fromDate}T00:00:00.000Z`);
-      }
-
-      if (toDate) {
-        filter.invoiceDate.$lte = new Date(`${toDate}T23:59:59.999Z`);
-      }
+    const invoiceDateRange = buildBusinessDateRange({
+      startDate: fromDate,
+      endDate: toDate,
+      field: "invoiceDate",
+    }).invoiceDate;
+    if (invoiceDateRange) {
+      filter.invoiceDate = invoiceDateRange;
     }
 
     // ✅ Refund list and total count together

@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+} from '../utils/localDateTime';
 
 const AccountTransactionTable = ({
   transactions = [],
@@ -31,11 +35,15 @@ const AccountTransactionTable = ({
     });
 
   const formatDateForInput = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
+    return getBusinessDateInputValue(date);
+  };
 
-    return `${year}-${month}-${day}`;
+  const getTransactionDateKey = (date) => {
+    if (!date) return '';
+
+    const parsed = new Date(date);
+
+    return Number.isNaN(parsed.getTime()) ? '' : getBusinessDateInputValue(date);
   };
 
   const handleQuickPeriodChange = (value) => {
@@ -149,26 +157,18 @@ const AccountTransactionTable = ({
     }
 
     if (startDate) {
-      const selectedStartDate = new Date(`${startDate}T00:00:00`);
-
       result = result.filter((txn) => {
-        if (!txn.date) return false;
+        const transactionDate = getTransactionDateKey(txn.date);
 
-        const transactionDate = new Date(txn.date);
-
-        return !Number.isNaN(transactionDate.getTime()) && transactionDate >= selectedStartDate;
+        return transactionDate && transactionDate >= startDate;
       });
     }
 
     if (endDate) {
-      const selectedEndDate = new Date(`${endDate}T23:59:59.999`);
-
       result = result.filter((txn) => {
-        if (!txn.date) return false;
+        const transactionDate = getTransactionDateKey(txn.date);
 
-        const transactionDate = new Date(txn.date);
-
-        return !Number.isNaN(transactionDate.getTime()) && transactionDate <= selectedEndDate;
+        return transactionDate && transactionDate <= endDate;
       });
     }
 
@@ -381,7 +381,7 @@ const AccountTransactionTable = ({
             </p>
 
             <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-              {txn.date ? new Date(txn.date).toLocaleDateString('en-GB') : '-'}
+              {formatBusinessDateForDisplay(txn.date)}
               {txn.time ? ` - ${txn.time}` : ''}
             </p>
           </div>
@@ -748,7 +748,7 @@ const AccountTransactionTable = ({
                         }`}
                       >
                         <td className={cellClass}>
-                          {txn.date ? new Date(txn.date).toLocaleDateString('en-GB') : '-'}
+                          {formatBusinessDateForDisplay(txn.date)}
                         </td>
 
                         <td className={cellClass}>{txn.time || '-'}</td>

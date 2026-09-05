@@ -2,6 +2,10 @@ import React, { useRef, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { t } from '../i18n/i18n';
+import {
+  formatBusinessDateForDisplay,
+  getBusinessDateInputValue,
+} from '../utils/localDateTime';
 
 const TransactionTable = ({ transactions, products, onDelete }) => {
   const [filters, setFilters] = useState({
@@ -18,9 +22,9 @@ const TransactionTable = ({ transactions, products, onDelete }) => {
       ? tx.productId && tx.productId._id === filters.product
       : true;
 
-    const txDate = new Date(tx.date);
-    const from = filters.fromDate ? new Date(filters.fromDate) : null;
-    const to = filters.toDate ? new Date(filters.toDate) : null;
+    const txDate = tx.date ? getBusinessDateInputValue(tx.date) : '';
+    const from = filters.fromDate || null;
+    const to = filters.toDate || null;
 
     const matchDate = (!from || txDate >= from) && (!to || txDate <= to);
 
@@ -68,7 +72,7 @@ const TransactionTable = ({ transactions, products, onDelete }) => {
         tx.productId?.name || '',
         tx.type,
         tx.quantity,
-        new Date(tx.date).toLocaleDateString(),
+        formatBusinessDateForDisplay(tx.date),
         tx.note || '-',
       ]);
     });
@@ -188,7 +192,7 @@ const TransactionTable = ({ transactions, products, onDelete }) => {
                   <td className="border p-2 text-center">{tx.quantity}</td>
 
                   <td className="border p-2 text-center">
-                    {new Date(tx.date).toLocaleDateString()}
+                    {formatBusinessDateForDisplay(tx.date)}
                   </td>
 
                   <td className="border p-2 text-center">{tx.note || '-'}</td>

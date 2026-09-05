@@ -19,6 +19,10 @@ const {
 const fs = require("fs");
 const path = require("path");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  getBusinessDateKey,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 // ATTACHMENT HELPERS
 
@@ -215,6 +219,15 @@ exports.createReceivePayment = async (req, res) => {
     const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
 
     const finalAmount = totalAmount + parsedDiscount;
+    const businessDate = getBusinessDateKey(date, {
+      fallback: new Date(),
+      label: "receive payment date",
+    });
+    const businessTime = time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "receive payment date",
+    });
 
     if (totalAmount <= 0) {
       return res.status(400).json({ error: "Invalid payment amount" });
@@ -270,8 +283,8 @@ exports.createReceivePayment = async (req, res) => {
     const newPayment = await ReceivePayment.create({
       customer: customerData?._id || null,
       partyId: partyData?._id || null,
-      date,
-      time,
+      date: businessDate,
+      time: businessTime,
       amount: totalAmount,
       discountAmount: parsedDiscount,
       finalAmount,
@@ -298,8 +311,8 @@ exports.createReceivePayment = async (req, res) => {
         description: description || "Receive Payment",
         customerId: customerData?._id || null,
         partyId: partyData?._id || null,
-        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
-        entryTime: time || "00:00",
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 
@@ -316,8 +329,8 @@ exports.createReceivePayment = async (req, res) => {
         partyId: partyData?._id || null,
 
         // ✅ اصل Payment کی تاریخ اور وقت
-        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
-        entryTime: time || "00:00",
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 
@@ -489,11 +502,15 @@ exports.getAllReceivePayments = async (req, res) => {
       filter.date = {};
 
       if (fromDate) {
-        filter.date.$gte = fromDate;
+        filter.date.$gte = getBusinessDateKey(fromDate, {
+          label: "from date",
+        });
       }
 
       if (toDate) {
-        filter.date.$lte = toDate;
+        filter.date.$lte = getBusinessDateKey(toDate, {
+          label: "to date",
+        });
       }
     }
 
@@ -897,11 +914,20 @@ exports.updateReceivePayment = async (req, res) => {
       .lean();
 
     const billNo = existingJournal?.billNo || payment.billNo || "RCV-1001";
+    const businessDate = getBusinessDateKey(date || payment.date, {
+      fallback: payment.date || new Date(),
+      label: "receive payment date",
+    });
+    const businessTime = time !== undefined ? time || "" : payment.time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "receive payment date",
+    });
 
     payment.customer = customerData?._id || null;
     payment.partyId = partyData?._id || null;
-    payment.date = date;
-    payment.time = time;
+    payment.date = businessDate;
+    payment.time = businessTime;
     payment.amount = totalAmount;
     payment.discountAmount = parsedDiscount;
     payment.finalAmount = finalAmount;
@@ -954,8 +980,8 @@ exports.updateReceivePayment = async (req, res) => {
         partyId: partyData?._id || null,
 
         // ✅ Edit کے دن کی بجائے Payment کی اصل منتخب تاریخ
-        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
-        entryTime: time || payment.time || "00:00",
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 
@@ -972,8 +998,8 @@ exports.updateReceivePayment = async (req, res) => {
         partyId: partyData?._id || null,
 
         // ✅ اصل Payment کی تاریخ اور وقت
-        entryDate: date ? new Date(`${date}T00:00:00.000+05:00`) : new Date(),
-        entryTime: time || payment.time || "00:00",
+        entryDate: journalDate,
+        entryTime: businessTime,
       });
     }
 

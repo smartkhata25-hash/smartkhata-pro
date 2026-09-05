@@ -32,6 +32,7 @@ const {
   applyModuleScopeFilter,
   applySupplierModuleScopeFilter,
 } = require("../../utils/moduleScope");
+const { parseBusinessDateTime } = require("../../utils/businessDate");
 const {
   normalizeCustomerCounterpartyInput,
   normalizeVendorCounterpartyInput,
@@ -188,6 +189,17 @@ const nullableDate = (value) => {
   }
 
   return date;
+};
+
+const parseTravelInvoiceDate = (value) => {
+  try {
+    return parseBusinessDateTime(value || new Date(), "", {
+      defaultTime: "00:00",
+      label: "travel invoice date",
+    });
+  } catch {
+    throw createHttpError(400, "Invalid invoice date");
+  }
 };
 
 const ensureObjectIdString = (value, label) => {
@@ -1958,10 +1970,9 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
   const customerId = customerCounterparty.customerId;
   const customerPartyId = customerCounterparty.customerPartyId;
 
-  const invoiceDate =
-    nullableDate(body.invoiceDate) ||
-    existingBooking?.invoiceDate ||
-    new Date();
+  const invoiceDate = parseTravelInvoiceDate(
+    body.invoiceDate || existingBooking?.invoiceDate || new Date(),
+  );
 
   const discountAmount = moneyNumber(body.discountAmount);
 

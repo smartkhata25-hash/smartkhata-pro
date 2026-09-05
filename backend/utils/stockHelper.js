@@ -98,6 +98,7 @@ exports.createInventoryEntry = async ({
   invoiceModel = null,
   userId,
   rate = 0,
+  date = null,
 
   // ✅ Optional MongoDB transaction session
   session = null,
@@ -134,6 +135,10 @@ exports.createInventoryEntry = async ({
     userId,
     rate: numericRate,
   };
+
+  if (date) {
+    transactionData.date = date;
+  }
 
   if (session) {
     const created = await InventoryTransaction.create([transactionData], {

@@ -16,6 +16,10 @@ const {
   recalculateTravelSoftDeleteAccounts,
   reverseTravelJournals,
 } = require("../services/travel/travelSoftDeleteService");
+const {
+  getBusinessDateKey,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 const fs = require("fs");
 const path = require("path");
 
@@ -121,6 +125,15 @@ exports.createExpense = async (req, res) => {
       moduleScope,
       MODULE_SCOPES.TRADING,
     );
+    const businessDate = getBusinessDateKey(date, {
+      fallback: new Date(),
+      label: "expense date",
+    });
+    const businessTime = time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "expense date",
+    });
 
     const totalCredit = creditEntries.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -173,8 +186,8 @@ exports.createExpense = async (req, res) => {
     const expense = new Expense({
       title: finalTitle,
       category: finalCategory,
-      date,
-      time,
+      date: businessDate,
+      time: businessTime,
       amount: numericAmount,
       paymentType,
       account: null,
@@ -188,8 +201,8 @@ exports.createExpense = async (req, res) => {
     await expense.save();
 
     const journal = new JournalEntry({
-      date,
-      time,
+      date: journalDate,
+      time: businessTime,
       description: finalTitle || description || "Expense Entry",
       createdBy: userId,
       sourceType: "expense",
@@ -293,6 +306,15 @@ exports.updateExpense = async (req, res) => {
       moduleScope,
       expense.moduleScope || MODULE_SCOPES.TRADING,
     );
+    const businessDate = getBusinessDateKey(date || expense.date, {
+      fallback: expense.date || new Date(),
+      label: "expense date",
+    });
+    const businessTime = time !== undefined ? time || "" : expense.time || "";
+    const journalDate = parseBusinessDateTime(businessDate, businessTime, {
+      defaultTime: "00:00",
+      label: "expense date",
+    });
 
     const totalCredit = creditEntries.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -352,8 +374,8 @@ exports.updateExpense = async (req, res) => {
 
     expense.title = finalTitle;
     expense.category = finalCategory;
-    expense.date = date;
-    expense.time = time;
+    expense.date = businessDate;
+    expense.time = businessTime;
     expense.amount = numericAmount;
     expense.paymentType = paymentType;
     expense.account = null;
@@ -373,8 +395,8 @@ exports.updateExpense = async (req, res) => {
     });
 
     const journal = new JournalEntry({
-      date,
-      time,
+      date: journalDate,
+      time: businessTime,
       description: finalTitle || description || "Expense Update",
       createdBy: userId,
       sourceType: "expense",

@@ -15,11 +15,14 @@ const {
   cleanString,
   escapeRegex,
   getUserId,
-  nullableDate,
   populateBooking,
   sendError,
   serializeBooking,
 } = require("../../../services/travel/travelBookingService");
+const {
+  buildBusinessDateRange,
+  startOfBusinessDay,
+} = require("../../../utils/businessDate");
 
 const SERVICE_TYPE_ALIASES = Object.freeze({
   ticket: "air_ticket",
@@ -58,20 +61,17 @@ const addAndClause = (query, clause) => {
 };
 
 const applyBookingDateRange = (query, fromDate, toDate) => {
-  if (!fromDate && !toDate) {
-    return;
-  }
+  const range = buildBusinessDateRange({
+    startDate: fromDate,
+    endDate: toDate,
+    field: "travelStartDate",
+  }).travelStartDate;
 
-  query.travelStartDate = query.travelStartDate || {};
-
-  if (fromDate) {
-    query.travelStartDate.$gte = nullableDate(fromDate);
-  }
-
-  if (toDate) {
-    const end = nullableDate(toDate);
-    end.setHours(23, 59, 59, 999);
-    query.travelStartDate.$lte = end;
+  if (range) {
+    query.travelStartDate = {
+      ...(query.travelStartDate || {}),
+      ...range,
+    };
   }
 };
 
@@ -202,8 +202,7 @@ exports.getTravelBookings = async (req, res) => {
     const normalizedDatePreset = cleanString(datePreset).toLowerCase();
 
     if (normalizedDatePreset === "upcoming") {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const today = startOfBusinessDay(new Date());
       query.travelStartDate = {
         ...(query.travelStartDate || {}),
         $gte:

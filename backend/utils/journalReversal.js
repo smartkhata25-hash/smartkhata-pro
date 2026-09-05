@@ -1,4 +1,9 @@
 const JournalEntry = require("../models/JournalEntry");
+const {
+  extractBusinessTime,
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("./businessDate");
 
 const getSessionQuery = (query, session) => (session ? query.session(session) : query);
 
@@ -21,12 +26,15 @@ const createReversalEntry = async (originalEntry, userId, options = {}) => {
     }
   }
 
-  const reversalDate = options.date || new Date();
+  const rawReversalDate = options.date || new Date();
   const reversalTime =
     options.time ||
-    (reversalDate instanceof Date
-      ? reversalDate.toTimeString().slice(0, 8)
-      : new Date().toTimeString().slice(0, 8));
+    extractBusinessTime(rawReversalDate) ||
+    getCurrentBusinessTimeInput();
+  const reversalDate = parseBusinessDateTime(rawReversalDate, reversalTime, {
+    defaultTime: "00:00",
+    label: "reversal date",
+  });
   const reversedLines = originalEntry.lines.map((line) => ({
     account: line.account,
     amount: line.amount,

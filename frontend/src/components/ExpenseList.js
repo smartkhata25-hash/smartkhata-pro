@@ -3,6 +3,7 @@ import { getAllExpenses, deleteExpense } from '../services/expenseService';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const ExpenseList = () => {
   const [expenses, setExpenses] = useState([]);
@@ -97,7 +98,7 @@ const ExpenseList = () => {
               {expenses.map((e) => (
                 <tr key={e._id} className="text-center">
                   <td className="p-2 border">
-                    {e.date ? new Date(e.date).toLocaleDateString() : '-'}
+                    {formatBusinessDateForDisplay(e.date)}
                   </td>
 
                   <td className="p-2 border">{e.title}</td>

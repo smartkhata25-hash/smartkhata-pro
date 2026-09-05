@@ -17,6 +17,10 @@ const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
 } = require("../utils/moduleScope");
+const {
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
 
 const ALLOWED_BORROWER_TYPES = [
   "person",
@@ -216,9 +220,14 @@ exports.createReceivableLoan = async (req, res) => {
       });
     }
 
-    const parsedStartDate = startDate ? new Date(startDate) : new Date();
+    let parsedStartDate = null;
 
-    if (Number.isNaN(parsedStartDate.getTime())) {
+    try {
+      parsedStartDate = parseBusinessDateTime(startDate || new Date(), "", {
+        defaultTime: "00:00",
+        label: "loan date",
+      });
+    } catch {
       return res.status(400).json({
         success: false,
         message: "Invalid loan date",
@@ -228,9 +237,12 @@ exports.createReceivableLoan = async (req, res) => {
     let parsedDueDate = null;
 
     if (dueDate) {
-      parsedDueDate = new Date(dueDate);
-
-      if (Number.isNaN(parsedDueDate.getTime())) {
+      try {
+        parsedDueDate = parseBusinessDateTime(dueDate, "", {
+          defaultTime: "00:00",
+          label: "due date",
+        });
+      } catch {
         return res.status(400).json({
           success: false,
           message: "Invalid due date",
@@ -638,11 +650,16 @@ exports.updateReceivableLoan = async (req, res) => {
     }
 
     if (req.body.startDate !== undefined) {
-      const startDate = req.body.startDate
-        ? new Date(req.body.startDate)
-        : null;
+      let startDate = null;
 
-      if (startDate && Number.isNaN(startDate.getTime())) {
+      try {
+        startDate = req.body.startDate
+          ? parseBusinessDateTime(req.body.startDate, "", {
+              defaultTime: "00:00",
+              label: "loan date",
+            })
+          : null;
+      } catch {
         return res.status(400).json({
           success: false,
           message: "Invalid loan date",
@@ -653,9 +670,16 @@ exports.updateReceivableLoan = async (req, res) => {
     }
 
     if (req.body.dueDate !== undefined) {
-      const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
+      let dueDate = null;
 
-      if (dueDate && Number.isNaN(dueDate.getTime())) {
+      try {
+        dueDate = req.body.dueDate
+          ? parseBusinessDateTime(req.body.dueDate, "", {
+              defaultTime: "00:00",
+              label: "due date",
+            })
+          : null;
+      } catch {
         return res.status(400).json({
           success: false,
           message: "Invalid due date",
@@ -787,8 +811,14 @@ exports.deleteReceivableLoan = async (req, res) => {
         return newLine;
       });
 
+      const reversalTime = getCurrentBusinessTimeInput();
+
       reversalJournal = await JournalEntry.create({
-        date: new Date(),
+        date: parseBusinessDateTime(new Date(), reversalTime, {
+          defaultTime: "00:00",
+          label: "loan reversal date",
+        }),
+        time: reversalTime,
 
         description: `Reversal - Loan given - ${loan.borrowerName}`,
 

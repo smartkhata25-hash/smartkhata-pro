@@ -3,6 +3,7 @@ import { getInvoices, deleteInvoice } from '../services/salesService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
 const SalesInvoiceList = () => {
   const [invoices, setInvoices] = useState([]);
@@ -328,7 +329,7 @@ const SalesInvoiceList = () => {
                     </td>
 
                     <td className="border px-2 py-1 md:p-2">
-                      {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString() : '-'}
+                      {formatBusinessDateForDisplay(inv.invoiceDate)}
                     </td>
 
                     <td className="border px-2 py-1 md:p-2">{getPartyOrCustomerName(inv)}</td>

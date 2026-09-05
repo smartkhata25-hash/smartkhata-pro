@@ -34,9 +34,13 @@ const {
   setCachedTravelReport,
 } = require("./travelReportCacheService");
 const { getBusinessValueSummary } = require("../businessValueService");
+const {
+  BUSINESS_TIME_ZONE,
+  buildBusinessPresetDateRange,
+  getBusinessDateKey,
+} = require("../../utils/businessDate");
 
-const PK_TIME_ZONE = "Asia/Karachi";
-const PK_OFFSET = "+05:00";
+const PK_TIME_ZONE = BUSINESS_TIME_ZONE;
 const PAYMENT_ACCOUNT_CATEGORIES = ["cash", "bank", "online", "cheque"];
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
 const TRAVEL_PROFIT_SOURCE_TYPES = [
@@ -123,21 +127,6 @@ const calculateTravelProfitMath = ({
   };
 };
 
-const formatDateString = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-};
-
-const getPakistanNow = () =>
-  new Date(
-    new Date().toLocaleString("en-US", {
-      timeZone: PK_TIME_ZONE,
-    }),
-  );
-
 const extractDateString = (value, label) => {
   const cleanValue = cleanString(value);
   const match = cleanValue.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -147,16 +136,6 @@ const extractDateString = (value, label) => {
   }
 
   return match[1];
-};
-
-const toBoundaryDate = (dateString, endOfDay = false) =>
-  new Date(`${dateString}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}${PK_OFFSET}`);
-
-const addDays = (date, days) => {
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + days);
-
-  return nextDate;
 };
 
 const normalizePreset = (value = "") => {
@@ -186,42 +165,27 @@ const normalizePreset = (value = "") => {
 const buildTravelReportDateContext = (query = {}) => {
   const hasExplicitDates = Boolean(query.startDate || query.endDate || query.fromDate || query.toDate);
   const preset = normalizePreset(query.preset || query.filterType || (hasExplicitDates ? "custom" : "all_time"));
-  const pakistanNow = getPakistanNow();
-  let startDate = "";
-  let endDate = "";
 
-  if (preset === "today") {
-    startDate = formatDateString(pakistanNow);
-    endDate = startDate;
-  } else if (preset === "yesterday") {
-    startDate = formatDateString(addDays(pakistanNow, -1));
-    endDate = startDate;
-  } else if (preset === "this_week") {
-    const start = new Date(pakistanNow);
-    const day = start.getDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    start.setDate(start.getDate() + mondayOffset);
-    startDate = formatDateString(start);
-    endDate = formatDateString(pakistanNow);
-  } else if (preset === "this_month") {
-    startDate = formatDateString(new Date(pakistanNow.getFullYear(), pakistanNow.getMonth(), 1));
-    endDate = formatDateString(pakistanNow);
-  } else if (preset === "this_year") {
-    startDate = `${pakistanNow.getFullYear()}-01-01`;
-    endDate = formatDateString(pakistanNow);
-  } else if (preset === "custom") {
-    const rawStart = query.startDate || query.fromDate;
-    const rawEnd = query.endDate || query.toDate;
-
-    if (!rawStart || !rawEnd) {
-      throw createHttpError(400, "Custom report range requires startDate and endDate");
-    }
-
-    startDate = extractDateString(rawStart, "start date");
-    endDate = extractDateString(rawEnd, "end date");
+  if (preset === "custom" && !(query.startDate || query.fromDate) && !(query.endDate || query.toDate)) {
+    throw createHttpError(400, "Custom report range requires startDate and endDate");
   }
 
-  if (!startDate || !endDate) {
+  if (preset === "custom") {
+    extractDateString(query.startDate || query.fromDate, "start date");
+    extractDateString(query.endDate || query.toDate, "end date");
+  }
+
+  const dateFilter =
+    preset === "all_time"
+      ? {}
+      : buildBusinessPresetDateRange({
+          dateFilter: preset,
+          fromDate: query.startDate || query.fromDate,
+          toDate: query.endDate || query.toDate,
+        });
+  const range = dateFilter.date;
+
+  if (!range?.$gte || !(range.$lt || range.$lte)) {
     return {
       preset: "all_time",
       startDate: "",
@@ -229,26 +193,29 @@ const buildTravelReportDateContext = (query = {}) => {
       hasDateRange: false,
       start: null,
       end: null,
+      endExclusive: null,
       groupBy: "month",
     };
   }
 
-  const start = toBoundaryDate(startDate);
-  const end = toBoundaryDate(endDate, true);
+  const start = range.$gte;
+  const endExclusive = range.$lt || new Date(range.$lte.getTime() + 1);
+  const end = new Date(endExclusive.getTime() - 1);
 
-  if (start.getTime() > end.getTime()) {
+  if (start.getTime() >= endExclusive.getTime()) {
     throw createHttpError(400, "Start date cannot be after end date");
   }
 
-  const dayCount = Math.ceil((end.getTime() - start.getTime()) / 86400000);
+  const dayCount = Math.ceil((endExclusive.getTime() - start.getTime()) / 86400000);
 
   return {
     preset,
-    startDate,
-    endDate,
+    startDate: getBusinessDateKey(start),
+    endDate: getBusinessDateKey(end),
     hasDateRange: true,
     start,
     end,
+    endExclusive,
     groupBy: dayCount <= 92 ? "day" : "month",
   };
 };
@@ -261,7 +228,7 @@ const getDateMatch = (dateContext, field = "date") => {
   return {
     [field]: {
       $gte: dateContext.start,
-      $lte: dateContext.end,
+      $lt: dateContext.endExclusive || dateContext.end,
     },
   };
 };

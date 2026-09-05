@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { t } from '../../i18n/i18n';
+import { formatBusinessDateForDisplay } from '../../utils/localDateTime';
 
 const ProfitDetailDrawer = ({
   isOpen,
@@ -125,7 +126,7 @@ const ProfitDetailDrawer = ({
               <td className="p-3 border">{item.customerName || '-'}</td>
 
               <td className="p-3 border">
-                {item.invoiceDate ? new Date(item.invoiceDate).toLocaleDateString() : '-'}
+                {formatBusinessDateForDisplay(item.invoiceDate)}
               </td>
 
               <td

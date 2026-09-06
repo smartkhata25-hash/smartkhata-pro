@@ -61,6 +61,9 @@ const StaffFormPage = lazy(() => import('./pages/StaffFormPage'));
 const StaffPermissionsPage = lazy(() => import('./pages/StaffPermissionsPage'));
 const ActivityLogPage = lazy(() => import('./pages/ActivityLogPage'));
 const ImportDataPage = lazy(() => import('./pages/ImportDataPage'));
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage'));
+const EmployeePayrollPage = lazy(() => import('./pages/EmployeePayrollPage'));
+const EmployeeLedgerPage = lazy(() => import('./pages/EmployeeLedgerPage'));
 const TravelDashboardPage = lazy(() => import('./pages/travel/TravelDashboardPage'));
 const TravelBusinessValuePage = lazy(() => import('./pages/travel/TravelBusinessValuePage'));
 const TravelReportsPage = lazy(() => import('./pages/travel/TravelReportsPage'));
@@ -80,6 +83,9 @@ const TravelTripPlannerPage = lazy(() => import('./pages/travel/TravelTripPlanne
 const TravelUmrahCalculatorPage = lazy(() => import('./pages/travel/TravelUmrahCalculatorPage'));
 const TravelCustomersPage = lazy(() => import('./pages/travel/TravelCustomersPage'));
 const TravelPartiesPage = lazy(() => import('./pages/travel/TravelPartiesPage'));
+const TravelEmployeesPage = lazy(() => import('./pages/travel/TravelEmployeesPage'));
+const TravelPayrollPage = lazy(() => import('./pages/travel/TravelPayrollPage'));
+const TravelEmployeeLedgerPage = lazy(() => import('./pages/travel/TravelEmployeeLedgerPage'));
 const TravelVendorsPage = lazy(() => import('./pages/travel/TravelVendorsPage'));
 const TravelPaymentHistoryPage = lazy(() => import('./pages/travel/TravelPaymentHistoryPage'));
 const TravelReceivePaymentPage = lazy(() => import('./pages/travel/TravelReceivePaymentPage'));
@@ -538,6 +544,36 @@ function App() {
             />
 
             <Route
+              path="/travel/employees"
+              element={
+                <PermissionRoute
+                  anyPermissions={['employees.view', 'payroll.view']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelEmployeesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/employees/:id/ledger"
+              element={
+                <PermissionRoute permission="employees.view_ledger" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelEmployeeLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/payroll"
+              element={
+                <PermissionRoute permission="payroll.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelPayrollPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/travel/vendors"
               element={
                 <PermissionRoute permission="travel.vendors.view" moduleKey={MODULE_KEYS.TRAVEL}>
@@ -943,6 +979,33 @@ function App() {
               element={
                 <PermissionRoute permission="parties.view_ledger">
                   <PartyLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/employees"
+              element={
+                <PermissionRoute permission="employees.view">
+                  <EmployeesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/employees/:id/ledger"
+              element={
+                <PermissionRoute permission="employees.view_ledger">
+                  <EmployeeLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/payroll"
+              element={
+                <PermissionRoute permission="payroll.view">
+                  <EmployeePayrollPage />
                 </PermissionRoute>
               }
             />

@@ -412,6 +412,23 @@ export const FRONTEND_PERMISSIONS = {
     VIEW_LEDGER: 'parties.view_ledger',
   },
 
+  EMPLOYEES: {
+    VIEW: 'employees.view',
+    CREATE: 'employees.create',
+    EDIT: 'employees.edit',
+    DELETE: 'employees.delete',
+    VIEW_LEDGER: 'employees.view_ledger',
+  },
+
+  PAYROLL: {
+    VIEW: 'payroll.view',
+    CREATE: 'payroll.create',
+    EDIT: 'payroll.edit',
+    DELETE: 'payroll.delete',
+    PAY: 'payroll.pay',
+    PRINT: 'payroll.print',
+  },
+
   EXPENSES: {
     VIEW: 'expenses.view',
     CREATE: 'expenses.create',

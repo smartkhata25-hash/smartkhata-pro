@@ -81,6 +81,10 @@ const createReversalEntry = async (originalEntry, userId, options = {}) => {
       options.partyId !== undefined
         ? options.partyId
         : originalEntry.partyId || null,
+    employeeId:
+      options.employeeId !== undefined
+        ? options.employeeId
+        : originalEntry.employeeId || null,
     attachmentUrl: originalEntry.attachmentUrl || "",
     attachmentType: originalEntry.attachmentType || "",
     isDeleted: false,

@@ -12,6 +12,9 @@ const {
 const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 } = require("../utils/businessValueModuleScope");
+const {
+  TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+} = require("../utils/employeePayrollOrigins");
 
 const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -20,6 +23,7 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_vendor_payment",
   "travel_vendor_return",
   "travel_expense",
+  ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 ]);
 

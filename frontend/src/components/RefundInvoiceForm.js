@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRefund, updateRefund, getRefundById } from '../services/refundService';
+import { getInvoiceById } from '../services/salesService';
 import { getCustomerBalance } from '../services/customerLedgerService';
 import { getPartyBalance } from '../services/partyLedgerService';
 import {
@@ -750,16 +751,44 @@ const RefundInvoiceForm = ({
     }
   };
 
-  const handleInvoiceSelect = (invoice) => {
+  const handleInvoiceSelect = async (invoice) => {
     if (!invoice) return;
-    setShowSearchModal(false);
-    setOriginalInvoiceId(invoice._id);
-    setCustomerId(invoice.customerId?._id || invoice.customerId);
-    setBillNo(`REF-${invoice.billNo}`);
-    setCustomerName(invoice.customerName);
-    setCustomerPhone(invoice.customerPhone);
 
-    const loadedItems = (invoice.items || []).map((item) => {
+    let selectedInvoice = invoice;
+
+    if (!Array.isArray(selectedInvoice.items) || selectedInvoice.items.length === 0) {
+      try {
+        selectedInvoice = await getInvoiceById(invoice._id, token);
+      } catch (err) {
+        console.error('Refund original invoice load failed:', err?.response?.data || err.message);
+        alert(err?.response?.data?.message || t('alerts.invoiceLoadFailed'));
+        return;
+      }
+    }
+
+    setShowSearchModal(false);
+    setOriginalInvoiceId(selectedInvoice._id || invoice._id);
+
+    const partyId = selectedInvoice.partyId?._id || selectedInvoice.partyId || '';
+    const customerRecordId = selectedInvoice.customerId?._id || selectedInvoice.customerId || '';
+    setCustomerId(partyId || customerRecordId);
+    setSelectedCustomerType(partyId ? 'party' : 'customer');
+
+    setBillNo(`REF-${selectedInvoice.billNo || invoice.billNo || ''}`);
+    setCustomerName(
+      selectedInvoice.customerName ||
+        selectedInvoice.partyId?.name ||
+        selectedInvoice.customerId?.name ||
+        ''
+    );
+    setCustomerPhone(
+      selectedInvoice.customerPhone ||
+        selectedInvoice.partyId?.phone ||
+        selectedInvoice.customerId?.phone ||
+        ''
+    );
+
+    const loadedItems = (selectedInvoice.items || []).map((item) => {
       const populatedProduct =
         item.productId && typeof item.productId === 'object' ? item.productId : null;
 
@@ -769,19 +798,46 @@ const RefundInvoiceForm = ({
         ? productList.find((product) => String(product._id) === String(productId))
         : null;
 
-      const price = Number(item.price || 0);
+      const price = Number(
+        item.price ??
+          item.rate ??
+          populatedProduct?.salePrice ??
+          fallbackProduct?.salePrice ??
+          fallbackProduct?.unitPrice ??
+          fallbackProduct?.price ??
+          0
+      );
       const quantity = Number(item.quantity || 0);
+      const total = Number(item.total ?? item.amount ?? quantity * price);
+      const name = populatedProduct?.name || fallbackProduct?.name || item.search || item.name || '';
 
       return {
         productId,
 
-        name: populatedProduct?.name || fallbackProduct?.name || item.name || '',
+        name,
+
+        search: name,
+
+        description:
+          populatedProduct?.description || fallbackProduct?.description || item.description || '',
+
+        uom:
+          populatedProduct?.uom ||
+          populatedProduct?.unit ||
+          fallbackProduct?.uom ||
+          fallbackProduct?.unit ||
+          item.uom ||
+          '',
 
         quantity,
 
         price,
 
-        total: Number(item.total ?? quantity * price).toFixed(2),
+        rate: price,
+
+        total: total.toFixed(2),
+
+        amount: total,
       };
     });
 

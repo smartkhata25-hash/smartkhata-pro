@@ -363,7 +363,20 @@ const TravelRightPanel = ({
       normalizedSummary.receivables ||
       [];
 
-    return normalizeBreakdownItems(source, 'customer');
+    const details = normalizeBreakdownItems(source, 'customer');
+    const employeeRecoverable = safeNumber(normalizedSummary.employeeRecoverable);
+
+    if (employeeRecoverable > 0) {
+      details.push({
+        entityId: 'travel-employee-recoverable',
+        accountId: '',
+        entityType: 'employee',
+        name: t('travel.dashboard.cards.employeeRecoverable'),
+        amount: employeeRecoverable,
+      });
+    }
+
+    return details;
   }, [normalizedSummary]);
 
   const payableDetails = useMemo(() => {
@@ -374,7 +387,20 @@ const TravelRightPanel = ({
       normalizedSummary.payables ||
       [];
 
-    return normalizeBreakdownItems(source, 'supplier');
+    const details = normalizeBreakdownItems(source, 'supplier');
+    const employeePayable = safeNumber(normalizedSummary.employeePayable);
+
+    if (employeePayable > 0) {
+      details.push({
+        entityId: 'travel-employee-payable',
+        accountId: '',
+        entityType: 'employee',
+        name: t('travel.dashboard.cards.employeePayable'),
+        amount: employeePayable,
+      });
+    }
+
+    return details;
   }, [normalizedSummary]);
 
   const receivableTotal = safeNumber(
@@ -413,6 +439,13 @@ const TravelRightPanel = ({
 
     if (item.entityType === 'party') {
       navigate(`/party-ledger/${item.entityId}?moduleScope=travel`, {
+        state: routeState,
+      });
+      return;
+    }
+
+    if (item.entityType === 'employee') {
+      navigate('/travel/payroll', {
         state: routeState,
       });
       return;

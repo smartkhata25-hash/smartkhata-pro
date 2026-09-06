@@ -4,6 +4,47 @@ const JournalEntry = require("../../models/JournalEntry");
 
 const { calculateProfitMetrics } = require("./profitCalculationService");
 const { buildBusinessPresetDateRange } = require("../../utils/businessDate");
+const {
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+} = require("../../utils/businessValueModuleScope");
+const {
+  TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+} = require("../../utils/employeePayrollOrigins");
+
+const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
+const getTravelJournalConditions = () => [
+  { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
+  { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
+  {
+    sourceType: "reversal",
+    originModule: { $in: TRAVEL_JOURNAL_ORIGINS },
+  },
+];
+
+const getTradingJournalFilter = () => ({
+  $nor: getTravelJournalConditions(),
+});
 
 const buildDateFilter = ({ filterType, startDate, endDate }) => {
   return buildBusinessPresetDateRange({
@@ -47,6 +88,7 @@ const getOperatingExpenses = async ({
       $match: {
         createdBy: objectUserId,
         isDeleted: false,
+        ...getTradingJournalFilter(),
         ...journalDateFilter,
       },
     },

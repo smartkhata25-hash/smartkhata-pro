@@ -62,6 +62,11 @@ const journalEntrySchema = new mongoose.Schema(
       ref: "Party",
       default: null,
     },
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+    },
     billNo: {
       type: String,
       default: "",
@@ -250,6 +255,14 @@ journalEntrySchema.index({
 journalEntrySchema.index({
   createdBy: 1,
   partyId: 1,
+  isDeleted: 1,
+  date: 1,
+});
+
+// Employee Ledger queries
+journalEntrySchema.index({
+  createdBy: 1,
+  employeeId: 1,
   isDeleted: 1,
   date: 1,
 });

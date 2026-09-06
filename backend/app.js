@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const profitRoutes = require("./routes/profitRoutes");
+const employeeRoutes = require("./routes/employeeRoutes");
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/api/customers", require("./routes/customerRoutes"));
 app.use("/api/customer-ledger", require("./routes/ledgerRoutes"));
 app.use("/api/suppliers", require("./routes/supplierRoutes"));
 app.use("/api/parties", require("./routes/partyRoutes"));
+app.use("/api/employees", employeeRoutes);
 app.use("/api/travel/travelers", require("./routes/travelTravelerRoutes"));
 app.use(
   "/api/travel/service-categories",
@@ -37,6 +39,7 @@ app.use("/api/travel/airlines", require("./routes/travelAirlineRoutes"));
 
 app.use("/api/travel/airports", require("./routes/travelAirportRoutes"));
 app.use("/api/travel/parties", require("./routes/travelPartyRoutes"));
+app.use("/api/travel/employees", employeeRoutes);
 
 app.use(
   "/api/travel/currency-settings",

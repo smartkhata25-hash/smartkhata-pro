@@ -39,10 +39,26 @@ const {
   buildBusinessPresetDateRange,
   getBusinessDateKey,
 } = require("../../utils/businessDate");
+const {
+  TRAVEL_EMPLOYEE_ORIGINS,
+} = require("../../utils/employeePayrollOrigins");
 
 const PK_TIME_ZONE = BUSINESS_TIME_ZONE;
 const PAYMENT_ACCOUNT_CATEGORIES = ["cash", "bank", "online", "cheque"];
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
+const TRAVEL_EXPENSE_ORIGINS = [
+  TRAVEL_EXPENSE_ORIGIN,
+  TRAVEL_EMPLOYEE_ORIGINS.SALARY,
+];
+const TRAVEL_EMPLOYEE_CASH_OUT_ORIGINS = [
+  TRAVEL_EMPLOYEE_ORIGINS.SALARY_PAYMENT,
+  TRAVEL_EMPLOYEE_ORIGINS.ADVANCE,
+  TRAVEL_EMPLOYEE_ORIGINS.LOAN,
+];
+const TRAVEL_EMPLOYEE_CASH_IN_ORIGINS = [
+  TRAVEL_EMPLOYEE_ORIGINS.ADVANCE_RECOVERY,
+  TRAVEL_EMPLOYEE_ORIGINS.LOAN_RECOVERY,
+];
 const TRAVEL_PROFIT_SOURCE_TYPES = [
   "travel_booking",
   "travel_vendor_cost",
@@ -375,7 +391,7 @@ const getTravelExpenses = async ({ objectUserId, dateContext }) => {
         isDeleted: false,
         isReversed: { $ne: true },
         sourceType: "expense",
-        originModule: TRAVEL_EXPENSE_ORIGIN,
+        originModule: { $in: TRAVEL_EXPENSE_ORIGINS },
         ...getDateMatch(dateContext),
       },
     },
@@ -1647,6 +1663,8 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
     refundPaid,
     vendorReturnReceipts,
     expensePaid,
+    employeeCashIn,
+    employeeCashOut,
     receivedRecent,
     vendorRecent,
   ] = await Promise.all([
@@ -1682,7 +1700,21 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
       objectUserId,
       dateContext,
       sourceType: "expense",
-      originModule: TRAVEL_EXPENSE_ORIGIN,
+      originModule: { $in: TRAVEL_EXPENSE_ORIGINS },
+      lineType: "credit",
+    }),
+    aggregatePaymentMovement({
+      objectUserId,
+      dateContext,
+      sourceType: "payment",
+      originModule: { $in: TRAVEL_EMPLOYEE_CASH_IN_ORIGINS },
+      lineType: "debit",
+    }),
+    aggregatePaymentMovement({
+      objectUserId,
+      dateContext,
+      sourceType: "payment",
+      originModule: { $in: TRAVEL_EMPLOYEE_CASH_OUT_ORIGINS },
       lineType: "credit",
     }),
     getRecentPaymentRows({
@@ -1703,8 +1735,17 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
     }),
   ]);
 
-  const cashIn = addMoney(received.total, vendorReturnReceipts.total);
-  const cashOut = roundMoney(vendorPayments.total + refundPaid.total + expensePaid.total);
+  const cashIn = addMoney(
+    received.total,
+    vendorReturnReceipts.total,
+    employeeCashIn.total,
+  );
+  const cashOut = roundMoney(
+    vendorPayments.total +
+      refundPaid.total +
+      expensePaid.total +
+      employeeCashOut.total,
+  );
 
   return {
     receivedTotal: received.total,
@@ -1712,6 +1753,8 @@ const getPaymentsReport = async ({ objectUserId, dateContext }) => {
     refundPaidTotal: refundPaid.total,
     vendorReturnReceiptTotal: vendorReturnReceipts.total,
     travelExpensePaidTotal: expensePaid.total,
+    employeeCashInTotal: employeeCashIn.total,
+    employeeCashOutTotal: employeeCashOut.total,
     cashIn,
     cashOut,
     netCashMovement: subtractMoney(cashIn, cashOut),

@@ -59,6 +59,7 @@ const accountSchema = new mongoose.Schema({
       "loan",
       "tax",
       "supplier",
+      "employee",
 
       // Equity
       "capital",

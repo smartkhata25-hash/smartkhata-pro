@@ -1,9 +1,48 @@
 const JournalEntry = require("../models/JournalEntry");
 const {
+  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+} = require("../utils/businessValueModuleScope");
+const {
+  TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+} = require("../utils/employeePayrollOrigins");
+const {
   buildBusinessDateRange,
   getBusinessDateKey,
   startOfBusinessDay,
 } = require("../utils/businessDate");
+
+const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  "travel_expense",
+  ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+]);
+
+const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
+  "travel_booking",
+  "travel_customer_advance",
+  "travel_vendor_cost",
+  "travel_vendor_advance",
+  "travel_vendor_return",
+  "travel_commission",
+  "travel_refund",
+  "travel_adjustment",
+]);
+
+const getTradingJournalFilter = () => ({
+  $nor: [
+    { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
+    { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
+    {
+      sourceType: "reversal",
+      originModule: { $in: TRAVEL_JOURNAL_ORIGINS },
+    },
+  ],
+});
 
 exports.getIncomeStatement = async (req, res) => {
   try {
@@ -26,6 +65,7 @@ exports.getIncomeStatement = async (req, res) => {
       createdBy: userId,
       isDeleted: false,
       date: dateRange,
+      ...getTradingJournalFilter(),
     }).populate("lines.account");
 
     let sales = 0;
@@ -152,6 +192,7 @@ exports.getMonthVsMonthIncome = async (req, res) => {
       createdBy: userId,
       isDeleted: false,
       date: { $gte: start, $lt: end },
+      ...getTradingJournalFilter(),
     }).populate("lines.account");
 
     // 🧺 Month container

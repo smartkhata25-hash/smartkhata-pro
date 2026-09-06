@@ -16,9 +16,16 @@ const {
   TRAVEL_BUSINESS_VALUE_ORIGINS,
 } = require("../../utils/businessValueModuleScope");
 const {
+  TRAVEL_EMPLOYEE_ORIGINS,
+  TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+} = require("../../utils/employeePayrollOrigins");
+const {
   TRAVEL_PARTY_OPENING_ORIGIN,
   buildTravelPartyRoleQuery,
 } = require("./travelCounterpartyService");
+const {
+  getEmployeeFinancialSummary,
+} = require("../employee/employeeAccountingService");
 
 const TRAVEL_INVOICE_ORIGIN = "travel_invoice";
 const TRAVEL_REFUND_ORIGIN = "travel_refund";
@@ -28,6 +35,19 @@ const TRAVEL_VENDOR_RETURN_ORIGIN = "travel_vendor_return";
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
 const TRAVEL_CUSTOMER_OPENING_ORIGIN = "travel_customer_opening_balance";
 const TRAVEL_VENDOR_OPENING_ORIGIN = "travel_vendor_opening_balance";
+const TRAVEL_EXPENSE_ORIGINS = Object.freeze([
+  TRAVEL_EXPENSE_ORIGIN,
+  TRAVEL_EMPLOYEE_ORIGINS.SALARY,
+]);
+const TRAVEL_EMPLOYEE_CASH_OUT_ORIGINS = Object.freeze([
+  TRAVEL_EMPLOYEE_ORIGINS.SALARY_PAYMENT,
+  TRAVEL_EMPLOYEE_ORIGINS.ADVANCE,
+  TRAVEL_EMPLOYEE_ORIGINS.LOAN,
+]);
+const TRAVEL_EMPLOYEE_CASH_IN_ORIGINS = Object.freeze([
+  TRAVEL_EMPLOYEE_ORIGINS.ADVANCE_RECOVERY,
+  TRAVEL_EMPLOYEE_ORIGINS.LOAN_RECOVERY,
+]);
 
 const TRAVEL_PARTY_BALANCE_ORIGINS = Object.freeze([
   TRAVEL_INVOICE_ORIGIN,
@@ -611,7 +631,9 @@ const getTravelExpenseTotals = async (userId) => {
 
         sourceType: "expense",
 
-        originModule: TRAVEL_EXPENSE_ORIGIN,
+        originModule: {
+          $in: TRAVEL_EXPENSE_ORIGINS,
+        },
       },
     },
 
@@ -743,6 +765,12 @@ const getActualCashBankPosition = async (userId) => {
             $in: TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
           },
         },
+
+        {
+          originModule: {
+            $in: TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+          },
+        },
       ],
     },
   });
@@ -826,6 +854,8 @@ const getTravelCashMovementTotals = async (userId) => {
       vendorPayments: 0,
       vendorReturnCashReceived: 0,
       travelExpensePaid: 0,
+      employeePayrollCashIn: 0,
+      employeePayrollCashOut: 0,
       businessValueCashIn: 0,
       businessValueCashOut: 0,
       travelCashIn: 0,
@@ -887,6 +917,17 @@ const getTravelCashMovementTotals = async (userId) => {
           {
             originModule: {
               $in: TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
+            },
+          },
+
+          {
+            sourceType: "payment",
+
+            originModule: {
+              $in: [
+                ...TRAVEL_EMPLOYEE_CASH_IN_ORIGINS,
+                ...TRAVEL_EMPLOYEE_CASH_OUT_ORIGINS,
+              ],
             },
           },
         ],
@@ -973,9 +1014,25 @@ const getTravelCashMovementTotals = async (userId) => {
       if (
         lineType === "credit" &&
         sourceType === "expense" &&
-        originModule === TRAVEL_EXPENSE_ORIGIN
+        TRAVEL_EXPENSE_ORIGINS.includes(originModule)
       ) {
         result.travelExpensePaid += amount;
+      }
+
+      if (
+        lineType === "credit" &&
+        sourceType === "payment" &&
+        TRAVEL_EMPLOYEE_CASH_OUT_ORIGINS.includes(originModule)
+      ) {
+        result.employeePayrollCashOut += amount;
+      }
+
+      if (
+        lineType === "debit" &&
+        sourceType === "payment" &&
+        TRAVEL_EMPLOYEE_CASH_IN_ORIGINS.includes(originModule)
+      ) {
+        result.employeePayrollCashIn += amount;
       }
 
       if (
@@ -1025,6 +1082,8 @@ const getTravelCashMovementTotals = async (userId) => {
       vendorPayments: 0,
       vendorReturnCashReceived: 0,
       travelExpensePaid: 0,
+      employeePayrollCashIn: 0,
+      employeePayrollCashOut: 0,
       businessValueCashIn: 0,
       businessValueCashOut: 0,
     },
@@ -1033,6 +1092,7 @@ const getTravelCashMovementTotals = async (userId) => {
   const travelCashIn = roundMoney(
     totals.received +
       totals.vendorReturnCashReceived +
+      totals.employeePayrollCashIn +
       totals.businessValueCashIn,
   );
 
@@ -1040,6 +1100,7 @@ const getTravelCashMovementTotals = async (userId) => {
     totals.refundPaid +
       totals.vendorPayments +
       totals.travelExpensePaid +
+      totals.employeePayrollCashOut +
       totals.businessValueCashOut,
   );
 
@@ -1054,6 +1115,10 @@ const getTravelCashMovementTotals = async (userId) => {
 
     travelExpensePaid: roundMoney(totals.travelExpensePaid),
 
+    employeePayrollCashIn: roundMoney(totals.employeePayrollCashIn),
+
+    employeePayrollCashOut: roundMoney(totals.employeePayrollCashOut),
+
     businessValueCashIn: roundMoney(totals.businessValueCashIn),
 
     businessValueCashOut: roundMoney(totals.businessValueCashOut),
@@ -1067,13 +1132,25 @@ const getTravelCashMovementTotals = async (userId) => {
 };
 
 const getTravelDashboardAccountingTotals = async (userId) => {
-  const [profit, customer, vendor, cashMovement, expenses, cashBankPosition] =
-    await Promise.all([
+  const [
+    profit,
+    customer,
+    vendor,
+    employee,
+    cashMovement,
+    expenses,
+    cashBankPosition,
+  ] = await Promise.all([
       getTravelProfitTotals(userId),
 
       getTravelCustomerBalanceTotals(userId),
 
       getTravelVendorBalanceTotals(userId),
+
+      getEmployeeFinancialSummary({
+        userId,
+        moduleScope: MODULE_SCOPES.TRAVEL,
+      }),
 
       getTravelCashMovementTotals(userId),
 
@@ -1090,6 +1167,16 @@ const getTravelDashboardAccountingTotals = async (userId) => {
     ...expenses,
     ...cashBankPosition,
 
+    employeePayable: roundMoney(employee.totalPayable || 0),
+    employeeRecoverable: roundMoney(employee.totalRecoverable || 0),
+    totalReceivable: roundMoney(
+      Number(customer.totalReceivable || 0) +
+        Number(employee.totalRecoverable || 0),
+    ),
+    totalPayable: roundMoney(
+      Number(vendor.totalPayable || 0) + Number(employee.totalPayable || 0),
+    ),
+
     netProfit: roundMoney(profit.grossProfit - expenses.travelExpenses),
   };
 };
@@ -1101,6 +1188,7 @@ module.exports = {
   TRAVEL_VENDOR_PAYMENT_ORIGIN,
   TRAVEL_VENDOR_RETURN_ORIGIN,
   TRAVEL_EXPENSE_ORIGIN,
+  TRAVEL_EXPENSE_ORIGINS,
   TRAVEL_CUSTOMER_OPENING_ORIGIN,
   TRAVEL_VENDOR_OPENING_ORIGIN,
 

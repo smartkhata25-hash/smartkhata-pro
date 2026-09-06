@@ -23,6 +23,7 @@ const ACCOUNT_RULES = {
       "loan",
       "tax",
       "supplier",
+      "employee",
       "other",
     ],
     normalBalance: "credit",

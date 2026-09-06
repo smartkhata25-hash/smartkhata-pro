@@ -1071,6 +1071,20 @@ const TravelReportsPage = () => {
             />
 
             <MetricCard
+              label={t('travel.reports.metrics.employeeCashIn')}
+              value={payments.employeeCashInTotal}
+              currency={currency}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={t('travel.reports.metrics.employeeCashOut')}
+              value={payments.employeeCashOutTotal}
+              currency={currency}
+              tone="rose"
+            />
+
+            <MetricCard
               label={t('travel.reports.metrics.netCashMovement')}
               value={payments.netCashMovement}
               currency={currency}

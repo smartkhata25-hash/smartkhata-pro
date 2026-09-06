@@ -12,6 +12,7 @@ export const TRAVEL_CACHE_DOMAINS = Object.freeze({
   CURRENCY_SETTINGS: 'travelCurrencySettings',
   TRAVEL_CUSTOMERS: 'travelCustomers',
   TRAVEL_PARTIES: 'travelParties',
+  EMPLOYEES: 'travelEmployees',
   BOOKINGS: 'travelBookings',
   VENDOR_RETURNS: 'travelVendorReturns',
   DASHBOARD: 'travelDashboard',

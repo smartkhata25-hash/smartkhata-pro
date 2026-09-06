@@ -8,6 +8,7 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
+const Employee = require("../models/Employee");
 
 const BusinessAsset = require("../models/BusinessAsset");
 const BusinessLiability = require("../models/BusinessLiability");
@@ -23,6 +24,10 @@ const {
   applyBusinessValueScopeFilter,
   resolveBusinessValueModuleScope,
 } = require("../utils/businessValueModuleScope");
+const { TRAVEL_EMPLOYEE_ORIGIN_VALUES } = require("../utils/employeePayrollOrigins");
+const {
+  getEmployeeFinancialSummary,
+} = require("./employee/employeeAccountingService");
 const {
   getActualCashBankPosition,
   getTravelCustomerBalanceTotals,
@@ -111,6 +116,7 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_vendor_payment",
   "travel_vendor_return",
   "travel_expense",
+  ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 ]);
 
@@ -387,6 +393,7 @@ const getAccountBalances = async (userId) => {
     customer: {},
     supplier: {},
     party: {},
+    employee: {},
   };
 
   accountData.forEach((item) => {
@@ -420,6 +427,12 @@ const getAccountBalances = async (userId) => {
         Number(balances.party[accountId] || 0) +
         (lineType === "debit" ? amount : -amount);
     }
+
+    if (category === "employee" && accountId) {
+      balances.employee[accountId] =
+        Number(balances.employee[accountId] || 0) +
+        (lineType === "credit" ? amount : -amount);
+    }
   });
 
   return balances;
@@ -441,12 +454,17 @@ const getReceivablePayableValues = async (userId, accountBalances) => {
     isActive: true,
     isDeleted: false,
   };
+  const employeeQuery = {
+    userId,
+    moduleScope: MODULE_SCOPES.TRADING,
+    isDeleted: false,
+  };
 
   applyModuleScopeFilter(customerQuery, MODULE_SCOPES.TRADING);
   applySupplierModuleScopeFilter(supplierQuery, MODULE_SCOPES.TRADING);
   applyModuleScopeFilter(partyQuery, MODULE_SCOPES.TRADING);
 
-  const [customers, suppliers, parties] = await Promise.all([
+  const [customers, suppliers, parties, employees] = await Promise.all([
     Customer.find(customerQuery)
       .select("account")
       .lean(),
@@ -456,6 +474,10 @@ const getReceivablePayableValues = async (userId, accountBalances) => {
       .lean(),
 
     Party.find(partyQuery)
+      .select("account")
+      .lean(),
+
+    Employee.find(employeeQuery)
       .select("account")
       .lean(),
   ]);
@@ -525,6 +547,22 @@ const getReceivablePayableValues = async (userId, accountBalances) => {
     }
   });
 
+  employees.forEach((employee) => {
+    const accountId = employee.account?.toString();
+
+    if (!accountId) {
+      return;
+    }
+
+    const balance = Number(accountBalances.employee[accountId] || 0);
+
+    if (balance > 0) {
+      payables += balance;
+      payableCount += 1;
+    }
+
+  });
+
   return {
     receivables: roundAmount(receivables),
     payables: roundAmount(payables),
@@ -548,36 +586,41 @@ const getLoanReceivablesValue = async (
 
   applyBusinessValueScopeFilter(match, moduleScope);
 
-  const result = await BusinessReceivableLoan.aggregate([
-    {
-      $match: match,
-    },
+  const [result, employeeSummary] = await Promise.all([
+    BusinessReceivableLoan.aggregate([
+      {
+        $match: match,
+      },
 
-    {
-      $group: {
-        _id: null,
+      {
+        $group: {
+          _id: null,
 
-        value: {
-          $sum: "$remainingAmount",
-        },
+          value: {
+            $sum: "$remainingAmount",
+          },
 
-        originalValue: {
-          $sum: "$originalAmount",
-        },
+          originalValue: {
+            $sum: "$originalAmount",
+          },
 
-        totalLoans: {
-          $sum: 1,
+          totalLoans: {
+            $sum: 1,
+          },
         },
       },
-    },
+    ]),
+    getEmployeeFinancialSummary({ userId, moduleScope }),
   ]);
 
   const data = result[0] || {};
+  const employeeRecoverable = Number(employeeSummary.totalRecoverable || 0);
 
   return {
-    value: roundAmount(data.value),
+    value: roundAmount(Number(data.value || 0) + employeeRecoverable),
     originalValue: roundAmount(data.originalValue),
-    totalLoans: Number(data.totalLoans || 0),
+    totalLoans:
+      Number(data.totalLoans || 0) + (employeeRecoverable > 0 ? 1 : 0),
   };
 };
 
@@ -630,19 +673,28 @@ const getManualLiabilitiesValue = async (
 };
 
 const getTravelAccountValues = async (userId) => {
-  const [cashBank, customer, vendor] = await Promise.all([
+  const [cashBank, customer, vendor, employee] = await Promise.all([
     getActualCashBankPosition(userId),
     getTravelCustomerBalanceTotals(userId),
     getTravelVendorBalanceTotals(userId),
+    getEmployeeFinancialSummary({
+      userId,
+      moduleScope: MODULE_SCOPES.TRAVEL,
+    }),
   ]);
 
   return {
     cash: roundAmount(cashBank.cashInHand),
     bank: roundAmount(cashBank.bankBalance),
     receivables: roundAmount(customer.totalReceivable || customer.customerDue),
-    payables: roundAmount(vendor.totalPayable || vendor.vendorPayable),
+    payables: roundAmount(
+      Number(vendor.totalPayable || vendor.vendorPayable || 0) +
+        Number(employee.totalPayable || 0),
+    ),
     receivableCount: (customer.receivableDetails || []).length,
-    payableCount: (vendor.payableDetails || []).length,
+    payableCount:
+      (vendor.payableDetails || []).length +
+      (Number(employee.totalPayable || 0) > 0 ? 1 : 0),
     cashAccounts: cashBank.cashAccounts || [],
     bankAccounts: cashBank.bankAccounts || [],
   };

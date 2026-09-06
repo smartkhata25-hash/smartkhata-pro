@@ -101,6 +101,10 @@ const Sidebar = ({
 
         <SidebarItem to="/parties" label={t('parties')} setIsSidebarOpen={setIsSidebarOpen} />
 
+        <SidebarItem to="/employees" label={t('employees.title')} setIsSidebarOpen={setIsSidebarOpen} />
+
+        <SidebarItem to="/payroll" label={t('payroll.title')} setIsSidebarOpen={setIsSidebarOpen} />
+
         <SidebarItem to="/accounts" label={t('accounts')} setIsSidebarOpen={setIsSidebarOpen} />
 
         {showTradingShortcuts && (

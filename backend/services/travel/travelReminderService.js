@@ -95,6 +95,8 @@ const { sendTravelReminderEmail } = require("./travelReminderEmailService");
 const DEFAULT_LEAD_MINUTES = 24 * 60;
 const MAX_PROCESS_LIMIT = 50;
 const PROCESSING_LOCK_MS = 2 * 60 * 1000;
+const PASSED_EVENT_CANCEL_REASON = "Reminder event date passed";
+const ACTIVE_REMINDER_STATUSES = ["pending", "processing", "due"];
 
 const DEFAULT_SETTINGS = Object.freeze({
   automaticRemindersEnabled: true,
@@ -578,6 +580,42 @@ const cancelBookingReminders = async ({
   );
 };
 
+const expirePassedEventReminders = async ({
+  userId = null,
+  bookingId = null,
+  now = new Date(),
+} = {}) => {
+  const query = {
+    enabled: true,
+    status: {
+      $in: ACTIVE_REMINDER_STATUSES,
+    },
+    eventDateTime: {
+      $lte: now,
+    },
+  };
+
+  if (userId) {
+    query.userId = userId;
+  }
+
+  if (bookingId) {
+    query.bookingId = bookingId;
+  }
+
+  return TravelReminder.updateMany(query, {
+    $set: {
+      status: "cancelled",
+      inAppStatus: "cancelled",
+      enabled: false,
+      cancelledAt: now,
+      cancelledReason: PASSED_EVENT_CANCEL_REASON,
+      processingUntil: null,
+      lockId: "",
+    },
+  });
+};
+
 const getPopulatedBooking = (bookingId, userId) =>
   TravelBooking.findOne({
     _id: bookingId,
@@ -666,6 +704,8 @@ const syncTravelBookingReminder = async ({
         bookingId: sourceBooking._id,
 
         reason: "No future event date",
+
+        includeDue: true,
       });
 
       return {
@@ -1010,6 +1050,10 @@ const serializeReminder = (reminder) => {
 const dueAttentionFilter = (now = new Date()) => ({
   enabled: true,
 
+  eventDateTime: {
+    $gt: now,
+  },
+
   status: {
     $ne: "cancelled",
   },
@@ -1035,6 +1079,11 @@ const dueAttentionFilter = (now = new Date()) => ({
 const getTravelReminderSummary = async (userId) => {
   const now = new Date();
 
+  await expirePassedEventReminders({
+    userId,
+    now,
+  });
+
   const [
     attentionCount,
     dueCount,
@@ -1054,6 +1103,10 @@ const getTravelReminderSummary = async (userId) => {
       userId,
 
       enabled: true,
+
+      eventDateTime: {
+        $gt: now,
+      },
 
       status: {
         $ne: "cancelled",
@@ -1081,6 +1134,10 @@ const getTravelReminderSummary = async (userId) => {
 
       status: "pending",
 
+      eventDateTime: {
+        $gt: now,
+      },
+
       remindAt: {
         $gt: now,
       },
@@ -1090,6 +1147,10 @@ const getTravelReminderSummary = async (userId) => {
       userId,
 
       enabled: true,
+
+      eventDateTime: {
+        $gt: now,
+      },
 
       status: {
         $ne: "cancelled",
@@ -1105,6 +1166,10 @@ const getTravelReminderSummary = async (userId) => {
         enabled: true,
 
         status: "pending",
+
+        eventDateTime: {
+          $gt: now,
+        },
 
         remindAt: {
           $gt: now,
@@ -1157,6 +1222,10 @@ const buildReminderListQuery = (userId, status = "") => {
 
       status: "pending",
 
+      eventDateTime: {
+        $gt: now,
+      },
+
       remindAt: {
         $gt: now,
       },
@@ -1168,6 +1237,10 @@ const buildReminderListQuery = (userId, status = "") => {
       ...base,
 
       enabled: true,
+
+      eventDateTime: {
+        $gt: now,
+      },
 
       status: {
         $ne: "cancelled",
@@ -1198,6 +1271,9 @@ const buildReminderListQuery = (userId, status = "") => {
       {
         enabled: true,
         status: "pending",
+        eventDateTime: {
+          $gt: now,
+        },
       },
 
       {
@@ -1217,6 +1293,12 @@ const buildReminderListQuery = (userId, status = "") => {
 
 const listTravelReminders = async ({ userId, status = "", limit = 80 }) => {
   const safeLimit = Math.min(Math.max(Number(limit) || 80, 1), 200);
+  const now = new Date();
+
+  await expirePassedEventReminders({
+    userId,
+    now,
+  });
 
   const reminders = await populateReminder(
     TravelReminder.find(buildReminderListQuery(userId, status))
@@ -1249,6 +1331,14 @@ const getBookingReminderState = async ({ userId, bookingId }) => {
     throw createHttpError(404, "Travel booking not found");
   }
 
+  const now = new Date();
+
+  await expirePassedEventReminders({
+    userId,
+    bookingId,
+    now,
+  });
+
   const [settings, reminders] = await Promise.all([
     getTravelReminderSettings(userId),
 
@@ -1260,6 +1350,10 @@ const getBookingReminderState = async ({ userId, bookingId }) => {
 
         status: {
           $ne: "cancelled",
+        },
+
+        eventDateTime: {
+          $gt: now,
         },
       }).sort({
         remindAt: 1,
@@ -1334,6 +1428,36 @@ const completeReminderEmail = async (reminder) => {
 
 const finalizeClaimedReminder = async (reminder) => {
   const now = new Date();
+  const eventDateTime = asDate(reminder.eventDateTime);
+
+  if (eventDateTime && eventDateTime <= now) {
+    const saved = await TravelReminder.findOneAndUpdate(
+      {
+        _id: reminder._id,
+
+        status: "processing",
+
+        lockId: reminder.lockId,
+      },
+      {
+        $set: {
+          status: "cancelled",
+          inAppStatus: "cancelled",
+          enabled: false,
+          cancelledAt: now,
+          cancelledReason: PASSED_EVENT_CANCEL_REASON,
+          lastProcessedAt: now,
+          processingUntil: null,
+          lockId: "",
+        },
+      },
+      {
+        new: true,
+      },
+    );
+
+    return serializeReminder(saved);
+  }
 
   const update = {
     status: "due",
@@ -1395,6 +1519,10 @@ const processDueTravelReminders = async ({
 } = {}) => {
   const startedAt = new Date();
 
+  await expirePassedEventReminders({
+    now: startedAt,
+  });
+
   const safeLimit = Math.min(
     Math.max(Number(limit) || MAX_PROCESS_LIMIT, 1),
     200,
@@ -1417,6 +1545,10 @@ const processDueTravelReminders = async ({
         enabled: true,
 
         status: "pending",
+
+        eventDateTime: {
+          $gt: now,
+        },
 
         remindAt: {
           $lte: now,
@@ -1500,6 +1632,13 @@ const getReminderForAction = async ({ userId, reminderId }) => {
     throw createHttpError(400, "Invalid reminder ID");
   }
 
+  const now = new Date();
+
+  await expirePassedEventReminders({
+    userId,
+    now,
+  });
+
   const reminder = await populateReminder(
     TravelReminder.findOne({
       _id: reminderId,
@@ -1508,6 +1647,10 @@ const getReminderForAction = async ({ userId, reminderId }) => {
 
       status: {
         $ne: "cancelled",
+      },
+
+      eventDateTime: {
+        $gt: now,
       },
     }),
   ).lean();

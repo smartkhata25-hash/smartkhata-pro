@@ -188,6 +188,15 @@ const createBaseAccountsForUser = async (userId) => {
       moduleScope: "trading",
     },
     {
+      name: "Travel Salary Expense",
+      type: "Expense",
+      category: "salary",
+      code: "TRAVEL_SALARY_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: "travel",
+    },
+    {
       name: "Transport Expense",
       type: "Expense",
       category: "transport",
@@ -283,6 +292,7 @@ const createBaseAccountsForUser = async (userId) => {
           normalBalance: acc.normalBalance,
           openingBalance: 0,
           isSystem: acc.isSystem,
+          moduleScope: acc.moduleScope || "trading",
           isActive: true,
         },
 

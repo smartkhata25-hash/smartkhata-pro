@@ -110,12 +110,17 @@ const BalanceBreakdownModal = ({
           counts.party += 1;
         }
 
+        if (item.entityType === 'employee') {
+          counts.employee += 1;
+        }
+
         return counts;
       },
       {
         customer: 0,
         supplier: 0,
         party: 0,
+        employee: 0,
       }
     );
   }, [normalizedItems]);
@@ -154,6 +159,10 @@ const BalanceBreakdownModal = ({
       return 'Party';
     }
 
+    if (entityType === 'employee') {
+      return 'Employee';
+    }
+
     return 'Other';
   };
 
@@ -168,6 +177,10 @@ const BalanceBreakdownModal = ({
 
     if (entityType === 'party') {
       return 'border-violet-200 bg-violet-50 text-violet-700';
+    }
+
+    if (entityType === 'employee') {
+      return 'border-cyan-200 bg-cyan-50 text-cyan-700';
     }
 
     return 'border-gray-200 bg-gray-50 text-gray-700';
@@ -407,6 +420,8 @@ const BalanceBreakdownModal = ({
               <option value="supplier">Suppliers ({entityCounts.supplier})</option>
 
               <option value="party">Parties ({entityCounts.party})</option>
+
+              <option value="employee">Employees ({entityCounts.employee})</option>
             </select>
 
             <select
@@ -484,7 +499,9 @@ const BalanceBreakdownModal = ({
                                   ? 'bg-emerald-100 text-emerald-700'
                                   : item.entityType === 'party'
                                     ? 'bg-violet-100 text-violet-700'
-                                    : 'bg-gray-100 text-gray-700'
+                                    : item.entityType === 'employee'
+                                      ? 'bg-cyan-100 text-cyan-700'
+                                      : 'bg-gray-100 text-gray-700'
                             }`}
                           >
                             {getEntityInitial(item.name)}
@@ -558,9 +575,11 @@ const BalanceBreakdownModal = ({
                           item.entityType === 'customer'
                             ? 'bg-blue-100 text-blue-700'
                             : item.entityType === 'supplier'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : item.entityType === 'party'
-                                ? 'bg-violet-100 text-violet-700'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : item.entityType === 'party'
+                              ? 'bg-violet-100 text-violet-700'
+                              : item.entityType === 'employee'
+                                ? 'bg-cyan-100 text-cyan-700'
                                 : 'bg-gray-100 text-gray-700'
                         }`}
                       >

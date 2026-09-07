@@ -18,6 +18,7 @@ const fs = require("fs");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
 const { logActivity } = require("../utils/activityLogger");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 const {
   MODULE_SCOPES,
   applySupplierModuleScopeFilter,
@@ -35,7 +36,7 @@ const {
   parseBusinessDateTime,
   startOfBusinessDay,
 } = require("../utils/businessDate");
-const PurchaseInvoice = require("../models/purchaseInvoice");
+
 const PurchaseReturn = require("../models/PurchaseReturn");
 const escapeRegex = (text = "") => {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -184,7 +185,8 @@ const replaceTravelVendorOpeningBalanceJournal = async ({
   }
 
   const absAmount = Math.abs(amount);
-  const openingBalanceAccount = await getOrCreateTravelOpeningBalanceAccount(userId);
+  const openingBalanceAccount =
+    await getOrCreateTravelOpeningBalanceAccount(userId);
   const journal = await JournalEntry.create({
     ...getCurrentTravelOpeningTimestamp(),
     description: "Travel Vendor Opening Balance",
@@ -959,8 +961,13 @@ exports.getTravelVendors = async (req, res) => {
 exports.createTravelVendor = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
-    const { name, phone = "", email = "", address = "", notes = "" } =
-      req.body || {};
+    const {
+      name,
+      phone = "",
+      email = "",
+      address = "",
+      notes = "",
+    } = req.body || {};
     const cleanName = cleanString(name);
 
     if (!cleanName) {
@@ -2439,18 +2446,18 @@ exports.getSupplierDetailedLedger = async (req, res) => {
             : entry.originModule === TRAVEL_VENDOR_OPENING_ORIGIN &&
                 entry.sourceType === "travel_adjustment"
               ? "Travel Vendor Opening Balance"
-            : entry.originModule === "travel_vendor_return" &&
-                entry.sourceType === "purchase_return_payment"
-              ? "Travel Vendor Return Receipt"
-              : entry.sourceType === "travel_vendor_return"
-                ? "Travel Vendor Return/Credit"
-                : entry.sourceType === "reversal"
-                  ? "Travel Reversal"
-                  : entry.sourceType === "travel_vendor_cost"
-                    ? "Travel Vendor Cost"
-                    : entry.sourceType === "travel_refund"
-                      ? "Travel Vendor Recovery"
-                      : "",
+              : entry.originModule === "travel_vendor_return" &&
+                  entry.sourceType === "purchase_return_payment"
+                ? "Travel Vendor Return Receipt"
+                : entry.sourceType === "travel_vendor_return"
+                  ? "Travel Vendor Return/Credit"
+                  : entry.sourceType === "reversal"
+                    ? "Travel Reversal"
+                    : entry.sourceType === "travel_vendor_cost"
+                      ? "Travel Vendor Cost"
+                      : entry.sourceType === "travel_refund"
+                        ? "Travel Vendor Recovery"
+                        : "",
         description: entry.description || "",
         debit,
         credit,
@@ -2464,7 +2471,6 @@ exports.getSupplierDetailedLedger = async (req, res) => {
         entry.invoiceId &&
         entry.invoiceModel
       ) {
-        const PurchaseInvoice = require("../models/purchaseInvoice");
         const invoice = await PurchaseInvoice.findById(
           entry.invoiceId,
         ).populate("items.productId", "name");

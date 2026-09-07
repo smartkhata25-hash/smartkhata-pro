@@ -16,7 +16,7 @@ const InventoryTransaction = require("../models/InventoryTransaction");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 
-const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 
 const Counter = require("../models/Counter");

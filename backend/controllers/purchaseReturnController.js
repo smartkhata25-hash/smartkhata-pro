@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const PurchaseReturn = require("../models/PurchaseReturn");
-const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 const JournalEntry = require("../models/JournalEntry");
 const InventoryTransaction = require("../models/InventoryTransaction");
 const Supplier = require("../models/Supplier");

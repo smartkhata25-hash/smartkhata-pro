@@ -1,4 +1,4 @@
-const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 
 const JournalEntry = require("../models/JournalEntry");
 const Supplier = require("../models/Supplier");

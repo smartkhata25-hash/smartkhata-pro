@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const Supplier = require("../models/Supplier");
 const JournalEntry = require("../models/JournalEntry");
-const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 
 const buildSupplierDetailLedgerPrint = require("../services/supplierDetailLedgerPrintBuilder");

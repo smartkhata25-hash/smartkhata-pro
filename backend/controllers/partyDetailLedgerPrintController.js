@@ -6,7 +6,7 @@ const Party = require("../models/Party");
 const JournalEntry = require("../models/JournalEntry");
 
 const Invoice = require("../models/Invoice");
-const PurchaseInvoice = require("../models/purchaseInvoice");
+const PurchaseInvoice = require("../models/PurchaseInvoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
 

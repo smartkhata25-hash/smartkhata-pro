@@ -7,13 +7,13 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const canCreateSuppliers = hasPermission('suppliers.create');
   const canEditSuppliers = hasPermission('suppliers.edit');
+
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     email: '',
     address: '',
     supplierType: 'vendor',
-    moduleScope: 'trading',
     openingBalance: '',
     openingType: 'payable',
     notes: '',
@@ -29,12 +29,8 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
         email: initialData.email || '',
         address: initialData.address || '',
         supplierType: initialData.supplierType || 'vendor',
-        moduleScope: initialData.moduleScope || 'trading',
-
-        openingBalance: opening,
-
+        openingBalance: Math.abs(opening),
         openingType: opening < 0 ? 'advance' : 'payable',
-
         notes: initialData.notes || '',
       });
     }
@@ -42,6 +38,8 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   useEffect(() => {
     const handleQuickFill = (e) => {
+      if (!e.detail) return;
+
       setFormData((prev) => ({
         ...prev,
         ...e.detail,
@@ -55,22 +53,23 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
     };
   }, []);
 
+  useEffect(() => {
+    const esc = (e) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+
+    window.addEventListener('keydown', esc);
+
+    return () => {
+      window.removeEventListener('keydown', esc);
+    };
+  }, [onCancel]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    if (name === 'openingBalance') {
-      const numericValue = parseFloat(value) || 0;
-
-      setFormData((prev) => ({
-        ...prev,
-
-        openingBalance: value,
-
-        openingType: numericValue < 0 ? 'advance' : 'payable',
-      }));
-
-      return;
-    }
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -97,22 +96,138 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
     const finalOpening =
       formData.openingType === 'advance'
-        ? -Math.abs(formData.openingBalance || 0)
-        : Math.abs(formData.openingBalance || 0);
+        ? -Math.abs(Number(formData.openingBalance) || 0)
+        : Math.abs(Number(formData.openingBalance) || 0);
 
     onSubmit({
       ...formData,
+      moduleScope: 'trading',
       openingBalance: finalOpening,
     });
   };
 
+  const handleClear = () => {
+    setFormData({
+      name: '',
+      phone: '',
+      email: '',
+      address: '',
+      supplierType: 'vendor',
+      openingBalance: '',
+      openingType: 'payable',
+      notes: '',
+    });
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
-        <form onSubmit={handleSubmit} style={formStyle}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-1.5 py-2 sm:p-4 overflow-hidden">
+      <style>{`
+        .supplier-form-modal,
+        .supplier-form-modal *,
+        .supplier-form-modal *::before,
+        .supplier-form-modal *::after {
+          box-sizing: border-box;
+        }
+
+        @media (max-width: 768px) {
+          .supplier-form-modal {
+            width: calc(100vw - 12px) !important;
+            max-width: calc(100vw - 12px) !important;
+            max-height: calc(100dvh - 16px) !important;
+            margin: 0 auto !important;
+            padding: 14px !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+          }
+
+          .supplier-form-inner {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .supplier-form-control {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            height: 42px !important;
+            min-height: 42px !important;
+            padding: 7px 10px !important;
+            font-size: 14px !important;
+            line-height: 20px !important;
+            color: #0f172a !important;
+            background: #fff !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 6px !important;
+          }
+
+          select.supplier-form-control {
+            appearance: auto !important;
+            -webkit-appearance: menulist !important;
+            height: 42px !important;
+            min-height: 42px !important;
+            padding-top: 5px !important;
+            padding-bottom: 5px !important;
+          }
+
+          textarea.supplier-form-control {
+            height: auto !important;
+            min-height: 72px !important;
+            resize: vertical;
+          }
+
+          .supplier-opening-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr) !important;
+            gap: 8px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .supplier-form-actions {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            justify-content: flex-end !important;
+            gap: 8px !important;
+            width: 100% !important;
+          }
+
+          .supplier-form-actions button {
+            min-height: 42px !important;
+            padding: 8px 13px !important;
+            font-size: 14px !important;
+          }
+        }
+
+        @media (max-width: 380px) {
+          .supplier-form-modal {
+            width: calc(100vw - 8px) !important;
+            max-width: calc(100vw - 8px) !important;
+            padding: 12px !important;
+          }
+
+          .supplier-opening-row {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+          }
+
+          .supplier-form-control {
+            font-size: 13px !important;
+          }
+
+          .supplier-form-actions button {
+            padding-left: 11px !important;
+            padding-right: 11px !important;
+          }
+        }
+      `}</style>
+
+      <div className="supplier-form-modal bg-white rounded-lg shadow-lg w-full max-w-md overflow-y-auto relative">
+        <form onSubmit={handleSubmit} className="supplier-form-inner" style={formStyle}>
           <input
             type="text"
             name="name"
+            className="supplier-form-control"
             placeholder={t('supplier.name')}
             value={formData.name}
             onChange={handleChange}
@@ -122,6 +237,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
           <select
             name="supplierType"
+            className="supplier-form-control"
             value={formData.supplierType}
             onChange={handleChange}
             style={input}
@@ -131,21 +247,14 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
             <option value="other">{t('supplier.other')}</option>
           </select>
 
-          <select name="moduleScope" value={formData.moduleScope} onChange={handleChange} style={input}>
-            <option value="trading">{t('moduleScope.trading')}</option>
-            <option value="both">{t('moduleScope.both')}</option>
-          </select>
-
-          {!initialData?._id && (
-            <div className="flex gap-2">
+          {!isEditMode && (
+            <div className="supplier-opening-row">
               <select
                 name="openingType"
+                className="supplier-form-control"
                 value={formData.openingType}
                 onChange={handleChange}
-                style={{
-                  ...input,
-                  width: '40%',
-                }}
+                style={input}
               >
                 <option value="payable">Payable</option>
                 <option value="advance">Advance</option>
@@ -155,13 +264,11 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
                 type="text"
                 inputMode="decimal"
                 name="openingBalance"
+                className="supplier-form-control no-spinner"
                 placeholder={t('supplier.openingBalance')}
                 value={formData.openingBalance}
                 onChange={handleChange}
-                style={{
-                  ...input,
-                  width: '60%',
-                }}
+                style={input}
               />
             </div>
           )}
@@ -169,6 +276,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
           <input
             type="email"
             name="email"
+            className="supplier-form-control"
             placeholder={t('email')}
             value={formData.email}
             onChange={handleChange}
@@ -178,6 +286,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
           <input
             type="text"
             name="phone"
+            className="supplier-form-control"
             placeholder={t('phone')}
             value={formData.phone}
             onChange={handleChange}
@@ -187,6 +296,7 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
           <input
             type="text"
             name="address"
+            className="supplier-form-control"
             placeholder={t('address')}
             value={formData.address}
             onChange={handleChange}
@@ -195,30 +305,15 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
           <textarea
             name="notes"
+            className="supplier-form-control"
             value={formData.notes}
             onChange={handleChange}
             placeholder={t('description')}
             style={input}
           />
 
-          <div className="flex gap-3 mt-4 justify-end">
-            <button
-              type="button"
-              onClick={() =>
-                setFormData({
-                  name: '',
-                  phone: '',
-                  email: '',
-                  address: '',
-                  supplierType: 'vendor',
-                  moduleScope: 'trading',
-                  openingBalance: '',
-                  openingType: 'payable',
-                  notes: '',
-                })
-              }
-              style={buttonGray}
-            >
+          <div className="supplier-form-actions mt-4">
+            <button type="button" onClick={handleClear} style={buttonGray}>
               {t('clear')}
             </button>
 
@@ -239,15 +334,24 @@ const SupplierForm = ({ onSubmit, initialData = {}, onCancel }) => {
 };
 
 const formStyle = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
   display: 'flex',
   flexDirection: 'column',
   gap: '12px',
 };
 
 const input = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
+  boxSizing: 'border-box',
   padding: '10px',
   borderRadius: '5px',
   border: '1px solid #ccc',
+  color: '#0f172a',
+  backgroundColor: '#fff',
 };
 
 const button = {

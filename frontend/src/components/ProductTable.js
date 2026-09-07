@@ -1,12 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { deleteProduct } from '../services/inventoryService';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { t } from '../i18n/i18n';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  buildPrintQuery,
+  downloadBackendPdf,
+  openBackendPrintWindow,
+} from '../utils/backendPrintDocument';
+
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick }) => {
   const [filters, setFilters] = useState({
@@ -27,7 +32,6 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const tableRef = useRef();
   const navigate = useNavigate();
   const canViewProducts = hasPermission('products.view');
   const canCreateProducts = hasPermission('products.create');
@@ -95,32 +99,32 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
     }
   };
 
-  const handlePrint = () => {
-    const printContent = tableRef.current.innerHTML;
-    const newWindow = window.open('', '', 'width=900,height=650');
-    newWindow.document.write(`
-      <html>
-        <head><title>${t('inventory.report')}</title></head>
-        <body>
-          <div id="print-section">${printContent}</div>
-        </body>
-      </html>`);
-    newWindow.document.close();
-    newWindow.focus();
-    newWindow.print();
-    newWindow.close();
+  const buildProductReportQuery = () =>
+    buildPrintQuery({
+      search: filters.search,
+      categoryId: filters.categoryId,
+      stockFilter: filters.stockFilter,
+    });
+
+  const handlePrint = async () => {
+    try {
+      await openBackendPrintWindow({
+        url: `${API}/api/print/products/html?${buildProductReportQuery()}`,
+      });
+    } catch (error) {
+      alert(error.message || t('alerts.printFailed'));
+    }
   };
 
   const handlePDF = async () => {
-    const input = tableRef.current;
-    const canvas = await html2canvas(input);
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const imgProps = pdf.getImageProperties(imgData);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-    pdf.save('Inventory_Report.pdf');
+    try {
+      await downloadBackendPdf({
+        url: `${API}/api/print/products/pdf?${buildProductReportQuery()}`,
+        fileName: 'Inventory-Report.pdf',
+      });
+    } catch (error) {
+      alert(error.message || t('alerts.pdfFailed'));
+    }
   };
 
   return (
@@ -356,7 +360,6 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
       {/* 📊 Table */}
       <div
         id="print-section"
-        ref={tableRef}
         style={{
           outline: 'none',
           flex: 1,

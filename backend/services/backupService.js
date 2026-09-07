@@ -76,6 +76,16 @@ const COLLECTION_CONFIG = {
   },
 };
 
+const CHANGE_TIMESTAMP_FIELDS = [
+  "updatedAt",
+  "createdAt",
+  "deletedAt",
+  "archivedAt",
+  "cancelledAt",
+  "voidedAt",
+  "reversedAt",
+];
+
 function ensureDirectories(tempDir) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   fs.mkdirSync(tempDir, { recursive: true });
@@ -471,6 +481,73 @@ function cleanTemp(tempDir) {
   });
 }
 
+function normalizeBackupDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+async function hasBackupRelevantChangesSince(userId, since) {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid user ID");
+  }
+
+  const sinceDate = normalizeBackupDate(since);
+
+  if (!sinceDate) {
+    return {
+      hasChanges: true,
+      reason: "missing_last_backup_time",
+    };
+  }
+
+  if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+    throw new Error("MongoDB is not connected");
+  }
+
+  const db = mongoose.connection.db;
+  const objectUserId = new mongoose.Types.ObjectId(userId);
+
+  for (const [collectionName, config] of Object.entries(COLLECTION_CONFIG)) {
+    const changeFilter = {
+      [config.field]: objectUserId,
+      $or: CHANGE_TIMESTAMP_FIELDS.map((field) => ({
+        [field]: {
+          $gt: sinceDate,
+        },
+      })),
+    };
+
+    const changedDocument = await db.collection(collectionName).findOne(
+      changeFilter,
+      {
+        projection: {
+          _id: 1,
+        },
+      },
+    );
+
+    if (changedDocument) {
+      return {
+        hasChanges: true,
+        collection: collectionName,
+        documentId: String(changedDocument._id),
+        since: sinceDate.toISOString(),
+      };
+    }
+  }
+
+  return {
+    hasChanges: false,
+    checkedCollections: Object.keys(COLLECTION_CONFIG).length,
+    since: sinceDate.toISOString(),
+  };
+}
+
 function getRegularBackupRegex(userId) {
   const safeUserId = String(userId).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -715,5 +792,6 @@ function getBackupStatus(userId = null) {
 module.exports = {
   createBackup,
   getBackupStatus,
+  hasBackupRelevantChangesSince,
   COLLECTION_CONFIG,
 };

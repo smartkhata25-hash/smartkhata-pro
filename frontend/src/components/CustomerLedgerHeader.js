@@ -1,8 +1,8 @@
 import React from 'react';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
-import { FaWhatsapp } from 'react-icons/fa';
+import { FaRegClock, FaWhatsapp } from 'react-icons/fa';
 const API = process.env.REACT_APP_API_BASE_URL;
 
 const CustomerLedgerHeader = ({
@@ -29,6 +29,7 @@ const CustomerLedgerHeader = ({
   showSuggestions,
   setShowSuggestions,
   printSize,
+  showAgingLedger = true,
 }) => {
   const [showShareModal, setShowShareModal] = React.useState(false);
   const [pdfLoading, setPdfLoading] = React.useState(false);
@@ -136,7 +137,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -181,7 +182,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -239,6 +240,27 @@ const CustomerLedgerHeader = ({
             >
               📊
             </button>
+            {showAgingLedger && (
+              <button
+                title={t('agingLedger.title')}
+                aria-label={t('agingLedger.title')}
+                style={{
+                  height: 32,
+                  width: 34,
+                  borderRadius: 8,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                disabled={!cid}
+                onClick={() => navigate(`/customer-aging-ledger/${cid}`)}
+              >
+                <FaRegClock size={13} />
+              </button>
+            )}
             <button
               disabled={!cid}
               onClick={() => setShowShareModal(true)}
@@ -377,7 +399,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -421,7 +443,7 @@ const CustomerLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -576,6 +598,23 @@ const CustomerLedgerHeader = ({
             >
               {t('ledger.detailLedger')}
             </button>
+            {showAgingLedger && (
+              <button
+                style={{
+                  height: 36,
+                  padding: '0 10px',
+                  borderRadius: 10,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                }}
+                disabled={!cid}
+                onClick={() => navigate(`/customer-aging-ledger/${cid}`)}
+              >
+                {t('agingLedger.title')}
+              </button>
+            )}
             <button
               disabled={!cid}
               onClick={() => setShowShareModal(true)}
@@ -682,6 +721,8 @@ const CustomerLedgerHeader = ({
           const query = new URLSearchParams({
             startDate: start || '',
             endDate: end || '',
+            size: printSize || 'A5',
+            lang: getCurrentLanguage(),
           }).toString();
 
           const pdfUrl = `${API}/api/print/customer-ledger/${cid}/pdf?${query}`;
@@ -694,7 +735,7 @@ const CustomerLedgerHeader = ({
             balance: closingBalance,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

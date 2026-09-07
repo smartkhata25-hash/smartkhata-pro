@@ -12,6 +12,7 @@ import { t } from '../i18n/i18n';
 
 import { hasPermission } from '../utils/permissionHelper';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
+import { FaEdit, FaTrash } from 'react-icons/fa';
 
 const PurchaseReturnList = () => {
   // ✅ صرف موجودہ page کے Purchase Returns
@@ -308,17 +309,17 @@ const PurchaseReturnList = () => {
   };
 
   return (
-    <div className="p-4 bg-white shadow rounded">
+    <div className="p-3 md:p-4 bg-white shadow rounded">
       {/* =====================================================
           HEADER
       ====================================================== */}
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">{t('purchase.returnList')}</h2>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
+        <h2 className="text-base md:text-xl font-bold">{t('purchase.returnList')}</h2>
 
         {canCreatePurchaseReturns && (
           <button
             type="button"
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            className="bg-blue-600 text-white px-3 py-2 md:px-4 rounded text-sm md:text-base hover:bg-blue-700"
             onClick={() => navigate('/purchase-returns/new')}
           >
             {t('add')}
@@ -329,12 +330,12 @@ const PurchaseReturnList = () => {
       {/* =====================================================
           FILTERS
       ====================================================== */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2 md:gap-3 mb-4">
         {/* Supplier / Party Filter */}
         <select
           value={filters.supplier}
           onChange={(event) => updateFilter('supplier', event.target.value)}
-          className="border rounded p-2 bg-white"
+          className="min-w-0 border rounded p-2 bg-white text-sm"
         >
           <option value="">Suppliers / Parties</option>
 
@@ -355,7 +356,7 @@ const PurchaseReturnList = () => {
         <select
           value={filters.paymentType}
           onChange={(event) => updateFilter('paymentType', event.target.value)}
-          className="border rounded p-2 bg-white"
+          className="min-w-0 border rounded p-2 bg-white text-sm"
         >
           <option value="">{t('payment.allTypes')}</option>
 
@@ -375,7 +376,7 @@ const PurchaseReturnList = () => {
           type="date"
           value={filters.fromDate}
           onChange={(event) => updateFilter('fromDate', event.target.value)}
-          className="border rounded p-2"
+          className="min-w-0 border rounded p-2 text-sm"
         />
 
         {/* To Date */}
@@ -383,7 +384,7 @@ const PurchaseReturnList = () => {
           type="date"
           value={filters.toDate}
           onChange={(event) => updateFilter('toDate', event.target.value)}
-          className="border rounded p-2"
+          className="min-w-0 border rounded p-2 text-sm"
         />
 
         {/* Search */}
@@ -392,14 +393,14 @@ const PurchaseReturnList = () => {
           placeholder={t('search')}
           value={filters.search}
           onChange={(event) => updateFilter('search', event.target.value)}
-          className="border rounded p-2"
+          className="min-w-0 border rounded p-2 text-sm"
         />
 
         {/* Clear Filters */}
         <button
           type="button"
           onClick={clearFilters}
-          className="bg-gray-200 rounded px-4 py-2 hover:bg-gray-300"
+          className="bg-gray-200 rounded px-3 py-2 md:px-4 text-sm hover:bg-gray-300"
         >
           🧹 {t('clear')}
         </button>
@@ -423,22 +424,31 @@ const PurchaseReturnList = () => {
           WebkitOverflowScrolling: 'touch',
         }}
       >
-        <table className="w-full border text-sm">
+        <table className="w-full min-w-[560px] md:min-w-0 border text-[11px] sm:text-xs md:text-sm">
           <thead>
             <tr className="bg-gray-100">
-              <th className="border p-2">{t('date')}</th>
+              <th className="border px-1.5 py-1 md:p-2">{t('date')}</th>
 
-              <th className="border p-2">{t('billNo')}</th>
+              <th className="border px-1.5 py-1 md:p-2">
+                <span className="hidden sm:inline">{t('billNo')}</span>
+                <span className="sm:hidden">Bill</span>
+              </th>
 
-              <th className="border p-2">{t('supplier.supplier')}</th>
+              <th className="border px-1.5 py-1 md:p-2">{t('supplier.supplier')}</th>
 
-              <th className="border p-2">{t('amount')}</th>
+              <th className="border px-1.5 py-1 md:p-2">
+                <span className="hidden sm:inline">{t('amount')}</span>
+                <span className="sm:hidden">Amt.</span>
+              </th>
 
-              <th className="border p-2">{t('paymentType')}</th>
+              <th className="border px-1.5 py-1 md:p-2">
+                <span className="hidden sm:inline">{t('paymentType')}</span>
+                <span className="sm:hidden">Type</span>
+              </th>
 
-              <th className="border p-2">{t('description')}</th>
+              <th className="hidden md:table-cell border p-2">{t('description')}</th>
 
-              <th className="border p-2">{t('common.actions')}</th>
+              <th className="border px-1.5 py-1 md:p-2">{t('common.actions')}</th>
             </tr>
           </thead>
 
@@ -447,41 +457,51 @@ const PurchaseReturnList = () => {
             {!loading &&
               returns.map((row) => (
                 <tr key={row._id} className="text-center">
-                  <td className="border p-2 whitespace-nowrap">
+                  <td className="border px-1.5 py-1 md:p-2 whitespace-nowrap">
                     {formatBusinessDateForDisplay(row.returnDate)}
                   </td>
 
-                  <td className="border p-2">{row.billNo || '-'}</td>
+                  <td className="border px-1.5 py-1 md:p-2">{row.billNo || '-'}</td>
 
-                  <td className="border p-2">{getSupplierOrPartyName(row)}</td>
+                  <td className="border px-1.5 py-1 md:p-2 max-w-[112px] sm:max-w-none break-words">
+                    {getSupplierOrPartyName(row)}
+                  </td>
 
-                  <td className="border p-2 whitespace-nowrap">
+                  <td className="border px-1.5 py-1 md:p-2 whitespace-nowrap">
                     {Number(row.totalAmount || 0).toFixed(2)}
                   </td>
 
-                  <td className="border p-2 capitalize">{row.paymentType || 'adjust'}</td>
+                  <td className="border px-1.5 py-1 md:p-2 capitalize">
+                    {row.paymentType || 'adjust'}
+                  </td>
 
-                  <td className="border p-2">{row.notes || '-'}</td>
+                  <td className="hidden md:table-cell border p-2">{row.notes || '-'}</td>
 
-                  <td className="border p-2">
-                    <div className="flex gap-2 justify-center">
+                  <td className="border px-1.5 py-1 md:p-2">
+                    <div className="flex gap-1 md:gap-2 justify-center">
                       {canEditPurchaseReturns && (
                         <button
                           type="button"
-                          className="bg-yellow-400 px-2 py-1 rounded hover:bg-yellow-500"
+                          className="inline-flex h-7 w-7 md:h-auto md:w-auto items-center justify-center bg-yellow-400 p-0 md:px-2 md:py-1 rounded text-xs md:text-sm hover:bg-yellow-500"
                           onClick={() => navigate(`/purchase-returns/edit/${row._id}`)}
+                          title={t('edit')}
+                          aria-label={t('edit')}
                         >
-                          {t('edit')}
+                          <FaEdit className="md:hidden" aria-hidden="true" />
+                          <span className="hidden md:inline">{t('edit')}</span>
                         </button>
                       )}
 
                       {canDeletePurchaseReturns && (
                         <button
                           type="button"
-                          className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
+                          className="inline-flex h-7 w-7 md:h-auto md:w-auto items-center justify-center bg-red-600 text-white p-0 md:px-2 md:py-1 rounded text-xs md:text-sm hover:bg-red-700"
                           onClick={() => handleDelete(row._id)}
+                          title={t('delete')}
+                          aria-label={t('delete')}
                         >
-                          {t('delete')}
+                          <FaTrash className="md:hidden" aria-hidden="true" />
+                          <span className="hidden md:inline">{t('delete')}</span>
                         </button>
                       )}
 

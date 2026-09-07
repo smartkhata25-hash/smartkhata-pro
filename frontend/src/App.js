@@ -22,12 +22,14 @@ const IncomeStatementPage = lazy(() => import('./pages/IncomeStatementPage'));
 const CustomersPage = lazy(() => import('./pages/CustomersPage'));
 const CustomerLedgerPage = lazy(() => import('./pages/CustomerLedgerPage'));
 const CustomerDetailLedgerPage = lazy(() => import('./pages/CustomerDetailLedgerPage'));
+const CustomerAgingLedgerPage = lazy(() => import('./pages/CustomerAgingLedgerPage'));
 const SuppliersPage = lazy(() => import('./pages/SuppliersPage'));
 const SupplierLedgerPage = lazy(() => import('./pages/SupplierLedgerPage'));
 const SupplierDetailLedgerPage = lazy(() => import('./pages/SupplierDetailLedgerPage'));
 const PartiesPage = lazy(() => import('./pages/PartiesPage'));
 const PartyLedgerPage = lazy(() => import('./pages/PartyLedgerPage'));
 const PartyDetailLedgerPage = lazy(() => import('./pages/PartyDetailLedgerPage'));
+const PartyAgingLedgerPage = lazy(() => import('./pages/PartyAgingLedgerPage'));
 const AgingReport = lazy(() => import('./pages/AgingReport'));
 const InventoryPage = lazy(() => import('./pages/InventoryPage'));
 const StockHistoryPage = lazy(() => import('./pages/StockHistoryPage'));
@@ -876,6 +878,15 @@ function App() {
             />
 
             <Route
+              path="/customer-aging-ledger/:customerId"
+              element={
+                <PermissionRoute permission="customers.view_ledger">
+                  <CustomerAgingLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/customer-ledger/:customerId"
               element={
                 <PermissionRoute permission="customers.view_ledger">
@@ -961,6 +972,15 @@ function App() {
               element={
                 <PermissionRoute permission="parties.view_ledger">
                   <PartyDetailLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/party-aging-ledger/:partyId"
+              element={
+                <PermissionRoute permission="parties.view_ledger">
+                  <PartyAgingLedgerPage />
                 </PermissionRoute>
               }
             />

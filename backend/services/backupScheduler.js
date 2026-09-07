@@ -2,7 +2,10 @@ const cron = require("node-cron");
 
 const User = require("../models/User");
 
-const { createBackup } = require("./backupService");
+const {
+  createBackup,
+  hasBackupRelevantChangesSince,
+} = require("./backupService");
 const { getCloudBackupList } = require("./cloudListService");
 const { isRunning } = require("./backupProgressService");
 
@@ -10,6 +13,7 @@ const TIMEZONE = "Asia/Karachi";
 
 const RETRY_DELAY_MS = 30 * 60 * 1000;
 const MAX_BACKUP_ATTEMPTS = 2;
+const CHANGE_DETECTION_SAFETY_WINDOW_MS = 5 * 60 * 1000;
 
 let schedulerStarted = false;
 let backupAllUsersRunning = false;
@@ -38,28 +42,74 @@ function getPakistanDateKey(date = new Date()) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-async function hasCloudBackupToday(userId) {
+function normalizeCloudBackupDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+async function getCloudBackupState(userId) {
   try {
     const result = await getCloudBackupList(userId, 10);
 
     if (!result.success || !Array.isArray(result.files)) {
-      return false;
+      return {
+        hasBackupToday: false,
+        latestBackupAt: null,
+      };
     }
 
     const today = getPakistanDateKey();
+    let latestBackupAt = null;
+    let hasBackupToday = false;
 
-    return result.files.some((file) => {
-      if (!file.lastModified) {
-        return false;
+    for (const file of result.files) {
+      const lastModified = normalizeCloudBackupDate(file.lastModified);
+
+      if (!lastModified) {
+        continue;
       }
 
-      return getPakistanDateKey(new Date(file.lastModified)) === today;
-    });
+      if (!latestBackupAt || lastModified > latestBackupAt) {
+        latestBackupAt = lastModified;
+      }
+
+      if (getPakistanDateKey(lastModified) === today) {
+        hasBackupToday = true;
+      }
+    }
+
+    return {
+      hasBackupToday,
+      latestBackupAt,
+    };
   } catch (error) {
     console.error(`❌ Backup check failed for ${userId}:`, error.message);
 
-    return false;
+    return {
+      hasBackupToday: false,
+      latestBackupAt: null,
+    };
   }
+}
+
+async function hasBackupRelevantChangesSinceLastBackup(userId, latestBackupAt) {
+  if (!latestBackupAt) {
+    return {
+      hasChanges: true,
+      reason: "no_previous_cloud_backup",
+    };
+  }
+
+  const since = new Date(
+    latestBackupAt.getTime() - CHANGE_DETECTION_SAFETY_WINDOW_MS,
+  );
+
+  return hasBackupRelevantChangesSince(userId, since);
 }
 
 async function getBusinessOwners() {
@@ -85,12 +135,43 @@ async function createUserBackup(userId) {
     };
   }
 
-  if (await hasCloudBackupToday(userId)) {
+  const cloudBackupState = await getCloudBackupState(userId);
+
+  if (cloudBackupState.hasBackupToday) {
     return {
       success: true,
       skipped: true,
       message: "Cloud backup already exists today",
     };
+  }
+
+  if (cloudBackupState.latestBackupAt) {
+    try {
+      const changeCheck = await hasBackupRelevantChangesSinceLastBackup(
+        userId,
+        cloudBackupState.latestBackupAt,
+      );
+
+      if (!changeCheck.hasChanges) {
+        return {
+          success: true,
+          skipped: true,
+          unchanged: true,
+          message: "Backup skipped - no data changes since last backup",
+        };
+      }
+
+      if (changeCheck.collection) {
+        console.log(
+          `Backup changes detected for ${userId} in ${changeCheck.collection}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Backup change check failed for ${userId}, creating backup:`,
+        error.message,
+      );
+    }
   }
 
   let lastError = null;
@@ -175,6 +256,7 @@ async function backupAllUsers({ reason = "scheduled", userIds = null } = {}) {
     total: 0,
     created: 0,
     skipped: 0,
+    unchanged: 0,
     busy: 0,
     failed: 0,
   };
@@ -209,7 +291,15 @@ async function backupAllUsers({ reason = "scheduled", userIds = null } = {}) {
         if (result.success && result.skipped) {
           summary.skipped += 1;
 
-          console.log(`✅ Backup already exists today for ${userId}`);
+          if (result.unchanged) {
+            summary.unchanged += 1;
+
+            console.log(
+              `Backup skipped - no data changes since last backup for ${userId}`,
+            );
+          } else {
+            console.log(`✅ Backup already exists today for ${userId}`);
+          }
 
           continue;
         }

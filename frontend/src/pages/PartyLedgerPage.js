@@ -269,6 +269,7 @@ const PartyLedgerPage = () => {
           setShowSuggestions={setShowSuggestions}
           printSize="A5"
           moduleScope={moduleScope}
+          showAgingLedger={!isTravelLedger}
         />
       }
     >

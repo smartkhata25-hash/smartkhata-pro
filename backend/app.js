@@ -59,6 +59,7 @@ app.use(
 );
 app.use("/api/party-ledger", require("./routes/partyLedgerRoutes"));
 app.use("/api/aging", require("./routes/agingRoutes"));
+app.use("/api/bill-wise-aging", require("./routes/billWiseAgingRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
 app.use("/api/categories", require("./routes/categoryRoutes"));
 

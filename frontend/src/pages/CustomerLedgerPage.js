@@ -12,7 +12,7 @@ import LedgerTable from '../components/LedgerTable';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
-import { FaWhatsapp } from 'react-icons/fa';
+import { FaRegClock, FaWhatsapp } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
 import { fetchTravelCustomers } from '../services/travelMasterService';
 import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
@@ -633,6 +633,32 @@ export default function CustomerLedgerPage() {
             >
               {t('ledger.detailLedger')}
             </button>
+            {!isTravelLedger && (
+              <button
+                title={t('agingLedger.title')}
+                aria-label={t('agingLedger.title')}
+                style={{
+                  height: window.innerWidth < 768 ? 32 : 36,
+                  width: window.innerWidth < 768 ? 36 : 'auto',
+                  padding: window.innerWidth < 768 ? 0 : '0 18px',
+                  borderRadius: 10,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  cursor: cid ? 'pointer' : 'not-allowed',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                disabled={!cid}
+                onClick={() => navigate(`/customer-aging-ledger/${cid}`)}
+              >
+                {window.innerWidth < 768 ? <FaRegClock size={14} /> : t('agingLedger.title')}
+              </button>
+            )}
             <button
               disabled={!cid}
               onClick={() => setShowShareModal(true)}
@@ -863,7 +889,7 @@ export default function CustomerLedgerPage() {
             balance: closingBalance,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

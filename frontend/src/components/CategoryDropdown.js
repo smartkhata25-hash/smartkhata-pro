@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { createCategory } from '../services/categoryService';
+import { t } from '../i18n/i18n';
 
-const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory, onFocus }) => {
+const CategoryDropdown = ({
+  categories = [],
+  value = '',
+  onSelect,
+  onAddCategory,
+  onFocus,
+  inputStyle = {},
+  placeholder = t('inventory.searchCategory'),
+  showAddOption = true,
+  inputProps = {},
+  onGridKeyDown,
+}) => {
   const [query, setQuery] = useState(value);
   const [filtered, setFiltered] = useState([]);
   const [showList, setShowList] = useState(false);
@@ -64,7 +76,12 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
 
   // ⌨️ keyboard
   const handleKeyDown = (e) => {
-    if (!showList || filtered.length === 0) return;
+    if (!showList) {
+      onGridKeyDown && onGridKeyDown(e);
+      return;
+    }
+
+    if (filtered.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -98,8 +115,18 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
       setQuery(created.name);
       setShowList(false);
     } catch (err) {
-      alert('Error adding category');
+      alert(t('alerts.categoryAddFailed'));
     }
+  };
+
+  const defaultInputStyle = {
+    width: '100%',
+    padding: '4px',
+    border: 'none',
+    outline: 'none',
+    textAlign: 'center',
+    fontSize: '13px',
+    background: 'transparent',
   };
 
   return (
@@ -123,16 +150,12 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
             setShowList(true);
             setHighlightIndex(-1);
           }}
-          placeholder="Search category..."
+          placeholder={placeholder}
           style={{
-            width: '100%',
-            padding: '4px',
-            border: 'none',
-            outline: 'none',
-            textAlign: 'center',
-            fontSize: '13px',
-            background: 'transparent',
+            ...defaultInputStyle,
+            ...inputStyle,
           }}
+          {...inputProps}
         />
       </div>
 
@@ -157,7 +180,7 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
             ))}
 
             {/* ➕ add */}
-            {filtered.length === 0 && query.trim() !== '' && (
+            {showAddOption && filtered.length === 0 && query.trim() !== '' && (
               <li
                 onPointerDown={(e) => {
                   e.preventDefault();
@@ -170,7 +193,7 @@ const CategoryDropdown = ({ categories = [], value = '', onSelect, onAddCategory
                   fontWeight: '600',
                 }}
               >
-                ➕ Add as new category "{query}"
+                + {t('inventory.addCategory')} "{query}"
               </li>
             )}
           </ul>,

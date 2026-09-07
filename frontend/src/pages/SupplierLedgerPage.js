@@ -5,7 +5,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
 import LedgerTable from '../components/LedgerTable';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -231,6 +231,7 @@ export default function SupplierLedgerPage() {
       startDate: start || '',
       endDate: end || '',
       size: printSize,
+      lang: getCurrentLanguage(),
     });
 
     try {
@@ -535,6 +536,7 @@ export default function SupplierLedgerPage() {
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize,
+                  lang: getCurrentLanguage(),
                 });
 
                 try {
@@ -739,6 +741,7 @@ export default function SupplierLedgerPage() {
             startDate: start || '',
             endDate: end || '',
             size: printSize,
+            lang: getCurrentLanguage(),
           });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${sid}/pdf?${query}`;
@@ -751,7 +754,7 @@ export default function SupplierLedgerPage() {
             balance: closingBalance,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

@@ -18,7 +18,6 @@ import {
 import { getCategories } from '../../services/categoryService';
 
 import ProductDropdown from '../ProductDropdown';
-
 import CategoryDropdown from '../CategoryDropdown';
 
 import { t } from '../../i18n/i18n';
@@ -27,29 +26,21 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
   const summaryRequestIdRef = useRef(0);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-
   const [drawerTitle, setDrawerTitle] = useState('');
-
   const [drawerType, setDrawerType] = useState('');
-
   const [drawerData, setDrawerData] = useState([]);
-
   const [loading, setLoading] = useState(false);
 
   const [quickFilter, setQuickFilter] = useState('this_month');
-
   const [summaryData, setSummaryData] = useState(data);
 
   const [products, setProducts] = useState([]);
-
   const [categories, setCategories] = useState([]);
 
   const [selectedProduct, setSelectedProduct] = useState('');
-
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const [startDate, setStartDate] = useState('');
-
   const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
@@ -182,7 +173,6 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
 
       if (type === 'sales') {
         setDrawerTitle(t('reports.salesBreakdown'));
-
         response = await getSalesBreakdown(activeFilters);
       }
 
@@ -198,13 +188,11 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
 
       if (type === 'cogs') {
         setDrawerTitle(t('reports.cogsBreakdown'));
-
         response = await getCogsBreakdown(activeFilters);
       }
 
       if (type === 'products') {
         setDrawerTitle(t('reports.productProfitability'));
-
         response = await getProductProfitability(activeFilters);
       }
 
@@ -252,10 +240,107 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <div>
+      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-2 py-3 sm:p-4 overflow-hidden">
+        <style>{`
+          .profit-summary-modal,
+          .profit-summary-modal *,
+          .profit-summary-modal *::before,
+          .profit-summary-modal *::after {
+            box-sizing: border-box;
+          }
+
+          @media (max-width: 767px) {
+            .profit-summary-modal {
+              width: calc(100vw - 16px) !important;
+              max-width: calc(100vw - 16px) !important;
+              max-height: calc(100dvh - 20px) !important;
+              overflow-y: auto !important;
+              overflow-x: hidden !important;
+            }
+
+            .profit-summary-header {
+              padding-left: 16px !important;
+              padding-right: 16px !important;
+            }
+
+            .profit-summary-section {
+              padding-left: 16px !important;
+              padding-right: 16px !important;
+            }
+
+            .profit-summary-control {
+              width: 100% !important;
+              max-width: 100% !important;
+              min-width: 0 !important;
+              height: 42px !important;
+              min-height: 42px !important;
+              padding: 6px 10px !important;
+              font-size: 14px !important;
+              line-height: 20px !important;
+              color: #0f172a !important;
+              background-color: #ffffff !important;
+              border: 1px solid #cbd5e1 !important;
+              border-radius: 8px !important;
+            }
+
+            select.profit-summary-control {
+              height: 42px !important;
+              min-height: 42px !important;
+              padding-top: 5px !important;
+              padding-bottom: 5px !important;
+              -webkit-appearance: menulist !important;
+              appearance: auto !important;
+            }
+
+            .profit-summary-filter-grid {
+              display: grid !important;
+              grid-template-columns: minmax(0, 1fr) !important;
+              gap: 10px !important;
+            }
+
+            .profit-summary-filter-box {
+              width: 100% !important;
+              max-width: 100% !important;
+              min-width: 0 !important;
+            }
+
+            .profit-summary-clear {
+              width: 100% !important;
+              min-height: 42px !important;
+            }
+
+            .profit-summary-custom-dates {
+              grid-template-columns: minmax(0, 1fr) !important;
+              gap: 8px !important;
+            }
+
+            .profit-summary-rows {
+              padding: 16px !important;
+            }
+          }
+
+          @media (max-width: 380px) {
+            .profit-summary-modal {
+              width: calc(100vw - 10px) !important;
+              max-width: calc(100vw - 10px) !important;
+            }
+
+            .profit-summary-header,
+            .profit-summary-section {
+              padding-left: 14px !important;
+              padding-right: 14px !important;
+            }
+
+            .profit-summary-control {
+              font-size: 13px !important;
+            }
+          }
+        `}</style>
+
+        <div className="profit-summary-modal bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+          {/* ================= HEADER ================= */}
+          <div className="profit-summary-header flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div className="min-w-0">
               <h2 className="text-lg font-bold text-gray-800">{t('reports.profitSummary')}</h2>
 
               <p className="text-xs text-gray-500 mt-1">{t('reports.financialOverview')}</p>
@@ -264,13 +349,16 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition"
+              className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition"
+              aria-label="Close"
+              title="Close"
             >
               ✕
             </button>
           </div>
 
-          <div className="px-6 pt-4">
+          {/* ================= QUICK FILTER ================= */}
+          <div className="profit-summary-section px-6 pt-4">
             <select
               value={quickFilter}
               onChange={(e) => {
@@ -283,7 +371,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
                   setEndDate('');
                 }
               }}
-              className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+              className="profit-summary-control w-full border rounded-lg px-3 py-2 text-sm outline-none"
             >
               <option value="today">{t('date.today')}</option>
 
@@ -299,13 +387,13 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
             </select>
 
             {quickFilter === 'custom' && (
-              <div className="grid grid-cols-2 gap-3 mt-3">
+              <div className="profit-summary-custom-dates grid grid-cols-2 gap-3 mt-3">
                 <input
                   type="date"
                   value={startDate}
                   max={endDate || undefined}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="border rounded-lg px-3 py-2 text-sm outline-none"
+                  className="profit-summary-control border rounded-lg px-3 py-2 text-sm outline-none"
                 />
 
                 <input
@@ -313,15 +401,16 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
                   value={endDate}
                   min={startDate || undefined}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="border rounded-lg px-3 py-2 text-sm outline-none"
+                  className="profit-summary-control border rounded-lg px-3 py-2 text-sm outline-none"
                 />
               </div>
             )}
           </div>
 
-          <div className="px-6 pt-4">
-            <div className="grid grid-cols-3 gap-3 items-center">
-              <div className="border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
+          {/* ================= PRODUCT / CATEGORY FILTERS ================= */}
+          <div className="profit-summary-section px-6 pt-4">
+            <div className="profit-summary-filter-grid grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+              <div className="profit-summary-filter-box min-w-0 border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
                 <ProductDropdown
                   productList={products}
                   value={products.find((product) => product._id === selectedProduct)?.name || ''}
@@ -337,7 +426,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
                 />
               </div>
 
-              <div className="border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
+              <div className="profit-summary-filter-box min-w-0 border border-gray-300 rounded-xl px-2 py-1 bg-white shadow-sm">
                 <CategoryDropdown
                   categories={categories}
                   value={
@@ -352,7 +441,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="h-full rounded-xl text-white text-sm font-semibold shadow-md transition hover:scale-[1.02] active:scale-[0.98]"
+                className="profit-summary-clear h-full rounded-xl text-white text-sm font-semibold shadow-md transition hover:scale-[1.02] active:scale-[0.98]"
                 style={{
                   background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%)',
                   minHeight: '44px',
@@ -363,7 +452,8 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
             </div>
           </div>
 
-          <div className="p-6 space-y-1">
+          {/* ================= SUMMARY ROWS ================= */}
+          <div className="profit-summary-rows p-6 space-y-1">
             <Row
               label={t('reports.totalSales')}
               value={summaryData.totalSales}

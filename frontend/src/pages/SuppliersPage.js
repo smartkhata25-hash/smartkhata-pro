@@ -16,7 +16,7 @@ import LedgerTable from '../components/LedgerTable';
 import SupplierLedgerHeader from '../components/SupplierLedgerHeader';
 import { useNavigate } from 'react-router-dom';
 import { useLocation } from 'react-router-dom';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import { FaEdit, FaTrash } from 'react-icons/fa';
@@ -1344,6 +1344,7 @@ const SuppliersPage = () => {
             startDate: ledgerStartDate || '',
             endDate: ledgerEndDate || '',
             size: printSize,
+            lang: getCurrentLanguage(),
           }).toString();
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-ledger/${selectedSupplierId}/pdf?${query}`;
@@ -1354,7 +1355,7 @@ const SuppliersPage = () => {
             balance: closing,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

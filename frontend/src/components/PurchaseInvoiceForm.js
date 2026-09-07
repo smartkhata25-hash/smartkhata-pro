@@ -3,17 +3,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import InvoiceTable from './InvoiceTable';
 import useFormPersist from '../hooks/useFormPersist';
 import SupplierForm from './SupplierForm';
 import PurchaseInvoiceSearchModal from './PurchaseInvoiceSearchModal';
-import { t } from '../i18n/i18n';
+import { getCurrentLanguage, t } from '../i18n/i18n';
 import AttachmentViewerModal from './AttachmentViewerModal';
 import { useNavigate } from 'react-router-dom';
 
 import { hasPermission } from '../utils/permissionHelper';
+import { downloadBackendPdf, openBackendPrintWindow } from '../utils/backendPrintDocument';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -22,7 +21,6 @@ import {
 const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
-  const printRef = useRef();
   const fileInputRef = useRef();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -82,6 +80,7 @@ const PurchaseInvoiceForm = () => {
   const [accountError, setAccountError] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [printLoading, setPrintLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
 
   const [itemHistory, setItemHistory] = useState([]);
@@ -1137,22 +1136,100 @@ const PurchaseInvoiceForm = () => {
     }
   };
 
-  const handlePrint = () => {
-    const content = printRef.current;
-    window.print(content);
+  const buildPurchasePrintPayload = () => {
+    const validItems = isOpeningPurchase
+      ? []
+      : items
+          .filter((item) => item.productId && Number(item.quantity || 0) > 0)
+          .map((item) => ({
+            productId: item.productId,
+            name: item.name || item.search || '',
+            description: item.description || '',
+            uom: item.uom || item.unit || '',
+            quantity: Number(item.quantity || 0),
+            price: Number(item.rate || 0),
+            total: Number(item.amount || 0),
+          }));
+
+    const status =
+      Number(paidAmount || 0) >= Number(grandTotal || 0)
+        ? 'Paid'
+        : Number(paidAmount || 0) > 0
+          ? 'Partial'
+          : 'Unpaid';
+
+    return {
+      lang: getCurrentLanguage(),
+      invoiceDate,
+      invoiceTime,
+      billNo,
+      supplierName: supplierName || '-',
+      supplierPhone,
+      items: validItems,
+      totalAmount,
+      discountPercent,
+      discountAmount: finalDiscount,
+      grandTotal,
+      paidAmount,
+      paymentType,
+      status,
+    };
   };
 
-  const handleDownloadPDF = () => {
-    const content = printRef.current;
-    html2canvas(content).then((canvas) => {
-      const img = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(img);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      pdf.addImage(img, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`purchase_invoice_${billNo}.pdf`);
+  const handlePrint = async () => {
+    await openBackendPrintWindow({
+      url: `${API}/api/print/purchase-preview`,
+      method: 'POST',
+      body: buildPurchasePrintPayload(),
     });
+  };
+
+  const handleDownloadPDF = async () => {
+    if (pdfLoading) return;
+
+    try {
+      setPdfLoading(true);
+
+      await downloadBackendPdf({
+        url: `${API}/api/print/purchase-pdf`,
+        method: 'POST',
+        body: buildPurchasePrintPayload(),
+        fileName: `PurchaseInvoice-${billNo || 'Preview'}.pdf`,
+      });
+    } catch (error) {
+      alert(error.message || t('alerts.pdfFailed'));
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const renderPurchaseHistoryContent = () => {
+    if (loadingHistory) {
+      return <p className="text-xs text-gray-500">{t('common.loading')}</p>;
+    }
+
+    if (itemHistory.length === 0) {
+      return <p className="text-xs text-gray-500">{t('sales.noHistory')}</p>;
+    }
+
+    return (
+      <div className="space-y-2 text-xs max-h-40 overflow-auto md:max-h-none">
+        {itemHistory.map((record, index) => (
+          <div key={index} className="border rounded p-2 bg-white shadow-sm">
+            <p className="font-semibold">{record.supplierName}</p>
+            <p>
+              {t('date')}: {formatBusinessDateForDisplay(record.invoiceDate)}
+            </p>
+            <p>
+              {t('rate')}: Rs. {record.price}
+            </p>
+            <p>
+              {t('qty')}: {record.quantity}
+            </p>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -1167,8 +1244,8 @@ const PurchaseInvoiceForm = () => {
       <form onSubmit={handleSubmit} className="max-w-7xl mx-auto p-6 bg-white rounded shadow">
         <div className="grid grid-cols-12 gap-6">
           {/* 🧾 Main Invoice Section */}
-          <div className={showHistory ? 'col-span-10' : 'col-span-12'}>
-            <div ref={printRef} id="print-section">
+          <div className={showHistory ? 'col-span-12 md:col-span-10' : 'col-span-12'}>
+            <div id="print-section">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">
                   📦
@@ -1610,7 +1687,7 @@ const PurchaseInvoiceForm = () => {
 
                             await new Promise((resolve) => setTimeout(resolve, 150));
 
-                            handlePrint();
+                            await handlePrint();
                           } catch (err) {
                             console.error('❌ Print failed:', err);
 
@@ -1639,8 +1716,11 @@ const PurchaseInvoiceForm = () => {
 
                       <button
                         type="button"
+                        disabled={pdfLoading}
                         onClick={handleDownloadPDF}
-                        className="bg-indigo-600 text-white px-2 py-1 md:px-4 md:py-2 rounded"
+                        className={`text-white px-2 py-1 md:px-4 md:py-2 rounded ${
+                          pdfLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600'
+                        }`}
                       >
                         <span className="md:hidden">📄</span>
                         <span className="hidden md:inline">📄 {t('pdf')}</span>
@@ -1672,7 +1752,7 @@ const PurchaseInvoiceForm = () => {
           </div>
           {/* 📊 History Panel */}
           {showHistory && (
-            <div className="col-span-2 bg-gray-50 border rounded p-3 h-fit">
+            <div className="hidden md:block md:col-span-2 bg-gray-50 border rounded p-3 h-fit">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="font-semibold text-sm">📊 {t('inventory.stockHistory')}</h3>
                 <button
@@ -1684,32 +1764,30 @@ const PurchaseInvoiceForm = () => {
                 </button>
               </div>
 
-              {loadingHistory ? (
-                <p className="text-xs text-gray-500">{t('common.loading')}</p>
-              ) : itemHistory.length === 0 ? (
-                <p className="text-xs text-gray-500">{t('sales.noHistory')}</p>
-              ) : (
-                <div className="space-y-3 text-xs">
-                  {itemHistory.map((record, index) => (
-                    <div key={index} className="border rounded p-2 bg-white shadow-sm">
-                      <p className="font-semibold">{record.supplierName}</p>
-                      <p>
-                        {t('date')}: {formatBusinessDateForDisplay(record.invoiceDate)}
-                      </p>
-                      <p>
-                        {t('rate')}: Rs. {record.price}
-                      </p>
-                      <p>
-                        {t('qty')}: {record.quantity}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {renderPurchaseHistoryContent()}
             </div>
           )}
         </div>
       </form>
+      {showHistory && (
+        <div className="fixed bottom-24 left-1/2 z-50 w-[94%] max-w-md -translate-x-1/2 pointer-events-none md:hidden">
+          <div className="bg-white border rounded-lg shadow-xl p-3 pointer-events-auto">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-semibold text-sm">{t('sales.previous')}</h3>
+
+              <button
+                type="button"
+                onClick={() => setShowHistory(false)}
+                className="text-red-500 text-sm"
+              >
+                ×
+              </button>
+            </div>
+
+            {renderPurchaseHistoryContent()}
+          </div>
+        </div>
+      )}
       {showSearchModal && (
         <PurchaseInvoiceSearchModal
           onClose={() => setShowSearchModal(false)}

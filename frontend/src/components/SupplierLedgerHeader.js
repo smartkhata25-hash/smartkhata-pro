@@ -1,5 +1,5 @@
 import React from 'react';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { FaWhatsapp } from 'react-icons/fa';
 
 const SupplierLedgerHeader = ({
@@ -138,7 +138,7 @@ const SupplierLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -190,7 +190,7 @@ const SupplierLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -378,7 +378,7 @@ const SupplierLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {
@@ -427,7 +427,7 @@ const SupplierLedgerHeader = ({
                   startDate: start || '',
                   endDate: end || '',
                   size: printSize || 'A5',
-                  lang: localStorage.getItem('lang') || 'ur',
+                  lang: getCurrentLanguage(),
                 }).toString();
 
                 try {

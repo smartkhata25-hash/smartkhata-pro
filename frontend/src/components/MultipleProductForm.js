@@ -6,12 +6,58 @@ import { t } from '../i18n/i18n';
 import CategoryDropdown from '../components/CategoryDropdown';
 import HighlightWrapper from '../components/HighlightWrapper';
 import ProductDropdown from '../components/ProductDropdown';
+import useFormPersist from '../hooks/useFormPersist';
+
+const blankProduct = () => ({
+  name: '',
+  rackNo: '',
+  categoryId: '',
+  unit: 'piece',
+  unitCost: '',
+  salePrice: '',
+  stock: '',
+  lowStockThreshold: '',
+  description: '',
+});
+
+const createDefaultRows = () => Array.from({ length: 20 }, () => blankProduct());
+
+const BULK_PRODUCT_FIELDS = [
+  'name',
+  'categoryId',
+  'rackNo',
+  'unit',
+  'unitCost',
+  'salePrice',
+  'stock',
+  'lowStockThreshold',
+  'description',
+];
+
+const hasMeaningfulProductDraft = (product = {}) =>
+  Boolean(
+    String(product.name || '').trim() ||
+      String(product.rackNo || '').trim() ||
+      String(product.categoryId || '').trim() ||
+      (String(product.unit || '').trim() && String(product.unit || '').trim() !== 'piece') ||
+      String(product.unitCost || '').trim() ||
+      String(product.salePrice || '').trim() ||
+      String(product.stock || '').trim() ||
+      String(product.lowStockThreshold || '').trim() ||
+      String(product.description || '').trim()
+  );
+
+const shouldSaveBulkProductDraft = (rows) =>
+  Array.isArray(rows) && rows.some(hasMeaningfulProductDraft);
 
 const MultipleProductForm = ({ onBulkAdd, onClose }) => {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() => createDefaultRows());
   const [categories, setCategories] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
   const [activeCell, setActiveCell] = useState(null);
+  const userId = localStorage.getItem('userId') || 'default';
+  const businessOwnerId = localStorage.getItem('businessOwnerId') || '';
+  const bulkDraftKey = `bulk_products_draft_${businessOwnerId || userId}`;
 
   const scrollRef = useRef();
   // 📱 Mobile detection
@@ -25,10 +71,13 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  useEffect(() => {
-    const defaultRows = Array.from({ length: 20 }, () => blankProduct());
-    setProducts(defaultRows);
+  const { clear: clearBulkDraft } = useFormPersist(bulkDraftKey, products, setProducts, {
+    expiryHours: 24,
+    delay: 600,
+    shouldSave: shouldSaveBulkProductDraft,
+  });
 
+  useEffect(() => {
     loadCategories();
     loadAllProducts();
   }, []);
@@ -45,18 +94,6 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
       console.error('Failed to load products');
     }
   };
-
-  const blankProduct = () => ({
-    name: '',
-    rackNo: '',
-    categoryId: '',
-    unit: 'piece',
-    unitCost: '',
-    salePrice: '',
-    stock: '',
-    lowStockThreshold: '',
-    description: '',
-  });
 
   const handleChange = (index, e) => {
     const updated = [...products];
@@ -84,6 +121,8 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
       const created = await bulkCreateProducts(cleaned);
 
       if (created) {
+        clearBulkDraft();
+
         const newProducts = Array.isArray(created) ? created : [created];
 
         const refreshedProducts = await fetchProducts();
@@ -102,7 +141,7 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
         if (action === 'close') {
           onClose();
         } else if (action === 'new') {
-          setProducts(Array.from({ length: 20 }, () => blankProduct()));
+          setProducts(createDefaultRows());
           scrollRef.current.scrollTop = 0;
         }
       } else {
@@ -114,30 +153,47 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
   };
 
   const handleClear = () => {
-    setProducts(Array.from({ length: 20 }, () => blankProduct()));
+    clearBulkDraft();
+    setProducts(createDefaultRows());
     scrollRef.current.scrollTop = 0;
   };
 
-  const handleKeyNavigation = (e) => {
-    const inputs = Array.from(document.querySelectorAll('input, select'));
-    const currentIndex = inputs.indexOf(e.target);
+  const focusGridCell = (rowIndex, colIndex) => {
+    const target = scrollRef.current?.querySelector(
+      `[data-bulk-product-row="${rowIndex}"][data-bulk-product-col="${colIndex}"]`
+    );
 
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (inputs[currentIndex + 10]) inputs[currentIndex + 10].focus();
+    target?.focus();
+  };
+
+  const handleKeyNavigation = (e, rowIndex, colIndex) => {
+    const key = e.key;
+    let nextRow = rowIndex;
+    let nextCol = colIndex;
+
+    if (key === 'ArrowDown') {
+      nextRow = rowIndex + 1;
+    } else if (key === 'ArrowUp') {
+      nextRow = rowIndex - 1;
+    } else if (key === 'ArrowRight') {
+      nextCol = colIndex + 1;
+    } else if (key === 'ArrowLeft') {
+      nextCol = colIndex - 1;
+    } else {
+      return;
     }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (inputs[currentIndex - 10]) inputs[currentIndex - 10].focus();
+
+    if (
+      nextRow < 0 ||
+      nextRow >= products.length ||
+      nextCol < 0 ||
+      nextCol >= BULK_PRODUCT_FIELDS.length
+    ) {
+      return;
     }
-    if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      if (inputs[currentIndex + 1]) inputs[currentIndex + 1].focus();
-    }
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      if (inputs[currentIndex - 1]) inputs[currentIndex - 1].focus();
-    }
+
+    e.preventDefault();
+    focusGridCell(nextRow, nextCol);
   };
 
   return (
@@ -283,17 +339,7 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
           <tbody>
             {products.map((p, rowIndex) => (
               <tr key={rowIndex}>
-                {[
-                  'name',
-                  'categoryId',
-                  'rackNo',
-                  'unit',
-                  'unitCost',
-                  'salePrice',
-                  'stock',
-                  'lowStockThreshold',
-                  'description',
-                ].map((field, colIndex) => (
+                {BULK_PRODUCT_FIELDS.map((field, colIndex) => (
                   <td key={colIndex}>
                     <HighlightWrapper
                       active={activeCell?.row === rowIndex && activeCell?.col === colIndex}
@@ -312,13 +358,20 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                           onAddCategory={(newCat) => {
                             setCategories((prev) => [...prev, newCat]);
                           }}
+                          inputProps={{
+                            'data-bulk-product-row': rowIndex,
+                            'data-bulk-product-col': colIndex,
+                          }}
+                          onGridKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
                         />
                       ) : field === 'unit' ? (
                         <select
                           name="unit"
                           value={p.unit}
                           onChange={(e) => handleChange(rowIndex, e)}
-                          onKeyDown={handleKeyNavigation}
+                          onKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
+                          data-bulk-product-row={rowIndex}
+                          data-bulk-product-col={colIndex}
                           style={inputStyle(isMobile)}
                         >
                           <option value="piece">{t('units.piece')}</option>
@@ -376,6 +429,11 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                             value={p.name}
                             showAddOption={false}
                             inputStyle={inputStyle(isMobile)}
+                            inputProps={{
+                              'data-bulk-product-row': rowIndex,
+                              'data-bulk-product-col': colIndex,
+                            }}
+                            onGridKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
                             onChange={(value) => {
                               const updated = [...products];
                               updated[rowIndex].name = value;
@@ -428,7 +486,9 @@ const MultipleProductForm = ({ onBulkAdd, onClose }) => {
                           }
                           value={p[field]}
                           onChange={(e) => handleChange(rowIndex, e)}
-                          onKeyDown={handleKeyNavigation}
+                          onKeyDown={(e) => handleKeyNavigation(e, rowIndex, colIndex)}
+                          data-bulk-product-row={rowIndex}
+                          data-bulk-product-col={colIndex}
                           style={inputStyle(isMobile)}
                         />
                       )}

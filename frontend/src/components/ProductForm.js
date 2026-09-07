@@ -9,6 +9,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 
 import ProductDropdown from './ProductDropdown';
+import CategoryDropdown from './CategoryDropdown';
 
 const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMobile }) => {
   const navigate = useNavigate();
@@ -81,7 +82,7 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
     setForm({
       name: editProduct.name || '',
       rackNo: editProduct.rackNo || '',
-      categoryId: editProduct.categoryId?._id || '',
+      categoryId: editProduct.categoryId?._id || editProduct.categoryId || '',
       unit: editProduct.unit || 'piece',
       unitCost: editProduct.unitCost || '',
       salePrice: editProduct.salePrice || '',
@@ -388,24 +389,27 @@ const ProductForm = ({ onAdd, editProduct, onUpdate, clearEdit, closeModal, isMo
 
         {/* Category */}
 
-        <select
-          value={form.categoryId}
-          onChange={(e) =>
+        <CategoryDropdown
+          categories={categories}
+          value={
+            categories.find((cat) => String(cat._id) === String(form.categoryId))?.name || ''
+          }
+          inputStyle={inputStyle}
+          placeholder={t('inventory.searchCategory')}
+          onSelect={(cat) =>
             setForm((prev) => ({
               ...prev,
-              categoryId: e.target.value,
+              categoryId: cat._id,
             }))
           }
-          style={inputStyle}
-        >
-          <option value="">{t('inventory.selectCategory')}</option>
-
-          {categories.map((cat) => (
-            <option key={cat._id} value={cat._id}>
-              {cat.name}
-            </option>
-          ))}
-        </select>
+          onAddCategory={(created) => {
+            setCategories((prev) =>
+              prev.some((cat) => String(cat._id) === String(created._id))
+                ? prev
+                : [...prev, created]
+            );
+          }}
+        />
 
         {/* Add Category */}
 

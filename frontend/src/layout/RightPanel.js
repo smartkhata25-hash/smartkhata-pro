@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaSyncAlt } from 'react-icons/fa';
 
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
@@ -131,7 +132,21 @@ const RightPanel = ({
           type="button"
           onClick={handleRefresh}
           disabled={dashboardSummaryLoading}
-          className="text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed md:hidden"
+          title={t('common.refresh')}
+          aria-label={t('common.refresh')}
+        >
+          <FaSyncAlt
+            aria-hidden="true"
+            className={dashboardSummaryLoading ? 'animate-spin' : ''}
+          />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={dashboardSummaryLoading}
+          className="hidden text-xs px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed md:inline-flex"
         >
           {dashboardSummaryLoading ? 'Refreshing...' : `🔄 ${t('common.refresh')}`}
         </button>

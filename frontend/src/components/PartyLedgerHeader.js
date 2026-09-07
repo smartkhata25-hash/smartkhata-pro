@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from './WhatsAppShareModal';
-import { FaWhatsapp } from 'react-icons/fa';
+import { FaRegClock, FaWhatsapp } from 'react-icons/fa';
 
 const API = process.env.REACT_APP_API_BASE_URL;
 
@@ -30,12 +30,14 @@ const PartyLedgerHeader = ({
   setShowSuggestions,
   printSize = 'A5',
   moduleScope = '',
+  showAgingLedger = true,
 }) => {
   const [showShareModal, setShowShareModal] = React.useState(false);
   const navigate = useNavigate();
   const [pdfLoading, setPdfLoading] = React.useState(false);
 
   const selectedParty = parties.find((p) => String(p._id) === String(partyId));
+  const canShowAgingLedger = showAgingLedger && moduleScope !== 'travel';
 
   const filteredParties = parties
     .filter((p) => (p.name || '').toLowerCase().includes((partyName || '').toLowerCase()))
@@ -46,7 +48,7 @@ const PartyLedgerHeader = ({
       startDate: start || '',
       endDate: end || '',
       size: printSize || 'A5',
-      lang: localStorage.getItem('lang') || 'ur',
+      lang: getCurrentLanguage(),
     });
 
     if (moduleScope) {
@@ -282,6 +284,28 @@ const PartyLedgerHeader = ({
               📊
             </button>
 
+            {canShowAgingLedger && (
+              <button
+                title={t('agingLedger.title')}
+                aria-label={t('agingLedger.title')}
+                style={{
+                  height: 32,
+                  width: 34,
+                  borderRadius: 8,
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                disabled={!partyId}
+                onClick={() => navigate(`/party-aging-ledger/${partyId}`)}
+              >
+                <FaRegClock size={13} />
+              </button>
+            )}
+
             <button
               disabled={!partyId}
               onClick={() => setShowShareModal(true)}
@@ -478,6 +502,16 @@ const PartyLedgerHeader = ({
               {t('ledger.detailLedger')}
             </button>
 
+            {canShowAgingLedger && (
+              <button
+                style={desktopAgingButton}
+                disabled={!partyId}
+                onClick={() => navigate(`/party-aging-ledger/${partyId}`)}
+              >
+                {t('agingLedger.title')}
+              </button>
+            )}
+
             <button
               disabled={!partyId}
               onClick={() => setShowShareModal(true)}
@@ -584,6 +618,7 @@ const PartyLedgerHeader = ({
             startDate: start || '',
             endDate: end || '',
             size: printSize || 'A5',
+            lang: getCurrentLanguage(),
           });
 
           if (moduleScope) {
@@ -601,7 +636,7 @@ const PartyLedgerHeader = ({
             balance: closingBalance,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,
@@ -670,6 +705,16 @@ const desktopDetailButton = {
   padding: '0 10px',
   borderRadius: 10,
   background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+  border: 'none',
+  color: '#ffffff',
+  fontWeight: 600,
+};
+
+const desktopAgingButton = {
+  height: 36,
+  padding: '0 10px',
+  borderRadius: 10,
+  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
   border: 'none',
   color: '#ffffff',
   fontWeight: 600,

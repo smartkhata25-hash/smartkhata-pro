@@ -7,13 +7,13 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
   const canCreateCustomers = hasPermission('customers.create');
   const canEditCustomers = hasPermission('customers.edit');
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
     address: '',
     type: 'regular',
-    moduleScope: 'trading',
     openingBalance: '',
     openingType: 'receivable',
   });
@@ -28,10 +28,7 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
         phone: initialData.phone || '',
         address: initialData.address || '',
         type: initialData.type || 'regular',
-        moduleScope: initialData.moduleScope || 'trading',
-
         openingBalance: Math.abs(opening),
-
         openingType: opening < 0 ? 'payable' : 'receivable',
       });
     }
@@ -54,22 +51,22 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
     };
   }, []);
 
+  useEffect(() => {
+    const esc = (e) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+
+    window.addEventListener('keydown', esc);
+
+    return () => {
+      window.removeEventListener('keydown', esc);
+    };
+  }, [onCancel]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
-
-    if (name === 'openingBalance') {
-      const numericValue = parseFloat(value) || 0;
-
-      setFormData((prev) => ({
-        ...prev,
-
-        openingBalance: value,
-
-        openingType: numericValue < 0 ? 'payable' : 'receivable',
-      }));
-
-      return;
-    }
 
     setFormData((prev) => ({
       ...prev,
@@ -97,32 +94,131 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
 
     const finalOpening =
       formData.openingType === 'payable'
-        ? -Math.abs(formData.openingBalance || 0)
-        : Math.abs(formData.openingBalance || 0);
+        ? -Math.abs(Number(formData.openingBalance) || 0)
+        : Math.abs(Number(formData.openingBalance) || 0);
 
     onSubmit({
       ...formData,
+      moduleScope: 'trading',
       openingBalance: finalOpening,
     });
   };
 
-  useEffect(() => {
-    const esc = (e) => {
-      if (e.key === 'Escape') onCancel();
-    };
-
-    window.addEventListener('keydown', esc);
-
-    return () => window.removeEventListener('keydown', esc);
-  }, [onCancel]);
+  const handleClear = () => {
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      address: '',
+      type: 'regular',
+      openingBalance: '',
+      openingType: 'receivable',
+    });
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
-        <form onSubmit={handleSubmit} style={formStyle}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-1.5 py-2 sm:p-4 overflow-hidden">
+      <style>{`
+        .customer-form-modal,
+        .customer-form-modal *,
+        .customer-form-modal *::before,
+        .customer-form-modal *::after {
+          box-sizing: border-box;
+        }
+
+        @media (max-width: 768px) {
+          .customer-form-modal {
+            width: calc(100vw - 12px) !important;
+            max-width: calc(100vw - 12px) !important;
+            max-height: calc(100dvh - 16px) !important;
+            margin: 0 auto !important;
+            padding: 14px !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+          }
+
+          .customer-form-inner {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .customer-form-control {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            height: 42px !important;
+            min-height: 42px !important;
+            padding: 7px 10px !important;
+            font-size: 14px !important;
+            line-height: 20px !important;
+            color: #0f172a !important;
+            background: #fff !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 6px !important;
+          }
+
+          select.customer-form-control {
+            appearance: auto !important;
+            -webkit-appearance: menulist !important;
+            height: 42px !important;
+            min-height: 42px !important;
+            padding-top: 5px !important;
+            padding-bottom: 5px !important;
+          }
+
+          .customer-opening-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr) !important;
+            gap: 8px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .customer-form-actions {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            justify-content: flex-end !important;
+            gap: 8px !important;
+            width: 100% !important;
+          }
+
+          .customer-form-actions button {
+            min-height: 42px !important;
+            padding: 8px 13px !important;
+            font-size: 14px !important;
+          }
+        }
+
+        @media (max-width: 380px) {
+          .customer-form-modal {
+            width: calc(100vw - 8px) !important;
+            max-width: calc(100vw - 8px) !important;
+            padding: 12px !important;
+          }
+
+          .customer-opening-row {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+          }
+
+          .customer-form-control {
+            font-size: 13px !important;
+          }
+
+          .customer-form-actions button {
+            padding-left: 11px !important;
+            padding-right: 11px !important;
+          }
+        }
+      `}</style>
+
+      <div className="customer-form-modal bg-white rounded-lg shadow-lg w-full max-w-md overflow-y-auto relative">
+        <form onSubmit={handleSubmit} className="customer-form-inner" style={formStyle}>
           <input
             type="text"
             name="name"
+            className="customer-form-control"
             placeholder={t('customerName')}
             value={formData.name}
             onChange={handleChange}
@@ -130,27 +226,26 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
             style={input}
           />
 
-          <select name="type" value={formData.type} onChange={handleChange} style={input}>
+          <select
+            name="type"
+            className="customer-form-control"
+            value={formData.type}
+            onChange={handleChange}
+            style={input}
+          >
             <option value="regular">{t('customer.regular')}</option>
             <option value="vip">{t('customer.vip')}</option>
             <option value="blocked">{t('customer.blocked')}</option>
           </select>
 
-          <select name="moduleScope" value={formData.moduleScope} onChange={handleChange} style={input}>
-            <option value="trading">{t('moduleScope.trading')}</option>
-            <option value="both">{t('moduleScope.both')}</option>
-          </select>
-
-          {!initialData?._id && (
-            <div className="flex gap-2">
+          {!isEditMode && (
+            <div className="customer-opening-row">
               <select
                 name="openingType"
+                className="customer-form-control"
                 value={formData.openingType}
                 onChange={handleChange}
-                style={{
-                  ...input,
-                  width: '40%',
-                }}
+                style={input}
               >
                 <option value="receivable">Receivable</option>
                 <option value="payable">Advance / Payable</option>
@@ -160,20 +255,19 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
                 type="text"
                 inputMode="decimal"
                 name="openingBalance"
-                className="no-spinner"
+                className="customer-form-control no-spinner"
                 placeholder={t('customer.openingBalance')}
                 value={formData.openingBalance}
                 onChange={handleChange}
-                style={{
-                  ...input,
-                  width: '60%',
-                }}
+                style={input}
               />
             </div>
           )}
+
           <input
             type="email"
             name="email"
+            className="customer-form-control"
             placeholder={t('customer.emailOptional')}
             value={formData.email}
             onChange={handleChange}
@@ -183,6 +277,7 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
           <input
             type="text"
             name="phone"
+            className="customer-form-control"
             placeholder={t('customer.phoneOptional')}
             value={formData.phone}
             onChange={handleChange}
@@ -192,36 +287,15 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
           <input
             type="text"
             name="address"
+            className="customer-form-control"
             placeholder={t('customer.addressOptional')}
             value={formData.address}
             onChange={handleChange}
             style={input}
           />
 
-          <div className="flex gap-3 mt-4 justify-end">
-            <button
-              type="button"
-              onClick={() =>
-                setFormData({
-                  name: '',
-                  email: '',
-                  phone: '',
-                  address: '',
-                  type: 'regular',
-                  moduleScope: 'trading',
-                  openingBalance: '',
-                  openingType: 'receivable',
-                })
-              }
-              style={{
-                padding: '10px 15px',
-                backgroundColor: '#f1f5f9',
-                color: '#0f172a',
-                border: '1px solid #cbd5e1',
-                borderRadius: '5px',
-                cursor: 'pointer',
-              }}
-            >
+          <div className="customer-form-actions mt-4">
+            <button type="button" onClick={handleClear} style={buttonClear}>
               {t('clear')}
             </button>
 
@@ -241,9 +315,10 @@ const CustomerForm = ({ onSubmit, initialData = {}, onCancel }) => {
   );
 };
 
-// Basic inline styles (if no CSS module used)
 const formStyle = {
-  maxWidth: '400px',
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
   margin: '0 auto',
   display: 'flex',
   flexDirection: 'column',
@@ -251,9 +326,15 @@ const formStyle = {
 };
 
 const input = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
+  boxSizing: 'border-box',
   padding: '10px',
   borderRadius: '5px',
   border: '1px solid #ccc',
+  color: '#0f172a',
+  backgroundColor: '#fff',
 };
 
 const button = {
@@ -268,6 +349,15 @@ const button = {
 const buttonGray = {
   ...button,
   backgroundColor: '#6c757d',
+};
+
+const buttonClear = {
+  padding: '10px 15px',
+  backgroundColor: '#f1f5f9',
+  color: '#0f172a',
+  border: '1px solid #cbd5e1',
+  borderRadius: '5px',
+  cursor: 'pointer',
 };
 
 export default CustomerForm;

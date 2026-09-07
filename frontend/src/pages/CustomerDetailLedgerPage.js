@@ -3,7 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCustomerDetailedLedger } from '../services/customerDetailLedgerService';
 
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -526,7 +526,7 @@ export default function CustomerDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
-                lang: localStorage.getItem('lang') || 'ur',
+                lang: getCurrentLanguage(),
               });
 
               try {
@@ -592,7 +592,7 @@ export default function CustomerDetailLedgerPage() {
                 startDate: startDate || '',
                 endDate: endDate || '',
                 size: printSize,
-                lang: localStorage.getItem('lang') || 'ur',
+                lang: getCurrentLanguage(),
               });
 
               try {
@@ -867,7 +867,7 @@ export default function CustomerDetailLedgerPage() {
             startDate: startDate || '',
             endDate: endDate || '',
             size: printSize,
-            lang: localStorage.getItem('lang') || 'ur',
+            lang: getCurrentLanguage(),
           });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/customer-detail-ledger/${selectedCustomerId}/pdf?${query}`;
@@ -878,7 +878,7 @@ export default function CustomerDetailLedgerPage() {
             balance: summary.closing,
             businessName: 'Your Business',
             mobile: '',
-            lang: localStorage.getItem('lang') || 'ur',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

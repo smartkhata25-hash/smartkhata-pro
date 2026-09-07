@@ -530,11 +530,12 @@ const MainLayout = () => {
     setIsTravelReminderCenterOpen(true);
   }, []);
 
-  /*
-   * Right Panel outside-click handling.
-   */
   useEffect(() => {
     const handleClickOutside = (event) => {
+      if (isMobile) {
+        return;
+      }
+
       if (event.target.closest('[data-right-panel-toggle="true"]')) {
         return;
       }
@@ -550,14 +551,10 @@ const MainLayout = () => {
 
     document.addEventListener('mousedown', handleClickOutside);
 
-    document.addEventListener('touchstart', handleClickOutside);
-
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-
-      document.removeEventListener('touchstart', handleClickOutside);
     };
-  }, [isRightPanelOpen]);
+  }, [isRightPanelOpen, isMobile]);
 
   const outletContext = {
     dashboardSummary,
@@ -744,15 +741,17 @@ const MainLayout = () => {
 
                 <div
                   ref={rightPanelRef}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onTouchStart={(event) => event.stopPropagation()}
                   className={`
-                    fixed right-0 top-0 z-40 h-full
-                    ${rightPanelWidthClass}
-                    bg-white shadow-lg
-                    transform
-                    transition-transform duration-300
-                    ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
-                    md:hidden
-                  `}
+  fixed right-0 top-0 z-[60] h-full
+  ${rightPanelWidthClass}
+  bg-white shadow-lg
+  transform
+  transition-transform duration-300
+  ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+  md:hidden
+`}
                 >
                   {isRightPanelOpen && renderRightPanel()}
                 </div>

@@ -2,6 +2,18 @@ const express = require("express");
 const router = express.Router();
 
 const printController = require("../controllers/printController");
+const {
+  getInventoryReportHtml,
+  generateInventoryReportPdf,
+  getProductLedgerHtml,
+  generateProductLedgerPdf,
+} = require("../controllers/inventoryPrintController");
+const {
+  getPurchasePreviewHtml,
+  generatePurchasePreviewPdf,
+  getPurchaseInvoiceHtml,
+  generateSavedPurchasePdf,
+} = require("../controllers/purchasePrintController");
 
 const {
   getSupplierLedgerHtml,
@@ -43,6 +55,8 @@ router.post(
   printController.saleReturnPreview,
 );
 
+router.post("/purchase-preview", authMiddleware, getPurchasePreviewHtml);
+
 router.post("/sale-pdf", authMiddleware, printController.generateSalePdf);
 
 router.post(
@@ -50,6 +64,8 @@ router.post(
   authMiddleware,
   printController.generateSaleReturnPdf,
 );
+
+router.post("/purchase-pdf", authMiddleware, generatePurchasePreviewPdf);
 
 router.post("/sale-pdf", authMiddleware, printController.generateSalePdf);
 
@@ -69,6 +85,26 @@ router.get(
   "/sale-return-html/:id",
   authMiddleware,
   printController.getSaleReturnHtml,
+);
+
+router.get("/purchase-html/:id", authMiddleware, getPurchaseInvoiceHtml);
+
+router.get("/purchase-pdf/:id", authMiddleware, generateSavedPurchasePdf);
+
+router.get("/products/html", authMiddleware, getInventoryReportHtml);
+
+router.get("/products/pdf", authMiddleware, generateInventoryReportPdf);
+
+router.get(
+  "/product-ledger/:productId/html",
+  authMiddleware,
+  getProductLedgerHtml,
+);
+
+router.get(
+  "/product-ledger/:productId/pdf",
+  authMiddleware,
+  generateProductLedgerPdf,
 );
 
 router.post(

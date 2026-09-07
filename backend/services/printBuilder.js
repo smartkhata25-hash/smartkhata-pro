@@ -74,6 +74,9 @@ const buildInvoice = (data, docConfig, title) => {
     /* ================= PARTY ================= */
     party: {
       label: data.partyLabel || "Customer",
+      labelKey: data.partyLabelKey || "",
+      balanceLabel: data.balanceLabel || "",
+      balanceLabelKey: data.balanceLabelKey || "",
       name: data.customerName || "",
       phone: data.customerPhone || "",
       by: setting.showBy ? data.by || "" : "",
@@ -111,8 +114,8 @@ const buildInvoice = (data, docConfig, title) => {
     items: (data.items || []).map((item) => ({
       productId: item.productId,
       name: item.name || item.productId?.name || "",
-      description: item.description || "",
-      uom: item.uom || "",
+      description: item.description || item.productId?.description || "",
+      uom: item.uom || item.unit || item.productId?.uom || item.productId?.unit || "",
       quantity: safeNumber(item.quantity),
       price: safeNumber(item.price),
       total: safeNumber(item.total),
@@ -173,7 +176,27 @@ const buildSaleReturnPrint = (refund, printSetting) => {
   return buildInvoice(refund, doc, "Sale Return");
 };
 
+const buildPurchaseInvoicePrint = (invoice, printSetting) => {
+  if (!printSetting || !printSetting.purchase) {
+    throw new Error("Purchase print settings missing");
+  }
+
+  const doc = printSetting.purchase;
+
+  return buildInvoice(
+    {
+      ...invoice,
+      partyLabelKey: "supplier",
+      customerName: invoice.supplierName || invoice.customerName || "",
+      customerPhone: invoice.supplierPhone || invoice.customerPhone || "",
+    },
+    doc,
+    "Purchase Invoice",
+  );
+};
+
 module.exports = {
   buildSaleInvoicePrint,
   buildSaleReturnPrint,
+  buildPurchaseInvoicePrint,
 };

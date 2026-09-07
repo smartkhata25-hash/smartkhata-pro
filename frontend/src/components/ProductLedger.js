@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { fetchProductLedger } from '../services/productLedgerService';
 import { fetchProducts } from '../services/inventoryService';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
+import { buildPrintQuery, downloadBackendPdf } from '../utils/backendPrintDocument';
+
+const API = process.env.REACT_APP_API_BASE_URL;
 
 const ProductLedger = ({ productId }) => {
   const [ledger, setLedger] = useState(null);
@@ -23,7 +24,6 @@ const ProductLedger = ({ productId }) => {
       setProductSearch(selected.name);
     }
   }, [selectedProduct, products]);
-  const tableRef = useRef();
   const navigate = useNavigate();
 
   const loadLedger = async () => {
@@ -48,19 +48,28 @@ const ProductLedger = ({ productId }) => {
     }
   }, [selectedProduct, startDate, endDate]);
 
+  const buildProductLedgerQuery = () =>
+    buildPrintQuery({
+      startDate,
+      endDate,
+      partySearch,
+      type: filterType,
+    });
+
   const handlePDF = async () => {
-    const input = tableRef.current;
-    const canvas = await html2canvas(input);
-    const imgData = canvas.toDataURL('image/png');
+    if (!selectedProduct) return;
 
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const imgProps = pdf.getImageProperties(imgData);
+    try {
+      const selectedName = products.find((p) => p._id === selectedProduct)?.name || 'Product';
+      const safeName = selectedName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-');
 
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-    pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-    pdf.save('Product_Ledger.pdf');
+      await downloadBackendPdf({
+        url: `${API}/api/print/product-ledger/${selectedProduct}/pdf?${buildProductLedgerQuery()}`,
+        fileName: `${safeName || 'Product'}-Ledger.pdf`,
+      });
+    } catch (error) {
+      alert(error.message || t('alerts.pdfFailed'));
+    }
   };
   if (!selectedProduct) {
     return <p style={{ padding: '20px' }}>🔍 {t('inventory.selectProductMessage')}</p>;
@@ -340,7 +349,6 @@ const ProductLedger = ({ productId }) => {
         }}
       >
         <div
-          ref={tableRef}
           style={{
             flex: 1,
             overflowY: 'auto',

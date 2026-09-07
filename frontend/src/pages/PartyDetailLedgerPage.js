@@ -10,7 +10,7 @@ import { fetchParties } from '../services/partyService';
 import { getPartyDetailedLedger } from '../services/partyDetailLedgerService';
 
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
-import { t } from '../i18n/i18n';
+import { t, getCurrentLanguage } from '../i18n/i18n';
 
 import { FaWhatsapp } from 'react-icons/fa';
 
@@ -296,7 +296,7 @@ const PartyDetailLedgerPage = () => {
       startDate: startDate || '',
       endDate: endDate || '',
       size: printSize || 'A5',
-      lang: localStorage.getItem('lang') || 'ur',
+      lang: getCurrentLanguage(),
     }).toString();
 
   const handleSelectParty = (party) => {
@@ -1010,7 +1010,7 @@ const PartyDetailLedgerPage = () => {
 
             mobile: '',
 
-            lang: localStorage.getItem('lang') || 'ur',
+            lang: getCurrentLanguage(),
 
             pdfUrl,
             token,

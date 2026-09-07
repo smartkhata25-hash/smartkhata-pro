@@ -12,6 +12,8 @@ const ProductDropdown = ({
   rowIndex,
   showAddOption = true,
   inputStyle = {},
+  inputProps = {},
+  onGridKeyDown,
 }) => {
   const [query, setQuery] = useState(value);
 
@@ -104,7 +106,12 @@ const ProductDropdown = ({
 
   // ⌨️ Keyboard Navigation
   const handleKeyDown = (e) => {
-    if (!showList || filtered.length === 0) return;
+    if (!showList) {
+      onGridKeyDown && onGridKeyDown(e);
+      return;
+    }
+
+    if (filtered.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -175,6 +182,7 @@ const ProductDropdown = ({
           className="w-full border p-1 text-sm"
           style={inputStyle}
           autoComplete="off"
+          {...inputProps}
           onBlur={() => {
             setTimeout(() => {
               setShowList(false);

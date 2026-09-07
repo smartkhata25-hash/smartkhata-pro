@@ -27,6 +27,14 @@ const generateSaleInvoiceHTML = (data) => {
       ? totals.balance
       : total - paid;
 
+  const partyLabel = party?.labelKey
+    ? t(party.labelKey, lang)
+    : party?.label || t("customer", lang);
+
+  const balanceLabel = party?.balanceLabelKey
+    ? t(party.balanceLabelKey, lang)
+    : party?.balanceLabel || t("customerTotalBalance", lang);
+
   /* ================= HEADER & FOOTER SIZE SCALE ================= */
 
   const headerScale =
@@ -288,7 +296,7 @@ ${
 
 <div class="info-section">
   <div class="info-left">
-    <div><strong>${t("customer", lang)}:</strong> ${party?.name || "-"}</div>
+    <div><strong>${partyLabel}:</strong> ${party?.name || "-"}</div>
     <div><strong>${t("phone", lang)}:</strong> ${party?.phone || "-"}</div>
     ${party?.by ? `<div><strong>${t("invoice.by", lang)}:</strong> ${party.by}</div>` : ""}
   </div>
@@ -384,7 +392,7 @@ ${
    party?.customerTotalBalance !== undefined
      ? `
 <div class="totals-row">
-  <span>${t("customerTotalBalance", lang)}:</span>
+  <span>${balanceLabel}:</span>
   <span>${party.customerTotalBalance}</span>
 </div>
 `

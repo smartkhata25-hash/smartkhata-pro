@@ -812,6 +812,7 @@ export default function SupplierDetailLedgerPage() {
             startDate: startDate || '',
             endDate: endDate || '',
             size: printSize,
+            lang: getCurrentLanguage(),
           });
 
           const pdfUrl = `${process.env.REACT_APP_API_BASE_URL}/api/print/supplier-detail-ledger/${selectedSupplierId}/pdf?${query}`;
@@ -824,7 +825,7 @@ export default function SupplierDetailLedgerPage() {
             balance: summary.closing,
             businessName: 'Your Business',
             mobile: '',
-            lang: 'en',
+            lang: getCurrentLanguage(),
             pdfUrl,
             token,
             preferredApp: type,

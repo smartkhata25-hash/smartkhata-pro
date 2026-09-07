@@ -25,8 +25,39 @@ const ADJUSTMENT_SOURCE_TYPES = Object.freeze([
   "adjustment",
 ]);
 
+const SALE_INVOICE_SOURCE_TYPES = Object.freeze([
+  "sale_invoice",
+  "opening_sale_invoice",
+]);
+
+const REFUND_INVOICE_SOURCE_TYPES = Object.freeze([
+  "refund_invoice",
+  "opening_refund_invoice",
+]);
+
 const TRAVEL_ORIGIN_PREFIX = "travel_";
 const MONEY_EPSILON = 0.004;
+
+const INVOICE_SELECT_FIELDS = [
+  "billNo",
+  "invoiceDate",
+  "invoiceTime",
+  "dueDate",
+  "totalAmount",
+  "status",
+  "isOpening",
+  "createdAt",
+].join(" ");
+
+const REFUND_SELECT_FIELDS = [
+  "billNo",
+  "invoiceDate",
+  "invoiceTime",
+  "totalAmount",
+  "originalInvoiceId",
+  "isOpening",
+  "createdAt",
+].join(" ");
 
 const makeHttpError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -143,6 +174,19 @@ const getAccountLineAmount = (entry, accountId, lineType) => {
 
     return sum + safeNumber(line.amount);
   }, 0);
+};
+
+const getReferencedDocumentIds = (entry = {}) => {
+  const ids = new Set();
+
+  [entry.referenceId, entry.invoiceId].forEach((value) => {
+    const id = value ? String(value) : "";
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      ids.add(id);
+    }
+  });
+
+  return [...ids];
 };
 
 const getEntityConfig = (entityType) => {
@@ -332,6 +376,119 @@ const applyGenericEventsFifo = ({ rows, events }) => {
   }
 };
 
+const fetchCustomerJournalDocumentIds = async ({
+  accountObjectId,
+  asOfEnd,
+  lineType,
+  sourceTypes,
+  userObjectId,
+}) => {
+  const entries = await JournalEntry.find({
+    createdBy: userObjectId,
+    isDeleted: { $ne: true },
+    isReversed: { $ne: true },
+    isReversal: { $ne: true },
+    sourceType: { $in: sourceTypes },
+    date: { $lt: asOfEnd },
+    "lines.account": accountObjectId,
+  })
+    .select(
+      [
+        "sourceType",
+        "originModule",
+        "referenceId",
+        "invoiceId",
+        "lines.account",
+        "lines.type",
+        "lines.amount",
+      ].join(" "),
+    )
+    .lean();
+
+  const ids = new Set();
+
+  for (const entry of entries) {
+    if (!isTradingJournalEntry(entry)) continue;
+
+    const amount = roundMoney(
+      getAccountLineAmount(entry, accountObjectId, lineType),
+    );
+
+    if (amount <= MONEY_EPSILON) continue;
+
+    getReferencedDocumentIds(entry).forEach((id) => ids.add(id));
+  }
+
+  return ids;
+};
+
+const fetchAgingInvoices = async ({
+  accountObjectId,
+  asOfEnd,
+  config,
+  entityObjectId,
+  entityType,
+  userObjectId,
+}) => {
+  const invoices = await Invoice.find({
+    createdBy: userObjectId,
+    isDeleted: { $ne: true },
+    [config.invoiceField]: entityObjectId,
+    invoiceDate: { $lt: asOfEnd },
+  })
+    .select(INVOICE_SELECT_FIELDS)
+    .sort({
+      invoiceDate: 1,
+      invoiceTime: 1,
+      createdAt: 1,
+      _id: 1,
+    })
+    .lean();
+
+  if (entityType !== ENTITY_TYPES.CUSTOMER) {
+    return invoices;
+  }
+
+  const invoiceMap = new Map(
+    invoices.map((invoice) => [String(invoice._id), invoice]),
+  );
+  const journalInvoiceIds = await fetchCustomerJournalDocumentIds({
+    accountObjectId,
+    asOfEnd,
+    lineType: "debit",
+    sourceTypes: SALE_INVOICE_SOURCE_TYPES,
+    userObjectId,
+  });
+  const missingInvoiceIds = [...journalInvoiceIds].filter(
+    (id) => !invoiceMap.has(id),
+  );
+
+  if (missingInvoiceIds.length > 0) {
+    const legacyInvoices = await Invoice.find({
+      _id: {
+        $in: missingInvoiceIds.map((id) => new mongoose.Types.ObjectId(id)),
+      },
+      createdBy: userObjectId,
+      isDeleted: { $ne: true },
+      invoiceDate: { $lt: asOfEnd },
+    })
+      .select(INVOICE_SELECT_FIELDS)
+      .sort({
+        invoiceDate: 1,
+        invoiceTime: 1,
+        createdAt: 1,
+        _id: 1,
+      })
+      .lean();
+
+    for (const invoice of legacyInvoices) {
+      invoiceMap.set(String(invoice._id), invoice);
+    }
+  }
+
+  return [...invoiceMap.values()];
+};
+
 const fetchPaymentEvents = async ({
   accountObjectId,
   asOfEnd,
@@ -417,29 +574,21 @@ const fetchPaymentEvents = async ({
 };
 
 const fetchRefundEvents = async ({
+  accountObjectId,
   entityObjectId,
+  entityType,
   config,
   asOfEnd,
   invoiceIdSet,
   userObjectId,
 }) => {
-  const refunds = await RefundInvoice.find({
+  const primaryRefunds = await RefundInvoice.find({
     createdBy: userObjectId,
     isDeleted: { $ne: true },
     [config.refundField]: entityObjectId,
     invoiceDate: { $lt: asOfEnd },
   })
-    .select(
-      [
-        "billNo",
-        "invoiceDate",
-        "invoiceTime",
-        "totalAmount",
-        "originalInvoiceId",
-        "isOpening",
-        "createdAt",
-      ].join(" "),
-    )
+    .select(REFUND_SELECT_FIELDS)
     .sort({
       invoiceDate: 1,
       invoiceTime: 1,
@@ -447,6 +596,53 @@ const fetchRefundEvents = async ({
       _id: 1,
     })
     .lean();
+
+  let refunds = primaryRefunds;
+
+  if (entityType === ENTITY_TYPES.CUSTOMER) {
+    const refundMap = new Map(
+      primaryRefunds.map((refund) => [String(refund._id), refund]),
+    );
+    const journalRefundIds = await fetchCustomerJournalDocumentIds({
+      accountObjectId,
+      asOfEnd,
+      lineType: "credit",
+      sourceTypes: REFUND_INVOICE_SOURCE_TYPES,
+      userObjectId,
+    });
+    const missingRefundIds = [...journalRefundIds].filter(
+      (id) => !refundMap.has(id),
+    );
+
+    if (missingRefundIds.length > 0) {
+      const legacyRefunds = await RefundInvoice.find({
+        _id: {
+          $in: missingRefundIds.map((id) => new mongoose.Types.ObjectId(id)),
+        },
+        createdBy: userObjectId,
+        isDeleted: { $ne: true },
+        invoiceDate: { $lt: asOfEnd },
+        $or: [
+          { [config.refundField]: { $exists: false } },
+          { [config.refundField]: null },
+        ],
+      })
+        .select(REFUND_SELECT_FIELDS)
+        .sort({
+          invoiceDate: 1,
+          invoiceTime: 1,
+          createdAt: 1,
+          _id: 1,
+        })
+        .lean();
+
+      for (const refund of legacyRefunds) {
+        refundMap.set(String(refund._id), refund);
+      }
+    }
+
+    refunds = [...refundMap.values()];
+  }
 
   const explicitEvents = [];
   const genericEvents = [];
@@ -538,31 +734,14 @@ const getBillWiseReceivableAging = async ({
       userObjectId,
     });
 
-  const invoices = await Invoice.find({
-    createdBy: userObjectId,
-    isDeleted: { $ne: true },
-    [config.invoiceField]: entityObjectId,
-    invoiceDate: { $lt: asOfEnd },
-  })
-    .select(
-      [
-        "billNo",
-        "invoiceDate",
-        "invoiceTime",
-        "dueDate",
-        "totalAmount",
-        "status",
-        "isOpening",
-        "createdAt",
-      ].join(" "),
-    )
-    .sort({
-      invoiceDate: 1,
-      invoiceTime: 1,
-      createdAt: 1,
-      _id: 1,
-    })
-    .lean();
+  const invoices = await fetchAgingInvoices({
+    accountObjectId,
+    asOfEnd,
+    config,
+    entityObjectId,
+    entityType,
+    userObjectId,
+  });
 
   const rows = buildInvoiceRows({
     invoices,
@@ -578,7 +757,9 @@ const getBillWiseReceivableAging = async ({
     userObjectId,
   });
   const refundEvents = await fetchRefundEvents({
+    accountObjectId,
     entityObjectId,
+    entityType,
     config,
     asOfEnd,
     invoiceIdSet,

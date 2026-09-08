@@ -233,9 +233,6 @@ const createBaseAccountsForUser = async (userId) => {
       moduleScope: "trading",
     },
 
-    // 💳 SHARED PAYMENT ACCOUNTS
-    // ایک ہی account دونوں modules میں استعمال ہوگا،
-    // لیکن Trading اور Travel balance الگ calculate ہوگا۔
     {
       name: "HANDCASH",
       type: "Asset",
@@ -292,11 +289,12 @@ const createBaseAccountsForUser = async (userId) => {
           normalBalance: acc.normalBalance,
           openingBalance: 0,
           isSystem: acc.isSystem,
-          moduleScope: acc.moduleScope || "trading",
+          ...(isSharedPaymentAccount
+            ? {}
+            : { moduleScope: acc.moduleScope || "trading" }),
           isActive: true,
         },
 
-        // Existing HANDCASH/BANK/EASYPAISA/JAZZCASH بھی درست ہو جائیں۔
         ...(isSharedPaymentAccount
           ? {
               $set: {

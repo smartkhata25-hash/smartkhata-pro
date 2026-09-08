@@ -17,14 +17,15 @@ const {
 } = require("../utils/moduleScope");
 const {
   getTravelCustomerBalanceMap,
-  getTravelCustomerJournalFilter,
   roundMoney,
 } = require("../services/travel/travelAccountingMetricsService");
 const {
-  buildBusinessDateRange,
+  enrichCustomerLedgerRows,
+  getCustomerLedgerCore,
+} = require("../services/customerLedgerCoreService");
+const {
   getCurrentBusinessTimeInput,
   parseBusinessDateTime,
-  startOfBusinessDay,
 } = require("../utils/businessDate");
 
 const escapeRegex = (text = "") => {
@@ -1403,316 +1404,31 @@ const getCustomerDetailedLedger = async (req, res) => {
     const { id: customerId } = req.params;
     const { startDate, endDate, moduleScope = "" } = req.query;
 
-    if (
-      !userId ||
-      !mongoose.Types.ObjectId.isValid(userId) ||
-      !mongoose.Types.ObjectId.isValid(customerId)
-    ) {
-      return res.status(400).json({
-        message: "Invalid customer or user",
-      });
-    }
-
-    const userObjectId = new mongoose.Types.ObjectId(userId);
-    const customerObjectId = new mongoose.Types.ObjectId(customerId);
-
-    const customer = await Customer.findOne({
-      _id: customerObjectId,
-      createdBy: userObjectId,
-    })
-      .populate("account")
-      .lean();
-
-    if (!customer || !customer.account) {
-      return res.status(404).json({
-        message: "Customer not found",
-      });
-    }
-
-    const accountObjectId =
-      customer.account?._id instanceof mongoose.Types.ObjectId
-        ? customer.account._id
-        : new mongoose.Types.ObjectId(customer.account);
-
-    const accountId = accountObjectId.toString();
-    const travelJournalFilter =
-      moduleScope === "travel" ? getTravelCustomerJournalFilter() : {};
-    const reversalVisibilityFilter =
-      moduleScope === "travel" ? {} : { sourceType: { $ne: "reversal" } };
-
-    let openingBalance = 0;
-
-    if (startDate) {
-      const start = startOfBusinessDay(startDate);
-
-      const result = await JournalEntry.aggregate([
-        {
-          $match: {
-            createdBy: userObjectId,
-            customerId: customerObjectId,
-            isDeleted: false,
-            ...reversalVisibilityFilter,
-            "lines.account": accountObjectId,
-            ...travelJournalFilter,
-            date: {
-              $lt: start,
-            },
-          },
-        },
-        {
-          $unwind: "$lines",
-        },
-        {
-          $match: {
-            "lines.account": accountObjectId,
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            balance: {
-              $sum: {
-                $cond: [
-                  {
-                    $eq: ["$lines.type", "debit"],
-                  },
-                  "$lines.amount",
-                  {
-                    $multiply: ["$lines.amount", -1],
-                  },
-                ],
-              },
-            },
-          },
-        },
-      ]);
-
-      openingBalance = Number(result[0]?.balance || 0);
-    }
-
-    const match = {
-      createdBy: userObjectId,
-      customerId: customerObjectId,
-      isDeleted: false,
-      ...reversalVisibilityFilter,
-      "lines.account": accountObjectId,
-      ...travelJournalFilter,
-    };
-
-    const ledgerDateRange = buildBusinessDateRange({
+    const core = await getCustomerLedgerCore({
+      customerId,
+      userId,
       startDate,
       endDate,
-    }).date;
-
-    if (ledgerDateRange) {
-      match.date = ledgerDateRange;
-    }
-
-    const journals = await JournalEntry.find(match)
-      .select(
-        "date time billNo description sourceType originModule lines invoiceId referenceId",
-      )
-      .sort({
-        date: 1,
-        time: 1,
-        _id: 1,
-      })
-      .lean();
-
-    let balance = openingBalance;
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    const ledger = [];
-
-    const saleInvoiceIds = new Set();
-    const refundInvoiceIds = new Set();
-
-    for (const entry of journals) {
-      if (!Array.isArray(entry.lines)) {
-        continue;
-      }
-
-      const customerLines = entry.lines.filter(
-        (line) => line.account?.toString() === accountId,
-      );
-
-      if (customerLines.length === 0) {
-        continue;
-      }
-
-      let debit = 0;
-      let credit = 0;
-
-      for (const line of customerLines) {
-        const amount = Number(line.amount || 0);
-
-        if (line.type === "debit") {
-          debit += amount;
-        }
-
-        if (line.type === "credit") {
-          credit += amount;
-        }
-      }
-
-      totalDebit += debit;
-      totalCredit += credit;
-
-      balance += debit - credit;
-
-      const row = {
-        _id: entry._id,
-        referenceId: entry.referenceId || entry._id,
-        invoiceId: entry.invoiceId || null,
-        date: entry.date,
-        time: entry.time || "",
-        billNo: entry.billNo || "",
-        sourceType: entry.sourceType || "",
-        originModule: entry.originModule || "",
-        sourceLabel:
-          entry.originModule === "travel_receive_payment" &&
-          entry.sourceType === "receive_payment"
-            ? "Travel Payment"
-            : entry.originModule === TRAVEL_CUSTOMER_OPENING_ORIGIN &&
-          entry.sourceType === "travel_adjustment"
-            ? "Travel Customer Opening Balance"
-            : entry.originModule === "travel_invoice" &&
-          entry.sourceType === "receive_payment"
-            ? "Travel Invoice Payment"
-            : entry.originModule === "travel_refund" &&
-                entry.sourceType === "refund_payment"
-              ? "Travel Refund Payment"
-              : entry.sourceType === "reversal"
-                ? "Travel Reversal"
-              : entry.sourceType === "travel_booking"
-                ? "Travel Invoice"
-                : entry.sourceType === "travel_refund"
-                  ? "Travel Refund"
-                  : "",
-        description: entry.description || "",
-        debit,
-        credit,
-        balance,
-        items: [],
-      };
-
-      if (
-        ["sale_invoice", "opening_sale_invoice"].includes(entry.sourceType) &&
-        entry.invoiceId
-      ) {
-        saleInvoiceIds.add(entry.invoiceId.toString());
-      }
-
-      if (
-        ["refund_invoice", "opening_refund_invoice"].includes(
-          entry.sourceType,
-        ) &&
-        entry.invoiceId
-      ) {
-        refundInvoiceIds.add(entry.invoiceId.toString());
-      }
-
-      ledger.push(row);
-    }
-
-    const saleIds = Array.from(saleInvoiceIds);
-    const refundIds = Array.from(refundInvoiceIds);
-
-    const [invoices, refunds] = await Promise.all([
-      saleIds.length
-        ? Invoice.find({
-            _id: {
-              $in: saleIds,
-            },
-            createdBy: userObjectId,
-            isDeleted: { $ne: true },
-          })
-            .select("items totalAmount")
-            .populate("items.productId", "name")
-            .lean()
-        : [],
-
-      refundIds.length
-        ? RefundInvoice.find({
-            _id: {
-              $in: refundIds,
-            },
-            createdBy: userObjectId,
-            isDeleted: { $ne: true },
-          })
-            .select("items totalAmount")
-            .populate("items.productId", "name")
-            .lean()
-        : [],
-    ]);
-
-    const invoiceMap = new Map();
-    const refundMap = new Map();
-
-    for (const invoice of invoices) {
-      invoiceMap.set(invoice._id.toString(), invoice);
-    }
-
-    for (const refund of refunds) {
-      refundMap.set(refund._id.toString(), refund);
-    }
-
-    for (const row of ledger) {
-      if (
-        ["sale_invoice", "opening_sale_invoice"].includes(row.sourceType) &&
-        row.invoiceId
-      ) {
-        const invoice = invoiceMap.get(row.invoiceId.toString());
-
-        if (invoice) {
-          row.invoiceTotal = Number(invoice.totalAmount || 0);
-
-          row.items = Array.isArray(invoice.items)
-            ? invoice.items.map((item) => ({
-                productName: item.productId?.name || "Product",
-                quantity: Number(item.quantity || 0),
-                rate: Number(item.price || 0),
-                total: Number(item.total || 0),
-              }))
-            : [];
-        }
-      }
-
-      if (
-        ["refund_invoice", "opening_refund_invoice"].includes(row.sourceType) &&
-        row.invoiceId
-      ) {
-        const refund = refundMap.get(row.invoiceId.toString());
-
-        if (refund) {
-          row.invoiceTotal = Number(refund.totalAmount || 0);
-
-          row.items = Array.isArray(refund.items)
-            ? refund.items.map((item) => ({
-                productName: item.productId?.name || "Product",
-                quantity: Number(item.quantity || 0),
-                rate: Number(item.price || 0),
-                total: Number(item.total || 0),
-              }))
-            : [];
-        }
-      }
-    }
+      moduleScope,
+    });
+    const ledger = await enrichCustomerLedgerRows({
+      ledger: core.ledger,
+      userId,
+    });
 
     return res.json({
-      customerName: customer.name || "-",
-      openingBalance: Number(openingBalance || 0),
-      totalDebit: Number(totalDebit || 0),
-      totalCredit: Number(totalCredit || 0),
-      closingBalance: Number(balance || 0),
+      customerName: core.customerName,
+      openingBalance: Number(core.openingBalance || 0),
+      totalDebit: Number(core.totalDebit || 0),
+      totalCredit: Number(core.totalCredit || 0),
+      closingBalance: Number(core.closingBalance || 0),
       ledger,
     });
   } catch (error) {
     console.error("Customer Detailed Ledger Error:", error);
 
-    return res.status(500).json({
-      message: "Server error",
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Server error",
       error: error.message,
     });
   }

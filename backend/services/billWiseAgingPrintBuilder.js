@@ -38,17 +38,32 @@ const buildBillWiseAgingPrintData = ({ agingData, lang = "en" }) => {
         days90plus: safeNumber(data.summary?.buckets?.days90plus),
       },
     },
-    rows: rows.map((row) => ({
-      billNo: row.billNo || "-",
-      invoiceDate: formatDate(row.invoiceDateKey || row.invoiceDate),
-      dueDate: row.dueDateKey || row.dueDate ? formatDate(row.dueDateKey || row.dueDate) : "-",
-      days: safeNumber(row.days),
-      daysType: row.daysType === "overdue" ? "overdue" : "age",
-      bucket: row.bucket || "days0to30",
-      originalAmount: safeNumber(row.originalAmount),
-      paidAdjusted: safeNumber(row.paidAdjusted),
-      outstanding: safeNumber(row.outstanding),
-    })),
+    rows: rows.map((row) => {
+      const isReconciliation = row.isReconciliation === true;
+
+      return {
+        billNo: row.billNo || "-",
+        invoiceDate: isReconciliation
+          ? "-"
+          : formatDate(row.invoiceDateKey || row.invoiceDate),
+        dueDate: isReconciliation
+          ? "-"
+          : row.dueDateKey || row.dueDate
+            ? formatDate(row.dueDateKey || row.dueDate)
+            : "-",
+        days: isReconciliation ? null : safeNumber(row.days),
+        daysType: isReconciliation
+          ? "reconciliation"
+          : row.daysType === "overdue"
+            ? "overdue"
+            : "age",
+        bucket: isReconciliation ? "" : row.bucket || "days0to30",
+        originalAmount: safeNumber(row.originalAmount),
+        paidAdjusted: safeNumber(row.paidAdjusted),
+        outstanding: safeNumber(row.outstanding),
+        isReconciliation,
+      };
+    }),
   };
 };
 

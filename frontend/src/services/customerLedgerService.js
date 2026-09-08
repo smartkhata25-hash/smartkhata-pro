@@ -7,10 +7,10 @@ const getToken = () => localStorage.getItem('token');
 
 const API_URL = `${BASE_URL}/api/customer-ledger`;
 
-// ✅ ONLY & FINAL: Get ledger by CUSTOMER ACCOUNT (CORRECT ACCOUNTING)
-export const getLedgerByCustomerAccount = async (accountId, start, end, options = {}) => {
-  if (!accountId) {
-    throw new Error('AccountId is required for ledger');
+// ✅ Customer ledger screens should use Customer._id; account-id fallback stays backend-only.
+export const getLedgerByCustomerId = async (customerId, start, end, options = {}) => {
+  if (!customerId) {
+    throw new Error('CustomerId is required for ledger');
   }
 
   const params = {};
@@ -23,7 +23,7 @@ export const getLedgerByCustomerAccount = async (accountId, start, end, options 
     params.moduleScope = options.moduleScope;
   }
 
-  const res = await axios.get(`${API_URL}/${accountId}`, {
+  const res = await axios.get(`${API_URL}/${customerId}`, {
     headers: {
       Authorization: `Bearer ${getToken()}`,
     },
@@ -32,6 +32,11 @@ export const getLedgerByCustomerAccount = async (accountId, start, end, options 
 
   return res.data;
 };
+
+// Backward-compatible alias for older callers. The backend can still resolve
+// account ids, but new ledger screens should pass Customer._id.
+export const getLedgerByCustomerAccount = async (accountId, start, end, options = {}) =>
+  getLedgerByCustomerId(accountId, start, end, options);
 
 export const getCustomerBalance = async (accountId) => {
   if (!accountId) {

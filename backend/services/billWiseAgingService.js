@@ -5,14 +5,18 @@ const Invoice = require("../models/Invoice");
 const JournalEntry = require("../models/JournalEntry");
 const Party = require("../models/Party");
 const RefundInvoice = require("../models/RefundInvoice");
+
 const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
 } = require("../utils/moduleScope");
+
 const {
   getBusinessDateKey,
   nextBusinessDayStart,
 } = require("../utils/businessDate");
+
+const { getCustomerLedgerCore } = require("./customerLedgerCoreService");
 
 const ENTITY_TYPES = Object.freeze({
   CUSTOMER: "customer",
@@ -22,6 +26,7 @@ const ENTITY_TYPES = Object.freeze({
 const ADJUSTMENT_SOURCE_TYPES = Object.freeze([
   "receive_payment",
   "receive_payment_discount",
+  "sale_discount",
   "adjustment",
 ]);
 
@@ -72,17 +77,20 @@ const safeNumber = (value) => {
 
 const roundMoney = (value) => {
   const rounded = Math.round((safeNumber(value) + Number.EPSILON) * 100) / 100;
+
   return Object.is(rounded, -0) ? 0 : rounded;
 };
 
 const normalizeTime = (value) => {
   const match = String(value || "").match(/^(\d{1,2}):(\d{2})/);
+
   if (!match) return "00:00";
 
   const hour = String(Math.min(Math.max(Number(match[1]), 0), 23)).padStart(
     2,
     "0",
   );
+
   const minute = String(Math.min(Math.max(Number(match[2]), 0), 59)).padStart(
     2,
     "0",
@@ -100,6 +108,7 @@ const getSafeDateKey = (value, fallback = "") => {
     });
   } catch {
     if (!fallback) return "";
+
     try {
       return getBusinessDateKey(fallback, {
         allowEmpty: true,
@@ -134,13 +143,19 @@ const compareAgingEvents = (a, b) => {
   const dateCompare = String(a.dateKey || "").localeCompare(
     String(b.dateKey || ""),
   );
+
   if (dateCompare !== 0) return dateCompare;
 
-  const timeCompare = normalizeTime(a.time).localeCompare(normalizeTime(b.time));
+  const timeCompare = normalizeTime(a.time).localeCompare(
+    normalizeTime(b.time),
+  );
+
   if (timeCompare !== 0) return timeCompare;
 
   const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+
   const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+
   if (createdA !== createdB) return createdA - createdB;
 
   return String(a.id || "").localeCompare(String(b.id || ""));
@@ -152,12 +167,18 @@ const getBucketKey = (days) => {
   if (safeDays <= 30) return "days0to30";
   if (safeDays <= 60) return "days31to60";
   if (safeDays <= 90) return "days61to90";
+
   return "days90plus";
 };
 
 const isTradingJournalEntry = (entry = {}) => {
-  const originModule = String(entry.originModule || "").trim().toLowerCase();
-  const sourceType = String(entry.sourceType || "").trim().toLowerCase();
+  const originModule = String(entry.originModule || "")
+    .trim()
+    .toLowerCase();
+
+  const sourceType = String(entry.sourceType || "")
+    .trim()
+    .toLowerCase();
 
   return (
     !originModule.startsWith(TRAVEL_ORIGIN_PREFIX) &&
@@ -169,8 +190,13 @@ const getAccountLineAmount = (entry, accountId, lineType) => {
   const accountKey = String(accountId || "");
 
   return (entry.lines || []).reduce((sum, line) => {
-    if (String(line.account || "") !== accountKey) return sum;
-    if (line.type !== lineType) return sum;
+    if (String(line.account || "") !== accountKey) {
+      return sum;
+    }
+
+    if (line.type !== lineType) {
+      return sum;
+    }
 
     return sum + safeNumber(line.amount);
   }, 0);
@@ -181,6 +207,7 @@ const getReferencedDocumentIds = (entry = {}) => {
 
   [entry.referenceId, entry.invoiceId].forEach((value) => {
     const id = value ? String(value) : "";
+
     if (mongoose.Types.ObjectId.isValid(id)) {
       ids.add(id);
     }
@@ -221,7 +248,9 @@ const loadTradingEntity = async ({ entityType, entityId, userObjectId }) => {
   }
 
   const config = getEntityConfig(entityType);
+
   const entityObjectId = new mongoose.Types.ObjectId(entityId);
+
   const query = {
     _id: entityObjectId,
     [config.ownerField]: userObjectId,
@@ -259,17 +288,24 @@ const buildInvoiceRows = ({ invoices, asOfDateKey }) =>
   invoices
     .map((invoice) => {
       const originalAmount = roundMoney(invoice.totalAmount);
-      if (originalAmount <= MONEY_EPSILON) return null;
+
+      if (originalAmount <= MONEY_EPSILON) {
+        return null;
+      }
 
       const invoiceDateKey = getSafeDateKey(
         invoice.invoiceDate,
         invoice.createdAt || new Date(),
       );
+
       const dueDateKey = invoice.dueDate
         ? getSafeDateKey(invoice.dueDate, "")
         : "";
+
       const basisKey = dueDateKey || invoiceDateKey;
+
       const rawDays = diffBusinessDays(basisKey, asOfDateKey);
+
       const days = Math.max(0, rawDays);
 
       return {
@@ -294,21 +330,25 @@ const buildInvoiceRows = ({ invoices, asOfDateKey }) =>
     })
     .filter(Boolean)
     .sort((a, b) =>
-      compareAgingEvents({
-        dateKey: a.invoiceDateKey,
-        time: a.invoiceTime,
-        createdAt: a.createdAt,
-        id: a.id,
-      }, {
-        dateKey: b.invoiceDateKey,
-        time: b.invoiceTime,
-        createdAt: b.createdAt,
-        id: b.id,
-      }),
+      compareAgingEvents(
+        {
+          dateKey: a.invoiceDateKey,
+          time: a.invoiceTime,
+          createdAt: a.createdAt,
+          id: a.id,
+        },
+        {
+          dateKey: b.invoiceDateKey,
+          time: b.invoiceTime,
+          createdAt: b.createdAt,
+          id: b.id,
+        },
+      ),
     );
 
 const applyAmountToRow = (row, amount) => {
   const available = roundMoney(row.originalAmount - row.paidAdjusted);
+
   const applied = Math.min(available, roundMoney(amount));
 
   if (applied <= MONEY_EPSILON) {
@@ -316,18 +356,40 @@ const applyAmountToRow = (row, amount) => {
   }
 
   row.paidAdjusted = roundMoney(row.paidAdjusted + applied);
+
   row.outstanding = roundMoney(row.originalAmount - row.paidAdjusted);
 
   return roundMoney(amount - applied);
 };
 
 const applyExplicitEvents = ({ events, rowMap }) => {
+  const overflowEvents = [];
+
   [...events].sort(compareAgingEvents).forEach((event) => {
     const row = rowMap.get(String(event.targetInvoiceId || ""));
-    if (!row) return;
 
-    applyAmountToRow(row, event.amount);
+    if (!row) {
+      overflowEvents.push({
+        ...event,
+        targetInvoiceId: "",
+      });
+
+      return;
+    }
+
+    const remaining = applyAmountToRow(row, event.amount);
+
+    if (remaining > MONEY_EPSILON) {
+      overflowEvents.push({
+        ...event,
+        id: `${event.id || "event"}-overflow`,
+        amount: remaining,
+        targetInvoiceId: "",
+      });
+    }
   });
+
+  return overflowEvents;
 };
 
 const applyGenericEventsFifo = ({ rows, events }) => {
@@ -347,13 +409,17 @@ const applyGenericEventsFifo = ({ rows, events }) => {
   ].sort(compareAgingEvents);
 
   const openRows = [];
+
   let unappliedCredit = 0;
 
   const applyCredit = (amount) => {
     let remaining = roundMoney(amount);
 
     for (const row of openRows) {
-      if (remaining <= MONEY_EPSILON) break;
+      if (remaining <= MONEY_EPSILON) {
+        break;
+      }
+
       remaining = applyAmountToRow(row, remaining);
     }
 
@@ -372,6 +438,7 @@ const applyGenericEventsFifo = ({ rows, events }) => {
     }
 
     const remaining = applyCredit(event.amount);
+
     unappliedCredit = roundMoney(unappliedCredit + remaining);
   }
 };
@@ -388,7 +455,9 @@ const fetchCustomerJournalDocumentIds = async ({
     isDeleted: { $ne: true },
     isReversed: { $ne: true },
     isReversal: { $ne: true },
-    sourceType: { $in: sourceTypes },
+    sourceType: {
+      $in: sourceTypes,
+    },
     date: { $lt: asOfEnd },
     "lines.account": accountObjectId,
   })
@@ -408,13 +477,17 @@ const fetchCustomerJournalDocumentIds = async ({
   const ids = new Set();
 
   for (const entry of entries) {
-    if (!isTradingJournalEntry(entry)) continue;
+    if (!isTradingJournalEntry(entry)) {
+      continue;
+    }
 
     const amount = roundMoney(
       getAccountLineAmount(entry, accountObjectId, lineType),
     );
 
-    if (amount <= MONEY_EPSILON) continue;
+    if (amount <= MONEY_EPSILON) {
+      continue;
+    }
 
     getReferencedDocumentIds(entry).forEach((id) => ids.add(id));
   }
@@ -452,6 +525,7 @@ const fetchAgingInvoices = async ({
   const invoiceMap = new Map(
     invoices.map((invoice) => [String(invoice._id), invoice]),
   );
+
   const journalInvoiceIds = await fetchCustomerJournalDocumentIds({
     accountObjectId,
     asOfEnd,
@@ -459,6 +533,7 @@ const fetchAgingInvoices = async ({
     sourceTypes: SALE_INVOICE_SOURCE_TYPES,
     userObjectId,
   });
+
   const missingInvoiceIds = [...journalInvoiceIds].filter(
     (id) => !invoiceMap.has(id),
   );
@@ -470,7 +545,9 @@ const fetchAgingInvoices = async ({
       },
       createdBy: userObjectId,
       isDeleted: { $ne: true },
-      invoiceDate: { $lt: asOfEnd },
+      invoiceDate: {
+        $lt: asOfEnd,
+      },
     })
       .select(INVOICE_SELECT_FIELDS)
       .sort({
@@ -500,7 +577,9 @@ const fetchPaymentEvents = async ({
     isDeleted: { $ne: true },
     isReversed: { $ne: true },
     isReversal: { $ne: true },
-    sourceType: { $in: ADJUSTMENT_SOURCE_TYPES },
+    sourceType: {
+      $in: ADJUSTMENT_SOURCE_TYPES,
+    },
     date: { $lt: asOfEnd },
     "lines.account": accountObjectId,
   })
@@ -530,15 +609,20 @@ const fetchPaymentEvents = async ({
   const genericEvents = [];
 
   for (const entry of entries) {
-    if (!isTradingJournalEntry(entry)) continue;
+    if (!isTradingJournalEntry(entry)) {
+      continue;
+    }
 
     const amount = roundMoney(
       getAccountLineAmount(entry, accountObjectId, "credit"),
     );
 
-    if (amount <= MONEY_EPSILON) continue;
+    if (amount <= MONEY_EPSILON) {
+      continue;
+    }
 
     const referenceId = entry.referenceId ? String(entry.referenceId) : "";
+
     const event = {
       id: String(entry._id),
       amount,
@@ -573,6 +657,77 @@ const fetchPaymentEvents = async ({
   };
 };
 
+const fetchRefundPaymentMap = async ({
+  accountObjectId,
+  refundIds,
+  asOfEnd,
+  userObjectId,
+}) => {
+  if (!refundIds.length) {
+    return new Map();
+  }
+
+  const objectRefundIds = refundIds
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  if (!objectRefundIds.length) {
+    return new Map();
+  }
+
+  const entries = await JournalEntry.find({
+    createdBy: userObjectId,
+    isDeleted: { $ne: true },
+    isReversed: { $ne: true },
+    isReversal: { $ne: true },
+    sourceType: "refund_payment",
+    referenceId: {
+      $in: objectRefundIds,
+    },
+    date: { $lt: asOfEnd },
+    "lines.account": accountObjectId,
+  })
+    .select(
+      [
+        "referenceId",
+        "originModule",
+        "lines.account",
+        "lines.type",
+        "lines.amount",
+      ].join(" "),
+    )
+    .lean();
+
+  const paymentMap = new Map();
+
+  for (const entry of entries) {
+    if (!isTradingJournalEntry(entry)) {
+      continue;
+    }
+
+    const refundId = entry.referenceId ? String(entry.referenceId) : "";
+
+    if (!refundId) {
+      continue;
+    }
+
+    const amount = roundMoney(
+      getAccountLineAmount(entry, accountObjectId, "debit"),
+    );
+
+    if (amount <= MONEY_EPSILON) {
+      continue;
+    }
+
+    paymentMap.set(
+      refundId,
+      roundMoney((paymentMap.get(refundId) || 0) + amount),
+    );
+  }
+
+  return paymentMap;
+};
+
 const fetchRefundEvents = async ({
   accountObjectId,
   entityObjectId,
@@ -586,7 +741,9 @@ const fetchRefundEvents = async ({
     createdBy: userObjectId,
     isDeleted: { $ne: true },
     [config.refundField]: entityObjectId,
-    invoiceDate: { $lt: asOfEnd },
+    invoiceDate: {
+      $lt: asOfEnd,
+    },
   })
     .select(REFUND_SELECT_FIELDS)
     .sort({
@@ -603,6 +760,7 @@ const fetchRefundEvents = async ({
     const refundMap = new Map(
       primaryRefunds.map((refund) => [String(refund._id), refund]),
     );
+
     const journalRefundIds = await fetchCustomerJournalDocumentIds({
       accountObjectId,
       asOfEnd,
@@ -610,6 +768,7 @@ const fetchRefundEvents = async ({
       sourceTypes: REFUND_INVOICE_SOURCE_TYPES,
       userObjectId,
     });
+
     const missingRefundIds = [...journalRefundIds].filter(
       (id) => !refundMap.has(id),
     );
@@ -620,11 +779,21 @@ const fetchRefundEvents = async ({
           $in: missingRefundIds.map((id) => new mongoose.Types.ObjectId(id)),
         },
         createdBy: userObjectId,
-        isDeleted: { $ne: true },
-        invoiceDate: { $lt: asOfEnd },
+        isDeleted: {
+          $ne: true,
+        },
+        invoiceDate: {
+          $lt: asOfEnd,
+        },
         $or: [
-          { [config.refundField]: { $exists: false } },
-          { [config.refundField]: null },
+          {
+            [config.refundField]: {
+              $exists: false,
+            },
+          },
+          {
+            [config.refundField]: null,
+          },
         ],
       })
         .select(REFUND_SELECT_FIELDS)
@@ -644,25 +813,49 @@ const fetchRefundEvents = async ({
     refunds = [...refundMap.values()];
   }
 
+  const refundIds = refunds.map((refund) => String(refund._id));
+
+  const refundPaymentMap = await fetchRefundPaymentMap({
+    accountObjectId,
+    refundIds,
+    asOfEnd,
+    userObjectId,
+  });
+
   const explicitEvents = [];
   const genericEvents = [];
 
   for (const refund of refunds) {
-    const amount = roundMoney(refund.totalAmount);
-    if (amount <= MONEY_EPSILON) continue;
+    const refundId = String(refund._id);
+
+    const refundAmount = roundMoney(refund.totalAmount);
+
+    const paidBackAmount = roundMoney(refundPaymentMap.get(refundId) || 0);
+
+    const amount = roundMoney(Math.max(refundAmount - paidBackAmount, 0));
+
+    if (amount <= MONEY_EPSILON) {
+      continue;
+    }
 
     const originalInvoiceId = refund.originalInvoiceId
       ? String(refund.originalInvoiceId)
       : "";
+
     const event = {
-      id: String(refund._id),
+      id: refundId,
       amount,
       date: refund.invoiceDate,
-      dateKey: getSafeDateKey(refund.invoiceDate, refund.createdAt || new Date()),
+      dateKey: getSafeDateKey(
+        refund.invoiceDate,
+        refund.createdAt || new Date(),
+      ),
       time: normalizeTime(refund.invoiceTime),
       createdAt: refund.createdAt || null,
       billNo: refund.billNo || "",
-      sourceType: refund.isOpening ? "opening_refund_invoice" : "refund_invoice",
+      sourceType: refund.isOpening
+        ? "opening_refund_invoice"
+        : "refund_invoice",
       originModule: "refund_invoice",
     };
 
@@ -698,8 +891,11 @@ const summarizeRows = (rows) => {
 
   for (const row of rows) {
     originalTotal += safeNumber(row.originalAmount);
+
     paidAdjustedTotal += safeNumber(row.paidAdjusted);
+
     totalOutstanding += safeNumber(row.outstanding);
+
     buckets[row.bucket] = roundMoney(
       safeNumber(buckets[row.bucket]) + safeNumber(row.outstanding),
     );
@@ -714,6 +910,24 @@ const summarizeRows = (rows) => {
   };
 };
 
+const buildReconciliationRow = ({ amount, entityObjectId }) => ({
+  invoiceId: `reconciliation-${entityObjectId}`,
+  billNo: "Legacy / unallocated balance",
+  invoiceDate: null,
+  invoiceDateKey: "",
+  dueDate: null,
+  dueDateKey: "",
+  days: null,
+  daysType: "reconciliation",
+  bucket: "",
+  originalAmount: 0,
+  paidAdjusted: 0,
+  outstanding: roundMoney(amount),
+  status: "reconciliation",
+  isOpening: false,
+  isReconciliation: true,
+});
+
 const getBillWiseReceivableAging = async ({
   entityType,
   entityId,
@@ -725,8 +939,11 @@ const getBillWiseReceivableAging = async ({
   }
 
   const userObjectId = new mongoose.Types.ObjectId(userId);
+
   const asOfDateKey = getSafeDateKey(asOfDate || new Date(), new Date());
+
   const asOfEnd = nextBusinessDayStart(asOfDateKey);
+
   const { entity, entityObjectId, accountObjectId, config } =
     await loadTradingEntity({
       entityType,
@@ -747,7 +964,9 @@ const getBillWiseReceivableAging = async ({
     invoices,
     asOfDateKey,
   });
+
   const rowMap = new Map(rows.map((row) => [row.id, row]));
+
   const invoiceIdSet = new Set(rows.map((row) => row.id));
 
   const paymentEvents = await fetchPaymentEvents({
@@ -756,6 +975,7 @@ const getBillWiseReceivableAging = async ({
     invoiceIdSet,
     userObjectId,
   });
+
   const refundEvents = await fetchRefundEvents({
     accountObjectId,
     entityObjectId,
@@ -766,14 +986,18 @@ const getBillWiseReceivableAging = async ({
     userObjectId,
   });
 
-  applyExplicitEvents({
+  const explicitOverflowEvents = applyExplicitEvents({
     events: [...paymentEvents.explicitEvents, ...refundEvents.explicitEvents],
     rowMap,
   });
 
   applyGenericEventsFifo({
     rows,
-    events: [...paymentEvents.genericEvents, ...refundEvents.genericEvents],
+    events: [
+      ...paymentEvents.genericEvents,
+      ...refundEvents.genericEvents,
+      ...explicitOverflowEvents,
+    ],
   });
 
   const outstandingRows = rows
@@ -800,6 +1024,40 @@ const getBillWiseReceivableAging = async ({
       isOpening: row.isOpening,
     }));
 
+  const summary = summarizeRows(outstandingRows);
+
+  if (entityType === ENTITY_TYPES.CUSTOMER) {
+    const authoritativeLedger = await getCustomerLedgerCore({
+      customerId: entityObjectId,
+      userId: userObjectId,
+      endDate: asOfDateKey,
+      moduleScope: MODULE_SCOPES.TRADING,
+    });
+
+    const authoritativeBalance = roundMoney(authoritativeLedger.closingBalance);
+
+    const reconciliationAmount = roundMoney(
+      authoritativeBalance - summary.totalOutstanding,
+    );
+
+    summary.authoritativeBalance = authoritativeBalance;
+
+    summary.reconciliationAmount = reconciliationAmount;
+
+    summary.totalOutstanding = authoritativeBalance;
+
+    if (Math.abs(reconciliationAmount) > MONEY_EPSILON) {
+      outstandingRows.push(
+        buildReconciliationRow({
+          amount: reconciliationAmount,
+          entityObjectId,
+        }),
+      );
+
+      summary.billCount = outstandingRows.length;
+    }
+  }
+
   return {
     entityType,
     moduleScope: MODULE_SCOPES.TRADING,
@@ -811,7 +1069,7 @@ const getBillWiseReceivableAging = async ({
       role: entity.role || "",
     },
     rows: outstandingRows,
-    summary: summarizeRows(outstandingRows),
+    summary,
   };
 };
 

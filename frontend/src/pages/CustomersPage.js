@@ -11,7 +11,7 @@ import {
 } from '../services/customerService';
 import CustomerForm from '../components/CustomerForm';
 import PageLayout from '../components/PageLayout';
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+import { getLedgerByCustomerId } from '../services/customerLedgerService';
 import LedgerTable from '../components/LedgerTable';
 import { confirmMergeCustomers } from '../services/customerService';
 
@@ -248,14 +248,7 @@ const CustomersPage = () => {
           return;
         }
 
-        const accountId = customer.account?._id || customer.account;
-
-        if (!accountId) {
-          setLedgerData(null);
-          return;
-        }
-
-        const data = await getLedgerByCustomerAccount(accountId, startDate || '', endDate || '');
+        const data = await getLedgerByCustomerId(customer._id, startDate || '', endDate || '');
 
         setLedgerData(data || null);
       } catch (error) {

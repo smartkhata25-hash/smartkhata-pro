@@ -6,7 +6,7 @@ import axios from 'axios';
 
 import PageLayout from '../components/PageLayout';
 
-import { getLedgerByCustomerAccount } from '../services/customerLedgerService';
+import { getLedgerByCustomerId } from '../services/customerLedgerService';
 
 import LedgerTable from '../components/LedgerTable';
 import { t, getCurrentLanguage } from '../i18n/i18n';
@@ -163,18 +163,10 @@ export default function CustomerLedgerPage() {
         return;
       }
 
-      const accountId = customer.account?._id || customer.account;
-
-      if (!accountId) {
-        setLedger([]);
-        setOpening(0);
-        return;
-      }
-
       setLoading(true);
 
       try {
-        const data = await getLedgerByCustomerAccount(accountId, s || '', e || '', {
+        const data = await getLedgerByCustomerId(id, s || '', e || '', {
           moduleScope: isTravelLedger ? 'travel' : '',
         });
 

@@ -333,7 +333,7 @@ const generateBillWiseAgingLedgerHTML = (data, pageSize = "A4") => {
                     </td>
 
                     <td class="days-cell">
-                      ${safeNumber(row.days)}
+                      ${row.isReconciliation ? "-" : safeNumber(row.days)}
                     </td>
 
                     <td class="amount-cell">

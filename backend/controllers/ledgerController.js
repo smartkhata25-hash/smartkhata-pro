@@ -1,314 +1,36 @@
-const mongoose = require("mongoose");
-const JournalEntry = require("../models/JournalEntry");
-const Customer = require("../models/Customer");
-
-const { MODULE_SCOPES, normalizeModuleScope } = require("../utils/moduleScope");
-
 const {
-  TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
-} = require("../utils/businessValueModuleScope");
-const {
-  TRAVEL_EMPLOYEE_ORIGIN_VALUES,
-} = require("../utils/employeePayrollOrigins");
-const {
-  buildBusinessDateRange,
-  startOfBusinessDay,
-} = require("../utils/businessDate");
+  getCustomerLedgerCore,
+} = require("../services/customerLedgerCoreService");
 
-const TRAVEL_JOURNAL_ORIGINS = Object.freeze([
-  "travel_invoice",
-  "travel_refund",
-  "travel_receive_payment",
-  "travel_vendor_payment",
-  "travel_vendor_return",
-  "travel_expense",
-  ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
-  ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
-]);
-
-const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
-  "travel_booking",
-  "travel_customer_advance",
-  "travel_vendor_cost",
-  "travel_vendor_advance",
-  "travel_vendor_return",
-  "travel_commission",
-  "travel_refund",
-  "travel_adjustment",
-]);
-
-const getTravelJournalConditions = () => [
-  {
-    originModule: {
-      $in: TRAVEL_JOURNAL_ORIGINS,
-    },
-  },
-  {
-    sourceType: {
-      $in: TRAVEL_JOURNAL_SOURCE_TYPES,
-    },
-  },
-  {
-    sourceType: "reversal",
-    originModule: {
-      $in: TRAVEL_JOURNAL_ORIGINS,
-    },
-  },
-];
-
-const getCustomerJournalScopeFilter = (moduleScope) => {
-  const scope = normalizeModuleScope(moduleScope, MODULE_SCOPES.TRADING);
-
-  if (scope === MODULE_SCOPES.TRAVEL) {
-    return {
-      $or: getTravelJournalConditions(),
-    };
-  }
-
-  return {
-    $nor: getTravelJournalConditions(),
-  };
-};
-
-// 🧾 Get Ledger for a Specific Customer (journal-based)
-
-const resolveCustomerSourceLabel = (entry) => {
-  if (
-    entry.originModule === "travel_receive_payment" &&
-    entry.sourceType === "receive_payment"
-  ) {
-    return "Travel Payment";
-  }
-
-  if (
-    entry.originModule === "travel_invoice" &&
-    entry.sourceType === "receive_payment"
-  ) {
-    return "Travel Invoice Payment";
-  }
-
-  if (
-    entry.originModule === "travel_refund" &&
-    entry.sourceType === "refund_payment"
-  ) {
-    return "Travel Refund Payment";
-  }
-
-  if (entry.sourceType === "travel_booking") {
-    return "Travel Invoice";
-  }
-
-  if (entry.sourceType === "travel_refund") {
-    return "Travel Refund";
-  }
-
-  return entry.sourceType === "sale_invoice"
-    ? entry.description?.includes("Discount")
-      ? "Discount"
-      : entry.description?.includes("Payment")
-        ? "Payment"
-        : "Sale Invoice"
-    : entry.sourceType === "opening_sale_invoice"
-      ? "Opening Balance"
-      : entry.sourceType === "receive_payment"
-        ? "Receive Payment"
-        : entry.sourceType === "receive_payment_discount"
-          ? "Receive Payment Discount"
-          : entry.sourceType === "refund_invoice"
-            ? "Refund Invoice"
-            : entry.sourceType === "opening_refund_invoice"
-              ? "Opening Balance"
-              : entry.sourceType === "purchase_invoice"
-                ? "Purchase Invoice"
-                : entry.sourceType === "opening_purchase_invoice"
-                  ? "Opening Balance"
-                  : entry.sourceType === "purchase_return"
-                    ? "Purchase Return"
-                    : entry.sourceType === "opening_purchase_return"
-                      ? "Opening Balance"
-                      : entry.sourceType === "pay_bill"
-                        ? "Pay Bill"
-                        : "-";
-};
+const getUserId = (req) => req.user?.id || req.userId;
 
 const getCustomerLedger = async (req, res) => {
   try {
     const { customerId } = req.params;
-
     const { startDate, endDate, moduleScope } = req.query;
 
-    const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
-
-    const journalScopeFilter = getCustomerJournalScopeFilter(moduleScope);
-
-    // ✅ Step 1: Fetch customer using ACCOUNT ID
-    const customer = await Customer.findOne({
-      account: customerId,
-      createdBy: userId,
-    }).populate("account");
-
-    if (!customer) {
-      return res.status(404).json({
-        message: "Customer not found",
-      });
-    }
-
-    // ✅ Step 2: Resolve accountId safely
-    const account =
-      typeof customer.account === "object" && customer.account?._id
-        ? customer.account._id
-        : customer.account;
-
-    if (!account) {
-      return res.status(400).json({
-        message: "No account linked with customer",
-      });
-    }
-
-    const accountId = account.toString();
-
-    const objectId = new mongoose.Types.ObjectId(accountId);
-
-    // ✅ Step 3: Build filter
-    const matchFilter = {
-      createdBy: userId,
-      isDeleted: false,
-      sourceType: {
-        $ne: "reversal",
-      },
-      "lines.account": objectId,
-      ...journalScopeFilter,
-    };
-
-    const ledgerDateRange = buildBusinessDateRange({
+    const data = await getCustomerLedgerCore({
+      customerId,
+      userId: getUserId(req),
       startDate,
       endDate,
-    }).date;
+      moduleScope,
+      allowAccountIdFallback: true,
+    });
 
-    if (ledgerDateRange) {
-      matchFilter.date = ledgerDateRange;
-    }
-
-    // ✅ Step 4: Get entries
-    const entries = await JournalEntry.find(matchFilter)
-      .select(
-        "date time billNo description sourceType originModule lines paymentType attachmentUrl attachmentType invoiceId referenceId",
-      )
-      .sort({
-        date: 1,
-        time: 1,
-      })
-      .lean();
-
-    // ✅ Step 5: Opening balance
-    let opening = 0;
-
-    if (startDate) {
-      const openingStart = startOfBusinessDay(startDate);
-
-      const result = await JournalEntry.aggregate([
-        {
-          $match: {
-            createdBy: userId,
-            isDeleted: false,
-            sourceType: {
-              $ne: "reversal",
-            },
-            "lines.account": objectId,
-            ...journalScopeFilter,
-            date: {
-              $lt: openingStart,
-            },
-          },
-        },
-        {
-          $unwind: "$lines",
-        },
-        {
-          $match: {
-            "lines.account": objectId,
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            balance: {
-              $sum: {
-                $cond: [
-                  {
-                    $eq: ["$lines.type", "debit"],
-                  },
-                  "$lines.amount",
-                  {
-                    $multiply: ["$lines.amount", -1],
-                  },
-                ],
-              },
-            },
-          },
-        },
-      ]);
-
-      opening = result[0]?.balance || 0;
-    }
-
-    // ✅ Step 6: Running balance calculation
-    let balance = opening;
-
-    const ledger = [];
-
-    for (const entry of entries) {
-      for (const line of entry.lines || []) {
-        if (line.account?.toString() === accountId) {
-          const debit = line.type === "debit" ? Number(line.amount || 0) : 0;
-
-          const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
-
-          balance += debit - credit;
-
-          ledger.push({
-            _id: entry._id,
-            date: entry.date,
-            time: entry.time || "",
-            billNo: entry.billNo || "",
-            description: entry.description || "",
-            sourceType: entry.sourceType || "",
-            originModule: entry.originModule || "",
-            sourceLabel: resolveCustomerSourceLabel(entry),
-            debit,
-            credit,
-
-            paymentType: line.paymentType || entry.paymentType || "-",
-
-            balance,
-            runningBalance: Number(balance.toFixed(2)),
-
-            attachmentUrl: entry.attachmentUrl || "",
-
-            attachmentType: entry.attachmentType || "",
-
-            invoiceId: entry.invoiceId || null,
-
-            referenceId: entry.referenceId || null,
-          });
-        }
-      }
-    }
-
-    // ✅ Final Response
     return res.json({
-      customerId: customer._id,
-      customerName: customer.name,
-      isActive: customer.isActive,
-      hiddenReason: customer.hiddenReason || null,
-      openingBalance: opening,
-      ledger,
+      customerId: data.customerId,
+      customerName: data.customerName,
+      isActive: data.isActive,
+      hiddenReason: data.hiddenReason,
+      openingBalance: data.openingBalance,
+      ledger: data.ledger,
     });
   } catch (err) {
-    console.error("❌ Ledger fetch error:", err);
+    console.error("Ledger fetch error:", err);
 
-    return res.status(500).json({
-      message: "Server error",
+    return res.status(err.statusCode || 500).json({
+      message: err.message || "Server error",
       error: err.message,
     });
   }
@@ -317,95 +39,24 @@ const getCustomerLedger = async (req, res) => {
 const getCustomerBalance = async (req, res) => {
   try {
     const { accountId } = req.params;
-
     const { moduleScope } = req.query;
 
-    if (!accountId || !mongoose.Types.ObjectId.isValid(accountId)) {
-      return res.status(400).json({
-        message: "Invalid account ID",
-      });
-    }
-
-    const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
-
-    const accountObjectId = new mongoose.Types.ObjectId(accountId);
-
-    const journalScopeFilter = getCustomerJournalScopeFilter(moduleScope);
-
-    const customer = await Customer.findOne({
-      account: accountObjectId,
-      createdBy: userId,
-    })
-      .select("_id")
-      .lean();
-
-    if (!customer) {
-      return res.status(404).json({
-        message: "Customer not found",
-      });
-    }
-
-    const result = await JournalEntry.aggregate([
-      {
-        $match: {
-          createdBy: userId,
-          isDeleted: false,
-
-          sourceType: {
-            $ne: "reversal",
-          },
-
-          "lines.account": accountObjectId,
-
-          ...journalScopeFilter,
-        },
-      },
-
-      {
-        $unwind: "$lines",
-      },
-
-      {
-        $match: {
-          "lines.account": accountObjectId,
-        },
-      },
-
-      {
-        $group: {
-          _id: null,
-
-          balance: {
-            $sum: {
-              $cond: [
-                {
-                  $eq: ["$lines.type", "debit"],
-                },
-
-                "$lines.amount",
-
-                {
-                  $multiply: ["$lines.amount", -1],
-                },
-              ],
-            },
-          },
-        },
-      },
-    ]);
-
-    const balance = Number(result[0]?.balance || 0);
+    const data = await getCustomerLedgerCore({
+      accountId,
+      userId: getUserId(req),
+      moduleScope,
+    });
 
     return res.json({
-      customerId: customer._id,
-      accountId,
-      balance,
+      customerId: data.customerId,
+      accountId: data.accountId,
+      balance: data.closingBalance,
     });
   } catch (err) {
     console.error("Customer balance fetch error:", err);
 
-    return res.status(500).json({
-      message: "Failed to fetch customer balance",
+    return res.status(err.statusCode || 500).json({
+      message: err.message || "Failed to fetch customer balance",
       error: err.message,
     });
   }

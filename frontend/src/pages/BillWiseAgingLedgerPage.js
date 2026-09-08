@@ -26,6 +26,9 @@ const formatDateKey = (value) => {
 
 const getBucketLabel = (bucket) => {
   switch (bucket) {
+    case '':
+    case 'reconciliation':
+      return '-';
     case 'days31to60':
       return t('agingLedger.days31to60');
     case 'days61to90':
@@ -311,21 +314,31 @@ const BillWiseAgingLedgerPage = ({ entityType }) => {
                   </tr>
                 ) : (
                   rows.map((row) => (
-                    <tr key={row.invoiceId}>
+                    <tr key={row.invoiceId || row.billNo}>
                       <td style={{ fontWeight: 700, color: '#1d4ed8' }}>{row.billNo || '-'}</td>
-                      <td>{formatDateKey(row.invoiceDateKey)}</td>
-                      <td>{row.dueDateKey ? formatDateKey(row.dueDateKey) : '-'}</td>
+                      <td>{row.isReconciliation ? '-' : formatDateKey(row.invoiceDateKey)}</td>
+                      <td>{row.isReconciliation || !row.dueDateKey ? '-' : formatDateKey(row.dueDateKey)}</td>
                       <td>
-                        <span style={{ fontWeight: 700 }}>
-                          {row.daysType === 'overdue'
-                            ? t('agingLedger.overdueDays')
-                            : t('agingLedger.ageDays')}
-                        </span>
-                        : {row.days}
+                        {row.isReconciliation ? (
+                          '-'
+                        ) : (
+                          <>
+                            <span style={{ fontWeight: 700 }}>
+                              {row.daysType === 'overdue'
+                                ? t('agingLedger.overdueDays')
+                                : t('agingLedger.ageDays')}
+                            </span>
+                            : {row.days}
+                          </>
+                        )}
                       </td>
                       <td>{getBucketLabel(row.bucket)}</td>
-                      <td style={amountCell}>{formatAmount(row.originalAmount)}</td>
-                      <td style={amountCell}>{formatAmount(row.paidAdjusted)}</td>
+                      <td style={amountCell}>
+                        {row.isReconciliation ? '-' : formatAmount(row.originalAmount)}
+                      </td>
+                      <td style={amountCell}>
+                        {row.isReconciliation ? '-' : formatAmount(row.paidAdjusted)}
+                      </td>
                       <td style={{ ...amountCell, fontWeight: 800, color: '#dc2626' }}>
                         {formatAmount(row.outstanding)}
                       </td>

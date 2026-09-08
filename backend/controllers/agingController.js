@@ -2,10 +2,6 @@ const asyncHandler = require("express-async-handler");
 const Customer = require("../models/Customer");
 const JournalEntry = require("../models/JournalEntry");
 
-/* =========================================================
-   AGING BUCKET CALCULATOR
-========================================================= */
-
 const calculateAgingBuckets = (entries, asOfDate) => {
   const aging = {
     recent: 0,
@@ -31,20 +27,12 @@ const calculateAgingBuckets = (entries, asOfDate) => {
   return aging;
 };
 
-/* =========================================================
-   GET CUSTOMER AGING REPORT
-========================================================= */
-
 const getAgingReport = asyncHandler(async (req, res) => {
   const { asOfDate } = req.query;
 
   const userId = req.user?.id || req.userId;
 
   const reportDate = asOfDate ? new Date(asOfDate) : new Date();
-
-  /* ==============================
-     STEP 1 — GET CUSTOMERS
-  ============================== */
 
   const customers = await Customer.find({
     createdBy: userId,
@@ -65,20 +53,12 @@ const getAgingReport = asyncHandler(async (req, res) => {
 
   const customerAccounts = Array.from(accountMap.keys());
 
-  /* ==============================
-     STEP 2 — GET JOURNAL ENTRIES
-  ============================== */
-
   const journalEntries = await JournalEntry.find({
     createdBy: userId,
     isDeleted: { $ne: true },
     date: { $lte: reportDate },
     "lines.account": { $in: customerAccounts },
   }).lean();
-
-  /* ==============================
-     STEP 3 — GROUP CUSTOMER LINES
-  ============================== */
 
   const customerLinesMap = {};
 
@@ -99,10 +79,6 @@ const getAgingReport = asyncHandler(async (req, res) => {
       });
     });
   });
-
-  /* ==============================
-     STEP 4 — CALCULATE AGING
-  ============================== */
 
   const results = customers.map((customer) => {
     const accId = customer.account?.toString();
@@ -171,10 +147,6 @@ const getAgingReport = asyncHandler(async (req, res) => {
       total,
     };
   });
-
-  /* ==============================
-     FINAL RESPONSE
-  ============================== */
 
   res.json(results);
 });

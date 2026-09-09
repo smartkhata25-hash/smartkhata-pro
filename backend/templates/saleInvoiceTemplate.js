@@ -27,9 +27,19 @@ const generateSaleInvoiceHTML = (data) => {
       ? totals.balance
       : total - paid;
 
+  const rawPartyLabel = String(party?.label || "")
+    .trim()
+    .toLowerCase();
+
   const partyLabel = party?.labelKey
     ? t(party.labelKey, lang)
-    : party?.label || t("customer", lang);
+    : rawPartyLabel === "supplier"
+      ? t("supplier", lang)
+      : rawPartyLabel === "party"
+        ? t("party", lang)
+        : rawPartyLabel === "customer"
+          ? t("customer", lang)
+          : party?.label || t("customer", lang);
 
   const balanceLabel = party?.balanceLabelKey
     ? t(party.balanceLabelKey, lang)

@@ -117,11 +117,7 @@ const getPageScope = (location) => {
     return MODULE_SCOPES.TRAVEL;
   }
 
-  const params = new URLSearchParams(location.search);
-
-  return params.get('moduleScope') === MODULE_SCOPES.TRAVEL
-    ? MODULE_SCOPES.TRAVEL
-    : MODULE_SCOPES.TRADING;
+  return MODULE_SCOPES.TRADING;
 };
 
 const buildEmptyForm = (moduleScope) => ({

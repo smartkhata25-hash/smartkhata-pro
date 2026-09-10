@@ -89,7 +89,11 @@ const getCachedAccounts = (options = {}) => {
 const setCachedAccounts = (accounts, options = {}) => {
   if (!Array.isArray(accounts)) return;
 
-  localStorage.setItem(getCacheKey(ACCOUNT_CACHE_PREFIX, options), JSON.stringify(accounts));
+  try {
+    localStorage.setItem(getCacheKey(ACCOUNT_CACHE_PREFIX, options), JSON.stringify(accounts));
+  } catch (error) {
+    console.warn('Account cache write skipped:', error?.message || error);
+  }
 };
 
 export const clearAccountsCache = () => {

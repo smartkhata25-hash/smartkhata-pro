@@ -1,12 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FaBook, FaEdit, FaPlus, FaSearch, FaTrash, FaUniversity, FaWallet } from 'react-icons/fa';
+import {
+  FaBalanceScale,
+  FaBook,
+  FaEdit,
+  FaExchangeAlt,
+  FaPlus,
+  FaSearch,
+  FaTrash,
+  FaUniversity,
+  FaWallet,
+} from 'react-icons/fa';
 
 import {
   getAccounts,
   createAccount,
   updateAccount,
   deleteAccount,
+  transferBetweenAccounts,
+  adjustAccountBalance,
 } from '../services/accountService';
 import { t } from '../i18n/i18n';
 import { buildTravelRouteState } from '../utils/travelContext';
@@ -18,6 +30,15 @@ const MODULE_SCOPES = Object.freeze({
 });
 
 const pageSize = 10;
+const BALANCE_SHEET_ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity'];
+const TRANSFER_ACCOUNT_CATEGORIES = ['cash', 'bank', 'online', 'cheque'];
+const ADJUSTMENT_EXCLUDED_CATEGORIES = ['customer', 'supplier', 'party', 'receivable', 'payable'];
+const RESERVED_BALANCING_ACCOUNT_CODES = [
+  'OPENING_BALANCE',
+  'TRAVEL_OPENING_BALANCE',
+  'ACCOUNT_ADJUSTMENT',
+  'TRAVEL_ACCOUNT_ADJUSTMENT',
+];
 
 const categoryTypeMap = {
   cash: 'Asset',
@@ -80,6 +101,17 @@ const categoryGroups = [
   },
 ];
 
+const isCounterpartyAccountName = (name = '') =>
+  /^(Customer|Supplier|Party):/i.test(String(name).trim());
+
+const isManualAdjustmentAccount = (account) =>
+  account?.isActive !== false &&
+  account?.isSystem !== true &&
+  BALANCE_SHEET_ACCOUNT_TYPES.includes(account.type) &&
+  !ADJUSTMENT_EXCLUDED_CATEGORIES.includes(account.category) &&
+  !RESERVED_BALANCING_ACCOUNT_CODES.includes(String(account.code || '').trim().toUpperCase()) &&
+  !isCounterpartyAccountName(account.name);
+
 const getPageScope = (location) => {
   if (location.pathname.startsWith('/travel/accounts')) {
     return MODULE_SCOPES.TRAVEL;
@@ -98,6 +130,25 @@ const buildEmptyForm = (moduleScope) => ({
   code: '',
   category: '',
   moduleScope,
+  openingBalance: '0',
+});
+
+const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
+
+const buildEmptyTransferForm = () => ({
+  fromAccountId: '',
+  toAccountId: '',
+  amount: '',
+  date: getTodayDateKey(),
+  note: '',
+});
+
+const buildEmptyAdjustmentForm = () => ({
+  accountId: '',
+  amount: '',
+  direction: 'increase',
+  date: getTodayDateKey(),
+  note: '',
 });
 
 const normalizeScope = (scope, fallback = MODULE_SCOPES.TRADING) =>
@@ -146,10 +197,14 @@ const ChartOfAccountsPage = () => {
   const [filterType, setFilterType] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [showTransferForm, setShowTransferForm] = useState(false);
+  const [showAdjustmentForm, setShowAdjustmentForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [transferForm, setTransferForm] = useState(buildEmptyTransferForm);
+  const [adjustmentForm, setAdjustmentForm] = useState(buildEmptyAdjustmentForm);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -184,6 +239,9 @@ const ChartOfAccountsPage = () => {
         ...previous,
         category: value,
         type: autoType,
+        openingBalance: BALANCE_SHEET_ACCOUNT_TYPES.includes(autoType)
+          ? previous.openingBalance
+          : '0',
       }));
 
       return;
@@ -200,6 +258,14 @@ const ChartOfAccountsPage = () => {
     setEditId(null);
   };
 
+  const resetTransferForm = () => {
+    setTransferForm(buildEmptyTransferForm());
+  };
+
+  const resetAdjustmentForm = () => {
+    setAdjustmentForm(buildEmptyAdjustmentForm());
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -207,6 +273,9 @@ const ChartOfAccountsPage = () => {
     const payload = {
       ...form,
       moduleScope: normalizeScope(form.moduleScope, pageModuleScope),
+      openingBalance: BALANCE_SHEET_ACCOUNT_TYPES.includes(form.type)
+        ? Number(form.openingBalance || 0)
+        : 0,
     };
 
     try {
@@ -242,6 +311,7 @@ const ChartOfAccountsPage = () => {
       code: account.code || '',
       category: account.category || '',
       moduleScope: normalizeScope(account.moduleScope, pageModuleScope),
+      openingBalance: String(Number(account.manualOpeningBalance || 0)),
     });
 
     setEditId(account._id);
@@ -262,6 +332,69 @@ const ChartOfAccountsPage = () => {
       alert(t('alerts.accountDeleted'));
     } catch (err) {
       alert(err.response?.data?.message || t('alerts.accountDeleteFailed'));
+    }
+  };
+
+  const handleTransferSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (!transferForm.fromAccountId || !transferForm.toAccountId) {
+      setError(t('accounts.selectTransferAccounts'));
+      return;
+    }
+
+    if (transferForm.fromAccountId === transferForm.toAccountId) {
+      setError(t('accounts.sameTransferAccount'));
+      return;
+    }
+
+    try {
+      await transferBetweenAccounts(
+        {
+          ...transferForm,
+          amount: Number(transferForm.amount || 0),
+        },
+        {
+          moduleScope: pageModuleScope,
+        }
+      );
+
+      resetTransferForm();
+      setShowTransferForm(false);
+      fetchAccounts();
+      alert(t('accounts.transferSaved'));
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || t('accounts.transferFailed'));
+    }
+  };
+
+  const handleAdjustmentSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (!adjustmentForm.accountId) {
+      setError(t('accounts.selectAdjustmentAccount'));
+      return;
+    }
+
+    try {
+      await adjustAccountBalance(
+        {
+          ...adjustmentForm,
+          amount: Number(adjustmentForm.amount || 0),
+        },
+        {
+          moduleScope: pageModuleScope,
+        }
+      );
+
+      resetAdjustmentForm();
+      setShowAdjustmentForm(false);
+      fetchAccounts();
+      alert(t('accounts.adjustmentSaved'));
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || t('accounts.adjustmentFailed'));
     }
   };
 
@@ -292,6 +425,15 @@ const ChartOfAccountsPage = () => {
   const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
 
   const paginatedAccounts = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const transferAccounts = accounts.filter(
+    (account) =>
+      account.isActive !== false &&
+      account.isSystem !== true &&
+      account.type === 'Asset' &&
+      TRANSFER_ACCOUNT_CATEGORIES.includes(account.category)
+  );
+  const adjustmentAccounts = accounts.filter(isManualAdjustmentAccount);
+  const showOpeningBalanceField = BALANCE_SHEET_ACCOUNT_TYPES.includes(form.type);
 
   const totalAccounts = filtered.length;
 
@@ -372,6 +514,32 @@ const ChartOfAccountsPage = () => {
                 aria-hidden="true"
                 className={`transition-transform ${showForm ? 'rotate-45' : ''}`}
               />
+            </button>
+
+            <button
+              type="button"
+              title={t('accounts.transferBetweenAccounts')}
+              aria-label={t('accounts.transferBetweenAccounts')}
+              onClick={() => {
+                setShowTransferForm((previous) => !previous);
+                setShowAdjustmentForm(false);
+              }}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/20 bg-white/10 text-sm text-white transition hover:bg-white/20 sm:h-9 sm:w-9"
+            >
+              <FaExchangeAlt aria-hidden="true" />
+            </button>
+
+            <button
+              type="button"
+              title={t('accounts.balanceAdjustment')}
+              aria-label={t('accounts.balanceAdjustment')}
+              onClick={() => {
+                setShowAdjustmentForm((previous) => !previous);
+                setShowTransferForm(false);
+              }}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/20 bg-white/10 text-sm text-white transition hover:bg-white/20 sm:h-9 sm:w-9"
+            >
+              <FaBalanceScale aria-hidden="true" />
             </button>
 
             <button
@@ -526,6 +694,23 @@ const ChartOfAccountsPage = () => {
               </select>
             </label>
 
+            {showOpeningBalanceField && (
+              <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                <span>{t('accounts.openingBalance')}</span>
+
+                <input
+                  type="number"
+                  name="openingBalance"
+                  value={form.openingBalance}
+                  onChange={handleChange}
+                  min="0"
+                  step="0.01"
+                  placeholder="0"
+                  className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            )}
+
             <label className="space-y-1.5 text-sm font-bold text-slate-700 md:col-span-2">
               <span>{t('accounts.availableIn')}</span>
 
@@ -560,6 +745,260 @@ const ChartOfAccountsPage = () => {
               </button>
             </div>
           </form>
+        </section>
+      )}
+
+      {(showTransferForm || showAdjustmentForm) && (
+        <section className="mt-3 flex-shrink-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+          {showTransferForm && (
+            <>
+              <h2 className="text-base font-extrabold text-slate-900">
+                {t('accounts.transferBetweenAccounts')}
+              </h2>
+
+              <form
+                onSubmit={handleTransferSubmit}
+                className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5"
+              >
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.fromAccount')}</span>
+
+                  <select
+                    value={transferForm.fromAccountId}
+                    onChange={(e) =>
+                      setTransferForm((previous) => ({
+                        ...previous,
+                        fromAccountId: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">{t('accounts.selectAccount')}</option>
+                    {transferAccounts.map((account) => (
+                      <option key={account._id} value={account._id}>
+                        {account.name} ({account.code})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.toAccount')}</span>
+
+                  <select
+                    value={transferForm.toAccountId}
+                    onChange={(e) =>
+                      setTransferForm((previous) => ({
+                        ...previous,
+                        toAccountId: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">{t('accounts.selectAccount')}</option>
+                    {transferAccounts.map((account) => (
+                      <option key={account._id} value={account._id}>
+                        {account.name} ({account.code})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('amount')}</span>
+
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={transferForm.amount}
+                    onChange={(e) =>
+                      setTransferForm((previous) => ({
+                        ...previous,
+                        amount: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('date')}</span>
+
+                  <input
+                    type="date"
+                    value={transferForm.date}
+                    onChange={(e) =>
+                      setTransferForm((previous) => ({
+                        ...previous,
+                        date: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.noteReference')}</span>
+
+                  <input
+                    value={transferForm.note}
+                    onChange={(e) =>
+                      setTransferForm((previous) => ({
+                        ...previous,
+                        note: e.target.value,
+                      }))
+                    }
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-5">
+                  <button
+                    type="submit"
+                    className={`inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold transition ${primaryButtonClass}`}
+                  >
+                    {t('accounts.saveTransfer')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetTransferForm}
+                    className="inline-flex min-h-10 items-center justify-center rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200"
+                  >
+                    {t('clear')}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+
+          {showAdjustmentForm && (
+            <>
+              <h2 className="text-base font-extrabold text-slate-900">
+                {t('accounts.balanceAdjustment')}
+              </h2>
+
+              <form
+                onSubmit={handleAdjustmentSubmit}
+                className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5"
+              >
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('account')}</span>
+
+                  <select
+                    value={adjustmentForm.accountId}
+                    onChange={(e) =>
+                      setAdjustmentForm((previous) => ({
+                        ...previous,
+                        accountId: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">{t('accounts.selectAccount')}</option>
+                    {adjustmentAccounts.map((account) => (
+                      <option key={account._id} value={account._id}>
+                        {account.name} ({account.code})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('amount')}</span>
+
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={adjustmentForm.amount}
+                    onChange={(e) =>
+                      setAdjustmentForm((previous) => ({
+                        ...previous,
+                        amount: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.direction')}</span>
+
+                  <select
+                    value={adjustmentForm.direction}
+                    onChange={(e) =>
+                      setAdjustmentForm((previous) => ({
+                        ...previous,
+                        direction: e.target.value,
+                      }))
+                    }
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="increase">{t('accounts.increase')}</option>
+                    <option value="decrease">{t('accounts.decrease')}</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('date')}</span>
+
+                  <input
+                    type="date"
+                    value={adjustmentForm.date}
+                    onChange={(e) =>
+                      setAdjustmentForm((previous) => ({
+                        ...previous,
+                        date: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.reasonNote')}</span>
+
+                  <input
+                    value={adjustmentForm.note}
+                    onChange={(e) =>
+                      setAdjustmentForm((previous) => ({
+                        ...previous,
+                        note: e.target.value,
+                      }))
+                    }
+                    required
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-5">
+                  <button
+                    type="submit"
+                    className={`inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold transition ${primaryButtonClass}`}
+                  >
+                    {t('accounts.saveAdjustment')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetAdjustmentForm}
+                    className="inline-flex min-h-10 items-center justify-center rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200"
+                  >
+                    {t('clear')}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
         </section>
       )}
 

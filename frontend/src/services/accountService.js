@@ -232,6 +232,32 @@ export const deleteAccount = async (id, options = {}) => {
   return res.data;
 };
 
+export const transferBetweenAccounts = async (data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.post(
+    `${API_URL}/transfer`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+
+  clearAccountsCache();
+
+  return res.data;
+};
+
+export const adjustAccountBalance = async (data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.post(
+    `${API_URL}/adjustment`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+
+  clearAccountsCache();
+
+  return res.data;
+};
+
 export const getCashSummary = async (options = {}) => {
   const normalizedOptions = normalizeOptions(options);
   const res = await axios.get(

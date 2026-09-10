@@ -25,6 +25,9 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_vendor_payment",
   "travel_vendor_return",
   "travel_expense",
+  "travel_account_opening_balance",
+  "travel_account_transfer",
+  "travel_account_adjustment",
 ]);
 
 const TRAVEL_ACCOUNT_SOURCE_TYPES = Object.freeze([
@@ -277,11 +280,6 @@ const main = async () => {
     const indexes = await Account.collection.indexes();
     const oldIndex = indexes.find(isOldUserCodeIndex);
 
-    if (oldIndex) {
-      await Account.collection.dropIndex(oldIndex.name);
-      console.log(`Dropped old unique index: ${oldIndex.name}`);
-    }
-
     await Account.collection.createIndex(
       { userId: 1, moduleScope: 1, code: 1 },
       {
@@ -289,7 +287,12 @@ const main = async () => {
         name: "userId_moduleScope_code_unique",
       },
     );
-    console.log("Created scoped unique account code index.");
+    console.log("Created/confirmed scoped unique account code index.");
+
+    if (oldIndex) {
+      await Account.collection.dropIndex(oldIndex.name);
+      console.log(`Dropped old unique index: ${oldIndex.name}`);
+    }
   } else {
     console.log("Indexes unchanged. Set APPLY_ACCOUNT_SCOPE_INDEXES=true to update indexes.");
   }

@@ -116,6 +116,9 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_vendor_payment",
   "travel_vendor_return",
   "travel_expense",
+  "travel_account_opening_balance",
+  "travel_account_transfer",
+  "travel_account_adjustment",
   ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 ]);

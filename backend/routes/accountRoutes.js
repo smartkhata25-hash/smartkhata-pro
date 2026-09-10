@@ -37,6 +37,20 @@ router.get(
   accountController.getAccounts,
 );
 
+router.post(
+  "/transfer",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.transferBetweenAccounts,
+);
+
+router.post(
+  "/adjustment",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.adjustAccountBalance,
+);
+
 router.put(
   "/:id",
   authenticate,

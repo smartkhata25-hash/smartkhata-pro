@@ -35,6 +35,14 @@ const TRAVEL_VENDOR_RETURN_ORIGIN = "travel_vendor_return";
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
 const TRAVEL_CUSTOMER_OPENING_ORIGIN = "travel_customer_opening_balance";
 const TRAVEL_VENDOR_OPENING_ORIGIN = "travel_vendor_opening_balance";
+const TRAVEL_ACCOUNT_OPENING_ORIGIN = "travel_account_opening_balance";
+const TRAVEL_ACCOUNT_TRANSFER_ORIGIN = "travel_account_transfer";
+const TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN = "travel_account_adjustment";
+const TRAVEL_ACCOUNT_BALANCE_ORIGINS = Object.freeze([
+  TRAVEL_ACCOUNT_OPENING_ORIGIN,
+  TRAVEL_ACCOUNT_TRANSFER_ORIGIN,
+  TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN,
+]);
 const TRAVEL_EXPENSE_ORIGINS = Object.freeze([
   TRAVEL_EXPENSE_ORIGIN,
   TRAVEL_EMPLOYEE_ORIGINS.SALARY,
@@ -769,6 +777,12 @@ const getActualCashBankPosition = async (userId) => {
         {
           originModule: {
             $in: TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+          },
+        },
+
+        {
+          originModule: {
+            $in: TRAVEL_ACCOUNT_BALANCE_ORIGINS,
           },
         },
       ],

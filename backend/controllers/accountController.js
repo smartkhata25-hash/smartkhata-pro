@@ -15,6 +15,17 @@ const {
 const {
   TRAVEL_EMPLOYEE_ORIGIN_VALUES,
 } = require("../utils/employeePayrollOrigins");
+const {
+  getCurrentBusinessTimeInput,
+  parseBusinessDateTime,
+} = require("../utils/businessDate");
+
+const TRADING_ACCOUNT_OPENING_ORIGIN = "account_opening_balance";
+const TRAVEL_ACCOUNT_OPENING_ORIGIN = "travel_account_opening_balance";
+const TRADING_ACCOUNT_TRANSFER_ORIGIN = "account_transfer";
+const TRAVEL_ACCOUNT_TRANSFER_ORIGIN = "travel_account_transfer";
+const TRADING_ACCOUNT_ADJUSTMENT_ORIGIN = "account_adjustment";
+const TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN = "travel_account_adjustment";
 
 const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -23,6 +34,9 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_vendor_payment",
   "travel_vendor_return",
   "travel_expense",
+  TRAVEL_ACCOUNT_OPENING_ORIGIN,
+  TRAVEL_ACCOUNT_TRANSFER_ORIGIN,
+  TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN,
   ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 ]);
@@ -45,6 +59,30 @@ const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze([
   "cheque",
 ]);
 const BANK_ACCOUNT_CATEGORIES = Object.freeze(["bank"]);
+const BALANCE_SHEET_ACCOUNT_TYPES = Object.freeze([
+  "Asset",
+  "Liability",
+  "Equity",
+]);
+const TRANSFER_ACCOUNT_CATEGORIES = Object.freeze([
+  "cash",
+  "bank",
+  "online",
+  "cheque",
+]);
+const ADJUSTMENT_EXCLUDED_CATEGORIES = Object.freeze([
+  "customer",
+  "supplier",
+  "party",
+  "receivable",
+  "payable",
+]);
+const RESERVED_BALANCING_ACCOUNT_CODES = Object.freeze([
+  "OPENING_BALANCE",
+  "TRAVEL_OPENING_BALANCE",
+  "ACCOUNT_ADJUSTMENT",
+  "TRAVEL_ACCOUNT_ADJUSTMENT",
+]);
 
 const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
 
@@ -179,6 +217,365 @@ const assertAccountCodeAvailable = async ({
   }
 };
 
+const hasOwn = (object, key) =>
+  Object.prototype.hasOwnProperty.call(object || {}, key);
+
+const makeHttpError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const roundMoney = (value = 0) =>
+  Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+const parseAmount = (value, { allowZero = false, label = "Amount" } = {}) => {
+  const amount = roundMoney(value);
+
+  if (!Number.isFinite(amount) || amount < 0 || (!allowZero && amount <= 0)) {
+    throw makeHttpError(
+      allowZero ? `${label} must be 0 or greater.` : `${label} must be greater than 0.`,
+      400,
+    );
+  }
+
+  return amount;
+};
+
+const getJournalContextScope = (scope) => {
+  const cleanScope = String(scope || "").trim().toLowerCase();
+
+  if (cleanScope === "all" || cleanScope === MODULE_SCOPES.BOTH) {
+    throw makeHttpError("Trading or Travel module context is required.", 400);
+  }
+
+  const normalized = normalizeModuleScope(scope, MODULE_SCOPES.TRADING);
+
+  if (
+    normalized !== MODULE_SCOPES.TRADING &&
+    normalized !== MODULE_SCOPES.TRAVEL
+  ) {
+    throw makeHttpError("Trading or Travel module context is required.", 400);
+  }
+
+  return normalized;
+};
+
+const isBalanceSheetAccountType = (type) =>
+  BALANCE_SHEET_ACCOUNT_TYPES.includes(type);
+
+const isTransferAccount = (account) =>
+  account?.isSystem !== true &&
+  account?.type === "Asset" &&
+  TRANSFER_ACCOUNT_CATEGORIES.includes(account.category);
+
+const isCounterpartyAccountName = (name = "") =>
+  /^(Customer|Supplier|Party):/i.test(String(name).trim());
+
+const isManualAdjustmentAccount = (account) =>
+  account?.isActive !== false &&
+  account?.isSystem !== true &&
+  isBalanceSheetAccountType(account?.type) &&
+  !ADJUSTMENT_EXCLUDED_CATEGORIES.includes(account.category) &&
+  !RESERVED_BALANCING_ACCOUNT_CODES.includes(
+    String(account.code || "").trim().toUpperCase(),
+  ) &&
+  !isCounterpartyAccountName(account.name);
+
+const getManualAccountOrigin = (scope, action) => {
+  if (scope === MODULE_SCOPES.TRAVEL) {
+    return {
+      opening: TRAVEL_ACCOUNT_OPENING_ORIGIN,
+      transfer: TRAVEL_ACCOUNT_TRANSFER_ORIGIN,
+      adjustment: TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN,
+    }[action];
+  }
+
+  return {
+    opening: TRADING_ACCOUNT_OPENING_ORIGIN,
+    transfer: TRADING_ACCOUNT_TRANSFER_ORIGIN,
+    adjustment: TRADING_ACCOUNT_ADJUSTMENT_ORIGIN,
+  }[action];
+};
+
+const getOpeningSourceType = (scope) =>
+  scope === MODULE_SCOPES.TRAVEL ? "travel_adjustment" : "opening_balance";
+
+const getAdjustmentSourceType = (scope) =>
+  scope === MODULE_SCOPES.TRAVEL ? "travel_adjustment" : "adjustment";
+
+const getSystemAccountConfig = (scope, purpose) => {
+  if (scope === MODULE_SCOPES.TRAVEL) {
+    return purpose === "adjustment"
+      ? {
+          code: "TRAVEL_ACCOUNT_ADJUSTMENT",
+          name: "Travel Account Adjustment",
+          moduleScope: MODULE_SCOPES.TRAVEL,
+        }
+      : {
+          code: "TRAVEL_OPENING_BALANCE",
+          name: "Travel Opening Balance",
+          moduleScope: MODULE_SCOPES.TRAVEL,
+        };
+  }
+
+  return purpose === "adjustment"
+    ? {
+        code: "ACCOUNT_ADJUSTMENT",
+        name: "Account Adjustment",
+        moduleScope: MODULE_SCOPES.TRADING,
+      }
+    : {
+        code: "OPENING_BALANCE",
+        name: "opening balance equity",
+        moduleScope: MODULE_SCOPES.TRADING,
+      };
+};
+
+const getOrCreateSystemAccount = async ({ userId, scope, purpose }) => {
+  const config = getSystemAccountConfig(scope, purpose);
+  const userObjectId = toObjectId(userId);
+  let account = await Account.findOne({
+    userId: userObjectId,
+    code: config.code,
+  });
+
+  if (!account) {
+    return Account.create({
+      userId: userObjectId,
+      name: config.name,
+      type: "Equity",
+      category: "other",
+      code: config.code,
+      normalBalance: "credit",
+      openingBalance: 0,
+      isSystem: true,
+      isActive: true,
+      moduleScope: config.moduleScope,
+    });
+  }
+
+  if (account.isSystem !== true) {
+    throw makeHttpError(
+      `System account code ${config.code} already exists as a user account.`,
+      409,
+    );
+  }
+
+  let changed = false;
+
+  if (account.moduleScope !== config.moduleScope) {
+    account.moduleScope = config.moduleScope;
+    changed = true;
+  }
+
+  if (account.type !== "Equity") {
+    account.type = "Equity";
+    changed = true;
+  }
+
+  if (account.category !== "other") {
+    account.category = "other";
+    changed = true;
+  }
+
+  if (account.normalBalance !== "credit") {
+    account.normalBalance = "credit";
+    changed = true;
+  }
+
+  if (account.isActive === false) {
+    account.isActive = true;
+    changed = true;
+  }
+
+  return changed ? account.save() : account;
+};
+
+const getJournalDateTime = (dateInput) => {
+  const now = new Date();
+  const time = getCurrentBusinessTimeInput(now);
+
+  return {
+    date: parseBusinessDateTime(dateInput || now, time, {
+      fallback: now,
+      label: "transaction date",
+    }),
+    time,
+  };
+};
+
+const buildAccountOpeningLines = ({ account, balancingAccount, amount }) => {
+  const accountLineType = account.type === "Asset" ? "debit" : "credit";
+  const balancingLineType = accountLineType === "debit" ? "credit" : "debit";
+
+  return [
+    {
+      account: account._id,
+      type: accountLineType,
+      amount,
+    },
+    {
+      account: balancingAccount._id,
+      type: balancingLineType,
+      amount,
+    },
+  ];
+};
+
+const buildAdjustmentLines = ({
+  account,
+  balancingAccount,
+  amount,
+  direction,
+}) => {
+  const increase = direction === "increase";
+  const accountLineType =
+    account.type === "Asset"
+      ? increase
+        ? "debit"
+        : "credit"
+      : increase
+        ? "credit"
+        : "debit";
+  const balancingLineType = accountLineType === "debit" ? "credit" : "debit";
+
+  return [
+    {
+      account: account._id,
+      type: accountLineType,
+      amount,
+    },
+    {
+      account: balancingAccount._id,
+      type: balancingLineType,
+      amount,
+    },
+  ];
+};
+
+const getManualOpeningQuery = ({ accountId, userId, scope }) => ({
+  createdBy: toObjectId(userId),
+  referenceId: toObjectId(accountId),
+  originModule: getManualAccountOrigin(scope, "opening"),
+  sourceType: getOpeningSourceType(scope),
+  isDeleted: false,
+  isReversed: { $ne: true },
+  isReversal: { $ne: true },
+  "lines.account": toObjectId(accountId),
+});
+
+const getManualOpeningBalanceMap = async ({
+  userId,
+  accounts = [],
+  moduleScope,
+}) => {
+  const scope = normalizeModuleScope(moduleScope, MODULE_SCOPES.TRADING);
+
+  if (![MODULE_SCOPES.TRADING, MODULE_SCOPES.TRAVEL].includes(scope)) {
+    return new Map();
+  }
+
+  const accountIds = accounts
+    .map((account) => account?._id)
+    .filter(Boolean)
+    .map((accountId) => toObjectId(accountId));
+
+  if (accountIds.length === 0) {
+    return new Map();
+  }
+
+  const journals = await JournalEntry.find({
+    createdBy: toObjectId(userId),
+    referenceId: { $in: accountIds },
+    originModule: getManualAccountOrigin(scope, "opening"),
+    sourceType: getOpeningSourceType(scope),
+    isDeleted: false,
+    isReversed: { $ne: true },
+    isReversal: { $ne: true },
+    "lines.account": { $in: accountIds },
+  })
+    .select("referenceId lines.account lines.type lines.amount")
+    .lean();
+
+  const openingByAccount = new Map();
+
+  for (const journal of journals) {
+    const accountId = String(journal.referenceId || "");
+
+    for (const line of journal.lines || []) {
+      if (String(line.account || "") !== accountId) continue;
+
+      openingByAccount.set(
+        accountId,
+        roundMoney(
+          Number(openingByAccount.get(accountId) || 0) +
+            Number(line.amount || 0),
+        ),
+      );
+    }
+  }
+
+  return openingByAccount;
+};
+
+const syncManualAccountOpeningBalance = async ({
+  account,
+  userId,
+  scope,
+  amount,
+}) => {
+  const normalizedAmount = parseAmount(amount, {
+    allowZero: true,
+    label: "Opening balance",
+  });
+
+  if (!isBalanceSheetAccountType(account.type) && normalizedAmount > 0) {
+    throw makeHttpError(
+      "Opening Balance is only allowed for Asset, Liability and Equity accounts.",
+      400,
+    );
+  }
+
+  await JournalEntry.updateMany(getManualOpeningQuery({
+    accountId: account._id,
+    userId,
+    scope,
+  }), {
+    $set: {
+      isDeleted: true,
+      note: "Retired after manual account opening balance update",
+    },
+  });
+
+  if (normalizedAmount <= 0 || !isBalanceSheetAccountType(account.type)) {
+    return null;
+  }
+
+  const balancingAccount = await getOrCreateSystemAccount({
+    userId,
+    scope,
+    purpose: "opening",
+  });
+  const { date, time } = getJournalDateTime();
+
+  return JournalEntry.create({
+    date,
+    time,
+    description: `Opening Balance - ${account.name}`,
+    note: "Manual account opening balance",
+    sourceType: getOpeningSourceType(scope),
+    originModule: getManualAccountOrigin(scope, "opening"),
+    referenceId: account._id,
+    createdBy: toObjectId(userId),
+    lines: buildAccountOpeningLines({
+      account,
+      balancingAccount,
+      amount: normalizedAmount,
+    }),
+  });
+};
+
 const getScopedBalanceMap = async ({ userId, accounts = [], moduleScope }) => {
   const ids = accounts
     .map((account) => account?._id)
@@ -251,11 +648,17 @@ const attachScopedBalances = async ({ userId, accounts = [], moduleScope }) => {
     accounts: plainAccounts,
     moduleScope,
   });
+  const openingBalanceMap = await getManualOpeningBalanceMap({
+    userId,
+    accounts: plainAccounts,
+    moduleScope,
+  });
 
   return plainAccounts.map((account) => ({
     ...account,
     moduleScope: account.moduleScope || MODULE_SCOPES.TRADING,
     balance: balanceMap.get(String(account._id)) || 0,
+    manualOpeningBalance: openingBalanceMap.get(String(account._id)) || 0,
   }));
 };
 
@@ -284,6 +687,10 @@ exports.createAccount = async (req, res) => {
     const userId = getUserId(req);
     const { name, type, category } = req.body;
     const code = String(req.body.code || "").trim();
+    const openingBalance = parseAmount(req.body.openingBalance, {
+      allowZero: true,
+      label: "Opening balance",
+    });
     const moduleScope = getAccountScope({ ...req.query, ...req.body });
     const accessScope =
       req.query.moduleScope || req.query.scope || req.query.module
@@ -304,6 +711,12 @@ exports.createAccount = async (req, res) => {
       });
     }
 
+    if (openingBalance > 0 && !isBalanceSheetAccountType(type)) {
+      return res.status(400).json({
+        message: "Opening Balance is only allowed for Asset, Liability and Equity accounts.",
+      });
+    }
+
     await assertAccountCodeAvailable({ userId, code, moduleScope });
 
     const newAccount = new Account({
@@ -314,9 +727,27 @@ exports.createAccount = async (req, res) => {
       userId,
       moduleScope,
       normalBalance: rule.normalBalance,
+      openingBalance,
     });
 
     await newAccount.save();
+
+    try {
+      if (openingBalance > 0) {
+        await syncManualAccountOpeningBalance({
+          account: newAccount,
+          userId,
+          scope: getJournalContextScope(accessScope),
+          amount: openingBalance,
+        });
+      }
+    } catch (openingError) {
+      await Account.deleteOne({
+        _id: newAccount._id,
+        userId,
+      });
+      throw openingError;
+    }
 
     res.status(201).json({ message: "Account created", account: newAccount });
   } catch (error) {
@@ -465,6 +896,25 @@ exports.updateAccount = async (req, res) => {
 
     await account.save();
 
+    if (hasOwn(req.body, "openingBalance") || !isBalanceSheetAccountType(nextType)) {
+      const openingBalance = isBalanceSheetAccountType(nextType)
+        ? parseAmount(req.body.openingBalance, {
+            allowZero: true,
+            label: "Opening balance",
+          })
+        : 0;
+
+      account.openingBalance = openingBalance;
+      await account.save();
+
+      await syncManualAccountOpeningBalance({
+        account,
+        userId,
+        scope: getJournalContextScope(accessScope),
+        amount: openingBalance,
+      });
+    }
+
     res.status(200).json(account);
   } catch (err) {
     sendControllerError(res, err, "Update failed");
@@ -508,6 +958,158 @@ exports.deleteAccount = async (req, res) => {
     res.status(200).json({ message: "Account deleted" });
   } catch (err) {
     sendControllerError(res, err, "Delete failed");
+  }
+};
+
+exports.transferBetweenAccounts = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getJournalContextScope(getAccountScope(req.query));
+    const amount = parseAmount(req.body.amount, {
+      label: "Transfer amount",
+    });
+    const fromAccountId = req.body.fromAccountId;
+    const toAccountId = req.body.toAccountId;
+
+    assertScopeEnabled(req, moduleScope);
+
+    if (
+      !mongoose.Types.ObjectId.isValid(fromAccountId) ||
+      !mongoose.Types.ObjectId.isValid(toAccountId)
+    ) {
+      throw makeHttpError("Valid From and To accounts are required.", 400);
+    }
+
+    if (String(fromAccountId) === String(toAccountId)) {
+      throw makeHttpError("From and To accounts cannot be the same.", 400);
+    }
+
+    const [fromAccount, toAccount] = await Promise.all([
+      findScopedAccount({
+        id: fromAccountId,
+        userId,
+        moduleScope,
+      }),
+      findScopedAccount({
+        id: toAccountId,
+        userId,
+        moduleScope,
+      }),
+    ]);
+
+    if (!fromAccount || !toAccount) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isTransferAccount(fromAccount) || !isTransferAccount(toAccount)) {
+      throw makeHttpError(
+        "Transfers are allowed only between cash, bank, online and cheque Asset accounts.",
+        400,
+      );
+    }
+
+    const { date, time } = getJournalDateTime(req.body.date);
+    const note = String(req.body.note || req.body.reference || "").trim();
+    const journal = await JournalEntry.create({
+      date,
+      time,
+      description: `Account Transfer - ${fromAccount.name} to ${toAccount.name}`,
+      note,
+      sourceType: "account_transfer",
+      originModule: getManualAccountOrigin(moduleScope, "transfer"),
+      createdBy: toObjectId(userId),
+      lines: [
+        {
+          account: toAccount._id,
+          type: "debit",
+          amount,
+        },
+        {
+          account: fromAccount._id,
+          type: "credit",
+          amount,
+        },
+      ],
+    });
+
+    return res.status(201).json({
+      message: "Transfer recorded",
+      journal,
+    });
+  } catch (error) {
+    console.error("ACCOUNT TRANSFER ERROR:", error);
+    return sendControllerError(res, error, "Transfer failed");
+  }
+};
+
+exports.adjustAccountBalance = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getJournalContextScope(getAccountScope(req.query));
+    const amount = parseAmount(req.body.amount, {
+      label: "Adjustment amount",
+    });
+    const accountId = req.body.accountId;
+    const direction = String(req.body.direction || "").trim().toLowerCase();
+
+    assertScopeEnabled(req, moduleScope);
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      throw makeHttpError("Valid account is required.", 400);
+    }
+
+    if (!["increase", "decrease"].includes(direction)) {
+      throw makeHttpError("Adjustment direction must be increase or decrease.", 400);
+    }
+
+    const account = await findScopedAccount({
+      id: accountId,
+      userId,
+      moduleScope,
+    });
+
+    if (!account) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isManualAdjustmentAccount(account)) {
+      throw makeHttpError(
+        "Balance Adjustment is allowed only for manually usable balance accounts.",
+        400,
+      );
+    }
+
+    const balancingAccount = await getOrCreateSystemAccount({
+      userId,
+      scope: moduleScope,
+      purpose: "adjustment",
+    });
+    const { date, time } = getJournalDateTime(req.body.date);
+    const note = String(req.body.note || req.body.reason || "").trim();
+    const journal = await JournalEntry.create({
+      date,
+      time,
+      description: `Account Balance Adjustment - ${account.name}`,
+      note,
+      sourceType: getAdjustmentSourceType(moduleScope),
+      originModule: getManualAccountOrigin(moduleScope, "adjustment"),
+      referenceId: account._id,
+      createdBy: toObjectId(userId),
+      lines: buildAdjustmentLines({
+        account,
+        balancingAccount,
+        amount,
+        direction,
+      }),
+    });
+
+    return res.status(201).json({
+      message: "Adjustment recorded",
+      journal,
+    });
+  } catch (error) {
+    console.error("ACCOUNT ADJUSTMENT ERROR:", error);
+    return sendControllerError(res, error, "Adjustment failed");
   }
 };
 

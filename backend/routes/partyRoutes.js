@@ -13,6 +13,7 @@ const {
   updateParty,
   deleteParty,
   restoreParty,
+  confirmMergeParties,
   convertPartyToCustomer,
   convertPartyToSupplier,
 } = require("../controllers/partyController");
@@ -31,6 +32,13 @@ router.get(
 
 // Create Party
 router.post("/", requirePermission("parties.create"), createParty);
+
+// Merge Parties
+router.post(
+  "/merge/confirm",
+  requirePermission("parties.merge"),
+  confirmMergeParties,
+);
 
 // Convert Party To Customer
 router.post(

@@ -3,10 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBook,
   FaEdit,
+  FaExchangeAlt,
   FaMoneyBillWave,
   FaPlus,
   FaSyncAlt,
   FaTrash,
+  FaUndo,
 } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
@@ -14,6 +16,8 @@ import {
   createTravelParty,
   deleteTravelParty,
   fetchTravelParties,
+  mergeTravelParties,
+  restoreTravelParty,
   updateTravelParty,
 } from '../../services/travelMasterService';
 import { buildTravelRouteState } from '../../utils/travelContext';
@@ -25,6 +29,7 @@ import {
   TravelFormModal,
   TravelMasterList,
   TravelMasterPageFrame,
+  TravelSegmentedControl,
   TravelMasterToolbar,
   TravelSearchInput,
   buildTravelConfirmMessage,
@@ -114,6 +119,11 @@ const getFiltersFromParams = (searchParams) => ({
 
 const getPartyBalance = (party) => Number(party?.balance || 0);
 
+const canRestoreHiddenParty = (party) => !party?.hiddenReason || party.hiddenReason === 'deleted';
+
+const getHiddenReasonLabel = (record) =>
+  t(`travel.hiddenReasons.${record?.hiddenReason || 'hidden'}`);
+
 const getBalanceLabelKey = (balance) => {
   if (balance > 0) return 'travel.parties.receivable';
   if (balance < 0) return 'travel.parties.payable';
@@ -185,8 +195,14 @@ const TravelPartiesPage = () => {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [restoringId, setRestoringId] = useState('');
+  const [mergeSource, setMergeSource] = useState(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [mergingId, setMergingId] = useState('');
+  const [activeTab, setActiveTab] = useState('active');
 
   const filters = useMemo(() => getFiltersFromParams(searchParams), [searchParams]);
+  const isHiddenTab = activeTab === 'hidden';
 
   const canView =
     hasPermission('travel.parties.view') ||
@@ -199,6 +215,8 @@ const TravelPartiesPage = () => {
     async (options = {}) => {
       if (!canView) return;
 
+      const { status = activeTab, ...requestOptions } = options;
+
       try {
         setLoading(true);
         setPageError('');
@@ -206,11 +224,11 @@ const TravelPartiesPage = () => {
         const data = await fetchTravelParties(
           {
             includeBalance: 'true',
-            status: 'all',
+            status,
           },
           {
             forceRefresh: true,
-            ...options,
+            ...requestOptions,
           }
         );
 
@@ -222,7 +240,7 @@ const TravelPartiesPage = () => {
         setLoading(false);
       }
     },
-    [canView]
+    [activeTab, canView]
   );
 
   useEffect(() => {
@@ -254,6 +272,9 @@ const TravelPartiesPage = () => {
     const cleanSearch = normalizeSearch(filters.search);
 
     return parties
+      .filter((party) =>
+        isHiddenTab ? party.isActive === false : party.isActive !== false
+      )
       .filter((party) => {
         const roleMatch = !filters.role || party.role === filters.role;
         const balance = getPartyBalance(party);
@@ -277,7 +298,7 @@ const TravelPartiesPage = () => {
 
         return String(first.name || '').localeCompare(String(second.name || ''));
       });
-  }, [filters, parties]);
+  }, [filters, isHiddenTab, parties]);
 
   const openDetails = (party = null) => {
     setEditingParty(party);
@@ -366,6 +387,73 @@ const TravelPartiesPage = () => {
     }
   };
 
+  const restoreArchivedParty = async (party, event = null) => {
+    event?.stopPropagation?.();
+
+    if (!party?._id || !canManage) return;
+
+    if (!canRestoreHiddenParty(party)) {
+      alert(t('travel.common.notRestorable'));
+      return;
+    }
+
+    try {
+      setRestoringId(party._id);
+      await restoreTravelParty(party._id);
+      setActiveTab('active');
+      await loadParties({
+        forceRefresh: true,
+        status: 'active',
+      });
+    } catch (error) {
+      console.error('Travel party restore failed:', error);
+      alert(error?.response?.data?.message || t('travel.parties.restoreFailed'));
+    } finally {
+      setRestoringId('');
+    }
+  };
+
+  const openMergeParty = (party) => {
+    if (!party?._id || !canManage) return;
+
+    setMergeSource(party);
+    setMergeTargetId('');
+  };
+
+  const closeMergeParty = () => {
+    if (mergingId) return;
+
+    setMergeSource(null);
+    setMergeTargetId('');
+  };
+
+  const confirmMergeParty = async () => {
+    if (!mergeSource?._id || !mergeTargetId || !canManage) {
+      return;
+    }
+
+    try {
+      setMergingId(mergeSource._id);
+      await mergeTravelParties({
+        sourcePartyId: mergeSource._id,
+        targetPartyId: mergeTargetId,
+      });
+      setMergeSource(null);
+      setMergeTargetId('');
+      setActiveTab('active');
+      await loadParties({
+        forceRefresh: true,
+        status: 'active',
+      });
+      alert(t('alerts.partiesMerged'));
+    } catch (error) {
+      console.error('Travel party merge failed:', error);
+      alert(error?.response?.data?.message || t('alerts.mergeFailed'));
+    } finally {
+      setMergingId('');
+    }
+  };
+
   const openLedger = (party) => {
     if (!party?._id || !canViewLedger) return;
 
@@ -389,6 +477,15 @@ const TravelPartiesPage = () => {
       state: buildTravelRouteState('/travel/parties'),
     });
   };
+
+  const mergeTargetOptions = useMemo(
+    () =>
+      parties.filter(
+        (party) =>
+          party?.isActive !== false && String(party?._id) !== String(mergeSource?._id || '')
+      ),
+    [mergeSource, parties]
+  );
 
   const columns = [
     {
@@ -436,23 +533,40 @@ const TravelPartiesPage = () => {
       labelKey: 'travel.parties.columns.status',
       className: 'w-[10%]',
       render: (party) =>
-        party.isActive === false ? t('travel.common.inactive') : t('travel.common.active'),
+        isHiddenTab ? getHiddenReasonLabel(party) : t('travel.common.active'),
     },
     {
       key: 'actions',
       labelKey: 'travel.common.actions',
       className: 'w-[25%]',
       cellClassName: 'whitespace-nowrap',
-      render: (party) => (
-        <div className="flex items-center gap-1.5">
-          <IconActionButton
-            icon={FaBook}
-            title={t('travel.parties.actions.ledger')}
-            onClick={() => openLedger(party)}
-            disabled={!canViewLedger}
-            variant="cyan"
-          />
-          {(party.role === 'customer' || party.role === 'both') && (
+      render: (party) =>
+        isHiddenTab ? (
+          <div className="flex items-center justify-end gap-1.5">
+            {canManage && canRestoreHiddenParty(party) ? (
+              <IconActionButton
+                icon={FaUndo}
+                title={t('travel.common.restore')}
+                onClick={(event) => restoreArchivedParty(party, event)}
+                disabled={restoringId === party._id}
+                variant="green"
+              />
+            ) : (
+              <span className="text-xs font-bold text-slate-400">
+                {t('travel.common.notRestorable')}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <IconActionButton
+              icon={FaBook}
+              title={t('travel.parties.actions.ledger')}
+              onClick={() => openLedger(party)}
+              disabled={!canViewLedger}
+              variant="cyan"
+            />
+            {(party.role === 'customer' || party.role === 'both') && (
             <IconActionButton
               icon={FaMoneyBillWave}
               title={t('travel.parties.actions.receivePayment')}
@@ -469,6 +583,13 @@ const TravelPartiesPage = () => {
             />
           )}
           <IconActionButton
+            icon={FaExchangeAlt}
+            title={t('party.merge')}
+            onClick={() => openMergeParty(party)}
+            disabled={!canManage || mergingId === party._id}
+            variant="amber"
+          />
+          <IconActionButton
             icon={FaEdit}
             title={t('travel.common.edit')}
             onClick={() => openDetails(party)}
@@ -482,8 +603,8 @@ const TravelPartiesPage = () => {
             disabled={!canManage || deletingId === party._id}
             variant="rose"
           />
-        </div>
-      ),
+          </div>
+        ),
     },
   ];
 
@@ -496,7 +617,7 @@ const TravelPartiesPage = () => {
           <div className="min-w-0">
             <p className="truncate text-sm font-extrabold text-slate-950">{party.name || '-'}</p>
             <p className="text-xs font-semibold text-slate-500">
-              {t(`travel.parties.roles.${party.role || 'both'}`)}
+              {isHiddenTab ? getHiddenReasonLabel(party) : t(`travel.parties.roles.${party.role || 'both'}`)}
             </p>
           </div>
           <div className={`text-right text-sm font-extrabold ${getBalanceTextClass(balance)}`}>
@@ -514,8 +635,24 @@ const TravelPartiesPage = () => {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <IconActionButton icon={FaBook} title={t('travel.parties.actions.ledger')} onClick={() => openLedger(party)} />
-          {(party.role === 'customer' || party.role === 'both') && (
+          {isHiddenTab ? (
+            canManage && canRestoreHiddenParty(party) ? (
+              <IconActionButton
+                icon={FaUndo}
+                title={t('travel.common.restore')}
+                onClick={(event) => restoreArchivedParty(party, event)}
+                disabled={restoringId === party._id}
+                variant="green"
+              />
+            ) : (
+              <span className="text-xs font-bold text-slate-400">
+                {t('travel.common.notRestorable')}
+              </span>
+            )
+          ) : (
+            <>
+              <IconActionButton icon={FaBook} title={t('travel.parties.actions.ledger')} onClick={() => openLedger(party)} />
+              {(party.role === 'customer' || party.role === 'both') && (
             <IconActionButton
               icon={FaMoneyBillWave}
               title={t('travel.parties.actions.receivePayment')}
@@ -531,6 +668,13 @@ const TravelPartiesPage = () => {
               variant="amber"
             />
           )}
+          <IconActionButton
+            icon={FaExchangeAlt}
+            title={t('party.merge')}
+            onClick={() => openMergeParty(party)}
+            disabled={!canManage || mergingId === party._id}
+            variant="amber"
+          />
           <IconActionButton icon={FaEdit} title={t('travel.common.edit')} onClick={() => openDetails(party)} disabled={!canManage} />
           <IconActionButton
             icon={FaTrash}
@@ -539,6 +683,8 @@ const TravelPartiesPage = () => {
             disabled={!canManage || deletingId === party._id}
             variant="rose"
           />
+            </>
+          )}
         </div>
       </div>
     );
@@ -567,6 +713,14 @@ const TravelPartiesPage = () => {
       }
       filters={
         <TravelMasterToolbar>
+          <TravelSegmentedControl
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'active', labelKey: 'travel.common.active' },
+              { value: 'hidden', labelKey: 'travel.common.hidden' },
+            ]}
+          />
           <TravelSearchInput
             value={filters.search}
             onChange={(value) => updateFilter('search', value)}
@@ -643,6 +797,58 @@ const TravelPartiesPage = () => {
         submitting={submitting}
         error={formError}
       />
+
+      {mergeSource && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-extrabold text-slate-950">{t('party.merge')}</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-500">{t('party.mergeDesc')}</p>
+
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-800">
+              <strong>{t('party.mergeWarning')}</strong>
+              <br />
+              {t('party.mergeContinue')}
+              <br />- {t('party.mergeMoveTransactions')}
+              <br />- {t('party.mergeSourceHidden')}
+            </div>
+
+            <label className="mt-4 block text-xs font-extrabold uppercase text-slate-500">
+              {t('party.selectMergeTarget')}
+            </label>
+            <select
+              value={mergeTargetId}
+              onChange={(event) => setMergeTargetId(event.target.value)}
+              className="mt-2 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-800 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+            >
+              <option value="">{t('select')}</option>
+              {mergeTargetOptions.map((party) => (
+                <option key={party._id} value={party._id}>
+                  {party.name} ({t(`travel.parties.roles.${party.role || 'both'}`)})
+                </option>
+              ))}
+            </select>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeMergeParty}
+                disabled={Boolean(mergingId)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-extrabold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmMergeParty}
+                disabled={!mergeTargetId || Boolean(mergingId)}
+                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {t('party.yesMerge')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </TravelMasterPageFrame>
   );
 };

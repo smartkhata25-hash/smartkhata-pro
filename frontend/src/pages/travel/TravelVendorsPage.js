@@ -9,6 +9,7 @@ import {
   FaSyncAlt,
   FaTimes,
   FaTrash,
+  FaUndo,
   FaWhatsapp,
 } from 'react-icons/fa';
 
@@ -17,6 +18,7 @@ import {
   deleteTravelVendor,
   fetchTravelServiceCategories,
   fetchTravelVendors,
+  restoreTravelVendor,
   updateTravelVendor,
 } from '../../services/travelMasterService';
 import { fetchWhatsAppTemplate } from '../../services/whatsAppTemplateService';
@@ -32,6 +34,7 @@ import {
   TravelFormModal,
   TravelMasterList,
   TravelMasterPageFrame,
+  TravelSegmentedControl,
   TravelMasterToolbar,
   TravelSearchInput,
   buildTravelConfirmMessage,
@@ -81,6 +84,11 @@ const getVendorBalance = (vendor) => {
 
 const getVendorOpeningDirection = (openingBalance = 0) =>
   Number(openingBalance || 0) < 0 ? 'advance' : 'payable';
+
+const isDeletedHiddenRecord = (record) => record?.hiddenReason === 'deleted';
+
+const getHiddenReasonLabel = (record) =>
+  t(`travel.hiddenReasons.${record?.hiddenReason || 'hidden'}`);
 
 const getOpeningBalanceAmount = (openingBalance = 0) => {
   const amount = Math.abs(Number(openingBalance || 0));
@@ -189,6 +197,8 @@ const TravelVendorsPage = () => {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [restoringId, setRestoringId] = useState('');
+  const [activeTab, setActiveTab] = useState('active');
   const [whatsAppTemplate, setWhatsAppTemplate] = useState(null);
 
   const createMode = searchParams.get('new') || '';
@@ -196,6 +206,7 @@ const TravelVendorsPage = () => {
   const canView = hasPermission('travel.vendors.view');
   const canManage = hasPermission('travel.vendors.manage');
   const canViewLedger = hasPermission('suppliers.view_ledger');
+  const isHiddenTab = activeTab === 'hidden';
 
   const canPayVendor =
     hasPermission('travel.vendors.view') ||
@@ -287,6 +298,8 @@ const TravelVendorsPage = () => {
         return;
       }
 
+      const { status = activeTab, ...requestOptions } = options;
+
       try {
         setLoading(true);
         setPageError('');
@@ -295,10 +308,14 @@ const TravelVendorsPage = () => {
           fetchTravelVendors(
             {
               includeBalance: 'true',
+              status,
             },
-            options
+            {
+              forceRefresh: true,
+              ...requestOptions,
+            }
           ),
-          fetchTravelServiceCategories({}, options),
+          fetchTravelServiceCategories({}, requestOptions),
         ]);
 
         setVendors(Array.isArray(vendorData) ? vendorData : []);
@@ -311,7 +328,7 @@ const TravelVendorsPage = () => {
         setLoading(false);
       }
     },
-    [canView]
+    [activeTab, canView]
   );
 
   useEffect(() => {
@@ -336,7 +353,9 @@ const TravelVendorsPage = () => {
     const search = normalizeSearch(pageMemory.search);
 
     return vendors
-      .filter((vendor) => vendor.isDeleted !== true)
+      .filter((vendor) =>
+        isHiddenTab ? vendor.isDeleted === true : vendor.isDeleted !== true
+      )
       .filter((vendor) => {
         if (!search) {
           return true;
@@ -377,7 +396,7 @@ const TravelVendorsPage = () => {
 
         return String(left.name || '').localeCompare(String(right.name || ''));
       });
-  }, [pageMemory.balance, pageMemory.search, pageMemory.sort, vendors]);
+  }, [isHiddenTab, pageMemory.balance, pageMemory.search, pageMemory.sort, vendors]);
 
   const openDetails = useCallback(
     (vendor = null, draftName = '') => {
@@ -540,6 +559,44 @@ const TravelVendorsPage = () => {
     [canManage, pageMemory.selectedId, setSelectedId]
   );
 
+  const handleRestoreVendor = useCallback(
+    async (vendor, event = null) => {
+      event?.stopPropagation?.();
+
+      if (!canManage) {
+        alert(t('travel.alerts.permissionDenied'));
+        return;
+      }
+
+      if (!isDeletedHiddenRecord(vendor)) {
+        alert(t('travel.common.notRestorable'));
+        return;
+      }
+
+      try {
+        setRestoringId(vendor._id);
+        const restored = await restoreTravelVendor(vendor._id);
+        const restoredVendor = restored?.supplier;
+
+        setActiveTab('active');
+        await loadData({
+          forceRefresh: true,
+          status: 'active',
+        });
+
+        if (restoredVendor?._id) {
+          setSelectedId(restoredVendor._id);
+        }
+      } catch (error) {
+        console.error('Travel vendor restore failed:', error);
+        alert(error?.response?.data?.message || t('travel.vendors.restoreFailed'));
+      } finally {
+        setRestoringId('');
+      }
+    },
+    [canManage, loadData, setSelectedId]
+  );
+
   const toggleCategory = (categoryId) => {
     setVendorValues((current) => {
       const currentIds = normalizeCategoryIds(current.travelServiceCategories);
@@ -648,6 +705,12 @@ const TravelVendorsPage = () => {
             {vendor.email && (
               <p className="truncate text-xs font-semibold text-slate-500">{vendor.email}</p>
             )}
+
+            {isHiddenTab && (
+              <p className="truncate text-[11px] font-bold uppercase tracking-wide text-rose-600">
+                {getHiddenReasonLabel(vendor)}
+              </p>
+            )}
           </div>
         ),
       },
@@ -688,9 +751,26 @@ const TravelVendorsPage = () => {
         labelKey: 'travel.fields.actions',
         className: 'w-[24%]',
         cellClassName: '!px-2 !py-2',
-        render: (vendor) => (
-          <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
-            {canViewLedger && (
+        render: (vendor) =>
+          isHiddenTab ? (
+            <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
+              {canManage && isDeletedHiddenRecord(vendor) ? (
+                <IconActionButton
+                  icon={FaUndo}
+                  title={t('travel.common.restore')}
+                  variant="green"
+                  disabled={restoringId === vendor._id}
+                  onClick={(event) => handleRestoreVendor(vendor, event)}
+                />
+              ) : (
+                <span className="text-xs font-bold text-slate-400">
+                  {t('travel.common.notRestorable')}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
+              {canViewLedger && (
               <IconActionButton
                 icon={FaBookOpen}
                 title={t('travel.common.viewLedger')}
@@ -759,8 +839,8 @@ const TravelVendorsPage = () => {
                 onClick={(event) => handleDeleteVendor(vendor, event)}
               />
             )}
-          </div>
-        ),
+            </div>
+          ),
       },
     ],
     [
@@ -770,9 +850,12 @@ const TravelVendorsPage = () => {
       businessName,
       deletingId,
       handleDeleteVendor,
+      handleRestoreVendor,
+      isHiddenTab,
       openDetails,
       openLedger,
       openVendorPayment,
+      restoringId,
       whatsAppTemplate,
     ]
   );
@@ -790,6 +873,12 @@ const TravelVendorsPage = () => {
               <p className="mt-1 truncate text-xs font-semibold text-slate-500">
                 {vendor.phone || vendor.email || '-'}
               </p>
+
+              {isHiddenTab && (
+                <p className="truncate text-[11px] font-bold uppercase tracking-wide text-rose-600">
+                  {getHiddenReasonLabel(vendor)}
+                </p>
+              )}
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right">
@@ -811,9 +900,25 @@ const TravelVendorsPage = () => {
             />
           </div>
 
-          {(canViewLedger || canPayVendor || canManage || vendor.phone) && (
+          {(isHiddenTab || canViewLedger || canPayVendor || canManage || vendor.phone) && (
             <div className="mt-3 flex flex-wrap justify-end gap-1.5 border-t border-slate-100 pt-3">
-              {canViewLedger && (
+              {isHiddenTab ? (
+                canManage && isDeletedHiddenRecord(vendor) ? (
+                  <IconActionButton
+                    icon={FaUndo}
+                    title={t('travel.common.restore')}
+                    variant="green"
+                    disabled={restoringId === vendor._id}
+                    onClick={(event) => handleRestoreVendor(vendor, event)}
+                  />
+                ) : (
+                  <span className="text-xs font-bold text-slate-400">
+                    {t('travel.common.notRestorable')}
+                  </span>
+                )
+              ) : (
+                <>
+                  {canViewLedger && (
                 <IconActionButton
                   icon={FaBookOpen}
                   title={t('travel.common.viewLedger')}
@@ -862,6 +967,8 @@ const TravelVendorsPage = () => {
                   onClick={(event) => handleDeleteVendor(vendor, event)}
                 />
               )}
+                </>
+              )}
             </div>
           )}
         </article>
@@ -873,9 +980,12 @@ const TravelVendorsPage = () => {
       canViewLedger,
       deletingId,
       handleDeleteVendor,
+      handleRestoreVendor,
+      isHiddenTab,
       openDetails,
       openLedger,
       openVendorPayment,
+      restoringId,
       sendTravelReminder,
     ]
   );
@@ -908,7 +1018,16 @@ const TravelVendorsPage = () => {
         )
       }
       filters={
-        <TravelMasterToolbar className="lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(150px,auto)_minmax(165px,auto)_auto_auto]">
+        <TravelMasterToolbar className="lg:grid lg:grid-cols-[auto_minmax(220px,1fr)_minmax(150px,auto)_minmax(165px,auto)_auto_auto]">
+          <TravelSegmentedControl
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'active', labelKey: 'travel.common.active' },
+              { value: 'hidden', labelKey: 'travel.common.hidden' },
+            ]}
+          />
+
           <TravelSearchInput
             value={pageMemory.search}
             onChange={setSearch}
@@ -954,7 +1073,11 @@ const TravelVendorsPage = () => {
         columns={columns}
         records={visibleVendors}
         selectedId={pageMemory.selectedId}
-        onRowClick={(vendor) => setSelectedId(vendor._id)}
+        onRowClick={(vendor) => {
+          if (!isHiddenTab) {
+            setSelectedId(vendor._id);
+          }
+        }}
         renderMobileCard={renderMobileCard}
         emptyKey="travel.vendors.empty"
       />

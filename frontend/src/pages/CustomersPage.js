@@ -1350,7 +1350,7 @@ const CustomersPage = () => {
                     setEditingCustomer(null);
 
                     await loadCustomers();
-                    alert(t('alerts.mergeFailed'));
+                    alert(t('alerts.customersMerged'));
                   } catch (err) {
                     console.error(err);
                     alert(t('alerts.mergeFailed'));

@@ -45,6 +45,13 @@ router.delete(
   ctrl.deleteTravelVendor,
 );
 
+router.post(
+  "/travel-vendors/:id/restore",
+  requireModule(MODULE_KEYS.TRAVEL),
+  requirePermission("travel.vendors.manage"),
+  ctrl.restoreTravelVendor,
+);
+
 router.get(
   "/data-version",
   requirePermission("suppliers.view"),

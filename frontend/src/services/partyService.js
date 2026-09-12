@@ -331,6 +331,14 @@ export const restoreParty = async (id, token = null) => {
   return res.data;
 };
 
+export const confirmMergeParties = async (mergeData, token = null) => {
+  const res = await axios.post(`${API_URL}/merge/confirm`, mergeData, getAuthHeaders(token));
+
+  clearPartyCaches();
+
+  return res.data;
+};
+
 export const convertPartyToCustomer = async (id, token = null) => {
   const res = await axios.post(`${API_URL}/${id}/convert-to-customer`, {}, getAuthHeaders(token));
 
@@ -389,6 +397,7 @@ const partyService = {
   updateParty,
   deleteParty,
   restoreParty,
+  confirmMergeParties,
 
   convertPartyToCustomer,
   convertPartyToSupplier,

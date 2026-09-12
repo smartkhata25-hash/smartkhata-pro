@@ -19,8 +19,10 @@ const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { getSupplierBalanceFromJournal } = require("../utils/balanceHelper");
 const { logActivity } = require("../utils/activityLogger");
 const PurchaseInvoice = require("../models/PurchaseInvoice");
+const PayBill = require("../models/PayBill");
 const {
   MODULE_SCOPES,
+  applyModuleScopeFilter,
   applySupplierModuleScopeFilter,
   getRequestedModuleScope,
   normalizeModuleScope,
@@ -1368,6 +1370,146 @@ exports.deleteTravelVendor = async (req, res) => {
   }
 };
 
+exports.restoreTravelVendor = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const supplierId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(supplierId))) {
+      return res.status(400).json({ message: "Invalid vendor ID" });
+    }
+
+    const supplier = await Supplier.findOne(
+      applySupplierModuleScopeFilter(
+        {
+          _id: supplierId,
+          userId,
+          isDeleted: true,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (!supplier) {
+      return res.status(404).json({ message: "Hidden travel vendor not found" });
+    }
+
+    if (supplier.hiddenReason !== "deleted") {
+      return res.status(400).json({
+        message: "Only deleted travel vendors can be restored",
+      });
+    }
+
+    const sameName = new RegExp(`^${escapeRegex(supplier.name)}$`, "i");
+    const activeSupplierExists = await Supplier.exists({
+      _id: { $ne: supplier._id },
+      name: sameName,
+      userId,
+      isDeleted: false,
+    });
+
+    if (activeSupplierExists) {
+      return res.status(400).json({
+        message: "Active supplier with same name already exists",
+      });
+    }
+
+    const activePartyExists = await Party.exists(
+      applyModuleScopeFilter(
+        {
+          name: sameName,
+          userId,
+          isDeleted: false,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (activePartyExists) {
+      return res.status(400).json({
+        message: "Active party with same name already exists",
+      });
+    }
+
+    const before = supplier.toObject();
+    const restoredModuleScope =
+      supplier.moduleScope === MODULE_SCOPES.BOTH
+        ? MODULE_SCOPES.BOTH
+        : MODULE_SCOPES.TRAVEL;
+
+    supplier.isDeleted = false;
+    supplier.supplierType = "vendor";
+    supplier.hiddenReason = null;
+    supplier.deletedAt = null;
+    supplier.deletedBy = null;
+    supplier.deleteReason = "";
+    supplier.isTravelVendor = true;
+    supplier.moduleScope = restoredModuleScope;
+
+    await supplier.save();
+
+    if (supplier.account) {
+      await Account.updateOne(
+        {
+          _id: supplier.account,
+          userId,
+        },
+        {
+          $set: {
+            name: supplier.name,
+            type: "Liability",
+            normalBalance: "credit",
+            category: "supplier",
+            openingBalance: Number(supplier.openingBalance || 0),
+            moduleScope: restoredModuleScope,
+            isActive: true,
+          },
+        },
+      );
+
+      await recalculateAccountBalance(supplier.account);
+    }
+
+    const responseSupplier = await buildTravelVendorResponse(userId, supplier);
+
+    await logActivity({
+      req,
+      action: "restore",
+      module: "travel.vendors",
+      entityType: "Supplier",
+      entityId: supplier._id,
+      title: `Travel vendor ${supplier.name}`,
+      description: `Travel vendor ${supplier.name} restored`,
+      before,
+      after: {
+        isDeleted: supplier.isDeleted,
+        supplierType: supplier.supplierType,
+        moduleScope: supplier.moduleScope,
+        isTravelVendor: supplier.isTravelVendor,
+        hiddenReason: supplier.hiddenReason,
+        account: supplier.account,
+      },
+    });
+
+    return res.json({
+      message: "Travel vendor restored successfully",
+      supplier: responseSupplier,
+    });
+  } catch (error) {
+    console.error("Travel vendor restore error:", error);
+
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+
+    return res.status(500).json({
+      message: "Travel vendor restore failed",
+      error: error.message,
+    });
+  }
+};
+
 exports.updateSupplier = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -1717,11 +1859,16 @@ exports.updateSupplier = async (req, res) => {
 
 // ✅ CONFIRM MERGE SUPPLIER (SAFE ACCOUNTING VERSION)
 exports.confirmMergeSupplier = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const userId = req.user?.id || req.userId;
     const { sourceSupplierId, targetSupplierId } = req.body;
 
-    if (!sourceSupplierId || !targetSupplierId) {
+    if (
+      !mongoose.Types.ObjectId.isValid(String(sourceSupplierId)) ||
+      !mongoose.Types.ObjectId.isValid(String(targetSupplierId))
+    ) {
       return res.status(400).json({
         message: "Invalid merge request",
       });
@@ -1734,23 +1881,36 @@ exports.confirmMergeSupplier = async (req, res) => {
     }
 
     // ✅ Fetch suppliers
-    const sourceSupplier = await Supplier.findOne({
-      _id: sourceSupplierId,
-      userId,
-      isDeleted: false,
-    });
+    let mergeResult = null;
 
-    const targetSupplier = await Supplier.findOne({
-      _id: targetSupplierId,
-      userId,
-      isDeleted: false,
-    });
+    await session.withTransaction(async () => {
+      const sourceSupplier = await Supplier.findOne(
+        applySupplierModuleScopeFilter(
+          {
+            _id: sourceSupplierId,
+            userId,
+            isDeleted: false,
+          },
+          MODULE_SCOPES.TRADING,
+        ),
+      ).session(session);
 
-    if (!sourceSupplier || !targetSupplier) {
-      return res.status(404).json({
-        message: "Supplier not found",
-      });
-    }
+      const targetSupplier = await Supplier.findOne(
+        applySupplierModuleScopeFilter(
+          {
+            _id: targetSupplierId,
+            userId,
+            isDeleted: false,
+          },
+          MODULE_SCOPES.TRADING,
+        ),
+      ).session(session);
+
+      if (!sourceSupplier || !targetSupplier) {
+        const error = new Error("Supplier not found");
+        error.statusCode = 404;
+        throw error;
+      }
 
     const beforeMerge = {
       sourceSupplierId: sourceSupplier._id,
@@ -1763,43 +1923,81 @@ exports.confirmMergeSupplier = async (req, res) => {
 
     // ✅ Safety checks
     if (!sourceSupplier.account || !targetSupplier.account) {
-      return res.status(400).json({
-        message: "Supplier account missing",
-      });
+      const error = new Error("Supplier account missing");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (sourceSupplier.account.toString() === targetSupplier.account.toString()) {
+      const error = new Error("Cannot merge suppliers with the same account");
+      error.statusCode = 400;
+      throw error;
     }
 
     // ✅ MOVE ALL JOURNAL ENTRIES SAFELY
 
-    const journals = await JournalEntry.find({
-      supplierId: sourceSupplier._id,
-      createdBy: userId,
-      isDeleted: false,
-    });
+    const journalSupplierUpdate = await JournalEntry.updateMany(
+      {
+        supplierId: sourceSupplier._id,
+        createdBy: userId,
+        isDeleted: false,
+      },
+      { $set: { supplierId: targetSupplier._id } },
+      { session },
+    );
 
-    let movedTransactions = 0;
+    const journalAccountUpdate = await JournalEntry.updateMany(
+      {
+        createdBy: userId,
+        isDeleted: false,
+        "lines.account": sourceSupplier.account,
+      },
+      {
+        $set: {
+          "lines.$[line].account": targetSupplier.account,
+        },
+      },
+      {
+        arrayFilters: [{ "line.account": sourceSupplier.account }],
+        session,
+      },
+    );
 
-    for (const journal of journals) {
-      journal.supplierId = targetSupplier._id;
+    const [purchaseUpdate, returnUpdate, paymentUpdate] = await Promise.all([
+      PurchaseInvoice.updateMany(
+        {
+          supplier: sourceSupplier._id,
+          userId,
+        },
+        { $set: { supplier: targetSupplier._id } },
+        { session },
+      ),
+      PurchaseReturn.updateMany(
+        {
+          supplierId: sourceSupplier._id,
+          createdBy: userId,
+        },
+        { $set: { supplierId: targetSupplier._id } },
+        { session },
+      ),
+      PayBill.updateMany(
+        {
+          supplier: sourceSupplier._id,
+          userId,
+        },
+        { $set: { supplier: targetSupplier._id } },
+        { session },
+      ),
+    ]);
 
-      // ✅ IMPORTANT:
+    const movedTransactions =
+      Number(journalSupplierUpdate.modifiedCount || 0) +
+      Number(journalAccountUpdate.modifiedCount || 0);
+    const movedDocuments =
+      Number(purchaseUpdate.modifiedCount || 0) +
+      Number(returnUpdate.modifiedCount || 0) +
+      Number(paymentUpdate.modifiedCount || 0);
 
-      journal.lines = journal.lines.map((line) => {
-        if (line.account?.toString() === sourceSupplier.account.toString()) {
-          return {
-            ...line,
-            account: targetSupplier.account,
-          };
-        }
-
-        return line;
-      });
-
-      await journal.save();
-      movedTransactions++;
-    }
-
-    await recalculateAccountBalance(targetSupplier.account);
-    await recalculateAccountBalance(sourceSupplier.account);
 
     // ✅ DEACTIVATE OLD SUPPLIER
 
@@ -1807,7 +2005,7 @@ exports.confirmMergeSupplier = async (req, res) => {
     sourceSupplier.supplierType = "blocked";
     sourceSupplier.hiddenReason = "merged";
 
-    await sourceSupplier.save();
+    await sourceSupplier.save({ session });
 
     await Account.updateOne(
       {
@@ -1819,36 +2017,56 @@ exports.confirmMergeSupplier = async (req, res) => {
           isActive: false,
         },
       },
+      { session },
     );
+
+    mergeResult = {
+      sourceSupplier,
+      targetSupplier,
+      sourceAccountId: sourceSupplier.account,
+      targetAccountId: targetSupplier.account,
+      beforeMerge,
+      movedTransactions,
+      movedDocuments,
+    };
+    });
+
+    await Promise.all([
+      recalculateAccountBalance(mergeResult.targetAccountId),
+      recalculateAccountBalance(mergeResult.sourceAccountId),
+    ]);
 
     await logActivity({
       req,
       action: "merge",
       module: "suppliers",
       entityType: "Supplier",
-      entityId: targetSupplier._id,
+      entityId: mergeResult.targetSupplier._id,
       title: "Supplier Merge",
-      description: `${sourceSupplier.name} کو ${targetSupplier.name} میں Merge کیا گیا`,
-      before: beforeMerge,
+      description: `${mergeResult.sourceSupplier.name} merged into ${mergeResult.targetSupplier.name}`,
+      before: mergeResult.beforeMerge,
       after: {
-        mergedInto: targetSupplier._id,
+        mergedInto: mergeResult.targetSupplier._id,
         sourceStatus: "merged",
-        movedTransactions,
+        movedTransactions: mergeResult.movedTransactions,
+        movedDocuments: mergeResult.movedDocuments,
       },
     });
 
     return res.json({
       message: "Suppliers merged successfully",
-      mergedInto: targetSupplier._id,
-      movedTransactions,
+      mergedInto: mergeResult.targetSupplier._id,
+      movedTransactions: mergeResult.movedTransactions,
+      movedDocuments: mergeResult.movedDocuments,
     });
   } catch (error) {
     console.error("❌ Confirm Merge Supplier Error:", error);
 
-    res.status(500).json({
-      message: "Merge failed",
-      error: error.message,
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Merge failed",
     });
+  } finally {
+    session.endSession();
   }
 };
 

@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   createParty,
+  confirmMergeParties,
   deleteParty,
   getParties,
   getPartyById,
@@ -35,6 +36,12 @@ router.get(
 );
 
 router.post("/", requirePermission("travel.parties.manage"), createParty);
+
+router.post(
+  "/merge/confirm",
+  requirePermission("travel.parties.manage"),
+  confirmMergeParties,
+);
 
 router.post("/:id/restore", requirePermission("travel.parties.manage"), restoreParty);
 

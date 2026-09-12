@@ -6,6 +6,7 @@ const { getCustomerBalanceFromJournal } = require("../utils/balanceHelper");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
+const ReceivePayment = require("../models/ReceivePayment");
 const Counter = require("../models/Counter");
 const mongoose = require("mongoose");
 const { logActivity } = require("../utils/activityLogger");
@@ -236,7 +237,7 @@ const buildTravelCustomerResponse = async (userId, customer) => {
     _id: customer._id,
     createdBy: userId,
   })
-    .select("name email phone address type moduleScope isActive openingBalance account createdAt updatedAt")
+    .select("name email phone address type moduleScope isActive hiddenReason deletedAt deleteReason openingBalance account createdAt updatedAt")
     .populate("account", "_id name code type category normalBalance isActive moduleScope")
     .lean();
 
@@ -1310,89 +1311,171 @@ const convertCustomerToParty = async (req, res) => {
 
 // ✅ CONFIRM MERGE CUSTOMERS (PRO LEVEL – FUTURE SAFE)
 const confirmMergeCustomers = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const userId = req.user?.id || req.userId;
     const { sourceCustomerId, targetCustomerId } = req.body;
+
+    if (
+      !mongoose.Types.ObjectId.isValid(String(sourceCustomerId)) ||
+      !mongoose.Types.ObjectId.isValid(String(targetCustomerId))
+    ) {
+      return res.status(400).json({ message: "Invalid merge request" });
+    }
 
     if (sourceCustomerId === targetCustomerId) {
       return res.status(400).json({ message: "Cannot merge same record" });
     }
 
-    const sourceCustomer = await Customer.findOne({
-      _id: sourceCustomerId,
-      createdBy: userId,
-      isActive: true,
-    });
+    let mergeResult = null;
 
-    const targetCustomer = await Customer.findOne({
-      _id: targetCustomerId,
-      createdBy: userId,
-      isActive: true,
-    });
+    await session.withTransaction(async () => {
+      const sourceCustomer = await Customer.findOne(
+        applyModuleScopeFilter(
+          {
+            _id: sourceCustomerId,
+            createdBy: userId,
+            isActive: true,
+          },
+          MODULE_SCOPES.TRADING,
+        ),
+      ).session(session);
 
-    if (!sourceCustomer || !targetCustomer) {
-      return res.status(404).json({ message: "Customer not found" });
-    }
+      const targetCustomer = await Customer.findOne(
+        applyModuleScopeFilter(
+          {
+            _id: targetCustomerId,
+            createdBy: userId,
+            isActive: true,
+          },
+          MODULE_SCOPES.TRADING,
+        ),
+      ).session(session);
 
-    const sourceAccountId = sourceCustomer.account;
-    const targetAccountId = targetCustomer.account;
+      if (!sourceCustomer || !targetCustomer) {
+        const error = new Error("Customer not found");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const sourceAccountId = sourceCustomer.account;
+      const targetAccountId = targetCustomer.account;
+
+      if (!sourceAccountId || !targetAccountId) {
+        const error = new Error("Customer account missing");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (sourceAccountId.toString() === targetAccountId.toString()) {
+        const error = new Error("Cannot merge customers with the same account");
+        error.statusCode = 400;
+        throw error;
+      }
 
     // 🔥 1️⃣ Update Journal customerId
-    await JournalEntry.updateMany(
-      { customerId: sourceCustomer._id, isDeleted: false },
-      { $set: { customerId: targetCustomer._id } },
-    );
+      await JournalEntry.updateMany(
+        {
+          customerId: sourceCustomer._id,
+          createdBy: userId,
+          isDeleted: false,
+        },
+        { $set: { customerId: targetCustomer._id } },
+        { session },
+      );
 
     // 🔥 2️⃣ Update Journal lines account
-    const journals = await JournalEntry.find({
-      createdBy: userId,
-      isDeleted: false,
-      "lines.account": sourceAccountId,
-    });
+      await JournalEntry.updateMany(
+        {
+          createdBy: userId,
+          isDeleted: false,
+          "lines.account": sourceAccountId,
+        },
+        {
+          $set: {
+            "lines.$[line].account": targetAccountId,
+          },
+        },
+        {
+          arrayFilters: [{ "line.account": sourceAccountId }],
+          session,
+        },
+      );
 
-    for (const journal of journals) {
-      journal.lines = journal.lines.map((line) => {
-        if (line.account?.toString() === sourceAccountId.toString()) {
-          return {
-            ...line,
-            account: targetAccountId,
-          };
-        }
-        return line;
-      });
-
-      await journal.save();
-    }
+      await Promise.all([
+        Invoice.updateMany(
+          {
+            customerId: sourceCustomer._id,
+            createdBy: userId,
+          },
+          { $set: { customerId: targetCustomer._id } },
+          { session },
+        ),
+        RefundInvoice.updateMany(
+          {
+            customerId: sourceCustomer._id,
+            createdBy: userId,
+          },
+          { $set: { customerId: targetCustomer._id } },
+          { session },
+        ),
+        ReceivePayment.updateMany(
+          {
+            customer: sourceCustomer._id,
+            userId,
+          },
+          { $set: { customer: targetCustomer._id } },
+          { session },
+        ),
+      ]);
 
     // 🔥 3️⃣ Deactivate source customer
     sourceCustomer.isActive = false;
     sourceCustomer.hiddenReason = "merged";
 
-    await sourceCustomer.save();
+      await sourceCustomer.save({ session });
 
     // 🔥 4️⃣ Deactivate source account
-    await Account.updateOne(
-      { _id: sourceAccountId },
-      { $set: { isActive: false } },
-    );
-    await recalculateAccountBalance(targetAccountId);
+      await Account.updateOne(
+        { _id: sourceAccountId, userId },
+        { $set: { isActive: false } },
+        { session },
+      );
+
+      mergeResult = {
+        sourceCustomer,
+        targetCustomer,
+        sourceAccountId,
+        targetAccountId,
+      };
+    });
+
+    await Promise.all([
+      recalculateAccountBalance(mergeResult.targetAccountId),
+      recalculateAccountBalance(mergeResult.sourceAccountId),
+    ]);
 
     await logActivity({
       req,
       action: "merge",
       module: "customers",
       entityType: "Customer",
-      entityId: targetCustomer._id,
+      entityId: mergeResult.targetCustomer._id,
       title: `Customer Merge`,
-      description: `${sourceCustomer.name} کو ${targetCustomer.name} میں Merge کیا گیا`,
+      description: `${mergeResult.sourceCustomer.name} merged into ${mergeResult.targetCustomer.name}`,
     });
-    res.json({
+    return res.json({
       message: "Customers merged successfully",
-      mergedInto: targetCustomer._id,
+      mergedInto: mergeResult.targetCustomer._id,
     });
   } catch (error) {
     console.error("Confirm merge error:", error);
-    res.status(500).json({ message: "Merge failed" });
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Merge failed",
+    });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -1468,7 +1551,7 @@ const getTravelCustomers = async (req, res) => {
 
       const limitNumber = Math.min(Math.max(Number(limit) || 500, 1), 1000);
       const customers = await Customer.find(query)
-        .select("name email phone address type moduleScope isActive openingBalance account createdAt updatedAt")
+        .select("name email phone address type moduleScope isActive hiddenReason deletedAt deleteReason openingBalance account createdAt updatedAt")
         .populate("account", "_id name code type category normalBalance isActive")
         .sort({ name: 1, createdAt: -1 })
         .limit(limitNumber)
@@ -1851,6 +1934,136 @@ const deleteTravelCustomer = async (req, res) => {
   }
 };
 
+const restoreTravelCustomer = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const customerId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(String(customerId))) {
+      return res.status(400).json({ message: "Invalid customer ID" });
+    }
+
+    const customer = await Customer.findOne(
+      applyModuleScopeFilter(
+        {
+          _id: customerId,
+          createdBy: userId,
+          isActive: false,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (!customer) {
+      return res.status(404).json({ message: "Hidden travel customer not found" });
+    }
+
+    if (customer.hiddenReason !== "deleted") {
+      return res.status(400).json({
+        message: "Only deleted travel customers can be restored",
+      });
+    }
+
+    const sameName = new RegExp(`^${escapeRegex(customer.name)}$`, "i");
+    const activeCustomerExists = await Customer.exists({
+      _id: { $ne: customer._id },
+      name: sameName,
+      createdBy: userId,
+      isActive: true,
+    });
+
+    if (activeCustomerExists) {
+      return res.status(400).json({
+        message: "Active customer with same name already exists",
+      });
+    }
+
+    const activePartyExists = await Party.exists(
+      applyModuleScopeFilter(
+        {
+          name: sameName,
+          userId,
+          isDeleted: false,
+          isActive: true,
+        },
+        MODULE_SCOPES.TRAVEL,
+      ),
+    );
+
+    if (activePartyExists) {
+      return res.status(400).json({
+        message: "Active party with same name already exists",
+      });
+    }
+
+    const before = customer.toObject();
+    const restoredModuleScope =
+      customer.moduleScope === MODULE_SCOPES.BOTH
+        ? MODULE_SCOPES.BOTH
+        : MODULE_SCOPES.TRAVEL;
+
+    customer.isActive = true;
+    customer.hiddenReason = null;
+    customer.deletedAt = null;
+    customer.deletedBy = null;
+    customer.deleteReason = "";
+    customer.moduleScope = restoredModuleScope;
+
+    await customer.save();
+
+    await Account.updateOne(
+      {
+        _id: customer.account,
+        userId,
+      },
+      {
+        $set: {
+          name: `Customer: ${customer.name}`,
+          type: "Asset",
+          normalBalance: "debit",
+          category: "customer",
+          openingBalance: Number(customer.openingBalance || 0),
+          moduleScope: restoredModuleScope,
+          isActive: true,
+        },
+      },
+    );
+
+    await recalculateAccountBalance(customer.account);
+
+    const responseCustomer = await buildTravelCustomerResponse(userId, customer);
+
+    await logActivity({
+      req,
+      action: "restore",
+      module: "travel.customers",
+      entityType: "Customer",
+      entityId: customer._id,
+      title: `Travel customer ${customer.name}`,
+      description: `Travel customer ${customer.name} restored`,
+      before,
+      after: {
+        isActive: customer.isActive,
+        moduleScope: customer.moduleScope,
+        hiddenReason: customer.hiddenReason,
+        account: customer.account,
+      },
+    });
+
+    return res.json({
+      message: "Travel customer restored successfully",
+      customer: responseCustomer,
+    });
+  } catch (error) {
+    console.error("Travel customer restore failed:", error);
+
+    return res.status(500).json({
+      message: "Travel customer restore failed",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getCustomers,
   getTravelCustomers,
@@ -1859,6 +2072,7 @@ module.exports = {
   addTravelCustomer,
   updateTravelCustomer,
   deleteTravelCustomer,
+  restoreTravelCustomer,
   updateCustomer,
   deleteCustomer,
   restoreCustomer,

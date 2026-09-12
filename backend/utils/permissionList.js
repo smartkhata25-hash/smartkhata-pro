@@ -95,6 +95,7 @@ const PERMISSIONS = {
     EDIT: "parties.edit",
     DELETE: "parties.delete",
     RESTORE: "parties.restore",
+    MERGE: "parties.merge",
     CONVERT: "parties.convert",
     VIEW_LEDGER: "parties.view_ledger",
   },

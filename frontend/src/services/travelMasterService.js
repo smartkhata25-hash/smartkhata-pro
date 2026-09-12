@@ -464,6 +464,18 @@ export const deleteTravelVendor = async (id, options = {}) => {
   return response.data;
 };
 
+export const restoreTravelVendor = async (id) => {
+  const response = await axios.post(`${SUPPLIER_API}/travel-vendors/${id}/restore`, {}, getConfig());
+
+  if (response.data?.supplier?._id) {
+    upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.VENDORS, response.data.supplier);
+  }
+
+  clearTravelVendorFinancialCaches();
+
+  return response.data;
+};
+
 export const fetchTravelCustomers = (params = {}, options = {}) =>
   fetchList(
     TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS,
@@ -503,6 +515,18 @@ export const deleteTravelCustomer = async (id, options = {}) => {
   );
 
   removeCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS, id);
+  clearTravelCustomerFinancialCaches();
+
+  return response.data;
+};
+
+export const restoreTravelCustomer = async (id) => {
+  const response = await axios.post(`${CUSTOMER_API}/travel-options/${id}/restore`, {}, getConfig());
+
+  if (response.data?.customer?._id) {
+    upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS, response.data.customer);
+  }
+
   clearTravelCustomerFinancialCaches();
 
   return response.data;
@@ -566,6 +590,14 @@ export const restoreTravelParty = async (id) => {
   if (response.data?.party?._id) {
     upsertCachedTravelRecord(TRAVEL_CACHE_DOMAINS.TRAVEL_PARTIES, response.data.party);
   }
+
+  clearTravelPartyFinancialCaches();
+
+  return response.data;
+};
+
+export const mergeTravelParties = async (payload = {}) => {
+  const response = await axios.post(`${TRAVEL_API}/parties/merge/confirm`, payload, getConfig());
 
   clearTravelPartyFinancialCaches();
 

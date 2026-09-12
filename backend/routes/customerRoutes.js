@@ -8,6 +8,7 @@ const {
   addCustomer,
   addTravelCustomer,
   deleteTravelCustomer,
+  restoreTravelCustomer,
   updateTravelCustomer,
   updateCustomer,
   deleteCustomer,
@@ -71,6 +72,14 @@ router.delete(
   requireModule(MODULE_KEYS.TRAVEL),
   requirePermission("travel.bookings.create", "travel.customers"),
   deleteTravelCustomer,
+);
+
+router.post(
+  "/travel-options/:id/restore",
+  protect,
+  requireModule(MODULE_KEYS.TRAVEL),
+  requirePermission("travel.customers"),
+  restoreTravelCustomer,
 );
 
 // Confirm Customer Merge

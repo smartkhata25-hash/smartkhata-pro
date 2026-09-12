@@ -8,6 +8,11 @@ const Invoice = require("../models/Invoice");
 const RefundInvoice = require("../models/RefundInvoice");
 const PurchaseInvoice = require("../models/PurchaseInvoice");
 const PurchaseReturn = require("../models/PurchaseReturn");
+const ReceivePayment = require("../models/ReceivePayment");
+const PayBill = require("../models/PayBill");
+const TravelBooking = require("../models/TravelBooking");
+const TravelRefund = require("../models/TravelRefund");
+const TravelVendorReturn = require("../models/TravelVendorReturn");
 const Counter = require("../models/Counter");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
 const { logActivity } = require("../utils/activityLogger");
@@ -70,6 +75,21 @@ const isTravelScope = (moduleScope) => moduleScope === MODULE_SCOPES.TRAVEL;
 
 const withPartyScope = (query, moduleScope) =>
   applyModuleScopeFilter(query, moduleScope, "moduleScope");
+
+const mergePartyRoles = (sourceRole, targetRole) => {
+  const normalizedSource = ["customer", "supplier", "both"].includes(sourceRole)
+    ? sourceRole
+    : "both";
+  const normalizedTarget = ["customer", "supplier", "both"].includes(targetRole)
+    ? targetRole
+    : "both";
+
+  if (normalizedSource === normalizedTarget) {
+    return normalizedTarget;
+  }
+
+  return "both";
+};
 
 const applyJournalScopeFilter = (match, moduleScope) => {
   if (isTravelScope(moduleScope)) {
@@ -1506,6 +1526,311 @@ exports.restoreParty = async (req, res) => {
       message: "Party restore failed",
       error: err.message,
     });
+  }
+};
+
+exports.confirmMergeParties = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getRequestModuleScope(req);
+    const { sourcePartyId, targetPartyId } = req.body || {};
+
+    if (
+      !mongoose.Types.ObjectId.isValid(String(sourcePartyId)) ||
+      !mongoose.Types.ObjectId.isValid(String(targetPartyId))
+    ) {
+      return res.status(400).json({ message: "Invalid merge request" });
+    }
+
+    if (String(sourcePartyId) === String(targetPartyId)) {
+      return res.status(400).json({ message: "Cannot merge same party" });
+    }
+
+    let mergeResult = null;
+
+    await session.withTransaction(async () => {
+      const sourceParty = await Party.findOne(
+        withPartyScope(
+          {
+            _id: sourcePartyId,
+            userId,
+            isDeleted: false,
+            isActive: true,
+          },
+          moduleScope,
+        ),
+      ).session(session);
+
+      const targetParty = await Party.findOne(
+        withPartyScope(
+          {
+            _id: targetPartyId,
+            userId,
+            isDeleted: false,
+            isActive: true,
+          },
+          moduleScope,
+        ),
+      ).session(session);
+
+      if (!sourceParty || !targetParty) {
+        const error = new Error("Party not found");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (!sourceParty.account || !targetParty.account) {
+        const error = new Error("Party account missing");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (String(sourceParty.account) === String(targetParty.account)) {
+        const error = new Error("Cannot merge parties with the same account");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const mergedRole = mergePartyRoles(sourceParty.role, targetParty.role);
+      const beforeMerge = {
+        sourcePartyId: sourceParty._id,
+        sourceName: sourceParty.name,
+        sourceRole: sourceParty.role,
+        sourceAccount: sourceParty.account,
+        targetPartyId: targetParty._id,
+        targetName: targetParty.name,
+        targetRole: targetParty.role,
+        targetAccount: targetParty.account,
+        moduleScope,
+      };
+
+      const journalPartyUpdate = await JournalEntry.updateMany(
+        applyJournalScopeFilter(
+          {
+            partyId: sourceParty._id,
+            createdBy: userId,
+            isDeleted: false,
+          },
+          moduleScope,
+        ),
+        { $set: { partyId: targetParty._id } },
+        { session },
+      );
+
+      const journalAccountUpdate = await JournalEntry.updateMany(
+        applyJournalScopeFilter(
+          {
+            createdBy: userId,
+            isDeleted: false,
+            "lines.account": sourceParty.account,
+          },
+          moduleScope,
+        ),
+        {
+          $set: {
+            "lines.$[line].account": targetParty.account,
+          },
+        },
+        {
+          arrayFilters: [{ "line.account": sourceParty.account }],
+          session,
+        },
+      );
+
+      const documentUpdates = await Promise.all(
+        isTravelScope(moduleScope)
+          ? [
+              TravelBooking.updateMany(
+                { userId, customerPartyId: sourceParty._id },
+                {
+                  $set: {
+                    customerType: "party",
+                    customerPartyId: targetParty._id,
+                  },
+                },
+                { session },
+              ),
+              TravelBooking.updateMany(
+                { userId, "bookingItems.vendorPartyId": sourceParty._id },
+                {
+                  $set: {
+                    "bookingItems.$[item].vendorType": "party",
+                    "bookingItems.$[item].vendorPartyId": targetParty._id,
+                  },
+                },
+                {
+                  arrayFilters: [{ "item.vendorPartyId": sourceParty._id }],
+                  session,
+                },
+              ),
+              TravelBooking.updateMany(
+                {
+                  userId,
+                  "bookingItems.umrahDetails.components.vendorPartyId": sourceParty._id,
+                },
+                {
+                  $set: {
+                    "bookingItems.$[].umrahDetails.components.$[component].vendorType": "party",
+                    "bookingItems.$[].umrahDetails.components.$[component].vendorPartyId":
+                      targetParty._id,
+                  },
+                },
+                {
+                  arrayFilters: [{ "component.vendorPartyId": sourceParty._id }],
+                  session,
+                },
+              ),
+              TravelRefund.updateMany(
+                { userId, customerPartyId: sourceParty._id },
+                {
+                  $set: {
+                    customerType: "party",
+                    customerPartyId: targetParty._id,
+                  },
+                },
+                { session },
+              ),
+              TravelRefund.updateMany(
+                { userId, "refundItems.vendorPartyId": sourceParty._id },
+                {
+                  $set: {
+                    "refundItems.$[item].vendorType": "party",
+                    "refundItems.$[item].vendorPartyId": targetParty._id,
+                  },
+                },
+                {
+                  arrayFilters: [{ "item.vendorPartyId": sourceParty._id }],
+                  session,
+                },
+              ),
+              TravelVendorReturn.updateMany(
+                { userId, vendorPartyId: sourceParty._id },
+                {
+                  $set: {
+                    vendorType: "party",
+                    vendorPartyId: targetParty._id,
+                  },
+                },
+                { session },
+              ),
+            ]
+          : [
+              Invoice.updateMany(
+                { partyId: sourceParty._id, createdBy: userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+              RefundInvoice.updateMany(
+                { partyId: sourceParty._id, createdBy: userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+              PurchaseInvoice.updateMany(
+                { partyId: sourceParty._id, userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+              PurchaseReturn.updateMany(
+                { partyId: sourceParty._id, createdBy: userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+              ReceivePayment.updateMany(
+                { partyId: sourceParty._id, userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+              PayBill.updateMany(
+                { partyId: sourceParty._id, userId },
+                { $set: { partyId: targetParty._id } },
+                { session },
+              ),
+            ],
+      );
+
+      targetParty.role = mergedRole;
+      sourceParty.isActive = false;
+      sourceParty.hiddenReason = "merged";
+
+      await targetParty.save({ session });
+      await sourceParty.save({ session });
+
+      await Promise.all([
+        Account.updateOne(
+          { _id: sourceParty.account, userId },
+          { $set: { isActive: false } },
+          { session },
+        ),
+        Account.updateOne(
+          { _id: targetParty.account, userId },
+          {
+            $set: {
+              isActive: true,
+              type: mergedRole === "supplier" ? "Liability" : "Asset",
+              normalBalance: mergedRole === "supplier" ? "credit" : "debit",
+            },
+          },
+          { session },
+        ),
+      ]);
+
+      mergeResult = {
+        sourceParty,
+        targetParty,
+        sourceAccountId: sourceParty.account,
+        targetAccountId: targetParty.account,
+        beforeMerge,
+        mergedRole,
+        movedTransactions:
+          Number(journalPartyUpdate.modifiedCount || 0) +
+          Number(journalAccountUpdate.modifiedCount || 0),
+        movedDocuments: documentUpdates.reduce(
+          (sum, update) => sum + Number(update?.modifiedCount || 0),
+          0,
+        ),
+      };
+    });
+
+    await Promise.all([
+      recalculateAccountBalance(mergeResult.targetAccountId),
+      recalculateAccountBalance(mergeResult.sourceAccountId),
+    ]);
+
+    await logActivity({
+      req,
+      action: "merge",
+      module: isTravelScope(moduleScope) ? "travel.parties" : "parties",
+      entityType: "Party",
+      entityId: mergeResult.targetParty._id,
+      title: "Party Merge",
+      description: `${mergeResult.sourceParty.name} merged into ${mergeResult.targetParty.name}`,
+      before: mergeResult.beforeMerge,
+      after: {
+        mergedInto: mergeResult.targetParty._id,
+        sourceStatus: "merged",
+        targetRole: mergeResult.mergedRole,
+        movedTransactions: mergeResult.movedTransactions,
+        movedDocuments: mergeResult.movedDocuments,
+      },
+    });
+
+    return res.json({
+      message: "Parties merged successfully",
+      mergedInto: mergeResult.targetParty._id,
+      targetRole: mergeResult.mergedRole,
+      movedTransactions: mergeResult.movedTransactions,
+      movedDocuments: mergeResult.movedDocuments,
+    });
+  } catch (err) {
+    console.error("❌ Confirm Merge Parties Error:", err);
+
+    return res.status(err.statusCode || 500).json({
+      message: err.message || "Party merge failed",
+    });
+  } finally {
+    session.endSession();
   }
 };
 

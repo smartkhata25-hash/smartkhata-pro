@@ -13,6 +13,7 @@ const ProductDropdown = ({
   showAddOption = true,
   inputStyle = {},
   inputProps = {},
+  inputRef: externalInputRef,
   onGridKeyDown,
 }) => {
   const [query, setQuery] = useState(value);
@@ -32,6 +33,16 @@ const ProductDropdown = ({
   const listRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const assignInputRef = (node) => {
+    inputRef.current = node;
+
+    if (typeof externalInputRef === 'function') {
+      externalInputRef(node);
+    } else if (externalInputRef) {
+      externalInputRef.current = node;
+    }
+  };
 
   // 🔍 Filter + Sort
   useEffect(() => {
@@ -155,7 +166,7 @@ const ProductDropdown = ({
     <>
       <div className="relative w-full" ref={wrapperRef}>
         <input
-          ref={inputRef}
+          ref={assignInputRef}
           type="text"
           value={query}
           onChange={(e) => {

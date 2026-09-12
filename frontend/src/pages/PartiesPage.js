@@ -9,11 +9,12 @@ import {
   updateParty,
   deleteParty,
   restoreParty,
+  confirmMergeParties,
   convertPartyToCustomer,
   convertPartyToSupplier,
 } from '../services/partyService';
 import { getPartyLedger } from '../services/partyLedgerService';
-import { FaEdit, FaTrash } from 'react-icons/fa';
+import { FaEdit, FaExchangeAlt, FaTrash } from 'react-icons/fa';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { useNavigate } from 'react-router-dom';
@@ -40,6 +41,7 @@ const PartiesPage = () => {
   const canEditParties = hasPermission('parties.edit');
   const canDeleteParties = hasPermission('parties.delete');
   const canRestoreParties = hasPermission('parties.restore');
+  const canMergeParties = hasPermission('parties.merge');
   const canConvertParties = hasPermission('parties.convert');
   const canViewPartyLedger = hasPermission('parties.view_ledger');
   const ledgerRestoreRef = useRef(false);
@@ -55,6 +57,9 @@ const PartiesPage = () => {
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [mergeSource, setMergeSource] = useState(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
@@ -385,6 +390,54 @@ const PartiesPage = () => {
     }
   };
 
+  const handleMergeClick = (e, party) => {
+    e.stopPropagation();
+
+    if (!canMergeParties) {
+      alert('You do not have permission to merge parties');
+      return;
+    }
+
+    setMergeSource(party);
+    setMergeTargetId('');
+    setShowMergeConfirm(true);
+  };
+
+  const confirmMerge = async () => {
+    if (!canMergeParties) {
+      alert('You do not have permission to merge parties');
+      return;
+    }
+
+    if (!mergeSource?._id || !mergeTargetId) {
+      alert(t('party.mergeTargetRequired'));
+      return;
+    }
+
+    try {
+      await confirmMergeParties({
+        sourcePartyId: mergeSource._id,
+        targetPartyId: mergeTargetId,
+      });
+
+      if (selectedPartyId === mergeSource._id) {
+        setSelectedPartyId('');
+        setSelectedPartyName('');
+        setLedgerData(null);
+      }
+
+      setShowMergeConfirm(false);
+      setMergeSource(null);
+      setMergeTargetId('');
+      setActiveTab('active');
+      await loadParties();
+      alert(t('alerts.partiesMerged'));
+    } catch (err) {
+      console.error('Party merge failed:', err);
+      alert(err?.response?.data?.message || t('alerts.mergeFailed'));
+    }
+  };
+
   const handleFormSubmit = async (formData) => {
     if (editingParty?._id && !canEditParties) {
       alert('You do not have permission to edit parties');
@@ -432,6 +485,11 @@ const PartiesPage = () => {
       return searchOk && roleOk;
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const mergeTargetOptions = parties.filter(
+    (party) =>
+      party?.isActive !== false && String(party?._id) !== String(mergeSource?._id || '')
+  );
 
   const closing = ledgerData?.ledger?.length
     ? Number(ledgerData.ledger[ledgerData.ledger.length - 1].runningBalance || 0)
@@ -735,6 +793,15 @@ const PartiesPage = () => {
                               <FaTrash size={12} />
                             </button>
                           )}
+                          {canMergeParties && (
+                            <button
+                              onClick={(e) => handleMergeClick(e, party)}
+                              style={iconButton('#f59e0b', '#fffbeb', '#b45309')}
+                              title={t('party.merge')}
+                            >
+                              <FaExchangeAlt size={11} />
+                            </button>
+                          )}
                           {canConvertParties && (
                             <button
                               onClick={(e) => handleConvertToCustomer(e, party)}
@@ -933,6 +1000,114 @@ const PartiesPage = () => {
                 }}
               >
                 {t('yes')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMergeConfirm && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 3000,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 14,
+              padding: 22,
+              width: 420,
+              maxWidth: '92vw',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 6, fontWeight: 800 }}>
+              {t('party.merge')}
+            </h3>
+            <p style={{ marginTop: 0, fontSize: 13, color: '#6b7280' }}>
+              {t('party.mergeDesc')}
+            </p>
+
+            <div
+              style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                color: '#92400e',
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 13,
+                lineHeight: 1.6,
+                marginBottom: 12,
+              }}
+            >
+              <strong>{t('party.mergeWarning')}</strong>
+              <br />
+              {t('party.mergeContinue')}
+              <br />- {t('party.mergeMoveTransactions')}
+              <br />- {t('party.mergeSourceHidden')}
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, marginBottom: 6 }}>
+                {t('party.selectMergeTarget')}
+              </label>
+              <select
+                value={mergeTargetId}
+                onChange={(event) => setMergeTargetId(event.target.value)}
+                style={{
+                  width: '100%',
+                  height: 36,
+                  borderRadius: 8,
+                  border: '1px solid #d1d5db',
+                  padding: '0 10px',
+                }}
+              >
+                <option value="">{t('select')}</option>
+                {mergeTargetOptions.map((party) => (
+                  <option key={party._id} value={party._id}>
+                    {party.name} ({getRoleLabel(party.role)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => {
+                  setShowMergeConfirm(false);
+                  setMergeSource(null);
+                  setMergeTargetId('');
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #d1d5db',
+                  background: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                onClick={confirmMerge}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#f59e0b',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
+              >
+                {t('party.yesMerge')}
               </button>
             </div>
           </div>

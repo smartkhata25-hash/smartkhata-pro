@@ -2,6 +2,37 @@ import React, { useRef, useEffect } from 'react';
 import ProductDropdown from './ProductDropdown';
 import { t } from '../i18n/i18n';
 
+const blankRow = () => ({
+  search: '',
+  name: '',
+  productId: '',
+  description: '',
+  cost: 0,
+  quantity: '',
+  rate: 0,
+  amount: 0,
+});
+
+const isInvoiceItemRowUsed = (row = {}) =>
+  Boolean(
+    row.productId ||
+      String(row.search || '').trim() ||
+      String(row.name || '').trim()
+  );
+
+const ensureTrailingBlankInvoiceRow = (rows = []) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const lastUsedIndex = safeRows.reduce(
+    (lastIndex, row, index) => (isInvoiceItemRowUsed(row) ? index : lastIndex),
+    -1
+  );
+  const hasBlankAfterLastUsed = safeRows
+    .slice(lastUsedIndex + 1)
+    .some((row) => !isInvoiceItemRowUsed(row));
+
+  return hasBlankAfterLastUsed ? safeRows : [...safeRows, blankRow()];
+};
+
 const InvoiceTable = ({
   items,
   setItems,
@@ -61,7 +92,7 @@ const InvoiceTable = ({
       quantity: qty,
     };
 
-    setItems(updated);
+    setItems(ensureTrailingBlankInvoiceRow(updated));
 
     onProductChange && onProductChange(product._id, rowIndex);
 
@@ -74,23 +105,20 @@ const InvoiceTable = ({
     }, 100);
   }, [products, items, mode, setItems, onProductChange]);
 
-  const blankRow = () => ({
-    search: '',
-    name: '',
-    productId: '',
-    description: '',
-    cost: 0,
-    quantity: '',
-    rate: 0,
-    amount: 0,
-  });
+  useEffect(() => {
+    const normalizedItems = ensureTrailingBlankInvoiceRow(items);
+
+    if (normalizedItems !== items) {
+      setItems(normalizedItems);
+    }
+  }, [items, setItems]);
 
   const clearItemRow = (index) => {
     const updated = [...items];
 
     updated[index] = blankRow();
 
-    setItems(updated);
+    setItems(ensureTrailingBlankInvoiceRow(updated));
 
     onProductChange && onProductChange('', index);
   };
@@ -208,7 +236,7 @@ const InvoiceTable = ({
                 <td className="border px-1 py-0 md:p-0">
                   <ProductDropdown
                     inputRef={(el) => (itemRefs.current[index] = el)}
-                    onKeyDown={(e) => handleArrowNavigation(e, index, 'item')}
+                    onGridKeyDown={(e) => handleArrowNavigation(e, index, 'item')}
                     productList={products}
                     value={item.search}
                     rowIndex={index}
@@ -249,15 +277,7 @@ const InvoiceTable = ({
 
                       onProductChange && onProductChange(product._id, index);
 
-                      const hasEmptyRow = updated.some(
-                        (row) => !row.productId && !row.search && !row.quantity && !row.rate
-                      );
-
-                      if (index === items.length - 1 && !hasEmptyRow) {
-                        updated.push(blankRow());
-                      }
-
-                      setItems(updated);
+                      setItems(ensureTrailingBlankInvoiceRow(updated));
 
                       window.dispatchEvent(new CustomEvent('show-history'));
 

@@ -7,6 +7,7 @@ import {
   FaSyncAlt,
   FaTimes,
   FaTrash,
+  FaUndo,
   FaUserPlus,
   FaWhatsapp,
 } from 'react-icons/fa';
@@ -16,6 +17,7 @@ import {
   createTravelCustomer,
   deleteTravelCustomer,
   fetchTravelCustomers,
+  restoreTravelCustomer,
   updateTravelCustomer,
 } from '../../services/travelMasterService';
 import { fetchWhatsAppTemplate } from '../../services/whatsAppTemplateService';
@@ -29,6 +31,7 @@ import {
   TravelFormModal,
   TravelMasterList,
   TravelMasterPageFrame,
+  TravelSegmentedControl,
   TravelMasterToolbar,
   TravelSearchInput,
   buildTravelConfirmMessage,
@@ -141,6 +144,11 @@ const getCustomerBalance = (customer) => {
 const getCustomerOpeningDirection = (openingBalance = 0) =>
   Number(openingBalance || 0) < 0 ? 'credit' : 'receivable';
 
+const isDeletedHiddenRecord = (record) => record?.hiddenReason === 'deleted';
+
+const getHiddenReasonLabel = (record) =>
+  t(`travel.hiddenReasons.${record?.hiddenReason || 'hidden'}`);
+
 const getOpeningBalanceAmount = (openingBalance = 0) => {
   const amount = Math.abs(Number(openingBalance || 0));
   return amount || '';
@@ -235,9 +243,12 @@ const TravelCustomersPage = () => {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [restoringId, setRestoringId] = useState('');
+  const [activeTab, setActiveTab] = useState('active');
   const [whatsAppTemplate, setWhatsAppTemplate] = useState(null);
 
   const filters = useMemo(() => getFiltersFromParams(searchParams), [searchParams]);
+  const isHiddenTab = activeTab === 'hidden';
 
   const createMode = searchParams.get('new') || '';
 
@@ -253,6 +264,7 @@ const TravelCustomersPage = () => {
   const canEditCustomer = canCreateCustomer || hasPermission('travel.customers');
 
   const canDeleteCustomer = canEditCustomer;
+  const canRestoreCustomer = hasPermission('travel.customers');
 
   const canReceivePayment =
     hasPermission('travel.bookings.view') ||
@@ -265,6 +277,8 @@ const TravelCustomersPage = () => {
         return;
       }
 
+      const { status = activeTab, ...requestOptions } = options;
+
       try {
         setLoading(true);
         setPageError('');
@@ -272,10 +286,11 @@ const TravelCustomersPage = () => {
         const data = await fetchTravelCustomers(
           {
             includeBalance: 'true',
+            status,
           },
           {
             forceRefresh: true,
-            ...options,
+            ...requestOptions,
           }
         );
 
@@ -287,7 +302,7 @@ const TravelCustomersPage = () => {
         setLoading(false);
       }
     },
-    [canView]
+    [activeTab, canView]
   );
 
   useEffect(() => {
@@ -333,7 +348,9 @@ const TravelCustomersPage = () => {
     const cleanSearch = normalizeSearch(filters.search);
 
     return customers
-      .filter((customer) => customer.isActive !== false)
+      .filter((customer) =>
+        isHiddenTab ? customer.isActive === false : customer.isActive !== false
+      )
       .filter((customer) => {
         if (!cleanSearch) {
           return true;
@@ -374,7 +391,7 @@ const TravelCustomersPage = () => {
 
         return String(left.name || '').localeCompare(String(right.name || ''));
       });
-  }, [customers, filters.balance, filters.search, filters.sort]);
+  }, [customers, filters.balance, filters.search, filters.sort, isHiddenTab]);
 
   const balanceOptions = useMemo(
     () => [
@@ -652,6 +669,38 @@ const TravelCustomersPage = () => {
     [canDeleteCustomer]
   );
 
+  const handleRestoreCustomer = useCallback(
+    async (customer, event = null) => {
+      event?.stopPropagation?.();
+
+      if (!canRestoreCustomer) {
+        alert(t('travel.alerts.permissionDenied'));
+        return;
+      }
+
+      if (!isDeletedHiddenRecord(customer)) {
+        alert(t('travel.common.notRestorable'));
+        return;
+      }
+
+      try {
+        setRestoringId(customer._id);
+        await restoreTravelCustomer(customer._id);
+        setActiveTab('active');
+        await loadCustomers({
+          forceRefresh: true,
+          status: 'active',
+        });
+      } catch (error) {
+        console.error('Travel customer restore failed:', error);
+        alert(error?.response?.data?.message || t('travel.customers.restoreFailed'));
+      } finally {
+        setRestoringId('');
+      }
+    },
+    [canRestoreCustomer, loadCustomers]
+  );
+
   const columns = useMemo(
     () => [
       {
@@ -664,6 +713,12 @@ const TravelCustomersPage = () => {
 
             {customer.email && (
               <p className="truncate text-xs font-semibold text-slate-500">{customer.email}</p>
+            )}
+
+            {isHiddenTab && (
+              <p className="truncate text-[11px] font-bold uppercase tracking-wide text-rose-600">
+                {getHiddenReasonLabel(customer)}
+              </p>
             )}
           </div>
         ),
@@ -707,9 +762,26 @@ const TravelCustomersPage = () => {
         labelKey: 'travel.fields.actions',
         className: 'w-[22%]',
         cellClassName: '!px-2 !py-2',
-        render: (customer) => (
-          <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
-            {canViewLedger && (
+        render: (customer) =>
+          isHiddenTab ? (
+            <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
+              {canRestoreCustomer && isDeletedHiddenRecord(customer) ? (
+                <IconActionButton
+                  icon={FaUndo}
+                  title={t('travel.common.restore')}
+                  variant="green"
+                  disabled={restoringId === customer._id}
+                  onClick={(event) => handleRestoreCustomer(customer, event)}
+                />
+              ) : (
+                <span className="text-xs font-bold text-slate-400">
+                  {t('travel.common.notRestorable')}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex max-w-full flex-nowrap items-center justify-end gap-1.5">
+              {canViewLedger && (
               <IconActionButton
                 icon={FaBook}
                 title={t('travel.common.viewLedger')}
@@ -763,20 +835,24 @@ const TravelCustomersPage = () => {
                 onClick={(event) => handleDeleteCustomer(customer, event)}
               />
             )}
-          </div>
-        ),
+            </div>
+          ),
       },
     ],
     [
       canDeleteCustomer,
       canEditCustomer,
       canReceivePayment,
+      canRestoreCustomer,
       canViewLedger,
       deletingId,
       handleDeleteCustomer,
+      handleRestoreCustomer,
+      isHiddenTab,
       openDetails,
       openLedger,
       openReceivePayment,
+      restoringId,
       sendTravelReminder,
     ]
   );
@@ -794,6 +870,12 @@ const TravelCustomersPage = () => {
               <p className="truncate text-xs font-semibold text-slate-500">
                 {customer.phone || '-'}
               </p>
+
+              {isHiddenTab && (
+                <p className="truncate text-[11px] font-bold uppercase tracking-wide text-rose-600">
+                  {getHiddenReasonLabel(customer)}
+                </p>
+              )}
             </div>
 
             <span
@@ -814,7 +896,23 @@ const TravelCustomersPage = () => {
           </div>
 
           <div className="mt-3 flex flex-wrap justify-end gap-1.5">
-            {canViewLedger && (
+            {isHiddenTab ? (
+              canRestoreCustomer && isDeletedHiddenRecord(customer) ? (
+                <IconActionButton
+                  icon={FaUndo}
+                  title={t('travel.common.restore')}
+                  variant="green"
+                  disabled={restoringId === customer._id}
+                  onClick={(event) => handleRestoreCustomer(customer, event)}
+                />
+              ) : (
+                <span className="text-xs font-bold text-slate-400">
+                  {t('travel.common.notRestorable')}
+                </span>
+              )
+            ) : (
+              <>
+                {canViewLedger && (
               <IconActionButton
                 icon={FaBook}
                 title={t('travel.common.viewLedger')}
@@ -859,6 +957,8 @@ const TravelCustomersPage = () => {
                 onClick={(event) => handleDeleteCustomer(customer, event)}
               />
             )}
+              </>
+            )}
           </div>
         </article>
       );
@@ -867,12 +967,16 @@ const TravelCustomersPage = () => {
       canDeleteCustomer,
       canEditCustomer,
       canReceivePayment,
+      canRestoreCustomer,
       canViewLedger,
       deletingId,
       handleDeleteCustomer,
+      handleRestoreCustomer,
+      isHiddenTab,
       openDetails,
       openLedger,
       openReceivePayment,
+      restoringId,
       sendTravelReminder,
     ]
   );
@@ -890,7 +994,16 @@ const TravelCustomersPage = () => {
         )
       }
       filters={
-        <TravelMasterToolbar className="lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(150px,auto)_minmax(170px,auto)_auto_auto]">
+        <TravelMasterToolbar className="lg:grid lg:grid-cols-[auto_minmax(220px,1fr)_minmax(150px,auto)_minmax(170px,auto)_auto_auto]">
+          <TravelSegmentedControl
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'active', labelKey: 'travel.common.active' },
+              { value: 'hidden', labelKey: 'travel.common.hidden' },
+            ]}
+          />
+
           <TravelSearchInput
             value={filters.search}
             onChange={(value) => updateFilter('search', value)}
@@ -937,7 +1050,11 @@ const TravelCustomersPage = () => {
       <TravelMasterList
         columns={columns}
         records={visibleCustomers}
-        onRowClick={openLedger}
+        onRowClick={(customer) => {
+          if (!isHiddenTab) {
+            openLedger(customer);
+          }
+        }}
         renderMobileCard={renderMobileCard}
         emptyKey="travel.customers.empty"
       />

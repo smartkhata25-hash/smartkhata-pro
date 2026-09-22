@@ -157,6 +157,22 @@ export const TRAVEL_BUSINESS_VALUE_COMPONENTS = [
 
 export const getPresetComponents = (preset, { moduleScope } = {}) => {
   const isTravelScope = moduleScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL;
+  const isWeavingScope = moduleScope === BUSINESS_VALUE_MODULE_SCOPES.WEAVING;
+  const includeWeavingLoans = (items) => {
+    if (!isWeavingScope || items.includes(BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES)) {
+      return items;
+    }
+
+    const payableIndex = items.indexOf(BUSINESS_VALUE_COMPONENTS.PAYABLES);
+
+    return payableIndex < 0
+      ? [...items, BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES]
+      : [
+          ...items.slice(0, payableIndex),
+          BUSINESS_VALUE_COMPONENTS.LOAN_RECEIVABLES,
+          ...items.slice(payableIndex),
+        ];
+  };
 
   if (preset === BUSINESS_VALUE_PRESETS.STOCK_ASSETS) {
     return [
@@ -167,19 +183,19 @@ export const getPresetComponents = (preset, { moduleScope } = {}) => {
   }
 
   if (preset === BUSINESS_VALUE_PRESETS.OPERATIONAL) {
-    return [
+    return includeWeavingLoans([
       ...(isTravelScope
         ? TRAVEL_DEFAULT_OPERATIONAL_COMPONENTS
         : DEFAULT_OPERATIONAL_COMPONENTS),
-    ];
+    ]);
   }
 
   if (preset === BUSINESS_VALUE_PRESETS.COMPLETE) {
-    return [
+    return includeWeavingLoans([
       ...(isTravelScope
         ? TRAVEL_DEFAULT_COMPLETE_COMPONENTS
         : DEFAULT_COMPLETE_COMPONENTS),
-    ];
+    ]);
   }
 
   return [];

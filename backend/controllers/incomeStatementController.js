@@ -34,6 +34,14 @@ const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
 ]);
 
 const getTradingJournalFilter = () => ({
+  isReversed: { $ne: true },
+  isReversal: { $ne: true },
+  $or: [
+    { moduleScope: { $exists: false } },
+    { moduleScope: null },
+    { moduleScope: "" },
+    { moduleScope: "trading" },
+  ],
   $nor: [
     { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
     { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
@@ -41,6 +49,8 @@ const getTradingJournalFilter = () => ({
       sourceType: "reversal",
       originModule: { $in: TRAVEL_JOURNAL_ORIGINS },
     },
+    { moduleScope: { $in: ["travel", "weaving"] } },
+    { originModule: /^weaving_/i },
   ],
 });
 
@@ -102,24 +112,18 @@ exports.getIncomeStatement = async (req, res) => {
           }
         }
 
-        if (
-          account.type === "Expense" &&
-          account.code === "COGS" &&
-          line.type === "debit"
-        ) {
-          cogs += amount;
+        if (account.type === "Expense" && account.code === "COGS") {
+          const signedAmount = line.type === "debit" ? amount : -amount;
+          cogs += signedAmount;
           cogsBreakdown[account.name] =
-            (cogsBreakdown[account.name] || 0) + amount;
+            (cogsBreakdown[account.name] || 0) + signedAmount;
         }
 
-        if (
-          account.type === "Expense" &&
-          account.code !== "COGS" &&
-          line.type === "debit"
-        ) {
-          operatingExpenses += amount;
+        if (account.type === "Expense" && account.code !== "COGS") {
+          const signedAmount = line.type === "debit" ? amount : -amount;
+          operatingExpenses += signedAmount;
           expenseBreakdown[account.name] =
-            (expenseBreakdown[account.name] || 0) + amount;
+            (expenseBreakdown[account.name] || 0) + signedAmount;
         }
       });
     });
@@ -232,13 +236,10 @@ exports.getMonthVsMonthIncome = async (req, res) => {
         }
 
         // 🔴 COGS
-        if (
-          acc.type === "Expense" &&
-          acc.code === "COGS" &&
-          line.type === "debit"
-        ) {
-          months[monthKey].cogs += amount;
-          months[monthKey].profit -= amount;
+        if (acc.type === "Expense" && acc.code === "COGS") {
+          const signedAmount = line.type === "debit" ? amount : -amount;
+          months[monthKey].cogs += signedAmount;
+          months[monthKey].profit -= signedAmount;
         }
       });
     });

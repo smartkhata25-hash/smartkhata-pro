@@ -1,5 +1,26 @@
 const PrintSetting = require("../models/PrintSetting");
 const User = require("../models/User");
+const { deleteFile, getFileUrl, uploadFile } = require("../services/r2FileService");
+
+const DOCUMENT_TYPES = [
+  "sales",
+  "saleReturn",
+  "purchase",
+  "purchaseReturn",
+  "travelInvoice",
+];
+
+const serializePrintSetting = (setting) => {
+  const value = typeof setting?.toObject === "function" ? setting.toObject() : setting;
+  if (!value) return value;
+
+  DOCUMENT_TYPES.forEach((type) => {
+    const header = value[type]?.header;
+    if (header) header.logoUrl = header.logoKey ? getFileUrl(header.logoKey) : "";
+  });
+
+  return value;
+};
 
 /* =========================================================
    DEFAULT DOCUMENT SETTINGS
@@ -57,6 +78,7 @@ const buildDefaultHeader = (user) => ({
 
   footerMessage: "Thank you for your business!",
   showLogo: false,
+  logoKey: "",
 
   showCompanyAddress: true,
   showCompanyPhone: true,
@@ -98,9 +120,19 @@ const getPrintSetting = async (req, res) => {
     if (!setting) {
       const defaults = await defaultSettings(userId);
       setting = await PrintSetting.create(defaults);
+    } else {
+      const defaults = await defaultSettings(userId);
+      let changed = false;
+      DOCUMENT_TYPES.forEach((type) => {
+        if (!setting[type]) {
+          setting[type] = defaults[type];
+          changed = true;
+        }
+      });
+      if (changed) await setting.save();
     }
 
-    return res.json(setting);
+    return res.json(serializePrintSetting(setting));
   } catch (err) {
     console.error("❌ PrintSetting GET Error:", err);
     return res.status(500).json({
@@ -116,6 +148,10 @@ const updatePrintSetting = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { type } = req.params;
 
+    if (!DOCUMENT_TYPES.includes(type)) {
+      return res.status(400).json({ msg: "Invalid document type" });
+    }
+
     let setting = await PrintSetting.findOne({ userId });
 
     if (!setting) {
@@ -123,18 +159,14 @@ const updatePrintSetting = async (req, res) => {
       setting = await PrintSetting.create(defaults);
     }
 
-    if (
-      !["sales", "saleReturn", "purchase", "purchaseReturn", "travelInvoice"].includes(
-        type,
-      )
-    ) {
-      return res.status(400).json({
-        msg: "Invalid document type",
-      });
+    if (!setting[type]) {
+      const defaults = await defaultSettings(userId);
+      setting[type] = defaults[type];
     }
 
     if (req.body.header && setting[type]?.header) {
-      Object.assign(setting[type].header, req.body.header);
+      const { logoKey, logoUrl, ...safeHeader } = req.body.header;
+      Object.assign(setting[type].header, safeHeader);
     }
 
     if (req.body.settings && setting[type]?.settings) {
@@ -146,7 +178,7 @@ const updatePrintSetting = async (req, res) => {
     }
     await setting.save();
 
-    return res.json(setting[type]);
+    return res.json(serializePrintSetting(setting)[type]);
   } catch (err) {
     console.error("❌ PrintSetting UPDATE Error:", err);
     return res.status(500).json({
@@ -160,11 +192,7 @@ const resetPrintSetting = async (req, res) => {
     const userId = req.user?.id || req.userId;
     const { type } = req.params;
 
-    if (
-      !["sales", "saleReturn", "purchase", "purchaseReturn", "travelInvoice"].includes(
-        type,
-      )
-    ) {
+    if (!DOCUMENT_TYPES.includes(type)) {
       return res.status(400).json({
         msg: "Invalid document type",
       });
@@ -178,12 +206,19 @@ const resetPrintSetting = async (req, res) => {
     }
 
     const defaults = await defaultSettings(userId);
+    const oldLogoKey = setting[type]?.header?.logoKey || "";
 
     setting[type] = defaults[type];
 
     await setting.save();
 
-    return res.json(setting[type]);
+    if (oldLogoKey) {
+      deleteFile(oldLogoKey).catch((error) =>
+        console.error("Reset print logo cleanup failed:", error.message),
+      );
+    }
+
+    return res.json(serializePrintSetting(setting)[type]);
   } catch (err) {
     console.error("❌ PrintSetting RESET Error:", err);
     return res.status(500).json({
@@ -192,9 +227,91 @@ const resetPrintSetting = async (req, res) => {
   }
 };
 
+const uploadPrintLogo = async (req, res) => {
+  const userId = req.user?.id || req.userId;
+  const { type } = req.params;
+
+  if (!DOCUMENT_TYPES.includes(type)) {
+    return res.status(400).json({ msg: "Invalid document type" });
+  }
+  if (!req.file || !req.file.mimetype?.startsWith("image/")) {
+    return res.status(400).json({ msg: "Please select a valid image logo" });
+  }
+
+  let uploaded;
+  try {
+    let setting = await PrintSetting.findOne({ userId });
+    if (!setting) setting = await PrintSetting.create(await defaultSettings(userId));
+    if (!setting[type]) {
+      const defaults = await defaultSettings(userId);
+      setting[type] = defaults[type];
+    }
+
+    const oldKey = setting[type]?.header?.logoKey || "";
+    uploaded = await uploadFile({
+      buffer: req.file.buffer,
+      userId,
+      moduleName: "print-logos",
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+    });
+
+    setting[type].header.logoKey = uploaded.key;
+    setting[type].header.showLogo = true;
+    await setting.save();
+
+    if (oldKey && oldKey !== uploaded.key) {
+      deleteFile(oldKey).catch((error) =>
+        console.error("Old print logo cleanup failed:", error.message),
+      );
+    }
+
+    return res.json(serializePrintSetting(setting)[type]);
+  } catch (error) {
+    if (uploaded?.key) {
+      await deleteFile(uploaded.key).catch(() => {});
+    }
+    console.error("Print logo upload error:", error);
+    return res.status(500).json({ msg: "Failed to upload print logo" });
+  }
+};
+
+const removePrintLogo = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const { type } = req.params;
+    if (!DOCUMENT_TYPES.includes(type)) {
+      return res.status(400).json({ msg: "Invalid document type" });
+    }
+
+    const setting = await PrintSetting.findOne({ userId });
+    if (!setting?.[type]?.header) {
+      return res.status(404).json({ msg: "Print settings not found" });
+    }
+
+    const oldKey = setting[type].header.logoKey || "";
+    setting[type].header.logoKey = "";
+    setting[type].header.showLogo = false;
+    await setting.save();
+    if (oldKey) {
+      deleteFile(oldKey).catch((error) =>
+        console.error("Print logo cleanup failed:", error.message),
+      );
+    }
+
+    return res.json(serializePrintSetting(setting)[type]);
+  } catch (error) {
+    console.error("Print logo remove error:", error);
+    return res.status(500).json({ msg: "Failed to remove print logo" });
+  }
+};
+
 module.exports = {
   getPrintSetting,
   updatePrintSetting,
   resetPrintSetting,
   defaultSettings,
+  uploadPrintLogo,
+  removePrintLogo,
+  _test: { serializePrintSetting },
 };

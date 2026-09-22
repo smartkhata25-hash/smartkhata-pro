@@ -1,5 +1,15 @@
 const mongoose = require("mongoose");
 
+const WEEKDAY_KEYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
 const employeeSchema = new mongoose.Schema(
   {
     userId: {
@@ -10,7 +20,7 @@ const employeeSchema = new mongoose.Schema(
     },
     moduleScope: {
       type: String,
-      enum: ["trading", "travel"],
+      enum: ["trading", "travel", "weaving"],
       default: "trading",
       index: true,
     },
@@ -30,6 +40,28 @@ const employeeSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    employeeNo: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
+    listOrder: {
+      type: Number,
+      default: 0,
+      min: 0,
+      index: true,
+    },
+    fatherName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other", ""],
+      default: "",
+    },
     phone: {
       type: String,
       trim: true,
@@ -45,12 +77,55 @@ const employeeSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    emergencyContact: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    unitId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WeavingUnit",
+      default: null,
+      index: true,
+    },
+    unitNo: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+    unitName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    departmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WeavingDepartment",
+      default: null,
+      index: true,
+    },
+    departmentName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     designationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "EmployeeDesignation",
       default: null,
     },
     designationName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WeavingShift",
+      default: null,
+      index: true,
+    },
+    shiftName: {
       type: String,
       trim: true,
       default: "",
@@ -68,6 +143,69 @@ const employeeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    knottingPaymentMethod: {
+      type: String,
+      enum: ["monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"],
+      default: "monthly",
+    },
+    dutyHours: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 24,
+    },
+    weeklyOffDays: {
+      type: [
+        {
+          type: String,
+          enum: WEEKDAY_KEYS,
+        },
+      ],
+      default: [],
+    },
+    paidLeaveAllowance: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: "Paid Leave Allowance must be an integer",
+      },
+    },
+    otAllowed: {
+      type: Boolean,
+      default: true,
+    },
+    openingBalance: {
+      amount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      type: {
+        type: String,
+        enum: ["payable", "receivable", ""],
+        default: "",
+      },
+      deductionIntent: {
+        type: String,
+        enum: ["future_salary", "manual_review", ""],
+        default: "",
+      },
+      recordedAt: {
+        type: Date,
+        default: null,
+      },
+      targetCycleKey: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      targetPayDate: {
+        type: Date,
+        default: null,
+      },
     },
     notes: {
       type: String,
@@ -105,6 +243,9 @@ const employeeSchema = new mongoose.Schema(
 
 employeeSchema.index({ userId: 1, moduleScope: 1, status: 1, isDeleted: 1 });
 employeeSchema.index({ userId: 1, moduleScope: 1, name: 1 });
+employeeSchema.index({ userId: 1, moduleScope: 1, unitNo: 1, listOrder: 1, name: 1 });
+employeeSchema.index({ userId: 1, moduleScope: 1, employeeNo: 1 });
+employeeSchema.index({ userId: 1, moduleScope: 1, cnic: 1 });
 employeeSchema.index(
   { userId: 1, account: 1 },
   {
@@ -116,11 +257,22 @@ employeeSchema.index(
 );
 
 employeeSchema.pre("save", function (next) {
-  ["name", "phone", "cnic", "address", "designationName", "notes"].forEach(
-    (field) => {
-      if (this[field]) this[field] = String(this[field]).trim();
-    },
-  );
+  [
+    "name",
+    "employeeNo",
+    "fatherName",
+    "phone",
+    "cnic",
+    "address",
+    "emergencyContact",
+    "unitName",
+    "departmentName",
+    "designationName",
+    "shiftName",
+    "notes",
+  ].forEach((field) => {
+    if (this[field]) this[field] = String(this[field]).trim();
+  });
 
   next();
 });

@@ -29,6 +29,7 @@ const headerSettingSchema = new mongoose.Schema({
   },
 
   showLogo: { type: Boolean, default: false },
+  logoKey: { type: String, default: "" },
 
   // Optional Hide/Show Controls
   showCompanyAddress: { type: Boolean, default: true },

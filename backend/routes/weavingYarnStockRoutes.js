@@ -1,0 +1,14 @@
+const express = require("express");
+const ctrl = require("../controllers/weavingYarnStockController");
+const protect = require("../middleware/authMiddleware");
+const { requireModule } = require("../middleware/moduleMiddleware");
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { MODULE_KEYS } = require("../utils/moduleConfig");
+const router = express.Router();
+router.use(protect, requireModule(MODULE_KEYS.WEAVING));
+router.get("/summary", requirePermission("weaving.yarn_stock.view"), ctrl.summary);
+router.get("/weft-consumption/meta", requirePermission("weaving.yarn_stock.consume"), ctrl.consumptionMeta);
+router.post("/weft-consumption", requirePermission("weaving.yarn_stock.consume"), ctrl.consumeWeft);
+router.post("/weft-consumption/:batchId/reverse", requirePermission("weaving.yarn_stock.consume"), ctrl.reverseConsumption);
+router.get("/:yarnId/ledger", requirePermission("weaving.yarn_stock.view"), ctrl.ledger);
+module.exports = router;

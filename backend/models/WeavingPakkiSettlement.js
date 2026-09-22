@@ -1,0 +1,45 @@
+const mongoose = require("mongoose");
+const schema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  moduleScope: { type: String, enum: ["weaving"], default: "weaving", immutable: true },
+  pakkiNo: { type: String, required: true, trim: true },
+  pakkiDate: { type: String, required: true },
+  dispatchDate: { type: String, default: "" },
+  kacchiReference: { type: String, trim: true, default: "" },
+  kacchiId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingKacchiParchi", default: null },
+  sourceKacchiId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingKacchiParchi", default: null },
+  partyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", required: true },
+  contractId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingContract", required: true },
+  fabricQualityId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingFabricQuality", required: true },
+  godownId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingGodown", default: null },
+  contractType: { type: String, enum: ["fabric_sale", "conversion"], required: true },
+  ownershipType: { type: String, enum: ["own", "party"], required: true },
+  qualitySnapshot: { name: String, code: String, warpCount: String, weftCount: String, construction: String, width: String, brand: String },
+  grossMeter: { type: Number, min: 0.000001, required: true },
+  grossKg: { type: Number, min: 0, default: 0 },
+  thanCount: { type: Number, min: 0, default: 0 },
+  oilKamiMeter: { type: Number, min: 0, default: 0 },
+  shortageMeter: { type: Number, min: 0, default: 0 },
+  rejectionMeter: { type: Number, min: 0, default: 0 },
+  otherMeterDeduction: { type: Number, min: 0, default: 0 },
+  netMeter: { type: Number, min: 0, required: true },
+  billableMeter: { type: Number, min: 0, required: true },
+  rate: { type: Number, min: 0, required: true },
+  amountDeduction: { type: Number, min: 0, default: 0 },
+  subtotal: { type: Number, min: 0, required: true },
+  settlementAmount: { type: Number, min: 0, required: true },
+  creditDays: { type: Number, min: 0, default: 0 },
+  dueDate: { type: String, default: "" },
+  commercialRemarks: { type: String, trim: true, default: "" },
+  status: { type: String, enum: ["finalized", "void"], default: "finalized" },
+  invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingSalesInvoice", default: null },
+  stockMovementId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingFabricMovement", default: null },
+  voidedAt: { type: Date, default: null },
+  voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  voidReason: { type: String, trim: true, default: "" },
+}, { timestamps: true });
+schema.index({ userId: 1, pakkiNo: 1 }, { unique: true });
+schema.index({ userId: 1, status: 1, invoiceId: 1, pakkiDate: -1 });
+schema.index({ userId: 1, kacchiId: 1 }, { unique: true, partialFilterExpression: { kacchiId: { $type: "objectId" } } });
+schema.index({ userId: 1, sourceKacchiId: 1, createdAt: -1 });
+module.exports = mongoose.model("WeavingPakkiSettlement", schema);

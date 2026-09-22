@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
@@ -46,15 +46,33 @@ const ExpenseForm = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const isTravelExpenseRoute = location.pathname.startsWith('/travel/expenses');
+  const isWeavingExpenseRoute = location.pathname.startsWith('/weaving/expenses');
+  const queryModuleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
   const requestedModuleScope =
-    isTravelExpenseRoute || String(searchParams.get('moduleScope') || '').toLowerCase() === 'travel'
+    isWeavingExpenseRoute || queryModuleScope === 'weaving'
+      ? 'weaving'
+      : isTravelExpenseRoute || queryModuleScope === 'travel'
       ? 'travel'
       : 'trading';
+  const isTravelExpenseView = requestedModuleScope === 'travel';
+  const isWeavingExpenseView = requestedModuleScope === 'weaving';
   const canViewExpenses = hasPermission('expenses.view');
   const canCreateExpenses = hasPermission('expenses.create');
   const canEditExpenses = hasPermission('expenses.edit');
-  const closePath = requestedModuleScope === 'travel' ? '/travel/expenses' : '/dashboard';
-  const listPath = requestedModuleScope === 'travel' ? '/travel/expenses' : '/expenses';
+  const closePath = isWeavingExpenseView
+    ? '/weaving/expenses'
+    : isTravelExpenseView
+      ? '/travel/expenses'
+      : '/dashboard';
+  const listPath = isWeavingExpenseView
+    ? '/weaving/expenses'
+    : isTravelExpenseView
+      ? '/travel/expenses'
+      : '/expenses';
+  const scopedExpenseOptions = useMemo(
+    () => (requestedModuleScope === 'trading' ? {} : { moduleScope: requestedModuleScope }),
+    [requestedModuleScope]
+  );
 
   const canManageExpenseTitles = hasPermission('expenses.manage_titles');
 
@@ -86,9 +104,11 @@ const ExpenseForm = () => {
         const [aData, titleData, existing] = await Promise.all([
           getAccounts(true, { moduleScope: requestedModuleScope }),
 
-          canViewExpenses ? getExpenseTitles('') : Promise.resolve([]),
+          canViewExpenses
+            ? getExpenseTitles('', scopedExpenseOptions)
+            : Promise.resolve([]),
 
-          id ? getExpenseById(id) : Promise.resolve(null),
+          id ? getExpenseById(id, scopedExpenseOptions) : Promise.resolve(null),
         ]);
 
         if (cancelled) return;
@@ -142,15 +162,16 @@ const ExpenseForm = () => {
     canEditExpenses,
     navigate,
     requestedModuleScope,
+    scopedExpenseOptions,
     closePath,
     listPath,
   ]);
 
   useEffect(() => {
-    if (!id && requestedModuleScope === 'travel') {
+    if (!id) {
       setFormData((prev) => ({
         ...prev,
-        moduleScope: 'travel',
+        moduleScope: requestedModuleScope,
       }));
     }
   }, [id, requestedModuleScope]);
@@ -277,6 +298,7 @@ const ExpenseForm = () => {
     });
     const expensePayload = {
       ...formData,
+      moduleScope: requestedModuleScope,
       amount: creditTotal.toFixed(2),
     };
 
@@ -294,22 +316,22 @@ const ExpenseForm = () => {
     try {
       setLoading(true);
       if (id) {
-        await updateExpense(id, data);
+        await updateExpense(id, data, scopedExpenseOptions);
         alert(t('expense.updated'));
       } else {
-        await createExpense(data);
+        await createExpense(data, scopedExpenseOptions);
         alert(t('expense.saved'));
       }
 
       if (
-        formData.moduleScope === 'travel' &&
+        requestedModuleScope === 'travel' &&
         typeof outletContext.fetchTravelDashboardSummary === 'function'
       ) {
         await outletContext.fetchTravelDashboardSummary({ forceRefresh: true });
       }
 
       if (type === 'close') {
-        navigate(formData.moduleScope === 'travel' ? '/travel/expenses' : '/dashboard');
+        navigate(closePath);
       } else if (type === 'new') {
         resetForm();
       }
@@ -702,6 +724,11 @@ const ExpenseForm = () => {
                   const res = await createExpenseTitle({
                     name: newAccount.name,
                     categoryId: newAccount.category,
+                    ...(requestedModuleScope === 'trading'
+                      ? {}
+                      : { moduleScope: requestedModuleScope }),
+                  }, {
+                    ...scopedExpenseOptions,
                   });
 
                   const createdTitle = {

@@ -1,11 +1,13 @@
 const MODULE_KEYS = Object.freeze({
   TRADING: "trading",
   TRAVEL: "travel",
+  WEAVING: "weaving",
 });
 
 const DEFAULT_ENABLED_MODULES = Object.freeze({
   [MODULE_KEYS.TRADING]: true,
   [MODULE_KEYS.TRAVEL]: false,
+  [MODULE_KEYS.WEAVING]: false,
 });
 
 const DEFAULT_MODULE = MODULE_KEYS.TRADING;

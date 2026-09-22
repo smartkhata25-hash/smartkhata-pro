@@ -171,6 +171,126 @@ const PERMISSIONS = {
     SETTINGS: "travel.settings",
   },
 
+  WEAVING: {
+    VIEW: "weaving.view",
+  },
+
+  WEAVING_MASTERS: {
+    VIEW: "weaving.masters.view",
+    CREATE: "weaving.masters.create",
+    EDIT: "weaving.masters.edit",
+  },
+
+  WEAVING_CONTRACTS: {
+    VIEW: "weaving.contracts.view",
+    CREATE: "weaving.contracts.create",
+    EDIT: "weaving.contracts.edit",
+  },
+
+  WEAVING_SETTINGS: {
+    MANAGE: "weaving.settings.manage",
+  },
+
+  WEAVING_COUNTERPARTIES: {
+    VIEW: "weaving.counterparties.view",
+    CREATE: "weaving.counterparties.create",
+    EDIT: "weaving.counterparties.edit",
+      VIEW_LEDGER: "weaving.counterparties.view_ledger",
+      HIDE: "weaving.counterparties.hide",
+      RESTORE: "weaving.counterparties.restore",
+      MERGE: "weaving.counterparties.merge",
+  },
+
+  WEAVING_PURCHASES: {
+    VIEW: "weaving.purchases.view",
+    CREATE: "weaving.purchases.create",
+    EDIT: "weaving.purchases.edit",
+    VOID: "weaving.purchases.void",
+  },
+
+  WEAVING_PAYMENTS: {
+    VIEW: "weaving.payments.view",
+    CREATE: "weaving.payments.create",
+    EDIT: "weaving.payments.edit",
+    VOID: "weaving.payments.void",
+  },
+
+  WEAVING_SIZING: {
+    VIEW: "weaving.sizing.view",
+    ISSUE: "weaving.sizing.issue",
+    RECEIVE: "weaving.sizing.receive",
+    BILL: "weaving.sizing.bill",
+    EDIT: "weaving.sizing.edit",
+    VOID: "weaving.sizing.void",
+    VIEW_MATERIAL_LEDGER: "weaving.sizing.view_material_ledger",
+  },
+
+  WEAVING_YARN_STOCK: {
+    VIEW: "weaving.yarn_stock.view",
+    TRANSFER: "weaving.yarn_stock.transfer",
+    REWINDER_RECOVERY: "weaving.yarn_stock.rewinder_recovery",
+    CONSUME: "weaving.yarn_stock.consume",
+  },
+
+  WEAVING_FOLDING: {
+    VIEW: "weaving.folding.view",
+    CREATE: "weaving.folding.create",
+    EDIT: "weaving.folding.edit",
+    VOID: "weaving.folding.void",
+    PRINT: "weaving.folding.print",
+  },
+
+  WEAVING_FABRIC_STOCK: {
+    VIEW: "weaving.fabric_stock.view",
+    TRANSFER: "weaving.fabric_stock.transfer",
+  },
+
+  WEAVING_STOCK_ADJUSTMENT: {
+    REVERSE: "weaving.stock_adjustment.reverse",
+  },
+
+  WEAVING_SALES: {
+    VIEW: "weaving.sales.view",
+    CREATE: "weaving.sales.create",
+    EDIT: "weaving.sales.edit",
+    POST: "weaving.sales.post",
+    VOID: "weaving.sales.void",
+    PRINT: "weaving.sales.print",
+  },
+
+  WEAVING_REJECTION_RETURN: {
+    VIEW: "weaving.rejection_return.view",
+    RECEIVE: "weaving.rejection_return.receive",
+    REVERSE: "weaving.rejection_return.reverse",
+  },
+
+  WEAVING_REPORTS: {
+    VIEW: "weaving.reports.view",
+    PRODUCTION: "weaving.reports.production",
+    STOCK: "weaving.reports.stock",
+    SALES: "weaving.reports.sales",
+    PROFIT: "weaving.reports.profit",
+  },
+
+  WEAVING_LOOMS: {
+    VIEW_PERFORMANCE: "weaving.looms.view_performance",
+  },
+
+  WEAVING_BEAMS: {
+    VIEW: "weaving.beams.view",
+    CREATE: "weaving.beams.create",
+    EDIT: "weaving.beams.edit",
+    APPROVE: "weaving.beams.approve",
+    VOID: "weaving.beams.void",
+    LOAD: "weaving.beams.load",
+  },
+
+  WEAVING_ATTENDANCE: {
+    VIEW: "weaving.attendance.view",
+    MANAGE: "weaving.attendance.manage",
+    OVERRIDE: "weaving.attendance.override",
+  },
+
   REPORTS: {
     DASHBOARD: "reports.dashboard",
     TRIAL_BALANCE: "reports.trial_balance",

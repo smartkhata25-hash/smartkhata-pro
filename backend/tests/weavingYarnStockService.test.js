@@ -1,0 +1,31 @@
+const assert = require("assert");
+const { _test } = require("../services/weaving/weavingYarnStockService");
+
+const yarnId = "y1", godownA = "g1", godownB = "g2", partyA = "p1", partyB = "p2";
+const opening = (kg, godownId = godownA) => ({ itemType: "yarn", transactionType: "opening", itemId: yarnId, godownId, quantity: kg });
+const movement = (movementType, quantityKg, extra = {}) => ({ yarnId, movementType, quantityKg, ownershipType: "own", destinationType: "godown", godownId: godownA, isVoided: false, ...extra });
+const balance = (rows, options = {}) => _test.accumulateEffects(rows).get(_test.balanceKey({ yarnId, godownId: options.godownId || godownA, ownershipType: options.ownershipType || "own", ownerPartyId: options.ownerPartyId || null }))?.kg || 0;
+
+assert.strictEqual(balance([opening(500)]), 500, "opening stock only");
+assert.strictEqual(balance([opening(500), movement("purchase_in", 200)]), 700, "opening plus purchase");
+assert.strictEqual(balance([opening(500), movement("purchase_in", 200), movement("sizing_issue", 100, { godownId: null, sourceGodownId: godownA, destinationType: "direct_sizing" })]), 600, "sizing issue");
+assert.strictEqual(balance([opening(500), movement("purchase_in", 200), movement("sizing_issue", 100, { godownId: null, sourceGodownId: godownA }), movement("sizing_return", 25)]), 625, "sizing return");
+assert.strictEqual(balance([opening(500), movement("sizing_receipt", 100, { godownId: null, destinationType: "direct_sizing" })]), 500, "receipt has no Godown effect");
+assert.strictEqual(balance([opening(500), movement("purchase_in", 200, { godownId: null, destinationType: "direct_sizing" })]), 500, "direct purchase has no Godown effect");
+const ownershipRows = [opening(500), movement("party_inward", 200, { ownershipType: "party", ownerPartyId: partyA })];
+assert.strictEqual(balance(ownershipRows), 500, "own remains separate");
+assert.strictEqual(balance(ownershipRows, { ownershipType: "party", ownerPartyId: partyA }), 200, "party remains separate");
+assert.strictEqual(balance([opening(500), opening(250, godownB)], { godownId: godownA }), 500, "Godown A separate");
+assert.strictEqual(balance([opening(500), opening(250, godownB)], { godownId: godownB }), 250, "Godown B separate");
+const parties = [movement("party_inward", 100, { ownershipType: "party", ownerPartyId: partyA }), movement("party_inward", 80, { ownershipType: "party", ownerPartyId: partyB })];
+assert.strictEqual(balance(parties, { ownershipType: "party", ownerPartyId: partyA }), 100, "party A separate");
+assert.strictEqual(balance(parties, { ownershipType: "party", ownerPartyId: partyB }), 80, "party B separate");
+assert.strictEqual(balance([opening(500), movement("purchase_in", 200, { isVoided: true })]), 500, "void excluded");
+const source = [opening(500), movement("purchase_in", 200)];
+assert.strictEqual(balance(source), balance(source), "repeat is read-only and deterministic");
+assert.strictEqual(balance([opening(500), movement("sizing_issue", 501, { godownId: null, sourceGodownId: godownA })]), -1, "canonical validation sees opening before preventing over-issue");
+assert.strictEqual(balance([opening(500), movement("sale_out", 125, { godownId: null, sourceGodownId: godownA })]), 375, "direct Yarn Sale reduces Own Yarn once");
+assert.strictEqual(balance([opening(500), movement("sale_out", 125, { godownId: null, sourceGodownId: godownA }), movement("sale_return", 125)]), 500, "voided Yarn Sale return restores stock once");
+assert.strictEqual(balance([opening(500), movement("sale_out", 125, { ownershipType: "party", ownerPartyId: partyA, godownId: null, sourceGodownId: godownA })]), 500, "Party-owned sale movement cannot reduce Own Yarn");
+assert.strictEqual(_test.toGodownEffect(movement("sizing_receipt", 50, { destinationType: "direct_sizing", godownId: null })), null);
+console.log("weaving yarn stock tests passed");

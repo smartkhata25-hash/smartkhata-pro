@@ -38,6 +38,22 @@ const {
 } = require("../controllers/receivePaymentPrintController");
 
 const authMiddleware = require("../middleware/authMiddleware");
+const { requirePermission } = require("../middleware/permissionMiddleware");
+const { PERMISSIONS } = require("../utils/permissionList");
+const quotationPrintController = require("../controllers/quotationPrintController");
+
+router.get(
+  "/quotation-html/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.SALES.PRINT),
+  quotationPrintController.getQuotationHtml,
+);
+router.get(
+  "/quotation-pdf/:id",
+  authMiddleware,
+  requirePermission(PERMISSIONS.SALES.PRINT),
+  quotationPrintController.generateQuotationPdf,
+);
 
 router.get("/sale/:id", authMiddleware, printController.getSaleInvoicePrint);
 

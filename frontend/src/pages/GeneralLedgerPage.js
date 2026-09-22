@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getLedgerByAccount } from '../services/journalService';
 import { getAllAccounts } from '../services/accountService';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { CSVLink } from 'react-csv';
@@ -17,6 +17,22 @@ import {
 } from 'recharts';
 import { t } from '../i18n/i18n';
 
+const getPageModuleScope = (location = {}) => {
+  const pathname = location.pathname || '';
+  const queryParams = new URLSearchParams(location.search || '');
+  const queryScope = String(queryParams.get('moduleScope') || '').toLowerCase();
+
+  if (pathname.startsWith('/weaving/general-ledger') || pathname.startsWith('/weaving/ledger')) {
+    return 'weaving';
+  }
+
+  if (queryScope === 'weaving' || queryScope === 'travel') {
+    return queryScope;
+  }
+
+  return 'trading';
+};
+
 const GeneralLedgerPage = () => {
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
@@ -30,7 +46,10 @@ const GeneralLedgerPage = () => {
   const [summary, setSummary] = useState(null);
 
   const token = localStorage.getItem('token');
+  const location = useLocation();
   const navigate = useNavigate();
+  const moduleScope = getPageModuleScope(location);
+  const isWeavingScoped = moduleScope === 'weaving';
 
   useEffect(() => {
     if (!token) return navigate('/#/login');
@@ -42,17 +61,17 @@ const GeneralLedgerPage = () => {
     }
 
     const fetchAccounts = async () => {
-      const data = await getAllAccounts(token);
+      const data = await getAllAccounts(true, { moduleScope });
       setAccounts(data);
     };
 
     fetchAccounts();
-  }, [token, navigate]);
+  }, [token, navigate, moduleScope]);
 
   const fetchLedger = async (accountId) => {
     setLoading(true);
     try {
-      const response = await getLedgerByAccount(accountId, startDate, endDate);
+      const response = await getLedgerByAccount(accountId, startDate, endDate, { moduleScope });
 
       const data = Array.isArray(response) ? response : response.ledger || [];
 
@@ -313,7 +332,10 @@ const GeneralLedgerPage = () => {
       {/* BACK BUTTON */}
 
       <div style={{ marginTop: '30px' }}>
-        <button className="btn gradient-dark" onClick={() => navigate('/dashboard')}>
+        <button
+          className="btn gradient-dark"
+          onClick={() => navigate(isWeavingScoped ? '/weaving/dashboard' : '/dashboard')}
+        >
           {t('common.back')} {t('dashboard')}
         </button>
       </div>

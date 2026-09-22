@@ -14,6 +14,7 @@ const AccountTransactionTable = ({
   isCashView = false,
   isBankView = false,
   isTravelScoped = false,
+  isWeavingScoped = false,
 }) => {
   const navigate = useNavigate();
 
@@ -316,6 +317,10 @@ const AccountTransactionTable = ({
 
     if (type.includes('travel_expense') || (isTravelScoped && type.includes('expense'))) {
       return `/travel/expenses/${referenceId}/edit`;
+    }
+
+    if (type.includes('weaving_expense') || (isWeavingScoped && type.includes('expense'))) {
+      return `/weaving/expenses/${referenceId}/edit`;
     }
 
     if (type.includes('expense')) {

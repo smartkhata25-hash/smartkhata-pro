@@ -8,6 +8,12 @@ const expenseTitleSchema = new mongoose.Schema(
       trim: true,
     },
 
+    normalizedName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
@@ -19,6 +25,13 @@ const expenseTitleSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "weaving", "both"],
+      default: "trading",
+      index: true,
     },
 
     isDefault: {
@@ -36,7 +49,10 @@ const expenseTitleSchema = new mongoose.Schema(
   },
 );
 
-expenseTitleSchema.index({ name: 1, userId: 1 }, { unique: true });
+expenseTitleSchema.index(
+  { userId: 1, moduleScope: 1, normalizedName: 1 },
+  { unique: true, name: "expense_title_scope_normalized_unique" },
+);
 
 expenseTitleSchema.index({
   name: "text",
@@ -45,6 +61,7 @@ expenseTitleSchema.index({
 expenseTitleSchema.pre("save", function (next) {
   if (this.name) {
     this.name = this.name.trim();
+    this.normalizedName = this.name.toLowerCase();
   }
   next();
 });

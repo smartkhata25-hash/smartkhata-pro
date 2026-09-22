@@ -18,6 +18,16 @@ const TRAVEL_EMPLOYEE_ORIGINS = Object.freeze({
   ADJUSTMENT: "travel_employee_adjustment",
 });
 
+const WEAVING_EMPLOYEE_ORIGINS = Object.freeze({
+  SALARY: "weaving_employee_salary",
+  SALARY_PAYMENT: "weaving_employee_salary_payment",
+  ADVANCE: "weaving_employee_advance",
+  ADVANCE_RECOVERY: "weaving_employee_advance_recovery",
+  LOAN: "weaving_employee_loan",
+  LOAN_RECOVERY: "weaving_employee_loan_recovery",
+  ADJUSTMENT: "weaving_employee_adjustment",
+});
+
 const TRADING_EMPLOYEE_ORIGIN_VALUES = Object.freeze(
   Object.values(EMPLOYEE_ORIGINS),
 );
@@ -26,16 +36,27 @@ const TRAVEL_EMPLOYEE_ORIGIN_VALUES = Object.freeze(
   Object.values(TRAVEL_EMPLOYEE_ORIGINS),
 );
 
+const WEAVING_EMPLOYEE_ORIGIN_VALUES = Object.freeze(
+  Object.values(WEAVING_EMPLOYEE_ORIGINS),
+);
+
 const ALL_EMPLOYEE_ORIGIN_VALUES = Object.freeze([
   ...TRADING_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  ...WEAVING_EMPLOYEE_ORIGIN_VALUES,
 ]);
 
 const getEmployeeOriginsForScope = (moduleScope = "trading") =>
-  moduleScope === "travel" ? TRAVEL_EMPLOYEE_ORIGINS : EMPLOYEE_ORIGINS;
+  moduleScope === "weaving"
+    ? WEAVING_EMPLOYEE_ORIGINS
+    : moduleScope === "travel"
+      ? TRAVEL_EMPLOYEE_ORIGINS
+      : EMPLOYEE_ORIGINS;
 
 const getEmployeeOriginValuesForScope = (moduleScope = "trading") =>
-  moduleScope === "travel"
+  moduleScope === "weaving"
+    ? WEAVING_EMPLOYEE_ORIGIN_VALUES
+    : moduleScope === "travel"
     ? TRAVEL_EMPLOYEE_ORIGIN_VALUES
     : TRADING_EMPLOYEE_ORIGIN_VALUES;
 
@@ -45,6 +66,8 @@ module.exports = {
   TRADING_EMPLOYEE_ORIGIN_VALUES,
   TRAVEL_EMPLOYEE_ORIGINS,
   TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  WEAVING_EMPLOYEE_ORIGINS,
+  WEAVING_EMPLOYEE_ORIGIN_VALUES,
   getEmployeeOriginsForScope,
   getEmployeeOriginValuesForScope,
 };

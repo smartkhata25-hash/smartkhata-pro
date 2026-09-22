@@ -14,12 +14,19 @@ const getAuthHeaders = () => {
   };
 };
 
-export const getExpenseTitles = async (search = '') => {
+const getScopedParams = (options = {}) => {
+  const moduleScope = options.moduleScope || options.scope;
+
+  return moduleScope ? { moduleScope } : {};
+};
+
+export const getExpenseTitles = async (search = '', options = {}) => {
   try {
     const res = await axios.get(API, {
       ...getAuthHeaders(),
       params: {
         search: String(search || '').trim(),
+        ...getScopedParams(options),
       },
     });
 
@@ -31,9 +38,20 @@ export const getExpenseTitles = async (search = '') => {
 };
 
 // ➕ Create Title
-export const createExpenseTitle = async (data) => {
+export const createExpenseTitle = async (data, options = {}) => {
   try {
-    const res = await axios.post(API, data, getAuthHeaders());
+    const moduleScope = options.moduleScope || data?.moduleScope || options.scope;
+    const res = await axios.post(
+      API,
+      {
+        ...data,
+        ...(moduleScope ? { moduleScope } : {}),
+      },
+      {
+        ...getAuthHeaders(),
+        params: getScopedParams({ moduleScope }),
+      }
+    );
     return res.data;
   } catch (error) {
     console.error('❌ createExpenseTitle error:', error);
@@ -42,9 +60,20 @@ export const createExpenseTitle = async (data) => {
 };
 
 // ✏️ Update Title
-export const updateExpenseTitle = async (id, data) => {
+export const updateExpenseTitle = async (id, data, options = {}) => {
   try {
-    const res = await axios.put(`${API}/${id}`, data, getAuthHeaders());
+    const moduleScope = options.moduleScope || data?.moduleScope || options.scope;
+    const res = await axios.put(
+      `${API}/${id}`,
+      {
+        ...data,
+        ...(moduleScope ? { moduleScope } : {}),
+      },
+      {
+        ...getAuthHeaders(),
+        params: getScopedParams({ moduleScope }),
+      }
+    );
     return res.data;
   } catch (error) {
     console.error('❌ updateExpenseTitle error:', error);
@@ -53,9 +82,12 @@ export const updateExpenseTitle = async (id, data) => {
 };
 
 // ❌ Delete Title
-export const deleteExpenseTitle = async (id) => {
+export const deleteExpenseTitle = async (id, options = {}) => {
   try {
-    const res = await axios.delete(`${API}/${id}`, getAuthHeaders());
+    const res = await axios.delete(`${API}/${id}`, {
+      ...getAuthHeaders(),
+      params: getScopedParams(options),
+    });
     return res.data;
   } catch (error) {
     console.error('❌ deleteExpenseTitle error:', error);

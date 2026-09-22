@@ -198,7 +198,14 @@ const loginUser = async (req, res) => {
 
       setTimeout(async () => {
         try {
-          await createBaseAccountsForUser(businessOwnerId);
+          await createBaseAccountsForUser(businessOwnerId, {
+            includeWeaving: moduleConfig.enabledModules.weaving === true,
+          });
+          if (moduleConfig.enabledModules.weaving === true) {
+            await createDefaultExpenseTitlesForUser(businessOwnerId, {
+              moduleScope: "weaving",
+            });
+          }
           await fixLegacyExpenseTitles(businessOwnerId);
         } catch (backgroundError) {
           console.error(

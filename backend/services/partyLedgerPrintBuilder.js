@@ -18,6 +18,7 @@ const buildPartyLedgerPrint = ({
   endDate,
   openingBalance = 0,
   ledger = [],
+  header = null,
 }) => {
   const opening = safeNumber(openingBalance);
 
@@ -66,6 +67,8 @@ const buildPartyLedgerPrint = ({
 
   return {
     documentTitle: "Party Ledger",
+
+    header,
 
     party: {
       name: partyName || "-",

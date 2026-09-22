@@ -192,6 +192,17 @@ body {
 .header {
   text-align: center;
   margin-bottom: ${3 * headerScale}px;
+  position: relative;
+}
+
+.header-logo {
+  height: ${52 * headerScale}px;
+  left: 0;
+  object-fit: contain;
+  object-position: left top;
+  position: absolute;
+  top: 0;
+  width: ${82 * headerScale}px;
 }
 
 .header h2 {
@@ -297,12 +308,15 @@ ${
   header
     ? `
 <div class="header">
+  ${header.logoUrl ? `<img class="header-logo" src="${header.logoUrl}" alt="" onerror="this.remove()" />` : ""}
   ${header.companyName ? `<h2>${header.companyName}</h2>` : ""}
   ${header.address ? `<p>${header.address}</p>` : ""}
   ${header.phone ? `<p>${header.phone}</p>` : ""}
 </div>`
     : ""
 }
+
+${page?.isQuotation ? `<h1 style="text-align:center;font-size:22px;margin:8px 0 14px;letter-spacing:1px;">${documentTitle}</h1>` : ""}
 
 <div class="info-section">
   <div class="info-left">
@@ -314,7 +328,7 @@ ${
   <div class="info-right">
     <div><strong>${t("billNo", lang)}:</strong> ${documentInfo?.billNo || "-"}</div>
     <div><strong>${t("date", lang)}:</strong> ${documentInfo?.date || ""} ${documentInfo?.time || ""}</div>
-    <div><strong>${t("common.type", lang)}:</strong> ${documentInfo?.type || "-"}</div>
+    ${documentInfo?.type ? `<div><strong>${t("common.type", lang)}:</strong> ${documentInfo.type}</div>` : ""}
   </div>
 </div>
 
@@ -391,10 +405,7 @@ ${
       : ""
   }
 
-  <div class="totals-row">
-    <span>${t("paid", lang)}:</span>
-    <span>${paid}</span>
-  </div>
+  ${totals?.paidAmount !== null && totals?.paidAmount !== undefined ? `<div class="totals-row"><span>${t("paid", lang)}:</span><span>${paid}</span></div>` : ""}
 
  ${
    columns?.showCustomerTotalBalance !== false &&

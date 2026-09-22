@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { getAllExpenses, deleteExpense } from '../services/expenseService';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { formatBusinessDateForDisplay, getBusinessDateInputValue } from '../utils/localDateTime';
@@ -19,11 +19,22 @@ const ExpenseList = () => {
   });
 
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
 
-  const moduleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
-
-  const isTravelExpenseView = moduleScope === 'travel';
+  const queryModuleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
+  const requestedModuleScope =
+    location.pathname.startsWith('/weaving/expenses') || queryModuleScope === 'weaving'
+      ? 'weaving'
+      : location.pathname.startsWith('/travel/expenses') || queryModuleScope === 'travel'
+        ? 'travel'
+        : 'trading';
+  const isTravelExpenseView = requestedModuleScope === 'travel';
+  const isWeavingExpenseView = requestedModuleScope === 'weaving';
+  const scopedExpenseParams = useMemo(
+    () => (requestedModuleScope === 'trading' ? {} : { moduleScope: requestedModuleScope }),
+    [requestedModuleScope]
+  );
 
   const canViewExpenses = hasPermission('expenses.view');
   const canCreateExpenses = hasPermission('expenses.create');
@@ -140,7 +151,7 @@ const ExpenseList = () => {
     }
 
     try {
-      const data = await getAllExpenses(isTravelExpenseView ? { moduleScope: 'travel' } : {});
+      const data = await getAllExpenses(scopedExpenseParams);
 
       setExpenses(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -149,7 +160,7 @@ const ExpenseList = () => {
     } finally {
       setLoading(false);
     }
-  }, [canViewExpenses, isTravelExpenseView]);
+  }, [canViewExpenses, scopedExpenseParams]);
 
   useEffect(() => {
     if (!canViewExpenses) {
@@ -171,7 +182,7 @@ const ExpenseList = () => {
     }
 
     try {
-      await deleteExpense(id, isTravelExpenseView ? { moduleScope: 'travel' } : {});
+      await deleteExpense(id, scopedExpenseParams);
 
       fetchData();
     } catch (err) {
@@ -336,13 +347,27 @@ const ExpenseList = () => {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-3">
         <h2 className="text-base md:text-xl font-bold">
-          {t(isTravelExpenseView ? 'travel.reports.expenses.title' : 'expense.allExpenses')}
+          {t(
+            isWeavingExpenseView
+              ? 'weaving.sidebar.expenses'
+              : isTravelExpenseView
+                ? 'travel.reports.expenses.title'
+                : 'expense.allExpenses'
+          )}
         </h2>
 
         {canCreateExpenses && (
           <button
             type="button"
-            onClick={() => navigate(isTravelExpenseView ? '/travel/expenses/new' : '/add-expense')}
+            onClick={() =>
+              navigate(
+                isWeavingExpenseView
+                  ? '/weaving/expenses/new'
+                  : isTravelExpenseView
+                    ? '/travel/expenses/new'
+                    : '/add-expense'
+              )
+            }
             className="w-full sm:w-auto bg-blue-600 text-white px-3 py-2 md:px-4 rounded text-sm md:text-base"
           >
             + {t('expense.new')}
@@ -573,7 +598,9 @@ const ExpenseList = () => {
                             type="button"
                             onClick={() =>
                               navigate(
-                                isTravelExpenseView
+                                isWeavingExpenseView
+                                  ? `/weaving/expenses/${e._id}/edit`
+                                  : isTravelExpenseView
                                   ? `/travel/expenses/${e._id}/edit`
                                   : `/edit-expense/${e._id}`
                               )

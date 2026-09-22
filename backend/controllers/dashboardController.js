@@ -70,7 +70,19 @@ const getTravelJournalConditions = () => [
 ];
 
 const getTradingJournalFilter = () => ({
-  $nor: getTravelJournalConditions(),
+  isReversed: { $ne: true },
+  isReversal: { $ne: true },
+  $or: [
+    { moduleScope: { $exists: false } },
+    { moduleScope: null },
+    { moduleScope: "" },
+    { moduleScope: "trading" },
+  ],
+  $nor: [
+    ...getTravelJournalConditions(),
+    { moduleScope: { $in: ["travel", "weaving"] } },
+    { originModule: /^weaving_/i },
+  ],
 });
 
 const getDashboardSummary = async (req, res) => {

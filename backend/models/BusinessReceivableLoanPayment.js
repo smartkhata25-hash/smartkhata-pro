@@ -11,7 +11,7 @@ const businessReceivableLoanPaymentSchema = new mongoose.Schema(
 
     moduleScope: {
       type: String,
-      enum: ["trading", "travel"],
+      enum: ["trading", "travel", "weaving"],
       default: "trading",
       index: true,
     },

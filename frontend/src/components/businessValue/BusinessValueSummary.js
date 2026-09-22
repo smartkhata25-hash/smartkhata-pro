@@ -113,6 +113,7 @@ const BusinessValueSummary = ({ data, loading = false, selectedComponents = [] }
                 isNegative={isNegative}
                 details={component.details || {}}
                 componentKey={card.key}
+                isExact={component.isExact !== false}
               />
             );
           })}
@@ -128,7 +129,16 @@ const BusinessValueSummary = ({ data, loading = false, selectedComponents = [] }
   );
 };
 
-const SummaryCard = ({ title, icon, gradient, value, isNegative, details, componentKey }) => {
+const SummaryCard = ({
+  title,
+  icon,
+  gradient,
+  value,
+  isNegative,
+  details,
+  componentKey,
+  isExact,
+}) => {
   const detailText = getDetailText(componentKey, details);
 
   return (
@@ -148,7 +158,11 @@ const SummaryCard = ({ title, icon, gradient, value, isNegative, details, compon
           </div>
 
           <span className="text-[10px] md:text-xs px-2 py-1 rounded-full bg-black/15 font-semibold">
-            {isNegative ? t('businessValue.deduction') : t('businessValue.addition')}
+            {isExact
+              ? isNegative
+                ? t('businessValue.deduction')
+                : t('businessValue.addition')
+              : t('businessValue.partialValuation')}
           </span>
         </div>
 
@@ -157,6 +171,7 @@ const SummaryCard = ({ title, icon, gradient, value, isNegative, details, compon
 
           <div className="mt-1 text-base sm:text-lg md:text-xl font-extrabold truncate">
             {isNegative ? '− ' : ''}
+            {!isExact ? '~ ' : ''}
             {t('currency.rs')} {formatBusinessValueAmount(value)}
           </div>
 
@@ -173,6 +188,12 @@ const SummaryCard = ({ title, icon, gradient, value, isNegative, details, compon
 
 const getDetailText = (componentKey, details = {}) => {
   if (componentKey === BUSINESS_VALUE_COMPONENTS.INVENTORY) {
+    if (details.inventoryKind === 'weaving') {
+      return `${t('businessValue.yarn')}: ${Number(details.yarnQuantityKg || 0).toLocaleString()} KG • ${t(
+        'businessValue.fabric'
+      )}: ${Number(details.fabricMeter || 0).toLocaleString()} m`;
+    }
+
     return `${Number(details.totalProducts || 0).toLocaleString()} ${t(
       'businessValue.products'
     )} • ${Number(details.totalQty || 0).toLocaleString()} ${t('businessValue.units')}`;

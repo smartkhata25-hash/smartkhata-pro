@@ -1,10 +1,11 @@
 // src/App.js
 import React, { lazy, Suspense, useEffect } from 'react';
-import { HashRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+import { HashRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { getCurrentLanguage } from './i18n/i18n';
 import { navigationService } from './utils/navigationService';
 import { MODULE_KEYS } from './utils/moduleConfig';
+import { BUSINESS_VALUE_MODULE_SCOPES } from './services/businessValueModuleScope';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import PermissionRoute from './components/PermissionRoute';
@@ -97,6 +98,29 @@ const TravelVendorReturnDetailPage = lazy(
   () => import('./pages/travel/TravelVendorReturnDetailPage')
 );
 const TravelSettingsPage = lazy(() => import('./pages/travel/TravelSettingsPage'));
+const WeavingDashboardPage = lazy(() => import('./pages/weaving/WeavingDashboardPage'));
+const WeavingEmployeesPage = lazy(() => import('./pages/weaving/WeavingEmployeesPage'));
+const WeavingEmployeeFormPage = lazy(() => import('./pages/weaving/WeavingEmployeeFormPage'));
+const WeavingEmployeeProfilePage = lazy(() => import('./pages/weaving/WeavingEmployeeProfilePage'));
+const WeavingAttendancePage = lazy(() => import('./pages/weaving/WeavingAttendancePage'));
+const WeavingEmployeeFinancePage = lazy(() => import('./pages/weaving/WeavingEmployeeFinancePage'));
+const WeavingEmployeeLedgersPage = lazy(() => import('./pages/weaving/WeavingEmployeeLedgersPage'));
+const WeavingPayrollPage = lazy(() => import('./pages/weaving/WeavingPayrollPage'));
+const WeavingReportsHubPage = lazy(() => import('./pages/weaving/WeavingReportsHubPage'));
+const WeavingLoomsPage = lazy(() => import('./pages/weaving/WeavingLoomsPage'));
+const WeavingProductionPage = lazy(() => import('./pages/weaving/WeavingProductionPage'));
+const WeavingSettingsPage = lazy(() => import('./pages/weaving/WeavingSettingsPage'));
+const WeavingFormsPage = lazy(() => import('./pages/weaving/WeavingFormsPage'));
+const WeavingPartiesPage = lazy(() => import('./pages/weaving/WeavingPartiesPage'));
+const WeavingPartyLedgerPage = lazy(() => import('./pages/weaving/WeavingPartyLedgerPage'));
+const WeavingPurchasePage = lazy(() => import('./pages/weaving/WeavingPurchasePage'));
+const WeavingPaymentsPage = lazy(() => import('./pages/weaving/WeavingPaymentsPage'));
+const WeavingSizingPage = lazy(() => import('./pages/weaving/WeavingSizingPage'));
+const WeavingBeamsPage = lazy(() => import('./pages/weaving/WeavingBeamsPage'));
+const WeavingYarnStockPage = lazy(() => import('./pages/weaving/WeavingYarnStockPage'));
+const WeavingFoldingPage = lazy(() => import('./pages/weaving/WeavingFoldingPage'));
+const WeavingFabricStockPage = lazy(() => import('./pages/weaving/WeavingFabricStockPage'));
+const WeavingSalesSettlementPage = lazy(() => import('./pages/weaving/WeavingSalesSettlementPage'));
 
 const SalesInvoiceList = lazy(() => import('./components/SalesInvoiceList'));
 const PurchaseInvoiceList = lazy(() => import('./components/PurchaseInvoiceList'));
@@ -334,6 +358,270 @@ function App() {
             }
           >
             <Route path="/dashboard" element={<DashboardPage />} />
+
+            <Route
+              path="/weaving/dashboard"
+              element={
+                <PermissionRoute permission="weaving.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingDashboardPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/accounts"
+              element={
+                <PermissionRoute permission="accounts.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <ChartOfAccountsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/business-value"
+              element={
+                <PermissionRoute permission="business_value.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <BusinessValuePage moduleScope={BUSINESS_VALUE_MODULE_SCOPES.WEAVING} />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/accounts/cash"
+              element={
+                <PermissionRoute
+                  permission="accounts.view_transactions"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <AccountDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/accounts/bank"
+              element={
+                <PermissionRoute
+                  permission="accounts.view_transactions"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <AccountDetailPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/journal-entries"
+              element={
+                <PermissionRoute permission="journal.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <JournalEntriesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/general-ledger"
+              element={
+                <PermissionRoute
+                  permission="reports.general_ledger"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <GeneralLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/general-ledger/:accountId"
+              element={
+                <PermissionRoute
+                  permission="reports.general_ledger"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <GeneralLedgerPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/expenses"
+              element={
+                <PermissionRoute permission="expenses.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <ExpenseList />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/expenses/new"
+              element={
+                <PermissionRoute permission="expenses.create" moduleKey={MODULE_KEYS.WEAVING}>
+                  <ExpenseForm />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/expenses/:id/edit"
+              element={
+                <PermissionRoute permission="expenses.edit" moduleKey={MODULE_KEYS.WEAVING}>
+                  <ExpenseForm />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employees"
+              element={
+                <PermissionRoute permission="employees.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingEmployeesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employees/new"
+              element={
+                <PermissionRoute permission="employees.create" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingEmployeeFormPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employees/:id/ledger"
+              element={
+                <PermissionRoute permission="employees.view_ledger" moduleKey={MODULE_KEYS.WEAVING}>
+                  <EmployeeLedgerPage moduleScope="weaving" />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employees/:id/edit"
+              element={
+                <PermissionRoute permission="employees.edit" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingEmployeeFormPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employees/:id"
+              element={
+                <PermissionRoute permission="employees.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingEmployeeProfilePage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/attendance"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'weaving.attendance.view',
+                    'weaving.attendance.manage',
+                    'weaving.attendance.override',
+                  ]}
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <WeavingAttendancePage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/payroll"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'payroll.view',
+                    'payroll.create',
+                    'payroll.edit',
+                    'payroll.pay',
+                  ]}
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <WeavingPayrollPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employee-finance"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'payroll.view',
+                    'payroll.create',
+                    'payroll.edit',
+                    'payroll.pay',
+                  ]}
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <WeavingEmployeeFinancePage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/employee-ledgers"
+              element={
+                <PermissionRoute permission="employees.view_ledger" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingEmployeeLedgersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/reports"
+              element={
+                <PermissionRoute anyPermissions={['payroll.view', 'weaving.reports.view', 'weaving.reports.production', 'weaving.reports.stock', 'weaving.reports.sales', 'weaving.reports.profit', 'weaving.looms.view_performance']} moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingReportsHubPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/forms"
+              element={
+                <PermissionRoute anyPermissions={['weaving.masters.view', 'weaving.contracts.view']} moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingFormsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route path="/weaving/parties" element={<PermissionRoute permission="weaving.counterparties.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingPartiesPage /></PermissionRoute>} />
+            <Route path="/weaving/party-ledger" element={<PermissionRoute permission="weaving.counterparties.view_ledger" moduleKey={MODULE_KEYS.WEAVING}><WeavingPartyLedgerPage /></PermissionRoute>} />
+            <Route path="/weaving/purchase" element={<PermissionRoute permission="weaving.purchases.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingPurchasePage /></PermissionRoute>} />
+            <Route path="/weaving/payments" element={<PermissionRoute permission="weaving.payments.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingPaymentsPage /></PermissionRoute>} />
+            <Route path="/weaving/sizing" element={<PermissionRoute permission="weaving.sizing.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingSizingPage /></PermissionRoute>} />
+            <Route path="/weaving/beams" element={<PermissionRoute permission="weaving.beams.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingBeamsPage /></PermissionRoute>} />
+            <Route path="/weaving/yarn-stock" element={<PermissionRoute permission="weaving.yarn_stock.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingYarnStockPage /></PermissionRoute>} />
+            <Route path="/weaving/folding-quality" element={<PermissionRoute permission="weaving.folding.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingFoldingPage /></PermissionRoute>} />
+            <Route path="/weaving/fabric-stock" element={<PermissionRoute permission="weaving.fabric_stock.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingFabricStockPage /></PermissionRoute>} />
+            <Route path="/weaving/sales-settlement" element={<PermissionRoute permission="weaving.sales.view" moduleKey={MODULE_KEYS.WEAVING}><WeavingSalesSettlementPage /></PermissionRoute>} />
+            <Route path="/weaving/looms" element={<PermissionRoute anyPermissions={['weaving.reports.view', 'weaving.looms.view_performance']} moduleKey={MODULE_KEYS.WEAVING}><WeavingLoomsPage /></PermissionRoute>} />
+            <Route path="/weaving/production" element={<PermissionRoute anyPermissions={['weaving.reports.view', 'weaving.reports.production']} moduleKey={MODULE_KEYS.WEAVING}><WeavingProductionPage /></PermissionRoute>} />
+
+            <Route
+              path="/weaving/masters"
+              element={<Navigate to="/weaving/forms" replace />}
+            />
+
+            <Route
+              path="/weaving/jobs-contracts"
+              element={<Navigate to="/weaving/forms?tab=sales" replace />}
+            />
+
+            <Route
+              path="/weaving/settings"
+              element={
+                <PermissionRoute permission="weaving.settings.manage" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingSettingsPage />
+                </PermissionRoute>
+              }
+            />
 
             <Route
               path="/travel/dashboard"

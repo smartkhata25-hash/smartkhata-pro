@@ -53,3 +53,17 @@ export const resetPrintSettings = async (type) => {
     throw error;
   }
 };
+
+export const uploadPrintLogo = async (type, file) => {
+  const formData = new FormData();
+  formData.append('logo', file);
+  const res = await axios.post(`${API_URL}/${type}/logo`, formData, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  return res.data;
+};
+
+export const removePrintLogo = async (type) => {
+  const res = await axios.delete(`${API_URL}/${type}/logo`, authHeaders());
+  return res.data;
+};

@@ -43,7 +43,19 @@ const getTravelJournalConditions = () => [
 ];
 
 const getTradingJournalFilter = () => ({
-  $nor: getTravelJournalConditions(),
+  isReversed: { $ne: true },
+  isReversal: { $ne: true },
+  $or: [
+    { moduleScope: { $exists: false } },
+    { moduleScope: null },
+    { moduleScope: "" },
+    { moduleScope: "trading" },
+  ],
+  $nor: [
+    ...getTravelJournalConditions(),
+    { moduleScope: { $in: ["travel", "weaving"] } },
+    { originModule: /^weaving_/i },
+  ],
 });
 
 const buildDateFilter = ({ filterType, startDate, endDate }) => {
@@ -112,7 +124,6 @@ const getOperatingExpenses = async ({
         "accountInfo.code": {
           $ne: "COGS",
         },
-        "lines.type": "debit",
       },
     },
   ];
@@ -124,7 +135,13 @@ const getOperatingExpenses = async ({
         $group: {
           _id: null,
           total: {
-            $sum: "$lines.amount",
+            $sum: {
+              $cond: [
+                { $eq: ["$lines.type", "debit"] },
+                "$lines.amount",
+                { $multiply: ["$lines.amount", -1] },
+              ],
+            },
           },
         },
       },
@@ -146,10 +163,17 @@ const getOperatingExpenses = async ({
           accountCode: "$accountInfo.code",
         },
         total: {
-          $sum: "$lines.amount",
+          $sum: {
+            $cond: [
+              { $eq: ["$lines.type", "debit"] },
+              "$lines.amount",
+              { $multiply: ["$lines.amount", -1] },
+            ],
+          },
         },
       },
     },
+    { $match: { total: { $gt: 0 } } },
     {
       $sort: {
         total: -1,

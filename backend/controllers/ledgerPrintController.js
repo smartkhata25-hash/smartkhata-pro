@@ -4,6 +4,7 @@ const {
 const buildCustomerLedgerPrint = require("../services/ledgerPrintBuilder");
 const generateCustomerLedgerHTML = require("../templates/customerLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 
 const getUserId = (req) => req.user?.id || req.userId;
 
@@ -18,6 +19,7 @@ const buildCustomerLedgerDocument = async (req) => {
     endDate,
     moduleScope,
   });
+  const header = await getLedgerPrintHeader(getUserId(req), moduleScope);
 
   const built = buildCustomerLedgerPrint({
     customerName: rawData.customerName,
@@ -25,6 +27,7 @@ const buildCustomerLedgerDocument = async (req) => {
     endDate,
     openingBalance: rawData.openingBalance,
     ledger: rawData.ledger,
+    header,
   });
 
   built.lang = lang || "ur";

@@ -1,0 +1,25 @@
+const assert = require("assert");
+const { normalizePacking } = require("../services/weaving/weavingPacking");
+const WeavingStockTransaction = require("../models/WeavingStockTransaction");
+
+const defaults = { largeConesPerPackage: 6, smallConesPerPackage: 15 };
+assert.deepStrictEqual(normalizePacking({}, defaults), { packageType: "", packageQty: 0, coneSize: "", conesPerPackage: 0, extraCones: 0, totalCones: 0, smallCones: 0, largeCones: 0 });
+const large = normalizePacking({ packageType: "bag", packageQty: 10, coneSize: "large", extraCones: 4 }, defaults);
+assert.strictEqual(large.totalCones, 64);
+assert.strictEqual(large.largeCones, 64);
+assert.strictEqual(large.smallCones, 0);
+const small = normalizePacking({ packageType: "bag", packageQty: 20, coneSize: "small", extraCones: 10 }, defaults);
+assert.strictEqual(small.totalCones, 310);
+assert.strictEqual(small.smallCones, 310);
+const returned = normalizePacking({ packageType: "bag", packageQty: 10, smallCones: 10, largeCones: 0 }, defaults);
+assert.strictEqual(returned.packageQty, 10);
+assert.strictEqual(returned.smallCones, 10);
+const legacy = normalizePacking({ packageType: "bag", bags: 12, coneSize: "large" }, defaults);
+assert.strictEqual(legacy.packageQty, 12);
+assert.strictEqual(legacy.largeCones, 72);
+const opening = new WeavingStockTransaction({ userId: "507f1f77bcf86cd799439011", itemType: "yarn", itemId: "507f1f77bcf86cd799439012", godownId: "507f1f77bcf86cd799439013", quantity: 2500, unit: "KG", packageType: "bag", packageQty: 50, smallCones: 20, largeCones: 300 });
+assert.strictEqual(opening.validateSync(), undefined);
+assert.strictEqual(opening.packageQty, 50);
+assert.strictEqual(opening.smallCones, 20);
+assert.strictEqual(opening.largeCones, 300);
+console.log("weaving packing tests passed");

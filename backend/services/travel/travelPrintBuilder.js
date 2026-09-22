@@ -1,4 +1,10 @@
 const { formatBusinessDate } = require("../../utils/businessDate");
+const { getFileUrl } = require("../r2FileService");
+
+const getLogoUrl = (header = {}) =>
+  header.showLogo && (header.logoUrl || header.logoKey)
+    ? header.logoUrl || getFileUrl(header.logoKey)
+    : "";
 
 const formatDate = (date) => formatBusinessDate(date) || "";
 
@@ -69,6 +75,7 @@ const buildSharedTravelPrintShell = (printSetting) => {
             taxNumber: headerSettings.showTaxNumber
               ? headerSettings.taxNumber || ""
               : "",
+            logoUrl: getLogoUrl(headerSettings),
           },
     footer:
       settings.showFooter === false
@@ -253,6 +260,7 @@ const buildTravelInvoicePrint = (booking, printSetting) => {
             taxNumber: headerSettings.showTaxNumber
               ? headerSettings.taxNumber || ""
               : "",
+            logoUrl: getLogoUrl(headerSettings),
           },
     documentInfo: {
       invoiceNumber: booking.invoiceNumber || booking.bookingNumber || "",

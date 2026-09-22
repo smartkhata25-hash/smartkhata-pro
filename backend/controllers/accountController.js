@@ -14,6 +14,7 @@ const {
 } = require("../utils/businessValueModuleScope");
 const {
   TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  WEAVING_EMPLOYEE_ORIGIN_VALUES,
 } = require("../utils/employeePayrollOrigins");
 const {
   getCurrentBusinessTimeInput,
@@ -22,10 +23,13 @@ const {
 
 const TRADING_ACCOUNT_OPENING_ORIGIN = "account_opening_balance";
 const TRAVEL_ACCOUNT_OPENING_ORIGIN = "travel_account_opening_balance";
+const WEAVING_ACCOUNT_OPENING_ORIGIN = "weaving_account_opening_balance";
 const TRADING_ACCOUNT_TRANSFER_ORIGIN = "account_transfer";
 const TRAVEL_ACCOUNT_TRANSFER_ORIGIN = "travel_account_transfer";
+const WEAVING_ACCOUNT_TRANSFER_ORIGIN = "weaving_account_transfer";
 const TRADING_ACCOUNT_ADJUSTMENT_ORIGIN = "account_adjustment";
 const TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN = "travel_account_adjustment";
+const WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN = "weaving_account_adjustment";
 
 const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -50,6 +54,14 @@ const TRAVEL_ACCOUNT_SOURCE_TYPES = Object.freeze([
   "travel_commission",
   "travel_refund",
   "travel_adjustment",
+]);
+
+const WEAVING_ACCOUNT_ORIGINS = Object.freeze([
+  "weaving_expense",
+  ...WEAVING_EMPLOYEE_ORIGIN_VALUES,
+  WEAVING_ACCOUNT_OPENING_ORIGIN,
+  WEAVING_ACCOUNT_TRANSFER_ORIGIN,
+  WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN,
 ]);
 
 const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze([
@@ -80,8 +92,10 @@ const ADJUSTMENT_EXCLUDED_CATEGORIES = Object.freeze([
 const RESERVED_BALANCING_ACCOUNT_CODES = Object.freeze([
   "OPENING_BALANCE",
   "TRAVEL_OPENING_BALANCE",
+  "WEAVING_OPENING_BALANCE",
   "ACCOUNT_ADJUSTMENT",
   "TRAVEL_ACCOUNT_ADJUSTMENT",
+  "WEAVING_ACCOUNT_ADJUSTMENT",
 ]);
 
 const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
@@ -118,6 +132,21 @@ const assertScopeEnabled = (req, moduleScope) => {
     return;
   }
 
+  if (moduleScope === MODULE_SCOPES.SHARED) {
+    const anyEnabled =
+      enabledModules[MODULE_SCOPES.TRADING] !== false ||
+      enabledModules[MODULE_SCOPES.TRAVEL] === true ||
+      enabledModules[MODULE_SCOPES.WEAVING] === true;
+
+    if (!anyEnabled) {
+      const error = new Error("This business module is not enabled");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    return;
+  }
+
   const enabled =
     moduleScope === MODULE_SCOPES.TRADING
       ? enabledModules[MODULE_SCOPES.TRADING] !== false
@@ -141,6 +170,7 @@ const applyAccountScopeFilter = (query, scope = MODULE_SCOPES.TRADING) => {
 };
 
 const getTravelJournalConditions = () => [
+  { moduleScope: MODULE_SCOPES.TRAVEL },
   { originModule: { $in: TRAVEL_ACCOUNT_ORIGINS } },
   { sourceType: { $in: TRAVEL_ACCOUNT_SOURCE_TYPES } },
   {
@@ -149,13 +179,43 @@ const getTravelJournalConditions = () => [
   },
 ];
 
+const getWeavingJournalConditions = () => [
+  { moduleScope: MODULE_SCOPES.WEAVING },
+  { originModule: { $in: WEAVING_ACCOUNT_ORIGINS } },
+  {
+    sourceType: "reversal",
+    originModule: { $in: WEAVING_ACCOUNT_ORIGINS },
+  },
+];
+
 const getJournalScopeFilter = (scope = MODULE_SCOPES.TRADING) => {
   if (scope === MODULE_SCOPES.TRAVEL) {
     return { $or: getTravelJournalConditions() };
   }
 
+  if (scope === MODULE_SCOPES.WEAVING) {
+    return { $or: getWeavingJournalConditions() };
+  }
+
   if (scope === MODULE_SCOPES.TRADING) {
-    return { $nor: getTravelJournalConditions() };
+    return {
+      $and: [
+        {
+          $or: [
+            { moduleScope: { $exists: false } },
+            { moduleScope: null },
+            { moduleScope: "" },
+            { moduleScope: MODULE_SCOPES.TRADING },
+          ],
+        },
+        {
+          $nor: [
+            ...getTravelJournalConditions(),
+            ...getWeavingJournalConditions(),
+          ],
+        },
+      ],
+    };
   }
 
   return {};
@@ -176,7 +236,11 @@ const buildCodeConflictQuery = ({
     query._id = { $ne: excludeId };
   }
 
-  if (moduleScope === MODULE_SCOPES.BOTH || moduleScope === "all") {
+  if (
+    moduleScope === MODULE_SCOPES.BOTH ||
+    moduleScope === MODULE_SCOPES.SHARED ||
+    moduleScope === "all"
+  ) {
     query.$or = [
       { moduleScope: { $exists: false } },
       { moduleScope: null },
@@ -186,7 +250,9 @@ const buildCodeConflictQuery = ({
           $in: [
             MODULE_SCOPES.TRADING,
             MODULE_SCOPES.TRAVEL,
+            MODULE_SCOPES.WEAVING,
             MODULE_SCOPES.BOTH,
+            MODULE_SCOPES.SHARED,
           ],
         },
       },
@@ -245,17 +311,28 @@ const parseAmount = (value, { allowZero = false, label = "Amount" } = {}) => {
 const getJournalContextScope = (scope) => {
   const cleanScope = String(scope || "").trim().toLowerCase();
 
-  if (cleanScope === "all" || cleanScope === MODULE_SCOPES.BOTH) {
-    throw makeHttpError("Trading or Travel module context is required.", 400);
+  if (
+    cleanScope === "all" ||
+    cleanScope === MODULE_SCOPES.BOTH ||
+    cleanScope === MODULE_SCOPES.SHARED
+  ) {
+    throw makeHttpError(
+      "Trading, Travel or Weaving module context is required.",
+      400,
+    );
   }
 
   const normalized = normalizeModuleScope(scope, MODULE_SCOPES.TRADING);
 
   if (
     normalized !== MODULE_SCOPES.TRADING &&
-    normalized !== MODULE_SCOPES.TRAVEL
+    normalized !== MODULE_SCOPES.TRAVEL &&
+    normalized !== MODULE_SCOPES.WEAVING
   ) {
-    throw makeHttpError("Trading or Travel module context is required.", 400);
+    throw makeHttpError(
+      "Trading, Travel or Weaving module context is required.",
+      400,
+    );
   }
 
   return normalized;
@@ -291,6 +368,14 @@ const getManualAccountOrigin = (scope, action) => {
     }[action];
   }
 
+  if (scope === MODULE_SCOPES.WEAVING) {
+    return {
+      opening: WEAVING_ACCOUNT_OPENING_ORIGIN,
+      transfer: WEAVING_ACCOUNT_TRANSFER_ORIGIN,
+      adjustment: WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN,
+    }[action];
+  }
+
   return {
     opening: TRADING_ACCOUNT_OPENING_ORIGIN,
     transfer: TRADING_ACCOUNT_TRANSFER_ORIGIN,
@@ -316,6 +401,20 @@ const getSystemAccountConfig = (scope, purpose) => {
           code: "TRAVEL_OPENING_BALANCE",
           name: "Travel Opening Balance",
           moduleScope: MODULE_SCOPES.TRAVEL,
+        };
+  }
+
+  if (scope === MODULE_SCOPES.WEAVING) {
+    return purpose === "adjustment"
+      ? {
+          code: "WEAVING_ACCOUNT_ADJUSTMENT",
+          name: "Weaving Account Adjustment",
+          moduleScope: MODULE_SCOPES.WEAVING,
+        }
+      : {
+          code: "WEAVING_OPENING_BALANCE",
+          name: "Weaving Opening Balance",
+          moduleScope: MODULE_SCOPES.WEAVING,
         };
   }
 
@@ -472,7 +571,13 @@ const getManualOpeningBalanceMap = async ({
 }) => {
   const scope = normalizeModuleScope(moduleScope, MODULE_SCOPES.TRADING);
 
-  if (![MODULE_SCOPES.TRADING, MODULE_SCOPES.TRAVEL].includes(scope)) {
+  if (
+    ![
+      MODULE_SCOPES.TRADING,
+      MODULE_SCOPES.TRAVEL,
+      MODULE_SCOPES.WEAVING,
+    ].includes(scope)
+  ) {
     return new Map();
   }
 
@@ -566,6 +671,7 @@ const syncManualAccountOpeningBalance = async ({
     note: "Manual account opening balance",
     sourceType: getOpeningSourceType(scope),
     originModule: getManualAccountOrigin(scope, "opening"),
+    moduleScope: scope,
     referenceId: account._id,
     createdBy: toObjectId(userId),
     lines: buildAccountOpeningLines({
@@ -699,6 +805,12 @@ exports.createAccount = async (req, res) => {
 
     assertScopeEnabled(req, accessScope);
     assertScopeEnabled(req, moduleScope);
+
+    if (accessScope === MODULE_SCOPES.WEAVING && moduleScope !== MODULE_SCOPES.WEAVING) {
+      return res.status(403).json({
+        message: "New accounts created from Weaving must use Weaving scope.",
+      });
+    }
 
     const rule = ACCOUNT_RULES[type];
     if (!rule) {
@@ -869,6 +981,17 @@ exports.updateAccount = async (req, res) => {
 
     assertScopeEnabled(req, nextModuleScope);
 
+    if (
+      accessScope === MODULE_SCOPES.WEAVING &&
+      ![MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(
+        nextModuleScope,
+      )
+    ) {
+      return res.status(403).json({
+        message: "Weaving accounts cannot modify Trading or Travel accounts.",
+      });
+    }
+
     const rule = ACCOUNT_RULES[nextType];
     if (!rule) {
       return res.status(400).json({ message: "Invalid account type." });
@@ -1015,9 +1138,10 @@ exports.transferBetweenAccounts = async (req, res) => {
       time,
       description: `Account Transfer - ${fromAccount.name} to ${toAccount.name}`,
       note,
-      sourceType: "account_transfer",
-      originModule: getManualAccountOrigin(moduleScope, "transfer"),
-      createdBy: toObjectId(userId),
+    sourceType: "account_transfer",
+    originModule: getManualAccountOrigin(moduleScope, "transfer"),
+    moduleScope,
+    createdBy: toObjectId(userId),
       lines: [
         {
           account: toAccount._id,
@@ -1093,6 +1217,7 @@ exports.adjustAccountBalance = async (req, res) => {
       note,
       sourceType: getAdjustmentSourceType(moduleScope),
       originModule: getManualAccountOrigin(moduleScope, "adjustment"),
+      moduleScope,
       referenceId: account._id,
       createdBy: toObjectId(userId),
       lines: buildAdjustmentLines({
@@ -1240,6 +1365,7 @@ exports.getAccountTransactions = async (req, res) => {
           "billNo",
           "sourceType",
           "originModule",
+          "moduleScope",
           "invoiceId",
           "invoiceModel",
           "referenceId",
@@ -1278,6 +1404,7 @@ exports.getAccountTransactions = async (req, res) => {
             sourceType: entry.sourceType || "",
             referenceType: entry.sourceType || "",
             originModule: entry.originModule || "",
+            moduleScope: entry.moduleScope || "",
             referenceId: clickableReferenceId,
             invoiceId: entry.invoiceId || null,
             invoiceModel: entry.invoiceModel || null,

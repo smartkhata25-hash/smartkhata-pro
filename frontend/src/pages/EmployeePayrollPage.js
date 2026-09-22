@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FaDownload, FaEdit, FaMoneyBillWave, FaPlus, FaPrint, FaTrash } from 'react-icons/fa';
+import { FaDownload, FaEdit, FaEye, FaMoneyBillWave, FaPlus, FaPrint, FaRedo, FaTrash } from 'react-icons/fa';
 
 import { t } from '../i18n/i18n';
 import {
@@ -10,6 +10,7 @@ import {
   TravelMasterList,
   TravelMasterPageFrame,
   TravelMasterToolbar,
+  TravelSegmentedControl,
   formatTravelMoney,
 } from '../components/travel/master/TravelMasterUI';
 import { getValidPaymentAccounts } from '../services/accountService';
@@ -24,6 +25,7 @@ import {
   getPayrolls,
   payPayroll,
   recoverAdvanceLoan,
+  restorePayroll,
   updatePayroll,
   voidAdvanceLoan,
   voidPayroll,
@@ -101,6 +103,8 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
   );
   const [employees, setEmployees] = useState([]);
   const [payrolls, setPayrolls] = useState([]);
+  const [recordState, setRecordState] = useState('active');
+  const [viewingPayroll, setViewingPayroll] = useState(null);
   const [advanceLoans, setAdvanceLoans] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -133,7 +137,7 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
     try {
       const [employeeRows, payrollRows, advanceRows, accounts, summaryData] = await Promise.all([
         getEmployees({ moduleScope, status: 'active' }),
-        getPayrolls({ moduleScope }),
+        getPayrolls({ moduleScope, recordState }),
         getAdvanceLoans({ moduleScope }),
         getValidPaymentAccounts({ moduleScope, forceRefresh: false }),
         getEmployeeSummary({ moduleScope }),
@@ -149,7 +153,7 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
     } finally {
       setLoading(false);
     }
-  }, [moduleScope]);
+  }, [moduleScope, recordState]);
 
   useEffect(() => {
     loadData();
@@ -415,6 +419,12 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
     await loadData();
   };
 
+  const handleRestorePayroll = async (payroll) => {
+    if (!window.confirm(`${t('payroll.restoreConfirm')}: ${payroll.employeeId?.name || '-'}`)) return;
+    await restorePayroll(payroll._id, { moduleScope });
+    await loadData();
+  };
+
   const handleVoidAdvanceLoan = async (entry) => {
     if (!window.confirm(`${t('payroll.voidConfirm')}: ${entry.employeeId?.name || '-'}`)) return;
     await voidAdvanceLoan(entry._id, { moduleScope });
@@ -453,17 +463,27 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
       labelKey: 'travel.common.actions',
       render: (payroll) => (
         <div className="flex flex-wrap gap-1.5">
-          {canPay && Number(payroll.remainingDue || 0) > 0 && (
+          {recordState === 'inactive' && (
+            <TravelActionButton icon={FaEye} variant="soft" onClick={() => setViewingPayroll(payroll)}>
+              {t('travel.common.view')}
+            </TravelActionButton>
+          )}
+          {recordState === 'inactive' && canEdit && (
+            <TravelActionButton icon={FaRedo} variant="success" onClick={() => handleRestorePayroll(payroll)}>
+              {t('payroll.restore')}
+            </TravelActionButton>
+          )}
+          {recordState === 'active' && canPay && Number(payroll.remainingDue || 0) > 0 && (
             <TravelActionButton icon={FaMoneyBillWave} variant="success" onClick={() => openPayForm(payroll)}>
               {t('payroll.pay')}
             </TravelActionButton>
           )}
-          {canEdit && (
+          {recordState === 'active' && canEdit && (
             <TravelActionButton icon={FaEdit} variant="secondary" onClick={() => openEditPayroll(payroll)}>
               {t('travel.common.edit')}
             </TravelActionButton>
           )}
-          {canPrint && (
+          {recordState === 'active' && canPrint && (
             <>
               <TravelActionButton icon={FaPrint} variant="soft" onClick={() => openPrint(`/payroll/${payroll._id}/print`)}>
                 {t('travel.common.print')}
@@ -473,7 +493,7 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
               </TravelActionButton>
             </>
           )}
-          {canDelete && (
+          {recordState === 'active' && canDelete && (
             <TravelActionButton icon={FaTrash} variant="danger" onClick={() => handleVoidPayroll(payroll)}>
               {t('travel.common.delete')}
             </TravelActionButton>
@@ -526,8 +546,10 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
   ];
 
   const payrollFields = [
-    { name: 'employeeId', labelKey: 'employees.fields.name', type: 'select', required: true, placeholderKey: 'payroll.placeholders.employee', options: employeeOptions },
-    { name: 'periodKey', labelKey: 'payroll.fields.period', type: 'month', required: true },
+    ...(!editingPayroll ? [
+      { name: 'employeeId', labelKey: 'employees.fields.name', type: 'select', required: true, placeholderKey: 'payroll.placeholders.employee', options: employeeOptions },
+      { name: 'periodKey', labelKey: 'payroll.fields.period', type: 'month', required: true },
+    ] : []),
     { name: 'salaryDate', labelKey: 'payroll.fields.salaryDate', type: 'date', required: true },
     { name: 'salaryTime', labelKey: 'payroll.fields.salaryTime', type: 'time' },
     { name: 'baseSalary', labelKey: 'employees.fields.baseSalary', type: 'number', min: 0, step: '0.01', required: true },
@@ -548,8 +570,10 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
     { name: 'deductionDescription', labelKey: 'payroll.fields.deductionDescription' },
     { name: 'recoveryAdvanceLoanId', labelKey: 'payroll.fields.recovery', type: 'select', placeholderKey: 'payroll.placeholders.recovery', options: recoveryOptions },
     { name: 'recoveryAmount', labelKey: 'payroll.fields.recoveryAmount', type: 'number', min: 0, step: '0.01' },
-    { name: 'paidAmount', labelKey: 'payroll.fields.payNow', type: 'number', min: 0, step: '0.01' },
-    { name: 'paymentAccountId', labelKey: 'payroll.fields.paymentAccount', type: 'select', placeholderKey: 'payroll.placeholders.paymentAccount', options: paymentAccountOptions },
+    ...(!editingPayroll ? [
+      { name: 'paidAmount', labelKey: 'payroll.fields.payNow', type: 'number', min: 0, step: '0.01' },
+      { name: 'paymentAccountId', labelKey: 'payroll.fields.paymentAccount', type: 'select', placeholderKey: 'payroll.placeholders.paymentAccount', options: paymentAccountOptions },
+    ] : []),
     { name: 'notes', labelKey: 'employees.fields.notes', type: 'textarea', fullWidth: true },
   ];
 
@@ -585,6 +609,16 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
               </button>
             ))}
           </div>
+          {activeTab === 'payroll' && (
+            <TravelSegmentedControl
+              value={recordState}
+              onChange={setRecordState}
+              options={[
+                { value: 'active', labelKey: 'travel.common.active' },
+                { value: 'inactive', labelKey: 'travel.common.inactive' },
+              ]}
+            />
+          )}
         </TravelMasterToolbar>
       }
     >
@@ -623,6 +657,18 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <TravelCardLine labelKey="payroll.columns.period" value={payroll.periodKey} />
                 <TravelCardLine labelKey="payroll.columns.due" value={formatTravelMoney(payroll.remainingDue || 0)} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {recordState === 'inactive' && (
+                  <TravelActionButton icon={FaEye} variant="soft" onClick={() => setViewingPayroll(payroll)}>
+                    {t('travel.common.view')}
+                  </TravelActionButton>
+                )}
+                {recordState === 'inactive' && canEdit && (
+                  <TravelActionButton icon={FaRedo} variant="success" onClick={() => handleRestorePayroll(payroll)}>
+                    {t('payroll.restore')}
+                  </TravelActionButton>
+                )}
               </div>
             </div>
           )}
@@ -679,6 +725,28 @@ const EmployeePayrollPage = ({ moduleScope = 'trading' }) => {
         submitting={saving}
         error={formError}
       />
+
+      {viewingPayroll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-slate-950">{viewingPayroll.employeeId?.name || '-'}</h2>
+                <p className="text-sm font-semibold text-slate-500">{viewingPayroll.periodKey}</p>
+              </div>
+              <button type="button" onClick={() => setViewingPayroll(null)} className="text-sm font-extrabold text-slate-500">
+                {t('travel.common.close')}
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <TravelCardLine labelKey="payroll.columns.netSalary" value={formatTravelMoney(viewingPayroll.netSalary || 0)} />
+              <TravelCardLine labelKey="payroll.columns.paid" value={formatTravelMoney(viewingPayroll.paidAmount || 0)} />
+              <TravelCardLine labelKey="payroll.columns.due" value={formatTravelMoney(viewingPayroll.remainingDue || 0)} />
+              <TravelCardLine labelKey="employees.columns.status" value={viewingPayroll.status || '-'} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <TravelFormModal
         open={advanceFormOpen}

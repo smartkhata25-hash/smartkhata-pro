@@ -1,4 +1,5 @@
 const { formatBusinessDate } = require("../utils/businessDate");
+const { getFileUrl } = require("./r2FileService");
 
 const formatDate = (date) => formatBusinessDate(date) || "";
 
@@ -58,6 +59,10 @@ const buildInvoice = (data, docConfig, title) => {
             ? headerSetting.taxNumber || ""
             : "",
           showLogo: headerSetting.showLogo || false,
+          logoUrl:
+            headerSetting.showLogo && (headerSetting.logoUrl || headerSetting.logoKey)
+              ? headerSetting.logoUrl || getFileUrl(headerSetting.logoKey)
+              : "",
           headerSize: layout?.headerSize || "normal",
         }
       : null,
@@ -176,6 +181,38 @@ const buildSaleReturnPrint = (refund, printSetting) => {
   return buildInvoice(refund, doc, "Sale Return");
 };
 
+const buildQuotationPrint = (quotation, printSetting) => {
+  if (!printSetting || !printSetting.sales) {
+    throw new Error("Sales print settings missing");
+  }
+
+  const built = buildInvoice(
+    {
+      ...quotation,
+      billNo: quotation.quotationNo,
+      invoiceDate: quotation.quotationDate,
+      invoiceTime: quotation.quotationTime,
+      totalAmount: quotation.subTotal,
+      paidAmount: 0,
+      paymentType: "",
+      customerTotalBalance: undefined,
+    },
+    printSetting.sales,
+    "Quotation",
+  );
+
+  built.documentInfo.status = null;
+  built.documentInfo.type = null;
+  built.totals.paidAmount = null;
+  built.totals.balance = null;
+  built.paymentInfo = null;
+  built.party.customerTotalBalance = null;
+  built.columns.showCustomerTotalBalance = false;
+  built.page.isQuotation = true;
+
+  return built;
+};
+
 const buildPurchaseInvoicePrint = (invoice, printSetting) => {
   if (!printSetting || !printSetting.purchase) {
     throw new Error("Purchase print settings missing");
@@ -197,6 +234,7 @@ const buildPurchaseInvoicePrint = (invoice, printSetting) => {
 
 module.exports = {
   buildSaleInvoicePrint,
+  buildQuotationPrint,
   buildSaleReturnPrint,
   buildPurchaseInvoicePrint,
 };

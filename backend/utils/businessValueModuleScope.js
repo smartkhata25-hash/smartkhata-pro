@@ -3,6 +3,7 @@ const { MODULE_SCOPES } = require("./moduleScope");
 const BUSINESS_VALUE_MODULE_SCOPES = Object.freeze([
   MODULE_SCOPES.TRADING,
   MODULE_SCOPES.TRAVEL,
+  MODULE_SCOPES.WEAVING,
 ]);
 
 const TRAVEL_BUSINESS_VALUE_ORIGINS = Object.freeze({
@@ -76,7 +77,7 @@ const assertBusinessValueScopeEnabled = (req, moduleScope) => {
   const enabled =
     moduleScope === MODULE_SCOPES.TRADING
       ? enabledModules[MODULE_SCOPES.TRADING] !== false
-      : enabledModules[MODULE_SCOPES.TRAVEL] === true;
+      : enabledModules[moduleScope] === true;
 
   if (!enabled) {
     throw createScopeError("This business module is not enabled", 403);
@@ -95,9 +96,9 @@ const buildBusinessValueScopeFilter = (
   moduleScope = MODULE_SCOPES.TRADING,
   field = "moduleScope",
 ) => {
-  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+  if (moduleScope !== MODULE_SCOPES.TRADING) {
     return {
-      [field]: MODULE_SCOPES.TRAVEL,
+      [field]: moduleScope,
     };
   }
 
@@ -130,10 +131,10 @@ const applyBusinessValueScopeFilter = (
 };
 
 const getScopedBusinessValueOrigin = (baseOrigin, moduleScope) =>
-  moduleScope === MODULE_SCOPES.TRAVEL ? `travel_${baseOrigin}` : baseOrigin;
+  moduleScope === MODULE_SCOPES.TRADING ? baseOrigin : `${moduleScope}_${baseOrigin}`;
 
 const getScopedBusinessValueAccountConfig = (baseConfig, moduleScope) => {
-  if (moduleScope !== MODULE_SCOPES.TRAVEL) {
+  if (moduleScope === MODULE_SCOPES.TRADING) {
     return {
       ...baseConfig,
       moduleScope: MODULE_SCOPES.TRADING,
@@ -142,9 +143,9 @@ const getScopedBusinessValueAccountConfig = (baseConfig, moduleScope) => {
 
   return {
     ...baseConfig,
-    name: `Travel ${baseConfig.name}`,
-    code: `TRAVEL_${baseConfig.code}`,
-    moduleScope: MODULE_SCOPES.TRAVEL,
+    name: `${moduleScope === MODULE_SCOPES.WEAVING ? "Weaving" : "Travel"} ${baseConfig.name}`,
+    code: `${moduleScope.toUpperCase()}_${baseConfig.code}`,
+    moduleScope,
   };
 };
 

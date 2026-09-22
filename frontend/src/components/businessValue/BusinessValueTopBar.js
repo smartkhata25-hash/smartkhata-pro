@@ -136,6 +136,8 @@ const BusinessValueTopBar = ({
 
   const totalNegativeValue = Number(data?.totalNegativeValue || 0);
 
+  const isPartialValuation = data?.isExact === false;
+
   const allSelected = useMemo(() => {
     return componentOptions.every((option) => selectedComponents.includes(option.key));
   }, [componentOptions, selectedComponents]);
@@ -316,6 +318,7 @@ const BusinessValueTopBar = ({
               label={t('businessValue.netBusinessValue')}
               value={netBusinessValue}
               variant={netBusinessValue < 0 ? 'danger' : 'primary'}
+              approximate={isPartialValuation}
             />
 
             <ValueCard
@@ -323,6 +326,7 @@ const BusinessValueTopBar = ({
               label={t('businessValue.positiveValue')}
               value={totalPositiveValue}
               variant="success"
+              approximate={isPartialValuation}
             />
 
             <ValueCard
@@ -330,6 +334,7 @@ const BusinessValueTopBar = ({
               label={t('businessValue.negativeValue')}
               value={totalNegativeValue}
               variant="warning"
+              approximate={isPartialValuation}
             />
 
             <button
@@ -656,7 +661,7 @@ const BusinessValueTopBar = ({
   );
 };
 
-const ValueCard = ({ icon, label, value, variant = 'primary' }) => {
+const ValueCard = ({ icon, label, value, variant = 'primary', approximate = false }) => {
   const styles = {
     primary: {
       wrapper: 'border-indigo-200 bg-gradient-to-br from-indigo-50 via-blue-50 to-white',
@@ -708,11 +713,17 @@ const ValueCard = ({ icon, label, value, variant = 'primary' }) => {
       </div>
 
       <div className="min-w-0">
-        <div className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          {label}
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          <span className="truncate">{label}</span>
+          {approximate && (
+            <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[8px] text-amber-700">
+              {t('businessValue.partialValuation')}
+            </span>
+          )}
         </div>
 
         <div className={`mt-0.5 truncate text-base font-black ${theme.value}`}>
+          {approximate ? '~ ' : ''}
           {t('currency.rs')} {formatBusinessValueAmount(value)}
         </div>
       </div>

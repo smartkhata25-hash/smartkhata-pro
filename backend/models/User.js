@@ -111,6 +111,10 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: DEFAULT_ENABLED_MODULES.travel,
       },
+      weaving: {
+        type: Boolean,
+        default: DEFAULT_ENABLED_MODULES.weaving,
+      },
     },
 
     defaultModule: {

@@ -55,6 +55,17 @@ export const getDefaultWorkspacePath = (user = null) => {
   const moduleConfig = normalizeModuleConfig(user);
 
   if (
+    moduleConfig.defaultModule === MODULE_KEYS.WEAVING &&
+    canAccess({
+      permission: 'weaving.view',
+      moduleKey: MODULE_KEYS.WEAVING,
+      user,
+    })
+  ) {
+    return '/weaving/dashboard';
+  }
+
+  if (
     moduleConfig.defaultModule === MODULE_KEYS.TRAVEL &&
     canAccess({
       permission: 'travel.view',

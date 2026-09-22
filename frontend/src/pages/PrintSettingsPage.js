@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { getPrintSettings, updatePrintSettings } from '../services/printSettingService';
 import { resetPrintSettings } from '../services/printSettingService';
+import { removePrintLogo, uploadPrintLogo } from '../services/printSettingService';
 import { t } from '../i18n/i18n';
 const API = process.env.REACT_APP_API_BASE_URL;
 
@@ -9,6 +10,7 @@ const DOCUMENT_TYPES = [
   { label: 'Sale Return', value: 'saleReturn' },
   { label: 'Purchase Invoice', value: 'purchase' },
   { label: 'Purchase Return', value: 'purchaseReturn' },
+  { label: 'Travel Invoice', value: 'travelInvoice' },
 ];
 
 const PrintSettingsPage = () => {
@@ -16,6 +18,7 @@ const PrintSettingsPage = () => {
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('sales');
   const [previewHtml, setPreviewHtml] = useState('');
+  const [logoLoading, setLogoLoading] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -148,6 +151,40 @@ const PrintSettingsPage = () => {
     }
   };
 
+  const replaceCurrentDocument = (documentSetting) => {
+    setSettings((previous) => ({
+      ...previous,
+      [selectedType]: documentSetting,
+    }));
+  };
+
+  const handleLogoUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || logoLoading) return;
+
+    try {
+      setLogoLoading(true);
+      replaceCurrentDocument(await uploadPrintLogo(selectedType, file));
+    } catch (error) {
+      alert(error?.response?.data?.msg || t('print.logoUploadFailed'));
+    } finally {
+      setLogoLoading(false);
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (logoLoading) return;
+    try {
+      setLogoLoading(true);
+      replaceCurrentDocument(await removePrintLogo(selectedType));
+    } catch (error) {
+      alert(error?.response?.data?.msg || t('print.logoRemoveFailed'));
+    } finally {
+      setLogoLoading(false);
+    }
+  };
+
   /* ================= RESET ================= */
   const handleReset = async () => {
     const confirmReset = window.confirm(t('alerts.printResetConfirm'));
@@ -223,6 +260,51 @@ const PrintSettingsPage = () => {
             value={currentDoc.header.footerMessage}
             onChange={(e) => handleHeaderChange('footerMessage', e.target.value)}
           />
+
+          <div className="space-y-2 border-t pt-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={currentDoc.header.showLogo === true}
+                onChange={(event) => handleHeaderChange('showLogo', event.target.checked)}
+              />
+              {t('print.showLogo')}
+            </label>
+
+            {currentDoc.header.logoUrl && (
+              <img
+                src={currentDoc.header.logoUrl}
+                alt={t('print.currentLogo')}
+                className="h-16 max-w-40 border bg-white object-contain p-1"
+                onError={(event) => {
+                  event.currentTarget.style.display = 'none';
+                }}
+              />
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <label className={`btn btn-primary cursor-pointer ${logoLoading ? 'opacity-50' : ''}`}>
+                {logoLoading ? t('common.loading') : t('print.uploadLogo')}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  disabled={logoLoading}
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+              </label>
+              {currentDoc.header.logoUrl && (
+                <button
+                  type="button"
+                  disabled={logoLoading}
+                  onClick={handleLogoRemove}
+                  className="btn bg-red-500 text-white disabled:opacity-50"
+                >
+                  {t('print.removeLogo')}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Visibility */}

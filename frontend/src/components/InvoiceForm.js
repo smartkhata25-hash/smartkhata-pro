@@ -19,12 +19,20 @@ import {
 } from '../services/invoiceFormOptionsService';
 
 import InvoiceTable from './InvoiceTable';
+import QuotationDrawer from './QuotationDrawer';
 import { useLocation } from 'react-router-dom';
 import InvoiceSearchModal from './InvoiceSearchModal';
 import { useNavigate } from 'react-router-dom';
 import CustomerForm from './CustomerForm';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  createQuotation,
+  deleteQuotation,
+  getQuotationById,
+  getQuotations,
+  updateQuotation,
+} from '../services/quotationService';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -52,6 +60,7 @@ const InvoiceForm = ({
   const canCreateSales = hasPermission('sales.create');
   const canEditSales = hasPermission('sales.edit');
   const canPrintSales = hasPermission('sales.print');
+  const canDeleteSales = hasPermission('sales.delete');
   const canReceiveSalesPayment = hasPermission('sales.receive_payment');
   const canCreateCustomer = hasPermission('customers.create');
   const canViewCost = hasPermission('products.view_cost');
@@ -99,6 +108,13 @@ const InvoiceForm = ({
   const [saveLoading, setSaveLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [historyRowIndex, setHistoryRowIndex] = useState(null);
+  const [activeQuotationId, setActiveQuotationId] = useState('');
+  const [activeQuotationNo, setActiveQuotationNo] = useState('');
+  const [showQuotationDrawer, setShowQuotationDrawer] = useState(false);
+  const [quotations, setQuotations] = useState([]);
+  const [quotationsLoading, setQuotationsLoading] = useState(false);
+  const [quotationSaving, setQuotationSaving] = useState(false);
+  const [deletingQuotationId, setDeletingQuotationId] = useState('');
 
   const [historyAutoMode, setHistoryAutoMode] = useState(
     localStorage.getItem('mobileHistoryMode') === 'on'
@@ -293,6 +309,69 @@ const InvoiceForm = ({
   const [customerBalance, setCustomerBalance] = useState(0);
   const [openingBalanceAmount, setOpeningBalanceAmount] = useState(0);
 
+  const applyQuotationToForm = useCallback(
+    (quotation) => {
+      const quotationItems = Array.isArray(quotation?.items) ? quotation.items : [];
+      const mappedItems = quotationItems.map((item, index) => ({
+        itemNo: index + 1,
+        search: item.name || '',
+        productId: item.productId?._id || item.productId || '',
+        name: item.name || '',
+        description: item.description || '',
+        uom: item.uom || '',
+        cost: 0,
+        quantity: Number(item.quantity || 0),
+        rate: Number(item.price || 0),
+        amount: Number(item.total || 0),
+      }));
+
+      setActiveQuotationId(quotation._id || '');
+      setActiveQuotationNo(quotation.quotationNo || '');
+      setCustomerName(quotation.customerName || '');
+      setCustomerPhone(quotation.customerPhone || '');
+      setSelectedCustomerType(quotation.customerType === 'party' ? 'party' : 'customer');
+      setSelectedCustomerId(quotation.partyId || quotation.customerId || '');
+      setInvoiceDate(getBusinessDateInputValue(quotation.quotationDate) || '');
+      setInvoiceTime(quotation.quotationTime?.slice(0, 5) || '');
+      setBy(quotation.by || '');
+      setItems([
+        ...mappedItems,
+        ...Array.from({ length: Math.max(0, 20 - mappedItems.length) }, () => blankRow()),
+      ]);
+      setDiscountPercent(Number(quotation.discountPercent || 0));
+      setDiscountAmount(Number(quotation.discountAmount || 0));
+      setPaidAmount(0);
+      setPaymentType('credit');
+      setSelectedAccountId('');
+      setAttachments([]);
+      setExistingAttachments([]);
+      setCustomerLedger([]);
+      setCustomerBalance(0);
+
+      if (quotation.customerId || quotation.partyId) {
+        onCustomerChange?.(quotation.partyId || quotation.customerId);
+      }
+    },
+    [onCustomerChange]
+  );
+
+  const loadQuotations = useCallback(
+    async (search = '') => {
+      if (!token || !canViewSales) return;
+      try {
+        setQuotationsLoading(true);
+        const data = await getQuotations(token, { search, limit: 200 });
+        setQuotations(Array.isArray(data?.quotations) ? data.quotations : []);
+      } catch (error) {
+        console.error('Quotation list load failed:', error?.response?.data || error.message);
+        alert(error?.response?.data?.message || t('quotation.loadFailed'));
+      } finally {
+        setQuotationsLoading(false);
+      }
+    },
+    [token, canViewSales]
+  );
+
   useEffect(() => {
     if (paidAmount > 0 && paymentType === 'credit') {
       setPaymentType('cash');
@@ -364,8 +443,10 @@ const InvoiceForm = ({
         setEditLoading(false);
         setEditingInvoiceFromAPI(null);
 
-        setInvoiceDate(getBusinessDateInputValue());
-        setInvoiceTime(getBusinessTimeInputValue());
+        if (!location.state?.preserveQuotationDraft) {
+          setInvoiceDate(getBusinessDateInputValue());
+          setInvoiceTime(getBusinessTimeInputValue());
+        }
 
         try {
           const lastBillNo = await getLastInvoiceNo(token);
@@ -420,7 +501,37 @@ const InvoiceForm = ({
     return () => {
       cancelled = true;
     };
-  }, [location.search, token, canEditSales, navigate]);
+  }, [location.search, location.state, token, canEditSales, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const quotationId = params.get('quotationId');
+
+    if (!quotationId || params.get('invoiceId') || !token) return;
+
+    let cancelled = false;
+
+    const loadQuotation = async () => {
+      try {
+        setEditLoading(true);
+        const quotation = await getQuotationById(quotationId, token);
+        if (!cancelled) applyQuotationToForm(quotation);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Quotation load failed:', error?.response?.data || error.message);
+        alert(error?.response?.data?.message || t('quotation.loadFailed'));
+        navigate('/create-sale', { replace: true });
+      } finally {
+        if (!cancelled) setEditLoading(false);
+      }
+    };
+
+    loadQuotation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.search, token, navigate, applyQuotationToForm]);
 
   useEffect(() => {
     if (!editingInvoiceFromAPI) return;
@@ -1067,6 +1178,118 @@ const InvoiceForm = ({
     }
   );
 
+  const handleSaveQuotation = async () => {
+    const canSave = activeQuotationId ? canEditSales : canCreateSales;
+    if (!canSave) {
+      alert(t('quotation.permissionDenied'));
+      return;
+    }
+    if (quotationSaving) return;
+    if (!customerName.trim()) {
+      alert(t('alerts.customerRequired'));
+      return;
+    }
+    if (!invoiceDate || Number.isNaN(new Date(invoiceDate).getTime())) {
+      alert(t('quotation.invalidDate'));
+      return;
+    }
+
+    const quotationItems = items
+      .filter((item) => item.productId && Number(item.quantity) > 0 && Number(item.rate) > 0)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Number(item.quantity),
+        price: Number(item.rate),
+      }));
+
+    if (quotationItems.length === 0) {
+      alert(t('quotation.itemsRequired'));
+      return;
+    }
+
+    const payload = {
+      quotationDate: invoiceDate,
+      quotationTime: invoiceTime,
+      customerName,
+      customerPhone,
+      customerType: selectedCustomerType,
+      customerId: selectedCustomerType === 'customer' ? selectedCustomerId : null,
+      partyId: selectedCustomerType === 'party' ? selectedCustomerId : null,
+      items: quotationItems,
+      discountPercent: Number(discountPercent || 0),
+      discountAmount: Number(finalDiscount || 0),
+      by,
+      lang: localStorage.getItem('lang') || 'en',
+    };
+
+    try {
+      setQuotationSaving(true);
+      const saved = activeQuotationId
+        ? await updateQuotation(activeQuotationId, payload, token)
+        : await createQuotation(payload, token);
+
+      setActiveQuotationId(saved._id);
+      setActiveQuotationNo(saved.quotationNo);
+      await loadQuotations();
+      if (canPrintSales) {
+        navigate(`/print/quotation/${saved._id}`, {
+          state: {
+            quotationNo: saved.quotationNo,
+            returnTo: `/create-sale?quotationId=${saved._id}`,
+          },
+        });
+      } else {
+        navigate(`/create-sale?quotationId=${saved._id}`, { replace: true });
+      }
+    } catch (error) {
+      console.error('Quotation save failed:', error?.response?.data || error.message);
+      alert(error?.response?.data?.message || t('quotation.saveFailed'));
+    } finally {
+      setQuotationSaving(false);
+    }
+  };
+
+  const handleOpenQuotation = async (quotationId) => {
+    try {
+      setQuotationsLoading(true);
+      const quotation = await getQuotationById(quotationId, token);
+      applyQuotationToForm(quotation);
+      setShowQuotationDrawer(false);
+      navigate(`/create-sale?quotationId=${quotationId}`, { replace: true });
+    } catch (error) {
+      console.error('Quotation load failed:', error?.response?.data || error.message);
+      alert(error?.response?.data?.message || t('quotation.loadFailed'));
+    } finally {
+      setQuotationsLoading(false);
+    }
+  };
+
+  const handleDeleteQuotation = async (quotation) => {
+    const confirmed = window.confirm(
+      t('quotation.deleteConfirm').replace('{number}', quotation.quotationNo || '')
+    );
+    if (!confirmed || deletingQuotationId) return;
+
+    try {
+      setDeletingQuotationId(quotation._id);
+      await deleteQuotation(quotation._id, token);
+      setQuotations((current) => current.filter((item) => item._id !== quotation._id));
+      if (activeQuotationId === quotation._id) {
+        setActiveQuotationId('');
+        setActiveQuotationNo('');
+        navigate('/create-sale', {
+          replace: true,
+          state: { preserveQuotationDraft: true },
+        });
+      }
+    } catch (error) {
+      console.error('Quotation delete failed:', error?.response?.data || error.message);
+      alert(error?.response?.data?.message || t('quotation.deleteFailed'));
+    } finally {
+      setDeletingQuotationId('');
+    }
+  };
+
   const handleClear = async () => {
     if (editingInvoiceFromAPI?._id) {
       try {
@@ -1097,6 +1320,12 @@ const InvoiceForm = ({
     }
 
     clear();
+
+    setActiveQuotationId('');
+    setActiveQuotationNo('');
+    if (new URLSearchParams(location.search).has('quotationId')) {
+      navigate('/create-sale', { replace: true });
+    }
 
     setBillNo('Auto');
 
@@ -1309,6 +1538,8 @@ const InvoiceForm = ({
       clear();
 
       const resetSavedInvoiceForm = () => {
+        setActiveQuotationId('');
+        setActiveQuotationNo('');
         setBillNo('Auto');
         setInvoiceDate(getBusinessDateInputValue());
         setInvoiceTime(getBusinessTimeInputValue());
@@ -1405,6 +1636,18 @@ const InvoiceForm = ({
         </div>
       )}
 
+      <QuotationDrawer
+        open={showQuotationDrawer}
+        quotations={quotations}
+        loading={quotationsLoading}
+        deletingId={deletingQuotationId}
+        canDelete={canDeleteSales}
+        onClose={() => setShowQuotationDrawer(false)}
+        onOpen={handleOpenQuotation}
+        onDelete={handleDeleteQuotation}
+        onSearch={loadQuotations}
+      />
+
       <form
         onSubmit={(e) => handleSubmit(e)}
         className="max-w-6xl mx-auto p-2 md:p-3 bg-white rounded shadow space-y-2 text-xs md:text-sm"
@@ -1412,7 +1655,14 @@ const InvoiceForm = ({
         <div ref={printRef} id="print-section">
           {/* 🧾 Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
-            <h2 className="text-2xl font-bold">{t('saleInvoice')}</h2>
+            <div>
+              <h2 className="text-2xl font-bold">{t('saleInvoice')}</h2>
+              {activeQuotationNo && (
+                <p className="mt-1 text-xs font-medium text-blue-700">
+                  {t('quotation.editing')} {activeQuotationNo}
+                </p>
+              )}
+            </div>
 
             <div className="flex flex-wrap items-center gap-1 md:gap-2">
               <div className="flex items-center gap-2">
@@ -1807,6 +2057,41 @@ const InvoiceForm = ({
 
                 {/* Buttons */}
                 <div className="flex flex-wrap gap-2 md:gap-3 no-print mt-6 md:mt-8">
+                  {!editingInvoiceFromAPI &&
+                    ((activeQuotationId && canEditSales) ||
+                      (!activeQuotationId && canCreateSales)) && (
+                      <button
+                        type="button"
+                        disabled={quotationSaving}
+                        onClick={handleSaveQuotation}
+                        className={`rounded px-3 py-1.5 text-xs text-white md:px-4 md:py-2 md:text-sm ${
+                          quotationSaving
+                            ? 'cursor-not-allowed bg-gray-400'
+                            : 'bg-amber-600 hover:bg-amber-700'
+                        }`}
+                      >
+                        {quotationSaving
+                          ? t('quotation.saving')
+                          : activeQuotationId
+                            ? t('quotation.update')
+                            : t('quotation.save')}
+                      </button>
+                    )}
+
+                  {canViewSales && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowQuotationDrawer(true);
+                        loadQuotations();
+                      }}
+                      className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 md:px-4 md:py-2 md:text-sm"
+                    >
+                      {t('quotation.list')}
+                      {quotations.length > 0 ? ` (${quotations.length})` : ''}
+                    </button>
+                  )}
+
                   {((editingInvoiceFromAPI && canEditSales) ||
                     (!editingInvoiceFromAPI && canCreateSales)) && (
                     <>

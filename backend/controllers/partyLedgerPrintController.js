@@ -8,6 +8,7 @@ const JournalEntry = require("../models/JournalEntry");
 const buildPartyLedgerPrint = require("../services/partyLedgerPrintBuilder");
 const generatePartyLedgerHTML = require("../templates/partyLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
@@ -332,6 +333,7 @@ const getPartyLedgerHtml = async (req, res) => {
       endDate,
       moduleScope,
     });
+    const header = await getLedgerPrintHeader(userId, moduleScope);
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
@@ -342,6 +344,7 @@ const getPartyLedgerHtml = async (req, res) => {
       endDate,
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
+      header,
     });
 
     built.lang = lang || "ur";
@@ -375,6 +378,7 @@ const generatePartyLedgerPdf = async (req, res) => {
       endDate,
       moduleScope,
     });
+    const header = await getLedgerPrintHeader(userId, moduleScope);
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
@@ -385,6 +389,7 @@ const generatePartyLedgerPdf = async (req, res) => {
       endDate,
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
+      header,
     });
 
     built.lang = lang || "ur";

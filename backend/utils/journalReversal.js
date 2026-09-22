@@ -55,6 +55,10 @@ const createReversalEntry = async (originalEntry, userId, options = {}) => {
       options.originModule !== undefined
         ? options.originModule
         : originalEntry.originModule || "",
+    moduleScope:
+      options.moduleScope !== undefined
+        ? options.moduleScope
+        : originalEntry.moduleScope || "trading",
     referenceId:
       options.referenceId !== undefined
         ? options.referenceId

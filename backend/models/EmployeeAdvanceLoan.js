@@ -35,8 +35,62 @@ const recoveryHistorySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    scheduledAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cycleKey: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    frequency: {
+      type: String,
+      enum: ["one_time", "carry_forward", "every_payroll_cycle", "monthly", ""],
+      default: "",
+    },
+    isSkipped: {
+      type: Boolean,
+      default: false,
+    },
+    isManualOverride: {
+      type: Boolean,
+      default: false,
+    },
   },
   { _id: false, timestamps: true },
+);
+
+const recoveryPlanSchema = new mongoose.Schema(
+  {
+    frequency: {
+      type: String,
+      enum: ["one_time", "carry_forward", "every_payroll_cycle", "monthly", ""],
+      default: "",
+    },
+    installmentAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    firstCycleKey: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    targetCycleKey: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    anchorHalf: {
+      type: String,
+      enum: ["H1", "H2", ""],
+      default: "",
+    },
+  },
+  { _id: false },
 );
 
 const employeeAdvanceLoanSchema = new mongoose.Schema(
@@ -49,7 +103,7 @@ const employeeAdvanceLoanSchema = new mongoose.Schema(
     },
     moduleScope: {
       type: String,
-      enum: ["trading", "travel"],
+      enum: ["trading", "travel", "weaving"],
       default: "trading",
       index: true,
     },
@@ -103,6 +157,16 @@ const employeeAdvanceLoanSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    recoveryPlan: {
+      type: recoveryPlanSchema,
+      default: () => ({
+        frequency: "",
+        installmentAmount: 0,
+        firstCycleKey: "",
+        targetCycleKey: "",
+        anchorHalf: "",
+      }),
+    },
     journalEntryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "JournalEntry",
@@ -151,6 +215,13 @@ employeeAdvanceLoanSchema.index({
   status: 1,
 });
 employeeAdvanceLoanSchema.index({ userId: 1, moduleScope: 1, date: -1 });
+employeeAdvanceLoanSchema.index({
+  userId: 1,
+  moduleScope: 1,
+  employeeId: 1,
+  kind: 1,
+  status: 1,
+});
 
 module.exports = mongoose.model(
   "EmployeeAdvanceLoan",

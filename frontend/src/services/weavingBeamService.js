@@ -1,0 +1,10 @@
+import axios from 'axios';
+const URL = `${process.env.REACT_APP_API_BASE_URL}/api/weaving/beams`;
+const cfg = (params) => ({ headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params });
+const unwrap = (response) => response.data?.data ?? response.data;
+export const listBeamSets = async (params = {}) => unwrap(await axios.get(`${URL}/sets`, cfg(params)));
+export const getBeamSet = async (id) => unwrap(await axios.get(`${URL}/sets/${id}`, cfg()));
+export const getBeamMeta = async () => unwrap(await axios.get(`${URL}/meta`, cfg()));
+export const syncBeamReceipts = async () => unwrap(await axios.post(`${URL}/sync`, {}, cfg()));
+export const createKnottingJob = async (body) => unwrap(await axios.post(`${URL}/jobs`, body, cfg()));
+export const voidKnottingJob = async (id, reason = '') => unwrap(await axios.post(`${URL}/jobs/${id}/void`, { reason }, cfg()));

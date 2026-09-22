@@ -50,6 +50,10 @@ const ACTION_LABELS = {
   business_info: 'Business Information',
   backup: 'Backup',
   lock: 'App Lock',
+
+  'attendance.view': 'Attendance View',
+  'attendance.manage': 'Attendance Manage',
+  'attendance.override': 'Attendance Override',
 };
 
 const MODULE_LABELS = {
@@ -69,6 +73,7 @@ const MODULE_LABELS = {
   accounts: 'Accounts',
   journal: 'Journal Entries',
   reports: 'Reports',
+  weaving: 'Weaving',
   staff: 'Staff Management',
   settings: 'Settings',
 };

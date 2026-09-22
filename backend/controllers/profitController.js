@@ -43,6 +43,14 @@ const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
 ]);
 
 const getTradingJournalFilter = () => ({
+  isReversed: { $ne: true },
+  isReversal: { $ne: true },
+  $or: [
+    { moduleScope: { $exists: false } },
+    { moduleScope: null },
+    { moduleScope: "" },
+    { moduleScope: "trading" },
+  ],
   $nor: [
     { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
     { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
@@ -50,6 +58,8 @@ const getTradingJournalFilter = () => ({
       sourceType: "reversal",
       originModule: { $in: TRAVEL_JOURNAL_ORIGINS },
     },
+    { moduleScope: { $in: ["travel", "weaving"] } },
+    { originModule: /^weaving_/i },
   ],
 });
 
@@ -128,7 +138,6 @@ const getExpenseBreakdown = async (req, res) => {
       {
         $match: {
           "accountInfo.type": "Expense",
-          "lines.type": "debit",
           "accountInfo.code": {
             $ne: "COGS",
           },
@@ -143,10 +152,18 @@ const getExpenseBreakdown = async (req, res) => {
           },
 
           total: {
-            $sum: "$lines.amount",
+            $sum: {
+              $cond: [
+                { $eq: ["$lines.type", "debit"] },
+                "$lines.amount",
+                { $multiply: ["$lines.amount", -1] },
+              ],
+            },
           },
         },
       },
+
+      { $match: { total: { $gt: 0 } } },
 
       {
         $sort: {

@@ -12,7 +12,14 @@ const {
 } = require("../utils/businessValueModuleScope");
 const {
   TRAVEL_EMPLOYEE_ORIGIN_VALUES,
+  WEAVING_EMPLOYEE_ORIGIN_VALUES,
 } = require("../utils/employeePayrollOrigins");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
 const {
   BUSINESS_TIME_ZONE,
   buildBusinessDateRange,
@@ -43,7 +50,16 @@ const TRAVEL_JOURNAL_SOURCE_TYPES = Object.freeze([
   "travel_adjustment",
 ]);
 
+const WEAVING_JOURNAL_ORIGINS = Object.freeze([
+  "weaving_expense",
+  ...WEAVING_EMPLOYEE_ORIGIN_VALUES,
+  "weaving_account_opening_balance",
+  "weaving_account_transfer",
+  "weaving_account_adjustment",
+]);
+
 const getTravelJournalConditions = () => [
+  { moduleScope: MODULE_SCOPES.TRAVEL },
   { originModule: { $in: TRAVEL_JOURNAL_ORIGINS } },
   { sourceType: { $in: TRAVEL_JOURNAL_SOURCE_TYPES } },
   {
@@ -52,9 +68,104 @@ const getTravelJournalConditions = () => [
   },
 ];
 
-const getTradingJournalFilter = () => ({
-  $nor: getTravelJournalConditions(),
-});
+const getWeavingJournalConditions = () => [
+  { moduleScope: MODULE_SCOPES.WEAVING },
+  { originModule: { $in: WEAVING_JOURNAL_ORIGINS } },
+  {
+    sourceType: "reversal",
+    originModule: { $in: WEAVING_JOURNAL_ORIGINS },
+  },
+];
+
+const getJournalScopeFilter = (moduleScope = MODULE_SCOPES.TRADING) => {
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    return { $or: getTravelJournalConditions() };
+  }
+
+  if (moduleScope === MODULE_SCOPES.WEAVING) {
+    return { $or: getWeavingJournalConditions() };
+  }
+
+  return {
+    $and: [
+      {
+        $or: [
+          { moduleScope: { $exists: false } },
+          { moduleScope: null },
+          { moduleScope: "" },
+          { moduleScope: MODULE_SCOPES.TRADING },
+        ],
+      },
+      {
+        $nor: [
+          ...getTravelJournalConditions(),
+          ...getWeavingJournalConditions(),
+        ],
+      },
+    ],
+  };
+};
+
+const getTradingJournalFilter = () => getJournalScopeFilter(MODULE_SCOPES.TRADING);
+
+const makeHttpError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const getJournalModuleScope = (source = {}, fallback = MODULE_SCOPES.TRADING) => {
+  const requested = getRequestedModuleScope(source, fallback);
+
+  if (
+    requested === "all" ||
+    requested === MODULE_SCOPES.BOTH ||
+    requested === MODULE_SCOPES.SHARED
+  ) {
+    throw makeHttpError(
+      "Journal entries must belong to Trading, Travel or Weaving.",
+      400,
+    );
+  }
+
+  return normalizeModuleScope(requested, fallback);
+};
+
+const assertJournalScopeEnabled = (req, moduleScope) => {
+  const enabledModules = req.user?.enabledModules || {};
+  const enabled =
+    moduleScope === MODULE_SCOPES.TRADING
+      ? enabledModules[MODULE_SCOPES.TRADING] !== false
+      : enabledModules[moduleScope] === true;
+
+  if (!enabled) {
+    throw makeHttpError("This business module is not enabled", 403);
+  }
+};
+
+const loadScopedJournalAccounts = async ({ userId, lines, moduleScope }) => {
+  const accountIds = [
+    ...new Set((lines || []).map((line) => line.account).filter(Boolean)),
+  ];
+  const accountQuery = {
+    _id: { $in: accountIds },
+    userId,
+    isActive: { $ne: false },
+  };
+
+  applyModuleScopeFilter(accountQuery, moduleScope);
+
+  const accounts = await Account.find(accountQuery);
+
+  if (accounts.length !== accountIds.length) {
+    throw makeHttpError(
+      "One or more selected accounts are not available in this module.",
+      400,
+    );
+  }
+
+  return accounts;
+};
 
 // ✅ Helper: Recalculate all involved accounts in one batch
 const recalculateInvolvedAccounts = async (lines) => {
@@ -94,7 +205,14 @@ exports.createEntry = async (req, res) => {
       invoiceId,
       invoiceModel,
       referenceId,
+      moduleScope,
     } = req.body;
+    const scopedModuleScope = getJournalModuleScope(
+      { ...req.query, ...req.body },
+      MODULE_SCOPES.TRADING,
+    );
+
+    assertJournalScopeEnabled(req, scopedModuleScope);
 
     // 🔒 PERIOD LOCK CHECK (CREATE)
     const resolvedTime = time !== undefined ? time || "" : "";
@@ -119,8 +237,11 @@ exports.createEntry = async (req, res) => {
         .json({ message: "Total Debit اور Credit برابر ہونے چاہئیں" });
     }
 
-    const accountIds = lines.map((l) => l.account);
-    const accounts = await Account.find({ _id: { $in: accountIds } });
+    const accounts = await loadScopedJournalAccounts({
+      userId,
+      lines,
+      moduleScope: scopedModuleScope,
+    });
 
     for (const line of lines) {
       const account = accounts.find(
@@ -166,6 +287,7 @@ exports.createEntry = async (req, res) => {
       billNo: billNo || "",
       paymentType: paymentType || "",
       sourceType: sourceType || "manual",
+      moduleScope: scopedModuleScope,
       attachmentUrl: attachmentUrl || "",
       attachmentType: attachmentType || "",
       invoiceId: invoiceId || null,
@@ -197,7 +319,7 @@ exports.createEntry = async (req, res) => {
 
     res.status(201).json(entry);
   } catch (err) {
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       message: "Server error",
       error: err.message,
     });
@@ -225,7 +347,14 @@ exports.updateEntry = async (req, res) => {
       supplierId,
       partyId,
       referenceId,
+      moduleScope,
     } = req.body;
+    const scopedModuleScope = getJournalModuleScope(
+      { ...req.query, ...req.body },
+      MODULE_SCOPES.TRADING,
+    );
+
+    assertJournalScopeEnabled(req, scopedModuleScope);
 
     if (!lines || lines.length < 2) {
       return res.status(400).json({
@@ -239,9 +368,10 @@ exports.updateEntry = async (req, res) => {
       });
     }
 
-    const accountIds = lines.map((l) => l.account);
-    const accounts = await Account.find({
-      _id: { $in: accountIds },
+    const accounts = await loadScopedJournalAccounts({
+      userId,
+      lines,
+      moduleScope: scopedModuleScope,
     });
 
     for (const line of lines) {
@@ -282,7 +412,7 @@ exports.updateEntry = async (req, res) => {
       _id: req.params.id,
       createdBy: userId,
       isDeleted: false,
-      ...getTradingJournalFilter(),
+      ...getJournalScopeFilter(scopedModuleScope),
     });
 
     if (!entry) {
@@ -292,7 +422,17 @@ exports.updateEntry = async (req, res) => {
     }
 
     // 🔒 PERIOD LOCK CHECK (UPDATE)
-    if (await isPeriodLocked(userId, date)) {
+    const resolvedTime = time !== undefined ? time || "" : entry.time || "";
+    const entryDate = parseBusinessDateTime(
+      date || entry.date || new Date(),
+      resolvedTime,
+      {
+        defaultTime: "00:00",
+        label: "journal date",
+      },
+    );
+
+    if (await isPeriodLocked(userId, entryDate)) {
       return res.status(403).json({
         message: "This accounting period is locked.",
       });
@@ -311,6 +451,7 @@ exports.updateEntry = async (req, res) => {
     entry.billNo = billNo || "";
     entry.paymentType = paymentType || "";
     entry.sourceType = sourceType || "manual";
+    entry.moduleScope = scopedModuleScope;
     entry.attachmentUrl = attachmentUrl || "";
     entry.attachmentType = attachmentType || "";
     entry.invoiceId = invoiceId || null;
@@ -332,7 +473,7 @@ exports.updateEntry = async (req, res) => {
 
     res.json(entry);
   } catch (err) {
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       message: "Server error",
       error: err.message,
     });
@@ -348,11 +489,14 @@ exports.getEntries = async (req, res) => {
     const page = parseInt(req.query.page || "1");
     const limit = parseInt(req.query.limit || "20");
     const skip = (page - 1) * limit;
+    const moduleScope = getJournalModuleScope(req.query, MODULE_SCOPES.TRADING);
+
+    assertJournalScopeEnabled(req, moduleScope);
 
     const filter = {
       createdBy: userId,
       isDeleted: false,
-      ...getTradingJournalFilter(),
+      ...getJournalScopeFilter(moduleScope),
     };
 
     const entryDateRange = buildBusinessDateRange({
@@ -373,7 +517,7 @@ exports.getEntries = async (req, res) => {
 
     res.json(entries);
   } catch (err) {
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       message: "Server error",
       error: err.message,
     });
@@ -384,12 +528,15 @@ exports.getEntries = async (req, res) => {
 exports.deleteEntry = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+    const moduleScope = getJournalModuleScope(req.query, MODULE_SCOPES.TRADING);
+
+    assertJournalScopeEnabled(req, moduleScope);
 
     const entry = await JournalEntry.findOne({
       _id: req.params.id,
       createdBy: userId,
       isDeleted: false,
-      ...getTradingJournalFilter(),
+      ...getJournalScopeFilter(moduleScope),
     });
 
     if (!entry) {
@@ -436,7 +583,7 @@ exports.deleteEntry = async (req, res) => {
   } catch (err) {
     console.error("REVERSAL ERROR:", err);
 
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       message: err.message,
       error: err.message,
     });
@@ -449,11 +596,14 @@ exports.getTrialBalance = async (req, res) => {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
 
     const { startDate, endDate } = req.query;
+    const moduleScope = getJournalModuleScope(req.query, MODULE_SCOPES.TRADING);
+
+    assertJournalScopeEnabled(req, moduleScope);
 
     const matchFilter = {
       createdBy: userId,
       isDeleted: false,
-      ...getTradingJournalFilter(),
+      ...getJournalScopeFilter(moduleScope),
     };
 
     const trialDateRange = buildBusinessDateRange({
@@ -502,9 +652,13 @@ exports.getTrialBalance = async (req, res) => {
       },
     ]);
 
-    const accounts = await Account.find({
+    const accountQuery = {
       userId,
-    });
+    };
+
+    applyModuleScopeFilter(accountQuery, moduleScope);
+
+    const accounts = await Account.find(accountQuery);
 
     const trialBalance = [];
 
@@ -566,7 +720,7 @@ exports.getTrialBalance = async (req, res) => {
       isBalanced: totalDebit === totalCredit,
     });
   } catch (err) {
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       message: "Trial balance error",
       error: err.message,
     });
@@ -578,8 +732,18 @@ exports.getLedgerByAccount = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user?.id || req.userId);
     const { accountId } = req.params;
+    const moduleScope = getJournalModuleScope(req.query, MODULE_SCOPES.TRADING);
 
-    const account = await Account.findById(accountId);
+    assertJournalScopeEnabled(req, moduleScope);
+
+    const accountQuery = {
+      _id: accountId,
+      userId,
+    };
+
+    applyModuleScopeFilter(accountQuery, moduleScope);
+
+    const account = await Account.findOne(accountQuery);
 
     if (!account) {
       return res.status(404).json({
@@ -595,7 +759,7 @@ exports.getLedgerByAccount = async (req, res) => {
       createdBy: userId,
       "lines.account": objectId,
       isDeleted: false,
-      ...getTradingJournalFilter(),
+      ...getJournalScopeFilter(moduleScope),
     };
 
     const ledgerDateRange = buildBusinessDateRange({
@@ -626,7 +790,7 @@ exports.getLedgerByAccount = async (req, res) => {
           $lt: startOfBusinessDay(startDate),
         },
         isDeleted: false,
-        ...getTradingJournalFilter(),
+        ...getJournalScopeFilter(moduleScope),
       });
 
       openingEntries.forEach((entry) => {
@@ -701,7 +865,7 @@ exports.getLedgerByAccount = async (req, res) => {
   } catch (error) {
     console.error("❌ Ledger error:", error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       message: "Ledger error",
       error: error.message,
     });

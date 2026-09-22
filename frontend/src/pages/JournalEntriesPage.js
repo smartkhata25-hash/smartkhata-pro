@@ -6,9 +6,27 @@ import {
   deleteJournalEntry,
 } from '../services/journalService';
 import { getAccounts } from '../services/accountService';
+import { useLocation } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { t } from '../i18n/i18n';
+
+const getPageModuleScope = (location = {}) => {
+  const pathname = location.pathname || '';
+  const queryParams = new URLSearchParams(location.search || '');
+  const queryScope = String(queryParams.get('moduleScope') || '').toLowerCase();
+
+  if (pathname.startsWith('/weaving/journal-entries')) {
+    return 'weaving';
+  }
+
+  if (queryScope === 'weaving' || queryScope === 'travel') {
+    return queryScope;
+  }
+
+  return 'trading';
+};
+
 const inputStyle = {
   height: 40,
   borderRadius: 10,
@@ -48,6 +66,8 @@ const btnGray = {
 };
 
 const JournalEntriesPage = () => {
+  const location = useLocation();
+  const moduleScope = getPageModuleScope(location);
   const [date, setDate] = useState('');
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState([
@@ -64,14 +84,14 @@ const JournalEntriesPage = () => {
   const [showModal, setShowModal] = useState(false);
 
   const fetchAccounts = useCallback(async () => {
-    const data = await getAccounts();
+    const data = await getAccounts(true, { moduleScope });
     setAccounts(data);
-  }, []);
+  }, [moduleScope]);
 
   const fetchEntries = useCallback(async () => {
-    const data = await getJournalEntries(startDate, endDate);
+    const data = await getJournalEntries(startDate, endDate, { moduleScope });
     setEntries(data);
-  }, [startDate, endDate]);
+  }, [moduleScope, startDate, endDate]);
 
   useEffect(() => {
     fetchAccounts();
@@ -112,13 +132,13 @@ const JournalEntriesPage = () => {
       setError('');
     }
 
-    const entryData = { date, description, lines };
+    const entryData = { date, description, lines, moduleScope };
 
     try {
       if (editId) {
-        await updateJournalEntry(editId, entryData);
+        await updateJournalEntry(editId, entryData, { moduleScope });
       } else {
-        await createJournalEntry(entryData);
+        await createJournalEntry(entryData, { moduleScope });
       }
 
       resetForm();
@@ -144,7 +164,7 @@ const JournalEntriesPage = () => {
   const handleDelete = async (id) => {
     const confirmDelete = window.confirm(t('alerts.deleteJournalConfirm'));
     if (confirmDelete) {
-      await deleteJournalEntry(id);
+      await deleteJournalEntry(id, { moduleScope });
       fetchEntries();
     }
   };

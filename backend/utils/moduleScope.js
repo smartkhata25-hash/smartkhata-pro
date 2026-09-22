@@ -1,7 +1,9 @@
 const MODULE_SCOPES = Object.freeze({
   TRADING: "trading",
   TRAVEL: "travel",
+  WEAVING: "weaving",
   BOTH: "both",
+  SHARED: "shared",
 });
 
 const MODULE_SCOPE_VALUES = Object.freeze(Object.values(MODULE_SCOPES));
@@ -49,7 +51,19 @@ const buildModuleScopeFilter = (
   if (normalizedScope === MODULE_SCOPES.TRAVEL) {
     return {
       [field]: {
-        $in: [MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH],
+        $in: [
+          MODULE_SCOPES.TRAVEL,
+          MODULE_SCOPES.BOTH,
+          MODULE_SCOPES.SHARED,
+        ],
+      },
+    };
+  }
+
+  if (normalizedScope === MODULE_SCOPES.WEAVING) {
+    return {
+      [field]: {
+        $in: [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED],
       },
     };
   }
@@ -60,12 +74,26 @@ const buildModuleScopeFilter = (
     };
   }
 
+  if (normalizedScope === MODULE_SCOPES.SHARED) {
+    return {
+      [field]: MODULE_SCOPES.SHARED,
+    };
+  }
+
   return {
     $or: [
       { [field]: { $exists: false } },
       { [field]: null },
       { [field]: "" },
-      { [field]: { $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH] } },
+      {
+        [field]: {
+          $in: [
+            MODULE_SCOPES.TRADING,
+            MODULE_SCOPES.BOTH,
+            MODULE_SCOPES.SHARED,
+          ],
+        },
+      },
     ],
   };
 };
@@ -95,7 +123,15 @@ const buildSupplierModuleScopeFilter = (
   if (normalizedScope === MODULE_SCOPES.TRAVEL) {
     return {
       $or: [
-        { [field]: { $in: [MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH] } },
+        {
+          [field]: {
+            $in: [
+              MODULE_SCOPES.TRAVEL,
+              MODULE_SCOPES.BOTH,
+              MODULE_SCOPES.SHARED,
+            ],
+          },
+        },
         {
           $and: [
             { [travelFlagField]: true },
@@ -106,15 +142,37 @@ const buildSupplierModuleScopeFilter = (
     };
   }
 
+  if (normalizedScope === MODULE_SCOPES.WEAVING) {
+    return {
+      [field]: {
+        $in: [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED],
+      },
+    };
+  }
+
   if (normalizedScope === MODULE_SCOPES.BOTH) {
     return {
       [field]: MODULE_SCOPES.BOTH,
     };
   }
 
+  if (normalizedScope === MODULE_SCOPES.SHARED) {
+    return {
+      [field]: MODULE_SCOPES.SHARED,
+    };
+  }
+
   return {
     $or: [
-      { [field]: { $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH] } },
+      {
+        [field]: {
+          $in: [
+            MODULE_SCOPES.TRADING,
+            MODULE_SCOPES.BOTH,
+            MODULE_SCOPES.SHARED,
+          ],
+        },
+      },
       {
         $and: [
           { [travelFlagField]: { $ne: true } },
@@ -188,7 +246,17 @@ const documentMatchesModuleScope = (
   const safeDocumentScope = documentScope || MODULE_SCOPES.TRADING;
 
   if (normalizedScope === MODULE_SCOPES.TRAVEL) {
-    return [MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH].includes(
+    return [
+      MODULE_SCOPES.TRAVEL,
+      MODULE_SCOPES.BOTH,
+      MODULE_SCOPES.SHARED,
+    ].includes(
+      safeDocumentScope,
+    );
+  }
+
+  if (normalizedScope === MODULE_SCOPES.WEAVING) {
+    return [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(
       safeDocumentScope,
     );
   }
@@ -197,7 +265,15 @@ const documentMatchesModuleScope = (
     return safeDocumentScope === MODULE_SCOPES.BOTH;
   }
 
-  return [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH].includes(
+  if (normalizedScope === MODULE_SCOPES.SHARED) {
+    return safeDocumentScope === MODULE_SCOPES.SHARED;
+  }
+
+  return [
+    MODULE_SCOPES.TRADING,
+    MODULE_SCOPES.BOTH,
+    MODULE_SCOPES.SHARED,
+  ].includes(
     safeDocumentScope,
   );
 };

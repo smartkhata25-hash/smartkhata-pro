@@ -106,10 +106,10 @@ const getOrCreateLiabilityAccount = async (
     code: config.code,
   };
 
-  if (moduleScope === MODULE_SCOPES.TRAVEL) {
-    query.moduleScope = MODULE_SCOPES.TRAVEL;
-  } else {
+  if (moduleScope === MODULE_SCOPES.TRADING) {
     applyModuleScopeFilter(query, MODULE_SCOPES.TRADING);
+  } else {
+    query.moduleScope = moduleScope;
   }
 
   const account = await Account.findOneAndUpdate(
@@ -322,6 +322,8 @@ exports.createLiabilityPayment = async (req, res) => {
       ],
 
       createdBy: userId,
+
+      moduleScope,
 
       sourceType: "payment",
 
@@ -593,16 +595,19 @@ exports.reverseLiabilityPayment = async (req, res) => {
       });
     }
 
+    const originalJournalQuery = {
+      _id: payment.journalEntryId,
+      createdBy: userId,
+      originModule: getScopedBusinessValueOrigin(
+        "business_liability_payment",
+        moduleScope,
+      ),
+      isDeleted: { $ne: true },
+    };
+    applyBusinessValueScopeFilter(originalJournalQuery, moduleScope);
+
     const originalJournal = payment.journalEntryId
-      ? await JournalEntry.findOne({
-          _id: payment.journalEntryId,
-          createdBy: userId,
-          originModule: getScopedBusinessValueOrigin(
-            "business_liability_payment",
-            moduleScope,
-          ),
-          isDeleted: { $ne: true },
-        })
+      ? await JournalEntry.findOne(originalJournalQuery)
       : null;
 
     if (!originalJournal) {
@@ -642,6 +647,8 @@ exports.reverseLiabilityPayment = async (req, res) => {
       lines: reversalLines,
 
       createdBy: userId,
+
+      moduleScope,
 
       sourceType: "reversal",
 

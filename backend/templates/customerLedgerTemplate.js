@@ -1,4 +1,8 @@
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 // 📁 templates/customerLedgerTemplate.js
 
 const escapeHtml = (value) => {
@@ -24,6 +28,7 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
     period = {},
     summary = {},
     rows = [],
+    header = null,
   } = data || {};
 
   const safePageSize = pageSize === "A4" ? "A4" : "A5";
@@ -32,8 +37,8 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
   const periodFrom = escapeHtml(period.from || "All");
   const periodTo = escapeHtml(period.to || "All");
 
-  const totalDebit = safeNumber(summary.totalDebit);
-  const totalCredit = safeNumber(summary.totalCredit);
+  const totalMoneyIn = safeNumber(summary.totalMoneyIn ?? summary.totalCredit);
+  const totalMoneyOut = safeNumber(summary.totalMoneyOut ?? summary.totalDebit);
   const closingBalance = safeNumber(summary.closingBalance);
   const opening = safeNumber(summary.opening);
 
@@ -67,6 +72,8 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
     .page {
       width: 100%;
     }
+
+    ${ledgerBusinessHeaderStyles}
 
     .title {
       text-align: center;
@@ -136,9 +143,7 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
 <body>
   <div class="page">
 
-    <div class="title">
-      ${escapeHtml(t("ledger.customerLedger", lang) || documentTitle || "Customer Ledger")}
-    </div>
+    ${renderLedgerBusinessHeader(header)}
 
     <div class="sub-info">
       ${escapeHtml(t("customer", lang))}: ${customerName}
@@ -169,14 +174,14 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
           Array.isArray(rows) && rows.length > 0
             ? rows
                 .map((row) => {
-                  const debit =
-                    row.debit !== null && row.debit !== undefined
-                      ? safeNumber(row.debit).toFixed(2)
+                  const moneyIn =
+                    row.moneyIn !== null && row.moneyIn !== undefined
+                      ? safeNumber(row.moneyIn).toFixed(2)
                       : "-";
 
-                  const credit =
-                    row.credit !== null && row.credit !== undefined
-                      ? safeNumber(row.credit).toFixed(2)
+                  const moneyOut =
+                    row.moneyOut !== null && row.moneyOut !== undefined
+                      ? safeNumber(row.moneyOut).toFixed(2)
                       : "-";
 
                   const balance = safeNumber(row.balance).toFixed(2);
@@ -186,8 +191,8 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
                       <td>${escapeHtml(row.date || "-")}</td>
                       <td>${escapeHtml(row.billNo || "-")}</td>
                       <td>${escapeHtml(row.source || "-")}</td>
-                      <td>${debit}</td>
-                      <td>${credit}</td>
+                      <td>${moneyIn}</td>
+                      <td>${moneyOut}</td>
                       <td>${balance}</td>
                     </tr>
                   `;
@@ -207,8 +212,8 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
             ${escapeHtml(t("totals", lang))}:
           </td>
 
-          <td>${totalDebit.toFixed(2)}</td>
-          <td>${totalCredit.toFixed(2)}</td>
+          <td>${totalMoneyIn.toFixed(2)}</td>
+          <td>${totalMoneyOut.toFixed(2)}</td>
           <td>${closingBalance.toFixed(2)}</td>
         </tr>
       </tbody>

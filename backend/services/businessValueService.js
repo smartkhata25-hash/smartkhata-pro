@@ -9,6 +9,7 @@ const Customer = require("../models/Customer");
 const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const Employee = require("../models/Employee");
+const WeavingParty = require("../models/WeavingParty");
 
 const BusinessAsset = require("../models/BusinessAsset");
 const BusinessLiability = require("../models/BusinessLiability");
@@ -33,6 +34,7 @@ const {
   getTravelCustomerBalanceTotals,
   getTravelVendorBalanceTotals,
 } = require("./travel/travelAccountingMetricsService");
+const weavingCostingService = require("./weaving/weavingCostingService");
 
 const AVAILABLE_COMPONENTS = [
   "inventory",
@@ -107,6 +109,11 @@ const BUSINESS_VALUE_SCOPE_CONFIG = Object.freeze({
     availableComponents: TRAVEL_AVAILABLE_COMPONENTS,
     presets: TRAVEL_PRESETS,
   },
+
+  [MODULE_SCOPES.WEAVING]: {
+    availableComponents: AVAILABLE_COMPONENTS,
+    presets: PRESETS,
+  },
 });
 
 const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
@@ -152,7 +159,25 @@ const getTravelJournalConditions = () => [
 ];
 
 const buildTradingJournalFilter = () => ({
-  $nor: getTravelJournalConditions(),
+  $and: [
+    {
+      $or: [
+        { moduleScope: { $exists: false } },
+        { moduleScope: null },
+        { moduleScope: "" },
+        {
+          moduleScope: {
+            $in: [
+              MODULE_SCOPES.TRADING,
+              MODULE_SCOPES.BOTH,
+              MODULE_SCOPES.SHARED,
+            ],
+          },
+        },
+      ],
+    },
+    { $nor: getTravelJournalConditions() },
+  ],
 });
 
 const buildTradingAccountScopeMatch = () => ({
@@ -162,7 +187,11 @@ const buildTradingAccountScopeMatch = () => ({
     { "account.moduleScope": "" },
     {
       "account.moduleScope": {
-        $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH],
+        $in: [
+          MODULE_SCOPES.TRADING,
+          MODULE_SCOPES.BOTH,
+          MODULE_SCOPES.SHARED,
+        ],
       },
     },
   ],
@@ -627,6 +656,52 @@ const getLoanReceivablesValue = async (
   };
 };
 
+const mapWeavingInventoryValuation = (valuation = {}) => {
+  const yarn = valuation.yarn || {};
+  const fabric = valuation.fabric || {};
+  const isExact = valuation.costCoverage === "complete";
+  const yarnValue = Number(
+    isExact
+      ? yarn.inventoryValue ?? yarn.knownInventoryValue ?? 0
+      : yarn.knownInventoryValue ?? yarn.inventoryValue ?? 0,
+  );
+  const fabricValue = Number(
+    isExact
+      ? fabric.inventoryValue ?? fabric.knownInventoryValue ?? 0
+      : fabric.knownInventoryValue ?? fabric.inventoryValue ?? 0,
+  );
+  const ownYarnRows = (yarn.rows || []).filter(
+    (row) => row.ownershipType !== "party",
+  );
+  const ownFabricRows = (fabric.rows || []).filter(
+    (row) => row.ownershipType !== "party",
+  );
+
+  return {
+    value: roundAmount(yarnValue + fabricValue),
+    totalProducts: ownYarnRows.length + ownFabricRows.length,
+    totalQty: roundAmount(
+      Number(yarn.quantityKg || 0) + Number(fabric.meter || 0),
+    ),
+    valuationStatus: isExact ? "complete" : "partial",
+    isExact,
+    missingReasons: [...new Set(valuation.missingReasons || [])],
+    inventoryKind: "weaving",
+    costingVersion: valuation.costingVersion || "",
+    calculatedAt: valuation.calculatedAt || null,
+    yarnQuantityKg: roundAmount(yarn.quantityKg),
+    yarnInventoryValue: roundAmount(yarnValue),
+    fabricMeter: roundAmount(fabric.meter),
+    fabricKg: roundAmount(fabric.kg),
+    fabricInventoryValue: roundAmount(fabricValue),
+  };
+};
+
+const getWeavingInventoryValue = async (userId) =>
+  mapWeavingInventoryValuation(
+    await weavingCostingService.getInventoryValuation(userId),
+  );
+
 const getManualLiabilitiesValue = async (
   userId,
   moduleScope = MODULE_SCOPES.TRADING,
@@ -675,6 +750,126 @@ const getManualLiabilitiesValue = async (
   };
 };
 
+const summarizeWeavingAccountData = ({
+  accountData = [],
+  parties = [],
+  employeeSummary = {},
+}) => {
+  const accountBalances = new Map();
+  let cash = 0;
+  let bank = 0;
+
+  accountData.forEach((item) => {
+    const accountId = item._id?.accountId?.toString();
+    const category = item._id?.category;
+    const amount = Number(item.amount || 0);
+    const signedAmount = item._id?.lineType === "debit" ? amount : -amount;
+
+    if (category === "cash") cash += signedAmount;
+    if (["bank", "online", "cheque", "wallet"].includes(category)) {
+      bank += signedAmount;
+    }
+
+    if (accountId) {
+      accountBalances.set(
+        accountId,
+        Number(accountBalances.get(accountId) || 0) + signedAmount,
+      );
+    }
+  });
+
+  let receivables = 0;
+  let payables = Number(employeeSummary.totalPayable || 0);
+  let receivableCount = 0;
+  let payableCount = payables > 0 ? 1 : 0;
+  const countedAccountIds = new Set();
+
+  parties.forEach((party) => {
+    const accountId = party.accountId?.toString();
+
+    if (!accountId || countedAccountIds.has(accountId)) return;
+    countedAccountIds.add(accountId);
+
+    const balance = Number(accountBalances.get(accountId) || 0);
+
+    if (balance > 0) {
+      receivables += balance;
+      receivableCount += 1;
+    } else if (balance < 0) {
+      payables += Math.abs(balance);
+      payableCount += 1;
+    }
+  });
+
+  return {
+    cash: roundAmount(cash),
+    bank: roundAmount(bank),
+    receivables: roundAmount(receivables),
+    payables: roundAmount(payables),
+    receivableCount,
+    payableCount,
+  };
+};
+
+const getWeavingAccountValues = async (userId) => {
+  const [accountData, parties, employeeSummary] = await Promise.all([
+    JournalEntry.aggregate([
+      {
+        $match: {
+          createdBy: userId,
+          moduleScope: MODULE_SCOPES.WEAVING,
+          isDeleted: false,
+        },
+      },
+      { $unwind: "$lines" },
+      {
+        $lookup: {
+          from: "accounts",
+          localField: "lines.account",
+          foreignField: "_id",
+          as: "account",
+        },
+      },
+      { $unwind: "$account" },
+      {
+        $match: {
+          "account.userId": userId,
+          "account.isActive": { $ne: false },
+          "account.moduleScope": {
+            $in: [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            accountId: "$lines.account",
+            category: "$account.category",
+            lineType: "$lines.type",
+          },
+          amount: { $sum: "$lines.amount" },
+        },
+      },
+    ]),
+    WeavingParty.find({
+      userId,
+      accountId: { $ne: null },
+    })
+      .select("accountId")
+      .lean(),
+    getEmployeeFinancialSummary({
+      userId,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    }),
+  ]);
+
+  return summarizeWeavingAccountData({
+    accountData,
+    parties,
+    employeeSummary,
+  });
+};
+
 const getTravelAccountValues = async (userId) => {
   const [cashBank, customer, vendor, employee] = await Promise.all([
     getActualCashBankPosition(userId),
@@ -708,11 +903,15 @@ const createComponent = ({
   value = 0,
   details = {},
   effect = "positive",
+  valuationStatus = "complete",
+  isExact = true,
 }) => {
   return {
     included,
     value: included ? roundAmount(value) : 0,
     effect,
+    valuationStatus: included ? valuationStatus : "not_included",
+    isExact: included ? isExact : true,
     details: included ? details : {},
   };
 };
@@ -732,6 +931,7 @@ const getBusinessValueSummary = async ({
   });
   const scopeConfig = getScopeConfig(normalizedModuleScope);
   const isTravelScope = normalizedModuleScope === MODULE_SCOPES.TRAVEL;
+  const isWeavingScope = normalizedModuleScope === MODULE_SCOPES.WEAVING;
 
   const selectedComponents = normalizeComponents({
     preset,
@@ -742,7 +942,9 @@ const getBusinessValueSummary = async ({
   const shouldInclude = (component) => selectedComponents.includes(component);
 
   const inventoryPromise = shouldInclude("inventory")
-    ? getInventoryValue(objectUserId)
+    ? isWeavingScope
+      ? getWeavingInventoryValue(objectUserId)
+      : getInventoryValue(objectUserId)
     : Promise.resolve(null);
 
   const assetsPromise = shouldInclude("assets")
@@ -756,7 +958,9 @@ const getBusinessValueSummary = async ({
     shouldInclude("payables")
       ? isTravelScope
         ? getTravelAccountValues(objectUserId)
-        : getAccountBalances(objectUserId)
+        : isWeavingScope
+          ? getWeavingAccountValues(objectUserId)
+          : getAccountBalances(objectUserId)
       : Promise.resolve(null);
 
   const loanReceivablesPromise = shouldInclude("loan_receivables")
@@ -787,7 +991,7 @@ const getBusinessValueSummary = async ({
     accountBalances &&
     (shouldInclude("receivables") || shouldInclude("payables"))
   ) {
-    receivablePayableData = isTravelScope
+    receivablePayableData = isTravelScope || isWeavingScope
       ? accountBalances
       : await getReceivablePayableValues(objectUserId, accountBalances);
   }
@@ -797,9 +1001,20 @@ const getBusinessValueSummary = async ({
       included: shouldInclude("inventory"),
       value: inventoryData?.value,
       effect: "positive",
+      valuationStatus: inventoryData?.valuationStatus || "complete",
+      isExact: inventoryData?.isExact !== false,
       details: {
         totalProducts: inventoryData?.totalProducts || 0,
         totalQty: inventoryData?.totalQty || 0,
+        inventoryKind: inventoryData?.inventoryKind || "",
+        yarnQuantityKg: inventoryData?.yarnQuantityKg || 0,
+        yarnInventoryValue: inventoryData?.yarnInventoryValue || 0,
+        fabricMeter: inventoryData?.fabricMeter || 0,
+        fabricKg: inventoryData?.fabricKg || 0,
+        fabricInventoryValue: inventoryData?.fabricInventoryValue || 0,
+        costingVersion: inventoryData?.costingVersion || "",
+        calculatedAt: inventoryData?.calculatedAt || null,
+        missingReasons: inventoryData?.missingReasons || [],
       },
     }),
 
@@ -888,6 +1103,16 @@ const getBusinessValueSummary = async ({
   });
 
   const netBusinessValue = totalPositiveValue - totalNegativeValue;
+  const partialComponents = Object.entries(resultComponents)
+    .filter(([, component]) => component.included && component.isExact === false)
+    .map(([key]) => key);
+  const missingReasons = [
+    ...new Set(
+      partialComponents.flatMap(
+        (key) => resultComponents[key].details?.missingReasons || [],
+      ),
+    ),
+  ];
 
   return {
     moduleScope: normalizedModuleScope,
@@ -913,6 +1138,14 @@ const getBusinessValueSummary = async ({
 
     netBusinessValue: roundAmount(netBusinessValue),
 
+    valuationStatus: partialComponents.length ? "partial" : "complete",
+
+    isExact: partialComponents.length === 0,
+
+    partialComponents,
+
+    missingReasons,
+
     generatedAt: new Date(),
   };
 };
@@ -924,4 +1157,9 @@ module.exports = {
   TRAVEL_PRESETS,
   normalizeComponents,
   getBusinessValueSummary,
+  _test: {
+    buildTradingJournalFilter,
+    mapWeavingInventoryValuation,
+    summarizeWeavingAccountData,
+  },
 };

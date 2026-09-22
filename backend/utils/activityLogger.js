@@ -78,11 +78,15 @@ const logActivity = async ({
     const resolvedModuleScope =
       requestedScope === "travel" ||
       requestedScope === "trading" ||
+      requestedScope === "weaving" ||
       requestedScope === "both"
         ? requestedScope
         : req.originalUrl?.startsWith("/api/travel") ||
             cleanModule.startsWith("travel.")
           ? "travel"
+          : req.originalUrl?.startsWith("/api/weaving") ||
+              cleanModule.startsWith("weaving.")
+            ? "weaving"
           : "trading";
 
     const activity = await ActivityLog.create({

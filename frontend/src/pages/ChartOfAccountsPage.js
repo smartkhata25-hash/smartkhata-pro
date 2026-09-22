@@ -22,11 +22,14 @@ import {
 } from '../services/accountService';
 import { t } from '../i18n/i18n';
 import { buildTravelRouteState } from '../utils/travelContext';
+import { buildWeavingRouteState } from '../utils/weavingContext';
 
 const MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
   TRAVEL: 'travel',
+  WEAVING: 'weaving',
   BOTH: 'both',
+  SHARED: 'shared',
 });
 
 const pageSize = 10;
@@ -36,8 +39,10 @@ const ADJUSTMENT_EXCLUDED_CATEGORIES = ['customer', 'supplier', 'party', 'receiv
 const RESERVED_BALANCING_ACCOUNT_CODES = [
   'OPENING_BALANCE',
   'TRAVEL_OPENING_BALANCE',
+  'WEAVING_OPENING_BALANCE',
   'ACCOUNT_ADJUSTMENT',
   'TRAVEL_ACCOUNT_ADJUSTMENT',
+  'WEAVING_ACCOUNT_ADJUSTMENT',
 ];
 
 const categoryTypeMap = {
@@ -117,6 +122,10 @@ const getPageScope = (location) => {
     return MODULE_SCOPES.TRAVEL;
   }
 
+  if (location.pathname.startsWith('/weaving/accounts')) {
+    return MODULE_SCOPES.WEAVING;
+  }
+
   return MODULE_SCOPES.TRADING;
 };
 
@@ -162,7 +171,9 @@ const scopeLabel = (scope) => {
   const normalized = normalizeScope(scope);
 
   if (normalized === MODULE_SCOPES.TRAVEL) return t('moduleScope.travel');
+  if (normalized === MODULE_SCOPES.WEAVING) return t('moduleScope.weaving');
   if (normalized === MODULE_SCOPES.BOTH) return t('moduleScope.both');
+  if (normalized === MODULE_SCOPES.SHARED) return t('moduleScope.shared');
 
   return t('moduleScope.trading');
 };
@@ -185,6 +196,7 @@ const ChartOfAccountsPage = () => {
 
   const pageModuleScope = getPageScope(location);
   const isTravelScoped = pageModuleScope === MODULE_SCOPES.TRAVEL;
+  const isWeavingScoped = pageModuleScope === MODULE_SCOPES.WEAVING;
 
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState(buildEmptyForm(pageModuleScope));
@@ -430,6 +442,41 @@ const ChartOfAccountsPage = () => {
   );
   const adjustmentAccounts = accounts.filter(isManualAdjustmentAccount);
   const showOpeningBalanceField = BALANCE_SHEET_ACCOUNT_TYPES.includes(form.type);
+  const canModifyAccount = (account) =>
+    account?.isSystem !== true &&
+    !(isWeavingScoped && normalizeScope(account?.moduleScope) === MODULE_SCOPES.SHARED);
+  const scopeOptions = isWeavingScoped
+    ? [
+        {
+          value: MODULE_SCOPES.WEAVING,
+          label: t('moduleScope.weaving'),
+        },
+      ]
+    : [
+        {
+          value: MODULE_SCOPES.TRADING,
+          label: t('moduleScope.trading'),
+        },
+        {
+          value: MODULE_SCOPES.TRAVEL,
+          label: t('moduleScope.travel'),
+        },
+        {
+          value: MODULE_SCOPES.BOTH,
+          label: t('moduleScope.both'),
+        },
+      ];
+  const displayedScopeOptions =
+    normalizeScope(form.moduleScope) === MODULE_SCOPES.SHARED &&
+    !scopeOptions.some((option) => option.value === MODULE_SCOPES.SHARED)
+      ? [
+          ...scopeOptions,
+          {
+            value: MODULE_SCOPES.SHARED,
+            label: t('moduleScope.shared'),
+          },
+        ]
+      : scopeOptions;
 
   const totalAccounts = filtered.length;
 
@@ -437,22 +484,38 @@ const ChartOfAccountsPage = () => {
 
   const userAccounts = filtered.filter((account) => !account.isSystem).length;
 
-  const pageTitle = isTravelScoped ? t('travel.sidebar.accounts') : t('accounts.chartTitle');
+  const pageTitle = isWeavingScoped
+    ? t('weaving.sidebar.accounts')
+    : isTravelScoped
+      ? t('travel.sidebar.accounts')
+      : t('accounts.chartTitle');
 
   const headerClass = isTravelScoped
     ? 'border-cyan-200 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-900 text-white'
+    : isWeavingScoped
+      ? 'border-emerald-200 bg-gradient-to-r from-slate-950 via-teal-950 to-emerald-900 text-white'
     : 'border-blue-200 bg-gradient-to-r from-blue-700 to-blue-900 text-white';
 
   const primaryButtonClass = isTravelScoped
     ? 'bg-cyan-500 text-white hover:bg-cyan-600 focus-visible:outline-cyan-300'
+    : isWeavingScoped
+      ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:outline-emerald-300'
     : 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-300';
 
   const openCash = () => {
-    const path = isTravelScoped ? '/travel/accounts/cash' : '/accounts/cash';
+    const path = isWeavingScoped
+      ? '/weaving/accounts/cash'
+      : isTravelScoped
+        ? '/travel/accounts/cash'
+        : '/accounts/cash';
 
     navigate(
       path,
-      isTravelScoped
+      isWeavingScoped
+        ? {
+            state: buildWeavingRouteState('/weaving/accounts'),
+          }
+        : isTravelScoped
         ? {
             state: buildTravelRouteState('/travel/accounts'),
           }
@@ -461,11 +524,19 @@ const ChartOfAccountsPage = () => {
   };
 
   const openBank = () => {
-    const path = isTravelScoped ? '/travel/accounts/bank' : '/accounts/bank';
+    const path = isWeavingScoped
+      ? '/weaving/accounts/bank'
+      : isTravelScoped
+        ? '/travel/accounts/bank'
+        : '/accounts/bank';
 
     navigate(
       path,
-      isTravelScoped
+      isWeavingScoped
+        ? {
+            state: buildWeavingRouteState('/weaving/accounts'),
+          }
+        : isTravelScoped
         ? {
             state: buildTravelRouteState('/travel/accounts'),
           }
@@ -716,11 +787,11 @@ const ChartOfAccountsPage = () => {
                 onChange={handleChange}
                 className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               >
-                <option value={MODULE_SCOPES.TRADING}>{t('moduleScope.trading')}</option>
-
-                <option value={MODULE_SCOPES.TRAVEL}>{t('moduleScope.travel')}</option>
-
-                <option value={MODULE_SCOPES.BOTH}>{t('moduleScope.both')}</option>
+                {displayedScopeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -1131,7 +1202,7 @@ const ChartOfAccountsPage = () => {
                           <div className="flex justify-end gap-2">
                             <button
                               type="button"
-                              disabled={account.isSystem}
+                              disabled={!canModifyAccount(account)}
                               onClick={() => handleEdit(account)}
                               className="inline-flex h-9 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -1141,7 +1212,7 @@ const ChartOfAccountsPage = () => {
 
                             <button
                               type="button"
-                              disabled={account.isSystem}
+                              disabled={!canModifyAccount(account)}
                               onClick={() => setDeleteTarget(account)}
                               className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -1233,7 +1304,7 @@ const ChartOfAccountsPage = () => {
                       </div>
                     </div>
 
-                    {!account.isSystem && (
+                    {canModifyAccount(account) && (
                       <div className="mt-2 flex justify-end gap-1.5">
                         <button
                           type="button"

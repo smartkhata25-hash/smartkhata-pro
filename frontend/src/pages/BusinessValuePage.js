@@ -19,9 +19,7 @@ import BusinessReceivableLoanPaymentHistory from '../components/businessValue/Bu
 import {
   BUSINESS_VALUE_MODULE_SCOPES,
   BUSINESS_VALUE_PRESETS,
-  DEFAULT_COMPLETE_COMPONENTS,
   TRAVEL_BUSINESS_VALUE_COMPONENTS,
-  TRAVEL_DEFAULT_COMPLETE_COMPONENTS,
   fetchBusinessValue,
   getPresetComponents,
 } from '../services/businessValueService';
@@ -76,17 +74,15 @@ const TRAVEL_PRESET_OPTIONS = [
 const BusinessValuePage = ({ moduleScope = '' }) => {
   const isTravelScope = moduleScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL;
   const serviceScope = useMemo(
-    () =>
-      isTravelScope
-        ? {
-            moduleScope: BUSINESS_VALUE_MODULE_SCOPES.TRAVEL,
-          }
-        : {},
-    [isTravelScope]
+    () => moduleScope && moduleScope !== BUSINESS_VALUE_MODULE_SCOPES.TRADING
+      ? { moduleScope }
+      : {},
+    [moduleScope]
   );
-  const defaultCompleteComponents = isTravelScope
-    ? TRAVEL_DEFAULT_COMPLETE_COMPONENTS
-    : DEFAULT_COMPLETE_COMPONENTS;
+  const defaultCompleteComponents = useMemo(
+    () => getPresetComponents(BUSINESS_VALUE_PRESETS.COMPLETE, serviceScope),
+    [serviceScope]
+  );
   const availableComponentKeys = isTravelScope ? TRAVEL_BUSINESS_VALUE_COMPONENTS : null;
   const presetOptions = isTravelScope ? TRAVEL_PRESET_OPTIONS : undefined;
 

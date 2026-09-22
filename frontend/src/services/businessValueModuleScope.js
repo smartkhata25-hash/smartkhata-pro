@@ -1,6 +1,7 @@
 export const BUSINESS_VALUE_MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
   TRAVEL: 'travel',
+  WEAVING: 'weaving',
 });
 
 export const normalizeBusinessValueModuleScope = (moduleScope = '') => {
@@ -12,7 +13,7 @@ export const normalizeBusinessValueModuleScope = (moduleScope = '') => {
 export const appendBusinessValueModuleScopeParam = (params, moduleScope) => {
   const cleanScope = normalizeBusinessValueModuleScope(moduleScope);
 
-  if (cleanScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL) {
+  if (cleanScope && cleanScope !== BUSINESS_VALUE_MODULE_SCOPES.TRADING) {
     params.append('moduleScope', cleanScope);
   }
 
@@ -22,7 +23,7 @@ export const appendBusinessValueModuleScopeParam = (params, moduleScope) => {
 export const getBusinessValueModuleScopeParams = (moduleScope) => {
   const cleanScope = normalizeBusinessValueModuleScope(moduleScope);
 
-  return cleanScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL
+  return cleanScope && cleanScope !== BUSINESS_VALUE_MODULE_SCOPES.TRADING
     ? {
         moduleScope: cleanScope,
       }
@@ -32,7 +33,7 @@ export const getBusinessValueModuleScopeParams = (moduleScope) => {
 export const withBusinessValueModuleScope = (payload = {}, moduleScope) => {
   const cleanScope = normalizeBusinessValueModuleScope(moduleScope);
 
-  return cleanScope === BUSINESS_VALUE_MODULE_SCOPES.TRAVEL
+  return cleanScope && cleanScope !== BUSINESS_VALUE_MODULE_SCOPES.TRADING
     ? {
         ...payload,
         moduleScope: cleanScope,

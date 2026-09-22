@@ -8,8 +8,13 @@ const { isBalanced } = require("../utils/journalHelper");
 const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
+  documentMatchesModuleScope,
+  getRequestedModuleScope,
   normalizeModuleScope,
 } = require("../utils/moduleScope");
+const {
+  applyExpenseTitleScopeFilter,
+} = require("../utils/expenseTitleScope");
 const { clearTravelReportCache } = require("../services/travel/travelReportCacheService");
 const {
   getSoftDeleteReason,
@@ -24,10 +29,106 @@ const fs = require("fs");
 const path = require("path");
 
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
+const WEAVING_EXPENSE_ORIGIN = "weaving_expense";
 const TRAVEL_EXPENSE_SCOPES = new Set([MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH]);
+const EXPENSE_BUSINESS_SCOPES = Object.freeze([
+  MODULE_SCOPES.TRADING,
+  MODULE_SCOPES.TRAVEL,
+  MODULE_SCOPES.WEAVING,
+  MODULE_SCOPES.BOTH,
+]);
+const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze(["cash", "bank", "online", "cheque"]);
 
-const getExpenseOriginModule = (moduleScope) =>
-  TRAVEL_EXPENSE_SCOPES.has(moduleScope) ? TRAVEL_EXPENSE_ORIGIN : "";
+const makeHttpError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const normalizeExpenseModuleScope = (
+  value,
+  fallback = MODULE_SCOPES.TRADING,
+) => {
+  const normalized = normalizeModuleScope(value, fallback);
+
+  if (!EXPENSE_BUSINESS_SCOPES.includes(normalized)) {
+    throw makeHttpError("Expenses must belong to Trading, Travel or Weaving.", 400);
+  }
+
+  return normalized;
+};
+
+const getExpenseScope = (
+  source = {},
+  fallback = MODULE_SCOPES.TRADING,
+  options = {},
+) => {
+  const requested = getRequestedModuleScope(source, fallback);
+
+  if (requested === "all") {
+    if (options.allowAll) {
+      return "all";
+    }
+
+    throw makeHttpError("Expenses must belong to a single business module.", 400);
+  }
+
+  if (requested === MODULE_SCOPES.SHARED) {
+    throw makeHttpError("Expenses cannot use shared account scope.", 400);
+  }
+
+  if (requested === MODULE_SCOPES.BOTH && options.disallowBoth) {
+    throw makeHttpError("New expenses must belong to a single business module.", 400);
+  }
+
+  return normalizeExpenseModuleScope(requested, fallback);
+};
+
+const assertExpenseScopeEnabled = (req, moduleScope) => {
+  if (moduleScope === "all") {
+    return;
+  }
+
+  const enabledModules = req.user?.enabledModules || {};
+
+  if (moduleScope === MODULE_SCOPES.BOTH) {
+    if (
+      enabledModules[MODULE_SCOPES.TRADING] === false ||
+      enabledModules[MODULE_SCOPES.TRAVEL] !== true
+    ) {
+      throw makeHttpError("This business module is not enabled", 403);
+    }
+
+    return;
+  }
+
+  const enabled =
+    moduleScope === MODULE_SCOPES.TRADING
+      ? enabledModules[MODULE_SCOPES.TRADING] !== false
+      : enabledModules[moduleScope] === true;
+
+  if (!enabled) {
+    throw makeHttpError("This business module is not enabled", 403);
+  }
+};
+
+const assertExpenseAccessible = (expense, moduleScope) => {
+  if (moduleScope === "all") {
+    return;
+  }
+
+  if (!documentMatchesModuleScope(expense, moduleScope)) {
+    throw makeHttpError("Expense not found in this module.", 404);
+  }
+};
+
+const getExpenseOriginModule = (moduleScope) => {
+  if (moduleScope === MODULE_SCOPES.WEAVING) {
+    return WEAVING_EXPENSE_ORIGIN;
+  }
+
+  return TRAVEL_EXPENSE_SCOPES.has(moduleScope) ? TRAVEL_EXPENSE_ORIGIN : "";
+};
 
 const validateScopedExpenseAccounts = async ({
   userId,
@@ -57,12 +158,43 @@ const validateScopedExpenseAccounts = async ({
 
   applyModuleScopeFilter(query, moduleScope);
 
-  const matchedAccounts = await Account.find(query).select("_id").lean();
+  const matchedAccounts = await Account.find(query)
+    .select("_id type category moduleScope")
+    .lean();
 
   if (matchedAccounts.length !== uniqueAccountIds.length) {
     const error = new Error("One or more selected accounts are not available in this module.");
     error.statusCode = 400;
     throw error;
+  }
+
+  const accountsById = new Map(
+    matchedAccounts.map((account) => [String(account._id), account]),
+  );
+  const debitAccount = accountsById.get(String(debitAccountId));
+
+  if (
+    !debitAccount ||
+    debitAccount.type !== "Expense" ||
+    !documentMatchesModuleScope(debitAccount, moduleScope)
+  ) {
+    throw makeHttpError("Expense category is not available in this module.", 400);
+  }
+
+  for (const entry of creditEntries) {
+    const creditAccount = accountsById.get(String(entry.account || ""));
+
+    if (
+      !creditAccount ||
+      creditAccount.type !== "Asset" ||
+      !PAYMENT_ACCOUNT_CATEGORIES.includes(creditAccount.category) ||
+      !documentMatchesModuleScope(creditAccount, moduleScope)
+    ) {
+      throw makeHttpError(
+        "Payment account must be a cash, bank, online or cheque account available in this module.",
+        400,
+      );
+    }
   }
 };
 
@@ -88,6 +220,13 @@ exports.createExpense = async (req, res) => {
       return res.status(400).json({ error: "User ID is required" });
     }
 
+    const normalizedModuleScope = getExpenseScope(
+      { ...req.query, ...req.body },
+      MODULE_SCOPES.TRADING,
+    );
+
+    assertExpenseScopeEnabled(req, normalizedModuleScope);
+
     if (!titleId && !category) {
       return res.status(400).json({
         error: "Either titleId or category is required",
@@ -98,11 +237,15 @@ exports.createExpense = async (req, res) => {
     let finalTitle = title || "";
 
     if (titleId) {
-      const titleDoc = await ExpenseTitle.findOne({
+      const titleQuery = {
         _id: titleId,
         userId,
         isDeleted: false,
-      });
+      };
+
+      applyExpenseTitleScopeFilter(titleQuery, normalizedModuleScope);
+
+      const titleDoc = await ExpenseTitle.findOne(titleQuery);
 
       if (!titleDoc) {
         return res.status(400).json({
@@ -121,10 +264,6 @@ exports.createExpense = async (req, res) => {
     }
 
     const numericAmount = Number(amount);
-    const normalizedModuleScope = normalizeModuleScope(
-      moduleScope,
-      MODULE_SCOPES.TRADING,
-    );
     const businessDate = getBusinessDateKey(date, {
       fallback: new Date(),
       label: "expense date",
@@ -207,6 +346,7 @@ exports.createExpense = async (req, res) => {
       createdBy: userId,
       sourceType: "expense",
       originModule: getExpenseOriginModule(normalizedModuleScope),
+      moduleScope: normalizedModuleScope,
       referenceId: expense._id,
       lines,
     });
@@ -252,6 +392,12 @@ exports.updateExpense = async (req, res) => {
 
     const creditEntries = JSON.parse(req.body.creditEntries || "[]");
     const userId = req.user?.id || req.userId;
+    const requestedScope = getExpenseScope(
+      { ...req.query, ...req.body },
+      MODULE_SCOPES.TRADING,
+    );
+
+    assertExpenseScopeEnabled(req, requestedScope);
 
     if (!titleId && !category) {
       return res.status(400).json({
@@ -273,17 +419,22 @@ exports.updateExpense = async (req, res) => {
       expense.moduleScope,
       MODULE_SCOPES.TRADING,
     );
+    assertExpenseAccessible(expense, requestedScope);
 
     let finalCategory = category;
     let finalTitle = title || "";
 
     // 🔥 NEW: titleId mapping
     if (titleId) {
-      const titleDoc = await ExpenseTitle.findOne({
+      const titleQuery = {
         _id: titleId,
         userId,
         isDeleted: false,
-      });
+      };
+
+      applyExpenseTitleScopeFilter(titleQuery, requestedScope);
+
+      const titleDoc = await ExpenseTitle.findOne(titleQuery);
 
       if (!titleDoc) {
         return res.status(400).json({
@@ -302,10 +453,15 @@ exports.updateExpense = async (req, res) => {
     }
 
     const numericAmount = Number(amount);
-    const normalizedModuleScope = normalizeModuleScope(
-      moduleScope,
-      expense.moduleScope || MODULE_SCOPES.TRADING,
-    );
+    const normalizedModuleScope =
+      moduleScope !== undefined
+        ? getExpenseScope({ moduleScope }, previousModuleScope)
+        : previousModuleScope;
+
+    if (normalizedModuleScope !== previousModuleScope) {
+      throw makeHttpError("Expense module scope cannot be changed.", 403);
+    }
+
     const businessDate = getBusinessDateKey(date || expense.date, {
       fallback: expense.date || new Date(),
       label: "expense date",
@@ -392,6 +548,7 @@ exports.updateExpense = async (req, res) => {
     await JournalEntry.deleteMany({
       referenceId: expense._id,
       sourceType: "expense",
+      createdBy: userId,
     });
 
     const journal = new JournalEntry({
@@ -401,6 +558,7 @@ exports.updateExpense = async (req, res) => {
       createdBy: userId,
       sourceType: "expense",
       originModule: getExpenseOriginModule(normalizedModuleScope),
+      moduleScope: normalizedModuleScope,
       referenceId: expense._id,
       lines,
     });
@@ -451,14 +609,15 @@ exports.deleteExpense = async (req, res) => {
     });
     if (!expense) return res.status(404).json({ error: "Expense not found" });
 
-    const requestedScope = normalizeModuleScope(
-      req.query?.moduleScope || req.query?.scope,
-      "",
-    );
     const expenseScope = normalizeModuleScope(
       expense.moduleScope,
       MODULE_SCOPES.TRADING,
     );
+    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
+
+    assertExpenseScopeEnabled(req, requestedScope);
+    assertExpenseAccessible(expense, requestedScope);
+
     const isTravelDelete =
       expenseScope === MODULE_SCOPES.TRAVEL ||
       (expenseScope === MODULE_SCOPES.BOTH && requestedScope === MODULE_SCOPES.TRAVEL);
@@ -520,8 +679,6 @@ exports.deleteExpense = async (req, res) => {
       });
     }
 
-    const { account, category } = expense;
-
     if (expense.attachment) {
       fs.unlinkSync(path.resolve(expense.attachment));
     }
@@ -530,13 +687,18 @@ exports.deleteExpense = async (req, res) => {
     await expense.save();
 
     await JournalEntry.updateMany(
-      { referenceId: expense._id, sourceType: "expense" },
+      {
+        referenceId: expense._id,
+        sourceType: "expense",
+        createdBy: userId,
+      },
       { isDeleted: true },
     );
 
     const journal = await JournalEntry.findOne({
       referenceId: expense._id,
       sourceType: "expense",
+      createdBy: userId,
     });
 
     if (journal?.lines?.length) {
@@ -569,11 +731,11 @@ exports.getAllExpenses = async (req, res) => {
       userId,
       isDeleted: false,
     };
-    const requestedScope = String(req.query?.moduleScope || req.query?.scope || "")
-      .trim()
-      .toLowerCase();
+    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
 
-    applyModuleScopeFilter(expenseQuery, requestedScope || MODULE_SCOPES.TRADING);
+    assertExpenseScopeEnabled(req, requestedScope);
+
+    applyModuleScopeFilter(expenseQuery, requestedScope);
 
     const expenses = await Expense.find(expenseQuery)
       .populate("category", "name")
@@ -589,9 +751,10 @@ exports.getAllExpenses = async (req, res) => {
     const journals = await JournalEntry.find({
       referenceId: { $in: expenseIds },
       sourceType: "expense",
+      createdBy: userId,
       isDeleted: false,
     })
-      .select("referenceId lines")
+      .select("referenceId lines moduleScope")
       .populate("lines.account", "name")
       .lean();
 
@@ -636,6 +799,9 @@ exports.getAllExpenses = async (req, res) => {
 exports.getExpenseById = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
+    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
+
+    assertExpenseScopeEnabled(req, requestedScope);
 
     const expense = await Expense.findOne({
       _id: req.params.id,
@@ -647,9 +813,12 @@ exports.getExpenseById = async (req, res) => {
 
     if (!expense) return res.status(404).json({ error: "Expense not found" });
 
+    assertExpenseAccessible(expense, requestedScope);
+
     const journal = await JournalEntry.findOne({
       referenceId: expense._id,
       sourceType: "expense",
+      createdBy: userId,
     }).populate("lines.account");
 
     const creditEntries =

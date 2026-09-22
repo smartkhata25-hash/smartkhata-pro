@@ -15,6 +15,9 @@ const PrintInvoicePage = () => {
   const [shareLoading, setShareLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const returnTo =
+    location.state?.returnTo ||
+    (type === 'quotation' && id ? `/create-sale?quotationId=${id}` : '/create-sale');
 
   const isPreview = location.state?.isPreview;
 
@@ -72,6 +75,17 @@ const PrintInvoicePage = () => {
           const text = await res.text();
           setHtml(text);
         }
+
+        if (type === 'quotation') {
+          const res = await fetch(`${API}/api/print/quotation-html/${id}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (!res.ok) throw new Error('Quotation print could not be loaded');
+          setHtml(await res.text());
+        }
       } catch (err) {
         console.error('Print HTML load error:', err);
       } finally {
@@ -89,11 +103,11 @@ const PrintInvoicePage = () => {
       const handleAfterPrint = () => {
         window.removeEventListener('afterprint', handleAfterPrint);
 
-        navigate('/create-sale', {
+        navigate(type === 'quotation' ? returnTo : '/create-sale', {
           replace: true,
         });
 
-        window.location.reload();
+        if (type !== 'quotation') window.location.reload();
       };
 
       window.addEventListener('afterprint', handleAfterPrint);
@@ -102,7 +116,7 @@ const PrintInvoicePage = () => {
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [html, autoPrint, navigate]);
+  }, [html, autoPrint, navigate, returnTo, type]);
 
   if (loading) {
     return <div className="p-6 text-center text-gray-600">{t('print.preparingPreview')}</div>;
@@ -111,9 +125,21 @@ const PrintInvoicePage = () => {
   return (
     <div className="bg-white p-6" style={{ height: '100vh', overflowY: 'auto' }}>
       {/* Top Bar (Not Printed) */}
-      <div className="flex justify-end mb-4 no-print">
+      <div className="flex justify-end gap-2 mb-4 no-print">
+        {type === 'quotation' && (
+          <button
+            type="button"
+            onClick={() => navigate(returnTo)}
+            className="rounded border border-gray-300 px-5 py-2 text-gray-700 hover:bg-gray-100"
+          >
+            {t('common.back')}
+          </button>
+        )}
         <button
           onClick={() => {
+            if (type === 'quotation') {
+              window.addEventListener('afterprint', () => navigate(returnTo), { once: true });
+            }
             window.print();
 
             if (isPreview) {
@@ -176,16 +202,30 @@ const PrintInvoicePage = () => {
                     },
                   });
                 }
+
+                if (type === 'quotation') {
+                  res = await fetch(`${API}/api/print/quotation-pdf/${id}`, {
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                    },
+                  });
+                }
               }
 
+              if (!res?.ok) throw new Error('PDF could not be generated');
               const blob = await res.blob();
               const url = window.URL.createObjectURL(blob);
 
-              const billNo = location.state?.invoiceData?.billNo || id || 'Preview';
+              const billNo =
+                location.state?.quotationNo ||
+                location.state?.invoiceData?.billNo ||
+                id ||
+                'Preview';
+              const filePrefix = type === 'quotation' ? 'Quotation' : 'Invoice';
 
               const a = document.createElement('a');
               a.href = url;
-              a.download = `Invoice-${billNo}.pdf`;
+              a.download = `${filePrefix}-${billNo}.pdf`;
 
               document.body.appendChild(a);
               a.click();
@@ -234,14 +274,21 @@ const PrintInvoicePage = () => {
                 pdfUrl = `${API}/api/print/sale-pdf/${id}`;
               } else if (type === 'refund') {
                 pdfUrl = `${API}/api/print/sale-return-pdf/${id}`;
+              } else if (type === 'quotation') {
+                pdfUrl = `${API}/api/print/quotation-pdf/${id}`;
               }
 
               if (!pdfUrl) {
                 throw new Error('PDF endpoint not found');
               }
 
-              const billNo = location.state?.invoiceData?.billNo || id || 'Preview';
-              const filePrefix = type === 'refund' ? 'SaleReturn' : 'Invoice';
+              const billNo =
+                location.state?.quotationNo ||
+                location.state?.invoiceData?.billNo ||
+                id ||
+                'Preview';
+              const filePrefix =
+                type === 'quotation' ? 'Quotation' : type === 'refund' ? 'SaleReturn' : 'Invoice';
               const fileName = `${filePrefix}-${billNo}.pdf`;
 
               await sharePdfDocument({

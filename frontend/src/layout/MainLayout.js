@@ -8,6 +8,8 @@ import Sidebar from './Sidebar';
 import RightPanel from './RightPanel';
 import TravelRightPanel from '../components/travel/layout/TravelRightPanel';
 import TravelReminderCenter from '../components/travel/reminders/TravelReminderCenter';
+import WeavingRightPanel from '../components/weaving/layout/WeavingRightPanel';
+import WeavingFeedbackModal from '../components/weaving/WeavingFeedbackModal';
 
 import { EMPTY_TRAVEL_DASHBOARD_SUMMARY } from '../components/travel/dashboard/travelDashboardConfig';
 
@@ -15,6 +17,7 @@ import { fetchTravelDashboardSummary as fetchTravelDashboardWorkspaceSummary } f
 import { fetchTravelReminderSummary as fetchTravelReminderWorkspaceSummary } from '../services/travelReminderService';
 
 import { isTravelContext } from '../utils/travelContext';
+import { isWeavingContext } from '../utils/weavingContext';
 import { t } from '../i18n/i18n';
 
 const EMPTY_DASHBOARD_SUMMARY = {
@@ -177,8 +180,14 @@ const MainLayout = () => {
     location.pathname.startsWith('/party-ledger');
 
   const isTravelWorkspace = isTravelContext(location);
+  const isWeavingWorkspace = isWeavingContext(location);
+  const isWeavingPayrollWorkspace = location.pathname === '/weaving/payroll';
+  const [isPayrollSidebarRevealed, setIsPayrollSidebarRevealed] = useState(false);
 
-  const hideWorkspacePanels = isLedgerPage && !isTravelWorkspace;
+  const hideWorkspacePanels = isLedgerPage && !isTravelWorkspace && !isWeavingWorkspace;
+  const effectiveDesktopSidebarVisible = isWeavingPayrollWorkspace
+    ? isPayrollSidebarRevealed
+    : isDesktopSidebarVisible;
 
   /*
    * Actual desktop sidebar rendering state.
@@ -186,7 +195,7 @@ const MainLayout = () => {
    * Mobile ignores this preference because mobile
    * continues using the normal hamburger sidebar.
    */
-  const showSidebar = !hideWorkspacePanels && (isMobile || isDesktopSidebarVisible);
+  const showSidebar = !hideWorkspacePanels && (isMobile || effectiveDesktopSidebarVisible);
 
   const fetchDashboardSummary = useCallback(async (options = {}) => {
     const { refresh = false, params = {} } = options;
@@ -482,15 +491,19 @@ const MainLayout = () => {
     localStorage.setItem('desktopSidebarVisible', JSON.stringify(isDesktopSidebarVisible));
   }, [isDesktopSidebarVisible]);
 
+  useEffect(() => {
+    setIsPayrollSidebarRevealed(false);
+  }, [location.pathname]);
+
   /*
    * Travel mobile screen should not automatically
    * keep the Right Panel covering the workspace.
    */
   useEffect(() => {
-    if (isTravelWorkspace && isMobile) {
+    if ((isTravelWorkspace || isWeavingWorkspace) && isMobile) {
       setIsRightPanelOpen(false);
     }
-  }, [isTravelWorkspace, isMobile]);
+  }, [isTravelWorkspace, isWeavingWorkspace, isMobile]);
 
   /*
    * Load correct dashboard data according
@@ -503,12 +516,17 @@ const MainLayout = () => {
       return;
     }
 
+    if (isWeavingWorkspace) {
+      return;
+    }
+
     fetchDashboardAlerts();
   }, [
     fetchDashboardAlerts,
     fetchTravelDashboardSummary,
     fetchTravelReminderSummary,
     isTravelWorkspace,
+    isWeavingWorkspace,
   ]);
 
   useEffect(() => {
@@ -577,11 +595,13 @@ const MainLayout = () => {
     openTravelReminderCenter,
   };
 
-  const visibleDashboardAlerts = isTravelWorkspace ? EMPTY_DASHBOARD_ALERTS : dashboardAlerts;
+  const visibleDashboardAlerts =
+    isTravelWorkspace || isWeavingWorkspace ? EMPTY_DASHBOARD_ALERTS : dashboardAlerts;
 
-  const rightPanelWidthClass = isTravelWorkspace ? 'w-80 max-w-[86vw]' : 'w-64';
+  const rightPanelWidthClass =
+    isTravelWorkspace || isWeavingWorkspace ? 'w-80 max-w-[86vw]' : 'w-64';
 
-  const rightPanelDesktopWidthClass = isTravelWorkspace ? 'w-72' : 'w-64';
+  const rightPanelDesktopWidthClass = isTravelWorkspace || isWeavingWorkspace ? 'w-72' : 'w-64';
 
   const renderRightPanel = () => {
     if (isTravelWorkspace) {
@@ -598,6 +618,10 @@ const MainLayout = () => {
           }
         />
       );
+    }
+
+    if (isWeavingWorkspace) {
+      return <WeavingRightPanel />;
     }
 
     return (
@@ -675,15 +699,27 @@ const MainLayout = () => {
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
             isDesktopSidebarVisible={isDesktopSidebarVisible}
-            setIsDesktopSidebarVisible={setIsDesktopSidebarVisible}
+            setIsDesktopSidebarVisible={(visible) => {
+              if (isWeavingPayrollWorkspace && !isMobile) {
+                setIsPayrollSidebarRevealed(Boolean(visible));
+              } else {
+                setIsDesktopSidebarVisible(Boolean(visible));
+              }
+            }}
           />
         )}
 
         {/* ================= DESKTOP SIDEBAR SHOW BUTTON ================= */}
-        {!hideWorkspacePanels && !isMobile && !isDesktopSidebarVisible && (
+        {!hideWorkspacePanels && !isMobile && !effectiveDesktopSidebarVisible && (
           <button
             type="button"
-            onClick={() => setIsDesktopSidebarVisible(true)}
+            onClick={() => {
+              if (isWeavingPayrollWorkspace) {
+                setIsPayrollSidebarRevealed(true);
+              } else {
+                setIsDesktopSidebarVisible(true);
+              }
+            }}
             title="Show Sidebar"
             aria-label="Show Sidebar"
             className="
@@ -772,6 +808,7 @@ const MainLayout = () => {
           </>
         )}
       </div>
+      {isWeavingWorkspace && <WeavingFeedbackModal />}
     </div>
   );
 };

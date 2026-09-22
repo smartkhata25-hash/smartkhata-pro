@@ -13,6 +13,8 @@ const {
 } = require("../services/printBuilder");
 const { generatePdfFromHtml } = require("../services/pdfService");
 const generateSaleInvoiceHTML = require("../templates/saleInvoiceTemplate");
+const { buildTravelInvoicePrint } = require("../services/travel/travelPrintBuilder");
+const { renderTravelInvoiceHtml } = require("../templates/travelInvoiceTemplate");
 
 //CUSTOMER / PARTY CURRENT BALANCE FOR PRINT
 
@@ -525,6 +527,30 @@ const generatePreviewSettingsHtml = async (req, res) => {
       built = buildSaleInvoicePrint(previewInvoice, previewPrintSetting);
     } else if (type === "saleReturn") {
       built = buildSaleReturnPrint(previewInvoice, previewPrintSetting);
+    } else if (type === "travelInvoice") {
+      built = buildTravelInvoicePrint(
+        {
+          bookingNumber: "TRAVEL-PREVIEW",
+          invoiceNumber: "TRAVEL-PREVIEW",
+          invoiceDate: new Date(),
+          customer: { name: "Preview Customer", phone: "03000000000" },
+          bookingItems: [
+            {
+              itemType: "air_ticket",
+              title: "Sample Travel Service",
+              estimatedSellingBase: 25000,
+            },
+          ],
+          sellingTotal: 25000,
+          netSale: 25000,
+          receivedAmount: 5000,
+          customerDue: 20000,
+          baseCurrency: "PKR",
+          status: "confirmed",
+        },
+        previewPrintSetting,
+      );
+      return res.type("html").send(renderTravelInvoiceHtml(built));
     } else {
       return res.status(400).send("Unsupported preview type");
     }

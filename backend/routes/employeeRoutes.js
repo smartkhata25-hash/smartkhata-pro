@@ -15,8 +15,17 @@ router.use((req, res, next) => {
     return requireModule(MODULE_KEYS.TRAVEL)(req, res, next);
   }
 
+  if (String(req.originalUrl || "").startsWith("/api/weaving/")) {
+    return requireModule(MODULE_KEYS.WEAVING)(req, res, next);
+  }
+
   return next();
 });
+router.get(
+  "/form-meta",
+  requirePermission(PERMISSIONS.EMPLOYEES.VIEW),
+  ctrl.getEmployeeFormMeta,
+);
 
 router.get(
   "/summary",
@@ -45,15 +54,81 @@ router.delete(
   ctrl.deleteDesignation,
 );
 
+router
+  .route("/units")
+  .get(requirePermission(PERMISSIONS.EMPLOYEES.VIEW), ctrl.getUnits)
+  .post(requirePermission(PERMISSIONS.EMPLOYEES.CREATE), ctrl.createUnit);
+
+router
+  .route("/units/:id")
+  .put(requirePermission(PERMISSIONS.EMPLOYEES.EDIT), ctrl.updateUnit)
+  .delete(requirePermission(PERMISSIONS.EMPLOYEES.DELETE), ctrl.deleteUnit);
+
+router
+  .route("/departments")
+  .get(requirePermission(PERMISSIONS.EMPLOYEES.VIEW), ctrl.getDepartments)
+  .post(
+    requirePermission(PERMISSIONS.EMPLOYEES.CREATE, PERMISSIONS.EMPLOYEES.EDIT),
+    ctrl.createDepartment,
+  );
+
+router
+  .route("/departments/:id")
+  .put(requirePermission(PERMISSIONS.EMPLOYEES.EDIT), ctrl.updateDepartment)
+  .delete(requirePermission(PERMISSIONS.EMPLOYEES.DELETE), ctrl.deleteDepartment);
+
+router
+  .route("/shifts")
+  .get(requirePermission(PERMISSIONS.EMPLOYEES.VIEW), ctrl.getShifts)
+  .post(
+    requirePermission(PERMISSIONS.EMPLOYEES.CREATE, PERMISSIONS.EMPLOYEES.EDIT),
+    ctrl.createShift,
+  );
+
+router
+  .route("/shifts/:id")
+  .put(requirePermission(PERMISSIONS.EMPLOYEES.EDIT), ctrl.updateShift)
+  .delete(requirePermission(PERMISSIONS.EMPLOYEES.DELETE), ctrl.deleteShift);
+
 router.get(
   "/payroll",
   requirePermission(PERMISSIONS.PAYROLL.VIEW),
   ctrl.getPayrolls,
 );
+router.get(
+  "/payroll/summary",
+  requirePermission(PERMISSIONS.PAYROLL.VIEW),
+  ctrl.getPayrollSummary,
+);
 router.post(
   "/payroll",
   requirePermission(PERMISSIONS.PAYROLL.CREATE),
   ctrl.createPayroll,
+);
+router.post(
+  "/payroll/finalize-all",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),
+  ctrl.finalizePayrollCycle,
+);
+router.post(
+  "/payroll/early-close",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),
+  ctrl.earlyClosePayrollCycle,
+);
+router.post(
+  "/payroll/resume",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),
+  ctrl.resumePayrollCycle,
+);
+router.post(
+  "/payroll/:id/finalize",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),
+  ctrl.finalizePayroll,
+);
+router.post(
+  "/payroll/:id/restore",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT),
+  ctrl.restorePayroll,
 );
 router.get(
   "/payroll/:id",
@@ -96,6 +171,11 @@ router.post(
   requirePermission(PERMISSIONS.PAYROLL.CREATE),
   ctrl.createAdvanceLoan,
 );
+router.put(
+  "/advance-loans/:id",
+  requirePermission(PERMISSIONS.PAYROLL.EDIT),
+  ctrl.updateAdvanceLoan,
+);
 router.post(
   "/advance-loans/:id/recover",
   requirePermission(PERMISSIONS.PAYROLL.PAY),
@@ -119,6 +199,12 @@ router.get(
 );
 
 router.get(
+  "/ledgers/summary",
+  requirePermission(PERMISSIONS.EMPLOYEES.VIEW_LEDGER),
+  ctrl.getEmployeeLedgersSummary,
+);
+
+router.get(
   "/:id/ledger",
   requirePermission(PERMISSIONS.EMPLOYEES.VIEW_LEDGER),
   ctrl.getEmployeeLedger,
@@ -132,6 +218,12 @@ router.get(
   "/:id/ledger/pdf",
   requirePermission(PERMISSIONS.EMPLOYEES.VIEW_LEDGER),
   ctrl.printEmployeeLedger,
+);
+
+router.post(
+  "/:id/restore",
+  requirePermission(PERMISSIONS.EMPLOYEES.EDIT),
+  ctrl.restoreEmployee,
 );
 
 router

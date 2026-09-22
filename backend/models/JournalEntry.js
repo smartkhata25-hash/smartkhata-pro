@@ -122,6 +122,13 @@ const journalEntrySchema = new mongoose.Schema(
       default: "",
     },
 
+    moduleScope: {
+      type: String,
+      enum: ["trading", "travel", "weaving", "both"],
+      default: "trading",
+      index: true,
+    },
+
     attachmentUrl: {
       type: String,
       default: "",
@@ -229,6 +236,7 @@ journalEntrySchema.index({
 });
 
 journalEntrySchema.index({ createdBy: 1, isDeleted: 1 });
+journalEntrySchema.index({ createdBy: 1, moduleScope: 1, isDeleted: 1 });
 journalEntrySchema.index({
   createdBy: 1,
   "lines.account": 1,

@@ -1,66 +1,91 @@
-// ✅ src/services/journalService.js
 import axios from 'axios';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
 const API_URL = `${BASE_URL}/api/journal`;
 
 const getToken = () => localStorage.getItem('token');
-const authHeaders = () => ({
+const authHeaders = (params = {}) => ({
   headers: { Authorization: `Bearer ${getToken()}` },
+  params,
 });
 
-// ✅ Create journal entry
-export const createJournalEntry = async (entryData) => {
-  const res = await axios.post(API_URL, entryData, authHeaders());
-  return res.data;
+const getScopedParams = (options = {}) => {
+  const moduleScope = options.moduleScope || options.scope;
+
+  return moduleScope ? { moduleScope } : {};
 };
 
-// ✅ Get journal entries (with optional date filter)
-export const getJournalEntries = async (startDate, endDate) => {
-  let url = API_URL;
+const getDateParams = (startDate, endDate, options = {}) => {
+  const params = {
+    ...getScopedParams(options),
+  };
+
   if (startDate && endDate) {
-    url += `?startDate=${startDate}&endDate=${endDate}`;
+    params.startDate = startDate;
+    params.endDate = endDate;
   }
 
-  const res = await axios.get(url, authHeaders());
+  return params;
+};
+
+export const createJournalEntry = async (entryData, options = {}) => {
+  const moduleScope = options.moduleScope || entryData?.moduleScope || options.scope;
+  const res = await axios.post(
+    API_URL,
+    {
+      ...entryData,
+      ...(moduleScope ? { moduleScope } : {}),
+    },
+    authHeaders(getScopedParams({ moduleScope }))
+  );
+
   return res.data;
 };
 
-// ✅ Update entry
-export const updateJournalEntry = async (id, updatedData) => {
-  const res = await axios.put(`${API_URL}/${id}`, updatedData, authHeaders());
+export const getJournalEntries = async (startDate, endDate, options = {}) => {
+  const res = await axios.get(API_URL, authHeaders(getDateParams(startDate, endDate, options)));
+
   return res.data;
 };
 
-// ✅ Delete entry
-export const deleteJournalEntry = async (id) => {
-  const res = await axios.delete(`${API_URL}/${id}`, authHeaders());
+export const updateJournalEntry = async (id, updatedData, options = {}) => {
+  const moduleScope = options.moduleScope || updatedData?.moduleScope || options.scope;
+  const res = await axios.put(
+    `${API_URL}/${id}`,
+    {
+      ...updatedData,
+      ...(moduleScope ? { moduleScope } : {}),
+    },
+    authHeaders(getScopedParams({ moduleScope }))
+  );
+
   return res.data;
 };
 
-// ✅ Trial Balance
-export const getTrialBalance = async (startDate, endDate) => {
-  let url = `${API_URL}/trial-balance`;
-  if (startDate && endDate) {
-    url += `?startDate=${startDate}&endDate=${endDate}`;
-  }
+export const deleteJournalEntry = async (id, options = {}) => {
+  const res = await axios.delete(`${API_URL}/${id}`, authHeaders(getScopedParams(options)));
 
-  const res = await axios.get(url, authHeaders());
   return res.data;
 };
 
-// ✅ General Ledger by Account with Date Filter
-export const getLedgerByAccount = async (accountId, startDate, endDate) => {
-  let url = `${API_URL}/ledger/${accountId}`;
-  if (startDate && endDate) {
-    url += `?startDate=${startDate}&endDate=${endDate}`;
-  }
+export const getTrialBalance = async (startDate, endDate, options = {}) => {
+  const res = await axios.get(
+    `${API_URL}/trial-balance`,
+    authHeaders(getDateParams(startDate, endDate, options))
+  );
 
-  const res = await axios.get(url, authHeaders());
   return res.data;
 };
 
-// ✅ Get Income Statement
+export const getLedgerByAccount = async (accountId, startDate, endDate, options = {}) => {
+  const res = await axios.get(
+    `${API_URL}/ledger/${accountId}`,
+    authHeaders(getDateParams(startDate, endDate, options))
+  );
+
+  return res.data;
+};
+
 export const fetchIncomeStatement = async (startDate, endDate) => {
   try {
     const url = `${API_URL}/income-statement?startDate=${startDate}&endDate=${endDate}`;
@@ -72,7 +97,6 @@ export const fetchIncomeStatement = async (startDate, endDate) => {
   }
 };
 
-// ✅ Month vs Month Income Statement
 export const fetchMonthVsMonthIncome = async (year) => {
   try {
     const url = `${API_URL}/income-statement/month-vs-month?year=${year}`;

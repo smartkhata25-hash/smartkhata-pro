@@ -80,10 +80,10 @@ const getOrCreateLoanReceivableAccount = async (userId, moduleScope) => {
     code: config.code,
   };
 
-  if (moduleScope === MODULE_SCOPES.TRAVEL) {
-    query.moduleScope = MODULE_SCOPES.TRAVEL;
-  } else {
+  if (moduleScope === MODULE_SCOPES.TRADING) {
     applyModuleScopeFilter(query, MODULE_SCOPES.TRADING);
+  } else {
+    query.moduleScope = moduleScope;
   }
 
   return Account.findOneAndUpdate(
@@ -317,6 +317,8 @@ exports.createReceivableLoanPayment = async (req, res) => {
       lines: [receivingLine, receivableLine],
 
       createdBy: userId,
+
+      moduleScope,
 
       sourceType: "receive_payment",
 
@@ -616,20 +618,21 @@ exports.reverseReceivableLoanPayment = async (req, res) => {
       });
     }
 
+    const originalJournalQuery = {
+      _id: payment.journalEntryId,
+      createdBy: userId,
+      originModule: getScopedBusinessValueOrigin(
+        "business_receivable_loan_payment",
+        moduleScope,
+      ),
+      isDeleted: {
+        $ne: true,
+      },
+    };
+    applyBusinessValueScopeFilter(originalJournalQuery, moduleScope);
+
     const originalJournal = payment.journalEntryId
-      ? await JournalEntry.findOne({
-          _id: payment.journalEntryId,
-
-          createdBy: userId,
-          originModule: getScopedBusinessValueOrigin(
-            "business_receivable_loan_payment",
-            moduleScope,
-          ),
-
-          isDeleted: {
-            $ne: true,
-          },
-        })
+      ? await JournalEntry.findOne(originalJournalQuery)
       : null;
 
     if (!originalJournal) {
@@ -678,6 +681,8 @@ exports.reverseReceivableLoanPayment = async (req, res) => {
       lines: reversalLines,
 
       createdBy: userId,
+
+      moduleScope,
 
       sourceType: "reversal",
 

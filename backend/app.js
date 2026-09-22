@@ -40,6 +40,16 @@ app.use("/api/travel/airlines", require("./routes/travelAirlineRoutes"));
 app.use("/api/travel/airports", require("./routes/travelAirportRoutes"));
 app.use("/api/travel/parties", require("./routes/travelPartyRoutes"));
 app.use("/api/travel/employees", employeeRoutes);
+app.use("/api/weaving/employees", employeeRoutes);
+app.use("/api/weaving/attendance", require("./routes/weavingAttendanceRoutes"));
+app.use("/api/weaving/reports", require("./routes/weavingReportRoutes"));
+app.use("/api/weaving/operations", require("./routes/weavingOperationsRoutes"));
+app.use("/api/weaving/commercial", require("./routes/weavingCommercialRoutes"));
+app.use("/api/weaving/beams", require("./routes/weavingBeamRoutes"));
+app.use("/api/weaving/yarn-stock", require("./routes/weavingYarnStockRoutes"));
+app.use("/api/weaving/folding", require("./routes/weavingFoldingRoutes"));
+app.use("/api/weaving/sales", require("./routes/weavingSalesRoutes"));
+app.use("/api/weaving/stock-control", require("./routes/weavingStockControlRoutes"));
 
 app.use(
   "/api/travel/currency-settings",
@@ -66,6 +76,7 @@ app.use("/api/categories", require("./routes/categoryRoutes"));
 app.use("/api/expense-titles", require("./routes/expenseTitleRoutes"));
 
 app.use("/api/invoices", require("./routes/invoiceRoutes"));
+app.use("/api/quotations", require("./routes/quotationRoutes"));
 app.use("/api/refunds", require("./routes/refundRoutes"));
 app.use("/api/purchase-returns", require("./routes/purchaseRefundRoutes"));
 

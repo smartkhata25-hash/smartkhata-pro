@@ -1,0 +1,10 @@
+const { logActivity } = require("../utils/activityLogger");
+const service = require("../services/weaving/weavingBeamService");
+const uid = (req) => req.user?.id || req.userId;
+const fail = (res, error, message) => res.status(error.statusCode || 500).json({ message: error.message || message });
+exports.listSets = async (req, res) => { try { return res.json({ data: await service.listSets(uid(req), req.query) }); } catch (error) { return fail(res, error, "Failed to load Beam Sets"); } };
+exports.getSet = async (req, res) => { try { return res.json({ data: await service.getSet(uid(req), req.params.id) }); } catch (error) { return fail(res, error, "Failed to load Beam Set"); } };
+exports.meta = async (req, res) => { try { return res.json({ data: await service.getMeta(uid(req)) }); } catch (error) { return fail(res, error, "Failed to load Beam setup"); } };
+exports.sync = async (req, res) => { try { return res.json({ data: { syncedReceipts: await service.syncPostedReceipts(uid(req)) } }); } catch (error) { return fail(res, error, "Failed to sync Sizing Receipts"); } };
+exports.createJob = async (req, res) => { try { const row = await service.createJob({ userId: uid(req), actorId: req.actorId || uid(req), payload: req.body }); await logActivity({ req, action: req.body.approve ? "approve" : "create", module: "weaving.beams", moduleScope: "weaving", entityType: "WeavingKnottingJob", entityId: row._id, title: "Beam Knotting Job" }); return res.status(201).json({ data: row }); } catch (error) { return fail(res, error, "Failed to save Knotting Job"); } };
+exports.voidJob = async (req, res) => { try { const row = await service.voidJob({ userId: uid(req), actorId: req.actorId || uid(req), jobId: req.params.id, reason: req.body.reason }); return res.json({ data: row }); } catch (error) { return fail(res, error, "Failed to void Knotting Job"); } };

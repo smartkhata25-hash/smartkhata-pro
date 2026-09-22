@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaBook, FaBriefcase, FaEdit, FaPlus, FaTrash } from 'react-icons/fa';
+import { FaBook, FaBriefcase, FaEdit, FaPlus, FaRedo, FaTrash } from 'react-icons/fa';
 
 import { t } from '../i18n/i18n';
 import {
   TravelActionButton,
   TravelCardLine,
-  TravelFilterSelect,
   TravelFormModal,
   TravelMasterList,
   TravelMasterPageFrame,
   TravelMasterToolbar,
   TravelSearchInput,
+  TravelSegmentedControl,
   TravelStatusBadge,
   buildTravelConfirmMessage,
   formatTravelMoney,
@@ -24,6 +24,7 @@ import {
   getEmployeeDesignations,
   getEmployeeSummary,
   getEmployees,
+  restoreEmployee,
   updateEmployee,
 } from '../services/employeeService';
 import { hasPermission } from '../utils/permissionHelper';
@@ -67,7 +68,7 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
   const [designations, setDesignations] = useState([]);
   const [summary, setSummary] = useState(null);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState('active');
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
@@ -79,6 +80,7 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
   const [pageError, setPageError] = useState('');
 
   const canManage = hasPermission('employees.create') || hasPermission('employees.edit');
+  const canEdit = hasPermission('employees.edit');
   const canDelete = hasPermission('employees.delete');
   const canViewLedger = hasPermission('employees.view_ledger');
 
@@ -188,6 +190,15 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
     await loadData();
   };
 
+  const handleRestore = async (employee) => {
+    if (!window.confirm(buildTravelConfirmMessage('employees.restoreConfirm', employee.name))) {
+      return;
+    }
+
+    await restoreEmployee(employee._id, { moduleScope });
+    await loadData();
+  };
+
   const handleCreateDesignation = async (event) => {
     event.preventDefault();
     const name = designationName.trim();
@@ -246,15 +257,6 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
       ],
     },
     { name: 'baseSalary', labelKey: 'employees.fields.baseSalary', type: 'number', min: 0, step: '0.01' },
-    {
-      name: 'status',
-      labelKey: 'employees.fields.status',
-      type: 'select',
-      options: [
-        { value: 'active', labelKey: 'travel.common.active' },
-        { value: 'inactive', labelKey: 'travel.common.inactive' },
-      ],
-    },
     { name: 'address', labelKey: 'employees.fields.address', type: 'textarea', fullWidth: true },
     { name: 'notes', labelKey: 'employees.fields.notes', type: 'textarea', fullWidth: true },
   ];
@@ -289,7 +291,7 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
     {
       key: 'status',
       labelKey: 'employees.columns.status',
-      render: (employee) => <TravelStatusBadge active={employee.status !== 'inactive'} />,
+      render: (employee) => <TravelStatusBadge active={!employee.isDeleted && employee.status === 'active'} />,
     },
     {
       key: 'actions',
@@ -302,14 +304,19 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
               {t('employees.actions.ledger')}
             </TravelActionButton>
           )}
-          {canManage && (
+          {status === 'active' && canEdit && (
             <TravelActionButton icon={FaEdit} variant="secondary" title={t('travel.common.edit')} onClick={() => openEditForm(employee)}>
               {t('travel.common.edit')}
             </TravelActionButton>
           )}
-          {canDelete && (
+          {status === 'active' && canDelete && (
             <TravelActionButton icon={FaTrash} variant="danger" title={t('travel.common.delete')} onClick={() => handleDelete(employee)}>
               {t('travel.common.delete')}
+            </TravelActionButton>
+          )}
+          {status === 'inactive' && canEdit && (
+            <TravelActionButton icon={FaRedo} variant="success" title={t('employees.actions.restore')} onClick={() => handleRestore(employee)}>
+              {t('employees.actions.restore')}
             </TravelActionButton>
           )}
         </div>
@@ -336,10 +343,9 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
       filters={
         <TravelMasterToolbar>
           <TravelSearchInput value={search} onChange={setSearch} placeholderKey="employees.search" />
-          <TravelFilterSelect
+          <TravelSegmentedControl
             value={status}
             onChange={setStatus}
-            placeholderKey="employees.filters.allStatus"
             options={[
               { value: 'active', labelKey: 'travel.common.active' },
               { value: 'inactive', labelKey: 'travel.common.inactive' },
@@ -384,7 +390,7 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
                   <p className="truncate text-sm font-black text-slate-950">{employee.name}</p>
                   <p className="truncate text-xs font-semibold text-slate-500">{employee.phone || '-'}</p>
                 </div>
-                <TravelStatusBadge active={employee.status !== 'inactive'} />
+                <TravelStatusBadge active={!employee.isDeleted && employee.status === 'active'} />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <TravelCardLine labelKey="employees.columns.designation" value={employee.designationName || '-'} />
@@ -396,9 +402,19 @@ const EmployeesPage = ({ moduleScope = 'trading' }) => {
                     {t('employees.actions.ledger')}
                   </TravelActionButton>
                 )}
-                {canManage && (
+                {status === 'active' && canEdit && (
                   <TravelActionButton icon={FaEdit} variant="secondary" onClick={() => openEditForm(employee)}>
                     {t('travel.common.edit')}
+                  </TravelActionButton>
+                )}
+                {status === 'active' && canDelete && (
+                  <TravelActionButton icon={FaTrash} variant="danger" onClick={() => handleDelete(employee)}>
+                    {t('travel.common.delete')}
+                  </TravelActionButton>
+                )}
+                {status === 'inactive' && canEdit && (
+                  <TravelActionButton icon={FaRedo} variant="success" onClick={() => handleRestore(employee)}>
+                    {t('employees.actions.restore')}
                   </TravelActionButton>
                 )}
               </div>

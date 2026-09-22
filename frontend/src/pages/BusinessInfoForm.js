@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { updateStoredUser } from '../utils/permissionHelper';
-import { FaBoxOpen, FaPlaneDeparture } from 'react-icons/fa';
+import { FaBoxOpen, FaIndustry, FaPlaneDeparture } from 'react-icons/fa';
 import {
   DEFAULT_ENABLED_MODULES,
   MODULE_KEYS,
@@ -40,6 +40,12 @@ export default function BusinessInfoForm() {
       label: 'business.modules.travel',
       description: 'business.modules.travelDescription',
       icon: FaPlaneDeparture,
+    },
+    {
+      key: MODULE_KEYS.WEAVING,
+      label: 'business.modules.weaving',
+      description: 'business.modules.weavingDescription',
+      icon: FaIndustry,
     },
   ];
 
@@ -140,7 +146,9 @@ export default function BusinessInfoForm() {
 
       alert(t('business.saved'));
 
-      if (defaultModule === MODULE_KEYS.TRAVEL) {
+      if (defaultModule === MODULE_KEYS.WEAVING) {
+        navigate('/weaving/dashboard', { replace: true });
+      } else if (defaultModule === MODULE_KEYS.TRAVEL) {
         navigate('/travel/dashboard', { replace: true });
       } else {
         navigate('/dashboard', { replace: true });

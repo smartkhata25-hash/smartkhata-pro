@@ -7,6 +7,11 @@ import { isModuleEnabled, MODULE_KEYS } from '../utils/moduleConfig';
 import { canAccess } from '../utils/permissionHelper';
 import { travelSidebarItems } from '../components/travel/layout/travelNavigationConfig';
 import { isTravelContext } from '../utils/travelContext';
+import {
+  weavingDashboardItem,
+  weavingSidebarItems,
+} from '../components/weaving/layout/weavingNavigationConfig';
+import { isWeavingContext } from '../utils/weavingContext';
 
 const Sidebar = ({
   isSidebarOpen,
@@ -22,6 +27,7 @@ const Sidebar = ({
   const showTradingShortcuts = isModuleEnabled(user, MODULE_KEYS.TRADING);
 
   const isTravelWorkspace = isTravelContext(location);
+  const isWeavingWorkspace = isWeavingContext(location);
 
   const visibleTravelItems = travelSidebarItems.filter((item) =>
     canAccess({
@@ -31,6 +37,21 @@ const Sidebar = ({
       user,
     })
   );
+
+  const visibleWeavingItems = weavingSidebarItems.filter((item) =>
+    canAccess({
+      permission: item.permission,
+      anyPermissions: item.anyPermissions,
+      moduleKey: item.module,
+      user,
+    })
+  );
+
+  const canViewWeavingDashboard = canAccess({
+    permission: weavingDashboardItem.permission,
+    moduleKey: weavingDashboardItem.module,
+    user,
+  });
 
   if (isTravelWorkspace) {
     return (
@@ -52,6 +73,64 @@ const Sidebar = ({
                 icon={item.icon}
                 setIsSidebarOpen={setIsSidebarOpen}
                 variant="travel"
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isWeavingWorkspace) {
+    return (
+      <div
+        className={`fixed left-0 top-0 z-40 flex h-full w-56 flex-col overflow-y-auto
+        bg-gradient-to-b from-slate-950 via-indigo-950 to-emerald-950 text-white
+        shadow-xl shadow-slate-950/10
+        transform transition-transform duration-300
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:static md:translate-x-0`}
+      >
+        <div className="border-b border-white/10 p-2.5">
+          <div className="flex items-center gap-2">
+            {canViewWeavingDashboard && (
+              <div className="min-w-0 flex-1">
+                <SidebarItem
+                  to={weavingDashboardItem.to}
+                  label={t(weavingDashboardItem.labelKey)}
+                  icon={weavingDashboardItem.icon}
+                  setIsSidebarOpen={setIsSidebarOpen}
+                  variant="weaving"
+                />
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsDesktopSidebarVisible(false)}
+              title="Hide Sidebar"
+              aria-label="Hide Sidebar"
+              className="hidden h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-white/10 text-emerald-50 transition hover:bg-white/15 hover:text-white md:flex"
+            >
+              {isRTL ? (
+                <FaChevronRight aria-hidden="true" className="text-xs" />
+              ) : (
+                <FaChevronLeft aria-hidden="true" className="text-xs" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2.5 py-3">
+          <div className="space-y-1">
+            {visibleWeavingItems.map((item) => (
+              <SidebarItem
+                key={item.key}
+                to={item.to}
+                label={t(item.labelKey)}
+                icon={item.icon}
+                setIsSidebarOpen={setIsSidebarOpen}
+                variant="weaving"
               />
             ))}
           </div>
@@ -139,12 +218,16 @@ const SidebarItem = ({ to, label, icon: Icon = null, setIsSidebarOpen, variant =
       `group flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-semibold
       transition-all duration-200 ${
         isActive
-          ? variant === 'travel'
-            ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-white shadow-md shadow-cyan-950/20'
-            : 'bg-blue-600 text-white'
-          : variant === 'travel'
-            ? 'text-slate-300 hover:bg-white/10 hover:text-white'
-            : 'text-slate-300 hover:bg-slate-700'
+          ? variant === 'weaving'
+            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md shadow-emerald-950/20'
+            : variant === 'travel'
+              ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-white shadow-md shadow-cyan-950/20'
+              : 'bg-blue-600 text-white'
+          : variant === 'weaving'
+            ? 'text-emerald-50/80 hover:bg-white/10 hover:text-white'
+            : variant === 'travel'
+              ? 'text-slate-300 hover:bg-white/10 hover:text-white'
+              : 'text-slate-300 hover:bg-slate-700'
       }`
     }
   >

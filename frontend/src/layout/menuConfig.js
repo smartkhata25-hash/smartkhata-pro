@@ -57,6 +57,13 @@ const menuConfig = [
   },
 
   {
+    label: 'weaving.nav.weaving',
+    path: '/weaving/dashboard',
+    module: MODULE_KEYS.WEAVING,
+    permission: 'weaving.view',
+  },
+
+  {
     label: 'customers',
     sections: [
       {

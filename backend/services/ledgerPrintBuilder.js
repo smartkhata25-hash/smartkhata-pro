@@ -56,6 +56,7 @@ const buildCustomerLedgerPrint = ({
   endDate,
   openingBalance = 0,
   ledger = [],
+  header = null,
 }) => {
   const opening = safeNumber(openingBalance);
 
@@ -88,6 +89,10 @@ const buildCustomerLedgerPrint = ({
 
         credit: credit > 0 ? credit : null,
 
+        moneyIn: credit > 0 ? credit : null,
+
+        moneyOut: debit > 0 ? debit : null,
+
         balance: Number(runningBalance.toFixed(2)),
       });
     }
@@ -100,6 +105,8 @@ const buildCustomerLedgerPrint = ({
 
   return {
     documentTitle: "Customer Ledger",
+
+    header,
 
     customer: {
       name: customerName || "-",
@@ -114,6 +121,8 @@ const buildCustomerLedgerPrint = ({
       opening: Number(opening.toFixed(2)),
       totalDebit: Number(totalDebit.toFixed(2)),
       totalCredit: Number(totalCredit.toFixed(2)),
+      totalMoneyIn: Number(totalCredit.toFixed(2)),
+      totalMoneyOut: Number(totalDebit.toFixed(2)),
       closingBalance: Number(closingBalance.toFixed(2)),
     },
 

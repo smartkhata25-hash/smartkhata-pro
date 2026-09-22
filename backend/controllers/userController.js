@@ -3,6 +3,9 @@ const PrintSetting = require("../models/PrintSetting");
 const { defaultSettings } = require("./printSettingController");
 const { logActivity } = require("../utils/activityLogger");
 const { normalizeModuleConfig } = require("../utils/moduleConfig");
+const { MODULE_SCOPES } = require("../utils/moduleScope");
+const createBaseAccountsForUser = require("../utils/createBaseAccounts");
+const createDefaultExpenseTitlesForUser = require("../utils/createDefaultExpenseTitles");
 
 const ownerOnlyCheck = (req, res) => {
   if (req.user?.accountRole !== "owner") {
@@ -69,6 +72,15 @@ const savePersonalInfo = async (req, res) => {
     user.address = String(address || "").trim();
 
     await user.save();
+
+    if (user.enabledModules?.weaving === true) {
+      await createBaseAccountsForUser(ownerId, {
+        includeWeaving: true,
+      });
+      await createDefaultExpenseTitlesForUser(ownerId, {
+        moduleScope: MODULE_SCOPES.WEAVING,
+      });
+    }
 
     const printSetting = await getOrCreatePrintSetting(ownerId);
 

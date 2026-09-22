@@ -1,0 +1,10 @@
+import axios from 'axios';
+const URL=`${process.env.REACT_APP_API_BASE_URL}/api/weaving/folding`; const cfg=(params)=>({headers:{Authorization:`Bearer ${localStorage.getItem('token')}`},params}); const unwrap=(r)=>r.data?.data??r.data;
+export const getFoldingMeta=async()=>unwrap(await axios.get(`${URL}/meta`,cfg()));
+export const resolveFoldingLoom=async(id)=>unwrap(await axios.get(`${URL}/resolve-loom/${id}`,cfg()));
+export const listFoldingEntries=async(params={})=>unwrap(await axios.get(`${URL}/entries`,cfg(params)));
+export const createFoldingEntry=async(body)=>unwrap(await axios.post(`${URL}/entries`,body,cfg()));
+export const updateFoldingEntry=async(id,body)=>unwrap(await axios.put(`${URL}/entries/${id}`,body,cfg()));
+export const voidFoldingEntry=async(id,reason)=>unwrap(await axios.post(`${URL}/entries/${id}/void`,{reason},cfg()));
+export const getFabricStock=async(params={})=>unwrap(await axios.get(`${URL}/stock`,cfg(params)));
+export const foldingParchiUrl=(params='')=>`${URL}/parchi?${params}`;

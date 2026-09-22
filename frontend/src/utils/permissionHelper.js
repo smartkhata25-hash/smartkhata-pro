@@ -484,6 +484,28 @@ export const FRONTEND_PERMISSIONS = {
     SETTINGS: 'travel.settings',
   },
 
+  WEAVING: {
+    VIEW: 'weaving.view',
+  },
+
+  WEAVING_ATTENDANCE: {
+    VIEW: 'weaving.attendance.view',
+    MANAGE: 'weaving.attendance.manage',
+    OVERRIDE: 'weaving.attendance.override',
+  },
+
+  WEAVING_REPORTS: {
+    VIEW: 'weaving.reports.view',
+    PRODUCTION: 'weaving.reports.production',
+    STOCK: 'weaving.reports.stock',
+    SALES: 'weaving.reports.sales',
+    PROFIT: 'weaving.reports.profit',
+  },
+
+  WEAVING_LOOMS: {
+    VIEW_PERFORMANCE: 'weaving.looms.view_performance',
+  },
+
   REPORTS: {
     DASHBOARD: 'reports.dashboard',
     TRIAL_BALANCE: 'reports.trial_balance',

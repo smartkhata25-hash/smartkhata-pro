@@ -8,10 +8,15 @@ import menuConfig from './menuConfig';
 import { filterMenuConfigByModules } from '../utils/moduleNavigation';
 import { MODULE_KEYS } from '../utils/moduleConfig';
 import { isTravelContext, buildTravelRouteState } from '../utils/travelContext';
+import {
+  weavingSearchConfig,
+  weavingTopMenuConfig,
+} from '../components/weaving/layout/weavingNavigationConfig';
+import { isWeavingContext, buildWeavingRouteState } from '../utils/weavingContext';
 import { getCurrentLanguage, setLanguage } from '../i18n/i18n';
 import { t } from '../i18n/i18n';
 import axios from 'axios';
-import { FaBars, FaBell, FaEllipsisV, FaSyncAlt, FaUserCircle } from 'react-icons/fa';
+import { FaBars, FaBell, FaChevronDown, FaEllipsisV, FaSyncAlt, FaUserCircle } from 'react-icons/fa';
 
 const travelTopMenuConfig = [
   {
@@ -291,8 +296,21 @@ const TopHeader = ({
   const navigate = useNavigate();
   const location = useLocation();
   const isTravelWorkspace = isTravelContext(location);
+  const isWeavingWorkspace = isWeavingContext(location);
+  const workspaceDashboardPath = isWeavingWorkspace
+    ? '/weaving/dashboard'
+    : isTravelWorkspace
+      ? '/travel/dashboard'
+      : '/dashboard';
 
-  const navigateFromHeader = (path, travelPath = null) => {
+  const navigateFromHeader = (path, travelPath = null, weavingPath = null) => {
+    if (isWeavingWorkspace) {
+      navigate(weavingPath || path, {
+        state: buildWeavingRouteState('/weaving/dashboard'),
+      });
+      return;
+    }
+
     if (isTravelWorkspace) {
       navigate(travelPath || path, {
         state: buildTravelRouteState('/travel/dashboard'),
@@ -304,6 +322,16 @@ const TopHeader = ({
   };
 
   const handleBack = () => {
+    if (isWeavingWorkspace && location.state?.returnTo) {
+      navigate(location.state.returnTo);
+      return;
+    }
+
+    if (isWeavingWorkspace && !navigationService.canGoBack()) {
+      navigate('/weaving/dashboard');
+      return;
+    }
+
     if (isTravelWorkspace && location.state?.returnTo) {
       navigate(location.state.returnTo);
       return;
@@ -322,6 +350,7 @@ const TopHeader = ({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = React.useRef(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [openWeavingMobileMenu, setOpenWeavingMobileMenu] = useState('');
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   const alertCount =
@@ -330,7 +359,11 @@ const TopHeader = ({
     (dashboardAlerts?.pendingPayments || 0);
 
   const travelReminderAlertCount = Number(travelReminderSummary?.attentionCount || 0);
-  const visibleAlertCount = isTravelWorkspace ? travelReminderAlertCount : alertCount;
+  const visibleAlertCount = isTravelWorkspace
+    ? travelReminderAlertCount
+    : isWeavingWorkspace
+      ? 0
+      : alertCount;
 
   const [isInstalled, setIsInstalled] = useState(false);
   const [notificationMsg, setNotificationMsg] = useState('');
@@ -340,9 +373,14 @@ const TopHeader = ({
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const visibleMenuConfig = filterMenuConfigByModules(menuConfig, user);
 
-  const activeMenuConfig = isTravelWorkspace
-    ? filterMenuConfigByModules(travelTopMenuConfig, user)
-    : visibleMenuConfig;
+  const activeMenuConfig = isWeavingWorkspace
+    ? filterMenuConfigByModules(weavingTopMenuConfig, user)
+    : isTravelWorkspace
+      ? filterMenuConfigByModules(travelTopMenuConfig, user)
+      : visibleMenuConfig;
+  const visibleWeavingSearchConfig = isWeavingWorkspace
+    ? filterMenuConfigByModules(weavingSearchConfig, user)
+    : [];
 
   const isOwner = (user.accountRole || 'owner') === 'owner';
   const baseUrl = process.env.REACT_APP_API_BASE_URL;
@@ -422,7 +460,12 @@ const TopHeader = ({
     if (e.key === 'Enter' && searchTerm.trim() !== '') {
       const term = searchTerm.toLowerCase();
 
-      if (isTravelWorkspace) {
+      if (isWeavingWorkspace) {
+        const destination = visibleWeavingSearchConfig.find((item) =>
+          item.terms.some((keyword) => term.includes(keyword))
+        );
+        navigate(destination?.path || '/weaving/dashboard');
+      } else if (isTravelWorkspace) {
         if (term.includes('customer')) {
           navigate('/travel/customers');
         } else if (term.includes('vendor') || term.includes('supplier')) {
@@ -485,7 +528,7 @@ const TopHeader = ({
     <div className="relative bg-white border-b shadow-sm px-3 sm:px-6 h-14 flex items-center justify-between">
       {/* LEFT SIDE */}
       <div className="flex items-center gap-3 md:gap-6">
-        {!['/dashboard', '/login', '/', '/personal-info', '/business-info'].includes(
+        {!['/dashboard', '/weaving/dashboard', '/login', '/', '/personal-info', '/business-info'].includes(
           location.pathname
         ) && (
           <button
@@ -539,7 +582,7 @@ const TopHeader = ({
           {/* Logo */}
           <div
             className="hidden md:flex items-center cursor-pointer"
-            onClick={() => navigate(isTravelWorkspace ? '/travel/dashboard' : '/dashboard')}
+            onClick={() => navigate(workspaceDashboardPath)}
           >
             <img src="/logo.png" alt="logo" style={{ height: '35px' }} />
           </div>
@@ -564,29 +607,57 @@ const TopHeader = ({
           {activeMenuConfig.map((menu, index) => (
             <div key={index} className="border-b">
               <div
-                className={`px-4 py-3 font-semibold bg-gray-50 ${
-                  menu.path ? 'cursor-pointer hover:bg-gray-100' : ''
+                className={`flex min-h-12 items-center justify-between gap-3 bg-gray-50 px-4 py-3 font-semibold ${
+                  menu.path || isWeavingWorkspace ? 'cursor-pointer hover:bg-gray-100' : ''
                 }`}
-                role={menu.path ? 'button' : undefined}
-                tabIndex={menu.path ? 0 : undefined}
-                onClick={() => handleMobileMenuPath(menu.path)}
-                onKeyDown={(event) => {
-                  if (menu.path && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
+                role={menu.path || isWeavingWorkspace ? 'button' : undefined}
+                tabIndex={menu.path || isWeavingWorkspace ? 0 : undefined}
+                onClick={() => {
+                  if (menu.path) {
                     handleMobileMenuPath(menu.path);
+                  } else if (isWeavingWorkspace) {
+                    setOpenWeavingMobileMenu((current) =>
+                      current === menu.label ? '' : menu.label
+                    );
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if ((menu.path || isWeavingWorkspace) && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    if (menu.path) {
+                      handleMobileMenuPath(menu.path);
+                    } else {
+                      setOpenWeavingMobileMenu((current) =>
+                        current === menu.label ? '' : menu.label
+                      );
+                    }
                   }
                 }}
               >
-                {t(menu.label)}
+                <span>{t(menu.label)}</span>
+                {!menu.path && isWeavingWorkspace && (
+                  <FaChevronDown
+                    aria-hidden="true"
+                    className={`flex-shrink-0 text-xs transition-transform ${
+                      openWeavingMobileMenu === menu.label ? 'rotate-180' : ''
+                    }`}
+                  />
+                )}
               </div>
 
               {!menu.path &&
+                (!isWeavingWorkspace || openWeavingMobileMenu === menu.label) &&
                 menu.sections?.map((section, sIndex) => (
-                  <div key={sIndex}>
+                  <div key={sIndex} className="border-t border-slate-100 py-1">
+                    {isWeavingWorkspace && (
+                      <div className="px-6 pb-1 pt-2 text-[11px] font-extrabold uppercase text-slate-400">
+                        {t(section.title)}
+                      </div>
+                    )}
                     {section.items?.map((item, iIndex) => (
                       <div
                         key={iIndex}
-                        className="px-6 py-2 text-sm cursor-pointer hover:bg-gray-100"
+                        className="min-h-10 cursor-pointer px-6 py-2 text-sm hover:bg-gray-100"
                         onClick={() => {
                           setShowMobileMenu(false);
                           navigate(item.path);
@@ -649,10 +720,18 @@ const TopHeader = ({
               setIsRightPanelOpen((prev) => !prev);
             }}
             title={
-              isTravelWorkspace ? t('travel.reminders.openCenter') : t('dashboard.togglePanel')
+              isTravelWorkspace
+                ? t('travel.reminders.openCenter')
+                : isWeavingWorkspace
+                  ? t('weaving.layout.toggleRightPanel')
+                  : t('dashboard.togglePanel')
             }
             aria-label={
-              isTravelWorkspace ? t('travel.reminders.openCenter') : t('dashboard.togglePanel')
+              isTravelWorkspace
+                ? t('travel.reminders.openCenter')
+                : isWeavingWorkspace
+                  ? t('weaving.layout.toggleRightPanel')
+                  : t('dashboard.togglePanel')
             }
             role="button"
             tabIndex={0}

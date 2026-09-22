@@ -1,6 +1,15 @@
 const Account = require("../models/Account");
+const { MODULE_SCOPES } = require("./moduleScope");
 
-const createBaseAccountsForUser = async (userId) => {
+const SHARED_PAYMENT_ACCOUNT_CODES = Object.freeze([
+  "HANDCASH",
+  "BANK",
+  "JAZZCASH",
+  "EASYPAISA",
+]);
+
+const createBaseAccountsForUser = async (userId, options = {}) => {
+  const includeWeaving = options.includeWeaving === true;
   const baseAccounts = [
     // 🔒 SYSTEM ACCOUNTS
     {
@@ -234,13 +243,113 @@ const createBaseAccountsForUser = async (userId) => {
     },
 
     {
+      name: "Fabric Sales",
+      type: "Income",
+      category: "sales",
+      code: "WEAVING_FABRIC_SALES",
+      normalBalance: "credit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Conversion / Job Work Income",
+      type: "Income",
+      category: "service",
+      code: "WEAVING_CONVERSION_INCOME",
+      normalBalance: "credit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Other Weaving Income",
+      type: "Income",
+      category: "other_income",
+      code: "WEAVING_OTHER_INCOME",
+      normalBalance: "credit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Sizing Expense",
+      type: "Expense",
+      category: "other_expense",
+      code: "WEAVING_SIZING_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Salary Expense",
+      type: "Expense",
+      category: "salary",
+      code: "WEAVING_SALARY_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Power Expense",
+      type: "Expense",
+      category: "utility",
+      code: "WEAVING_POWER_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Folding Expense",
+      type: "Expense",
+      category: "other_expense",
+      code: "WEAVING_FOLDING_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Maintenance Expense",
+      type: "Expense",
+      category: "maintenance",
+      code: "WEAVING_MAINTENANCE_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Rent Expense",
+      type: "Expense",
+      category: "rent",
+      code: "WEAVING_RENT_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Transport Expense",
+      type: "Expense",
+      category: "transport",
+      code: "WEAVING_TRANSPORT_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+    {
+      name: "Other Expense",
+      type: "Expense",
+      category: "other_expense",
+      code: "WEAVING_OTHER_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: MODULE_SCOPES.WEAVING,
+    },
+
+    {
       name: "HANDCASH",
       type: "Asset",
       category: "cash",
       code: "HANDCASH",
       normalBalance: "debit",
       isSystem: false,
-      moduleScope: "both",
+      moduleScope: MODULE_SCOPES.SHARED,
     },
     {
       name: "BANK",
@@ -249,7 +358,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "BANK",
       normalBalance: "debit",
       isSystem: false,
-      moduleScope: "both",
+      moduleScope: MODULE_SCOPES.SHARED,
     },
     {
       name: "JAZZCASH",
@@ -258,7 +367,7 @@ const createBaseAccountsForUser = async (userId) => {
       code: "JAZZCASH",
       normalBalance: "debit",
       isSystem: false,
-      moduleScope: "both",
+      moduleScope: MODULE_SCOPES.SHARED,
     },
     {
       name: "EASYPAISA",
@@ -267,12 +376,18 @@ const createBaseAccountsForUser = async (userId) => {
       code: "EASYPAISA",
       normalBalance: "debit",
       isSystem: false,
-      moduleScope: "both",
+      moduleScope: MODULE_SCOPES.SHARED,
     },
   ];
 
   for (const acc of baseAccounts) {
-    const isSharedPaymentAccount = acc.moduleScope === "both";
+    if (acc.moduleScope === MODULE_SCOPES.WEAVING && !includeWeaving) {
+      continue;
+    }
+
+    const isSharedPaymentAccount = SHARED_PAYMENT_ACCOUNT_CODES.includes(
+      acc.code,
+    );
 
     await Account.findOneAndUpdate(
       {
@@ -298,7 +413,7 @@ const createBaseAccountsForUser = async (userId) => {
         ...(isSharedPaymentAccount
           ? {
               $set: {
-                moduleScope: "both",
+                moduleScope: MODULE_SCOPES.SHARED,
               },
             }
           : {}),

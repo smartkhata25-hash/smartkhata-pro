@@ -31,19 +31,25 @@ const isTravelExpenseScope = (value) => {
   return scope === 'travel' || scope === 'both';
 };
 
-const clearTravelExpenseCaches = () => {
-  clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
-  clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
+const clearExpenseCaches = (moduleScope) => {
   clearAccountsCache();
+
+  if (isTravelExpenseScope(moduleScope)) {
+    clearTravelCacheDomain(TRAVEL_CACHE_DOMAINS.DASHBOARD);
+    clearTravelCacheDomainPrefix(TRAVEL_CACHE_DOMAINS.REPORTS);
+  }
 };
 
 // ✅ Create New Expense
-export async function createExpense(formData) {
-  const response = await axios.post(API_URL, formData, getConfig());
+export async function createExpense(formData, options = {}) {
+  const moduleScope = options.moduleScope || getFormValue(formData, 'moduleScope');
+  const response = await axios.post(
+    API_URL,
+    formData,
+    getConfig(moduleScope ? { moduleScope } : {})
+  );
 
-  if (isTravelExpenseScope(getFormValue(formData, 'moduleScope'))) {
-    clearTravelExpenseCaches();
-  }
+  clearExpenseCaches(moduleScope);
 
   return response.data;
 }
@@ -54,23 +60,26 @@ export async function getAllExpenses(params = {}) {
   return Array.isArray(response.data) ? response.data : [];
 }
 
-export async function getExpenseById(id) {
+export async function getExpenseById(id, params = {}) {
   if (!id) {
     throw new Error('Expense ID is required');
   }
 
-  const response = await axios.get(`${API_URL}/${id}`, getConfig());
+  const response = await axios.get(`${API_URL}/${id}`, getConfig(params));
 
   return response.data || null;
 }
 
 // ✅ Update Expense
-export async function updateExpense(id, formData) {
-  const response = await axios.put(`${API_URL}/${id}`, formData, getConfig());
+export async function updateExpense(id, formData, options = {}) {
+  const moduleScope = options.moduleScope || getFormValue(formData, 'moduleScope');
+  const response = await axios.put(
+    `${API_URL}/${id}`,
+    formData,
+    getConfig(moduleScope ? { moduleScope } : {})
+  );
 
-  if (isTravelExpenseScope(getFormValue(formData, 'moduleScope'))) {
-    clearTravelExpenseCaches();
-  }
+  clearExpenseCaches(moduleScope);
 
   return response.data;
 }
@@ -79,9 +88,7 @@ export async function updateExpense(id, formData) {
 export async function deleteExpense(id, options = {}) {
   const response = await axios.delete(`${API_URL}/${id}`, getConfig(options));
 
-  if (isTravelExpenseScope(options.moduleScope || options.scope)) {
-    clearTravelExpenseCaches();
-  }
+  clearExpenseCaches(options.moduleScope || options.scope);
 
   return response.data;
 }

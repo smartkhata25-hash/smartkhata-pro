@@ -1,0 +1,13 @@
+const express=require("express"); const ctrl=require("../controllers/weavingFoldingController"); const protect=require("../middleware/authMiddleware"); const {requireModule}=require("../middleware/moduleMiddleware"); const {requirePermission}=require("../middleware/permissionMiddleware"); const {MODULE_KEYS}=require("../utils/moduleConfig");
+const router=express.Router();
+router.get("/parchi",(req,res,next)=>{if(req.query.token&&!req.headers.authorization)req.headers.authorization=`Bearer ${req.query.token}`;return next();},protect,requireModule(MODULE_KEYS.WEAVING),requirePermission("weaving.folding.print"),ctrl.parchi);
+router.use(protect,requireModule(MODULE_KEYS.WEAVING));
+router.get("/meta",requirePermission("weaving.folding.view"),ctrl.meta);
+router.get("/resolve-loom/:loomId",requirePermission("weaving.folding.view"),ctrl.resolveLoom);
+router.get("/entries",requirePermission("weaving.folding.view"),ctrl.list);
+router.post("/entries",requirePermission("weaving.folding.create"),ctrl.create);
+router.put("/entries/:id",requirePermission("weaving.folding.edit"),ctrl.update);
+router.post("/entries/:id/void",requirePermission("weaving.folding.void"),ctrl.voidEntry);
+router.get("/stock",requirePermission("weaving.fabric_stock.view"),ctrl.stock);
+router.get("/production",requirePermission("weaving.folding.view"),ctrl.production);
+module.exports=router;

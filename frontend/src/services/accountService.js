@@ -9,7 +9,9 @@ const PAYMENT_ACCOUNT_CACHE_PREFIX = 'payment_accounts_cache_v2';
 const MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
   TRAVEL: 'travel',
+  WEAVING: 'weaving',
   BOTH: 'both',
+  SHARED: 'shared',
 });
 
 const getToken = () => localStorage.getItem('token');

@@ -1,4 +1,8 @@
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 
 // 📁 templates/partyLedgerTemplate.js
 
@@ -46,6 +50,7 @@ const generatePartyLedgerHTML = (data, pageSize = "A5") => {
     period = {},
     summary = {},
     rows = [],
+    header: businessHeader = null,
   } = data || {};
 
   const safePageSize = pageSize === "A4" ? "A4" : "A5";
@@ -85,6 +90,8 @@ body {
   width: 100%;
   margin: 0;
 }
+
+${ledgerBusinessHeaderStyles}
 
 .header {
   text-align: center;
@@ -197,9 +204,9 @@ td.left {
 <body>
 <div class="container">
 
-  <div class="header">
+  ${renderLedgerBusinessHeader(businessHeader)}
 
-    <h2>${escapeHtml(title)}</h2>
+  <div class="header">
 
     <div class="sub-info">
 

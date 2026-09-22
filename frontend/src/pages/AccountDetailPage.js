@@ -19,12 +19,21 @@ const AccountDetailPage = () => {
 
   const pathname = location.pathname;
   const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const isCashView = pathname === '/accounts/cash' || pathname === '/travel/accounts/cash';
-  const isBankView = pathname === '/accounts/bank' || pathname === '/travel/accounts/bank';
+  const isCashView =
+    pathname === '/accounts/cash' ||
+    pathname === '/travel/accounts/cash' ||
+    pathname === '/weaving/accounts/cash';
+  const isBankView =
+    pathname === '/accounts/bank' ||
+    pathname === '/travel/accounts/bank' ||
+    pathname === '/weaving/accounts/bank';
   const isTravelScoped =
     pathname.startsWith('/travel/accounts') || queryParams.get('moduleScope') === 'travel';
-  const moduleScope = isTravelScoped ? 'travel' : 'trading';
+  const isWeavingScoped =
+    pathname.startsWith('/weaving/accounts') || queryParams.get('moduleScope') === 'weaving';
+  const moduleScope = isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading';
   const requestedAccountId = queryParams.get('accountId') || '';
+  const bankAccountCategories = useMemo(() => new Set(['bank', 'online', 'cheque', 'wallet']), []);
 
   useEffect(() => {
     if (!canViewAccountTransactions) {
@@ -50,8 +59,8 @@ const AccountDetailPage = () => {
   }, []);
 
   const getTxnCacheKey = useCallback(
-    (accountId) => `${isTravelScoped ? 'travel' : 'all'}:${accountId}`,
-    [isTravelScoped]
+    (accountId) => `${moduleScope}:${accountId}`,
+    [moduleScope]
   );
 
   const buildAccountState = useCallback(
@@ -193,6 +202,29 @@ const AccountDetailPage = () => {
           return;
         }
 
+        if (isCashView && isWeavingScoped) {
+          const all = await getAccounts(true, { moduleScope });
+          const cashAccounts = all.filter((account) => account.category === 'cash');
+
+          if (!cashAccounts.length) {
+            alert(t('alerts.cashAccountNotFound'));
+            return;
+          }
+
+          const selectedCash = requestedAccountId
+            ? cashAccounts.find((account) => String(account._id) === String(requestedAccountId))
+            : cashAccounts[0];
+
+          if (!selectedCash) {
+            alert(t('alerts.cashAccountNotFound'));
+            return;
+          }
+
+          setAccounts(cashAccounts);
+          await loadSingleAccount(selectedCash);
+          return;
+        }
+
         if (isCashView) {
           if (requestedAccountId) {
             const all = await getAccounts(true, { moduleScope });
@@ -225,8 +257,8 @@ const AccountDetailPage = () => {
         if (isBankView) {
           const all = await getAccounts(true, { moduleScope });
 
-          const bankAccounts = all.filter(
-            (a) => a.category === 'bank' || a.category === 'online' || a.category === 'wallet'
+          const bankAccounts = all.filter((account) =>
+            bankAccountCategories.has(String(account.category || '').trim().toLowerCase())
           );
 
           const txnResults = await Promise.all(
@@ -317,6 +349,8 @@ const AccountDetailPage = () => {
     getSafeBalance,
     getTxnCacheKey,
     isTravelScoped,
+    isWeavingScoped,
+    bankAccountCategories,
     moduleScope,
     requestedAccountId,
   ]);
@@ -364,6 +398,7 @@ const AccountDetailPage = () => {
           isCashView={isCashView}
           isBankView={isBankView}
           isTravelScoped={isTravelScoped}
+          isWeavingScoped={isWeavingScoped}
         />
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">

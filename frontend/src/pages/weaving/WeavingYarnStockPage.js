@@ -1,0 +1,61 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { FaBoxes, FaExchangeAlt, FaEye, FaHistory, FaIndustry, FaRecycle, FaSearch, FaSpinner, FaTimes } from 'react-icons/fa';
+import { RewinderRecoveryModal, StockHistoryModal, YarnTransferModal } from '../../components/weaving/StockControlModals';
+import WeftConsumptionModal from '../../components/weaving/WeftConsumptionModal';
+import { t } from '../../i18n/i18n';
+import { getWeftConsumptionMeta, getYarnStockLedger, getYarnStockSummary } from '../../services/weavingYarnStockService';
+import { getStockControlHistory, getStockControlMeta } from '../../services/weavingStockControlService';
+import { hasPermission } from '../../utils/permissionHelper';
+
+const number = (value) => Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 3 });
+const control = 'h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
+
+export default function WeavingYarnStockPage() {
+  const [params, setParams] = useSearchParams();
+  const [data, setData] = useState({ items: [], totals: {}, filters: { godowns: [] } });
+  const [filters, setFilters] = useState({ search: '', godownId: '', ownershipType: '' });
+  const [loading, setLoading] = useState(true); const [detail, setDetail] = useState(null); const [ledger, setLedger] = useState(null); const [tab, setTab] = useState('godowns');
+  const [modal, setModal] = useState(''); const [meta, setMeta] = useState({ yarns: [], godowns: [], parties: [], suppliers: [] }); const [history, setHistory] = useState([]);
+  const canTransfer = hasPermission('weaving.yarn_stock.transfer'); const canRecover = hasPermission('weaving.yarn_stock.rewinder_recovery'); const canConsume = hasPermission('weaving.yarn_stock.consume'); const canReverse = hasPermission('weaving.stock_adjustment.reverse');
+  const load = useCallback(async () => { setLoading(true); try { setData(await getYarnStockSummary(filters)); } finally { setLoading(false); } }, [filters]);
+  useEffect(() => { const timer = setTimeout(load, 250); return () => clearTimeout(timer); }, [load]);
+  const view = async (row) => { setDetail(row); setLedger(null); setTab('godowns'); try { setLedger(await getYarnStockLedger(row.yarn._id, { godownId: filters.godownId, ownershipType: filters.ownershipType })); } catch { setLedger({ rows: [] }); } };
+  useEffect(() => {
+    const yarnId = params.get('yarnId');
+    if (!yarnId || detail || !data.items?.length) return;
+    const selected = data.items.find((row) => String(row.yarn?._id) === yarnId);
+    if (selected) view(selected);
+  }, [data.items, detail, params]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openAction = useCallback(async (type) => { if (type === 'history') setHistory(await getStockControlHistory('yarn')); else if (type === 'consumption') setMeta(await getWeftConsumptionMeta()); else setMeta(await getStockControlMeta()); setModal(type); }, []);
+  const closeAction = useCallback(() => { setModal(''); if (params.has('action')) { const next = new URLSearchParams(params); next.delete('action'); setParams(next, { replace: true }); } }, [params, setParams]);
+  useEffect(() => {
+    const requestedAction = params.get('action');
+    const canOpen = requestedAction === 'transfer'
+      ? canTransfer
+      : requestedAction === 'recovery'
+        ? canRecover
+        : requestedAction === 'consumption'
+          ? canConsume
+          : false;
+    if (canOpen) openAction(requestedAction);
+  }, [canConsume, canRecover, canTransfer, openAction, params]);
+  const completed = async () => { closeAction(); await load(); };
+  const historyChanged = async () => { setHistory(await getStockControlHistory('yarn')); await load(); };
+  return <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-teal-50/50 p-3 sm:p-5 lg:p-6">
+    <div className="mx-auto max-w-[1600px] space-y-5"><header className="flex flex-wrap items-center gap-3"><div className="mr-auto"><h1 className="text-2xl font-black text-slate-900">{t('weaving.yarnStock.title')}</h1><p className="mt-1 text-sm text-slate-500">{t('weaving.yarnStock.subtitle')}</p></div>{canConsume && <button type="button" onClick={() => openAction('consumption')} className="inline-flex h-10 items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-bold text-white hover:bg-slate-800"><FaIndustry />{t('weaving.yarnStock.weftConsumption')}</button>}{canTransfer && <button type="button" onClick={() => openAction('transfer')} className="inline-flex h-10 items-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-bold text-white hover:bg-teal-800"><FaExchangeAlt />{t('weaving.stock.transferYarn')}</button>}{canRecover && <button type="button" onClick={() => openAction('recovery')} className="inline-flex h-10 items-center gap-2 rounded-md bg-indigo-700 px-4 text-sm font-bold text-white hover:bg-indigo-800"><FaRecycle />{t('weaving.stock.rewinderRecovery')}</button>}<button type="button" onClick={() => openAction('history')} className="inline-flex h-10 items-center gap-2 rounded-md border bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><FaHistory />{t('weaving.stock.history')}</button><span className="grid h-11 w-11 place-items-center rounded-lg bg-teal-700 text-white"><FaBoxes/></span></header>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[['totalKg','total'],['ownKg','own'],['partyKg','party']].map(([key,label]) => <div key={key} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"><div className="text-xs font-bold uppercase text-slate-500">{t(`weaving.yarnStock.cards.${label}`)}</div><div className="mt-1 text-2xl font-black text-slate-900">{number(data.totals?.[key])} KG</div></div>)}</section>
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap gap-3 border-b p-4"><label className="relative min-w-[220px] flex-1"><FaSearch className="absolute left-3 top-3 text-slate-400"/><input className={`${control} w-full pl-9`} value={filters.search} onChange={(e) => setFilters({...filters,search:e.target.value})} placeholder={t('weaving.yarnStock.search')}/></label><select className={control} value={filters.godownId} onChange={(e) => setFilters({...filters,godownId:e.target.value})}><option value="">{t('weaving.yarnStock.allGodowns')}</option>{data.filters?.godowns?.map((row) => <option key={row._id} value={row._id}>{row.name}</option>)}</select><select className={control} value={filters.ownershipType} onChange={(e) => setFilters({...filters,ownershipType:e.target.value})}><option value="">{t('weaving.yarnStock.allOwnership')}</option><option value="own">{t('weaving.yarnStock.own')}</option><option value="party">{t('weaving.yarnStock.party')}</option></select></div>
+        <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-slate-900 text-left text-xs uppercase text-white"><tr><th className="px-4 py-3">{t('weaving.yarnStock.yarn')}</th><th className="px-4 py-3">{t('weaving.yarnStock.countQuality')}</th><th className="px-4 py-3 text-right">{t('weaving.yarnStock.own')}</th><th className="px-4 py-3 text-right">{t('weaving.yarnStock.party')}</th><th className="px-4 py-3 text-right">{t('weaving.yarnStock.total')}</th><th className="px-4 py-3 text-center">{t('weaving.yarnStock.godowns')}</th><th className="px-4 py-3 text-right">{t('weaving.yarnStock.action')}</th></tr></thead><tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan="7" className="p-10 text-center"><FaSpinner className="mx-auto animate-spin text-teal-600"/></td></tr> : data.items?.length ? data.items.map((row) => <tr key={row.yarn._id} className="hover:bg-slate-50"><td className="px-4 py-3"><div className="font-bold text-slate-900">{row.yarn.name}</div><div className="text-xs text-slate-500">{row.yarn.millBrand || '-'}</div></td><td className="px-4 py-3">{[row.yarn.count,row.yarn.quality].filter(Boolean).join(' / ')}</td><td className="px-4 py-3 text-right font-semibold text-emerald-700">{number(row.ownKg)} KG</td><td className="px-4 py-3 text-right font-semibold text-indigo-700">{number(row.partyKg)} KG</td><td className="px-4 py-3 text-right font-black">{number(row.totalKg)} KG</td><td className="px-4 py-3 text-center">{row.godownCount}</td><td className="px-4 py-3 text-right"><button title={t('weaving.yarnStock.view')} onClick={() => view(row)} className="rounded-md p-2 text-teal-700 hover:bg-teal-50"><FaEye/></button></td></tr>) : <tr><td colSpan="7" className="p-10 text-center text-slate-500">{t('weaving.yarnStock.empty')}</td></tr>}</tbody></table></div></section>
+    </div>
+    {detail && <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40"><aside className="h-full w-full max-w-4xl overflow-y-auto bg-white shadow-2xl"><header className="sticky top-0 z-10 flex items-start justify-between border-b bg-white p-5"><div><h2 className="text-xl font-black">{detail.yarn.name}</h2><p className="text-sm text-slate-500">{[detail.yarn.count,detail.yarn.quality,detail.yarn.millBrand].filter(Boolean).join(' · ')}</p><div className="mt-2 text-lg font-black text-teal-700">{number(detail.totalKg)} KG</div></div><button onClick={() => setDetail(null)} className="p-2"><FaTimes/></button></header><div className="p-5"><div className="mb-4 flex border-b">{['godowns','ownership','ledger'].map((name) => <button key={name} onClick={() => setTab(name)} className={`px-4 py-3 text-sm font-bold ${tab===name?'border-b-2 border-teal-600 text-teal-700':'text-slate-500'}`}>{t(`weaving.yarnStock.tabs.${name}`)}</button>)}</div>
+      {tab==='godowns' && <div className="grid gap-3 sm:grid-cols-2">{detail.godownBreakdown.map((row) => <div key={row.godownId} className="rounded-lg border p-4"><div className="font-black">{row.godownName}</div><div className="mt-3 grid grid-cols-3 text-sm"><span>{t('weaving.yarnStock.own')}<b className="block">{number(row.ownKg)} KG</b></span><span>{t('weaving.yarnStock.party')}<b className="block">{number(row.partyKg)} KG</b></span><span>{t('weaving.yarnStock.total')}<b className="block">{number(row.totalKg)} KG</b></span></div></div>)}</div>}
+      {tab==='ownership' && <div className="space-y-2">{detail.ownershipBreakdown.map((row) => <div key={`${row.ownershipType}-${row.ownerPartyId}`} className="flex justify-between rounded-lg border p-4"><b>{row.ownerName}</b><b>{number(row.kg)} KG</b></div>)}</div>}
+      {tab==='ledger' && <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-slate-100 text-left text-xs uppercase text-slate-600"><tr><th className="p-3">{t('weaving.yarnStock.date')}</th><th className="p-3">{t('weaving.yarnStock.type')}</th><th className="p-3">{t('weaving.yarnStock.reference')}</th><th className="p-3">{t('weaving.yarnStock.godown')}</th><th className="p-3 text-right">{t('weaving.yarnStock.in')}</th><th className="p-3 text-right">{t('weaving.yarnStock.out')}</th><th className="p-3 text-right">{t('weaving.yarnStock.balance')}</th></tr></thead><tbody className="divide-y">{ledger?.rows?.map((row) => <tr key={`${row._id}-${row.type}`}><td className="p-3">{String(row.date).slice(0,10)}</td><td className="p-3 font-semibold">{row.typeLabel}<div className="text-xs font-normal text-slate-500">{row.ownerName}</div></td><td className="p-3">{row.reference}</td><td className="p-3">{row.godownName}</td><td className="p-3 text-right text-emerald-700">{row.inKg?number(row.inKg):'-'}</td><td className="p-3 text-right text-rose-700">{row.outKg?number(row.outKg):'-'}</td><td className="p-3 text-right font-bold">{number(row.runningBalance)}</td></tr>)}</tbody></table></div>}
+    </div></aside></div>}
+    {modal === 'transfer' && <YarnTransferModal stockRows={data.stockRows} meta={meta} onClose={closeAction} onDone={completed} />}
+    {modal === 'recovery' && <RewinderRecoveryModal meta={meta} onClose={closeAction} onDone={completed} />}
+    {modal === 'consumption' && <WeftConsumptionModal meta={meta} onClose={closeAction} onDone={completed} />}
+    {modal === 'history' && <StockHistoryModal rows={history} canReverse={canReverse} onClose={closeAction} onChanged={historyChanged} />}
+  </div>;
+}

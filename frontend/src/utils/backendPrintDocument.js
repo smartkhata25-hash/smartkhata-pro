@@ -90,6 +90,25 @@ export const openBackendPrintWindow = async ({ url, method = 'GET', body }) => {
   }
 };
 
+export const openBackendPreviewWindow = async ({ url, method = 'GET', body }) => {
+  const previewWindow = window.open('', '_blank');
+
+  if (!previewWindow) {
+    throw new Error('Print window blocked');
+  }
+
+  try {
+    const html = await fetchBackendPrintHtml(url, { method, body });
+
+    previewWindow.document.open();
+    previewWindow.document.write(html);
+    previewWindow.document.close();
+  } catch (error) {
+    previewWindow.close();
+    throw error;
+  }
+};
+
 export const downloadBackendPdf = async ({ url, method = 'GET', body, fileName }) => {
   const hasBody = body !== undefined;
 

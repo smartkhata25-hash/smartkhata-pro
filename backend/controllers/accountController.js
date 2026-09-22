@@ -3,6 +3,9 @@ const mongoose = require("mongoose");
 const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const ACCOUNT_RULES = require("../utils/accountRules");
+const { recalculateAccountBalances } = require("../utils/accountHelper");
+const { isPeriodLocked } = require("../utils/periodLockHelper");
+const { logAudit } = require("../utils/auditHelper");
 const {
   MODULE_SCOPES,
   applyModuleScopeFilter,
@@ -30,6 +33,9 @@ const WEAVING_ACCOUNT_TRANSFER_ORIGIN = "weaving_account_transfer";
 const TRADING_ACCOUNT_ADJUSTMENT_ORIGIN = "account_adjustment";
 const TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN = "travel_account_adjustment";
 const WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN = "weaving_account_adjustment";
+const TRADING_OWNER_MONEY_ORIGIN = "owner_money";
+const TRAVEL_OWNER_MONEY_ORIGIN = "travel_owner_money";
+const WEAVING_OWNER_MONEY_ORIGIN = "weaving_owner_money";
 
 const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   "travel_invoice",
@@ -41,6 +47,7 @@ const TRAVEL_ACCOUNT_ORIGINS = Object.freeze([
   TRAVEL_ACCOUNT_OPENING_ORIGIN,
   TRAVEL_ACCOUNT_TRANSFER_ORIGIN,
   TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN,
+  TRAVEL_OWNER_MONEY_ORIGIN,
   ...TRAVEL_EMPLOYEE_ORIGIN_VALUES,
   ...TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 ]);
@@ -62,6 +69,7 @@ const WEAVING_ACCOUNT_ORIGINS = Object.freeze([
   WEAVING_ACCOUNT_OPENING_ORIGIN,
   WEAVING_ACCOUNT_TRANSFER_ORIGIN,
   WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN,
+  WEAVING_OWNER_MONEY_ORIGIN,
 ]);
 
 const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze([
@@ -96,6 +104,12 @@ const RESERVED_BALANCING_ACCOUNT_CODES = Object.freeze([
   "ACCOUNT_ADJUSTMENT",
   "TRAVEL_ACCOUNT_ADJUSTMENT",
   "WEAVING_ACCOUNT_ADJUSTMENT",
+  "OWNER_CAPITAL",
+  "TRAVEL_OWNER_CAPITAL",
+  "WEAVING_OWNER_CAPITAL",
+  "OWNER_DRAWINGS",
+  "TRAVEL_OWNER_DRAWINGS",
+  "WEAVING_OWNER_DRAWINGS",
 ]);
 
 const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
@@ -300,7 +314,9 @@ const parseAmount = (value, { allowZero = false, label = "Amount" } = {}) => {
 
   if (!Number.isFinite(amount) || amount < 0 || (!allowZero && amount <= 0)) {
     throw makeHttpError(
-      allowZero ? `${label} must be 0 or greater.` : `${label} must be greater than 0.`,
+      allowZero
+        ? `${label} must be 0 or greater.`
+        : `${label} must be greater than 0.`,
       400,
     );
   }
@@ -309,7 +325,9 @@ const parseAmount = (value, { allowZero = false, label = "Amount" } = {}) => {
 };
 
 const getJournalContextScope = (scope) => {
-  const cleanScope = String(scope || "").trim().toLowerCase();
+  const cleanScope = String(scope || "")
+    .trim()
+    .toLowerCase();
 
   if (
     cleanScope === "all" ||
@@ -355,7 +373,9 @@ const isManualAdjustmentAccount = (account) =>
   isBalanceSheetAccountType(account?.type) &&
   !ADJUSTMENT_EXCLUDED_CATEGORIES.includes(account.category) &&
   !RESERVED_BALANCING_ACCOUNT_CODES.includes(
-    String(account.code || "").trim().toUpperCase(),
+    String(account.code || "")
+      .trim()
+      .toUpperCase(),
   ) &&
   !isCounterpartyAccountName(account.name);
 
@@ -365,6 +385,7 @@ const getManualAccountOrigin = (scope, action) => {
       opening: TRAVEL_ACCOUNT_OPENING_ORIGIN,
       transfer: TRAVEL_ACCOUNT_TRANSFER_ORIGIN,
       adjustment: TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN,
+      owner: TRAVEL_OWNER_MONEY_ORIGIN,
     }[action];
   }
 
@@ -373,6 +394,7 @@ const getManualAccountOrigin = (scope, action) => {
       opening: WEAVING_ACCOUNT_OPENING_ORIGIN,
       transfer: WEAVING_ACCOUNT_TRANSFER_ORIGIN,
       adjustment: WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN,
+      owner: WEAVING_OWNER_MONEY_ORIGIN,
     }[action];
   }
 
@@ -380,6 +402,7 @@ const getManualAccountOrigin = (scope, action) => {
     opening: TRADING_ACCOUNT_OPENING_ORIGIN,
     transfer: TRADING_ACCOUNT_TRANSFER_ORIGIN,
     adjustment: TRADING_ACCOUNT_ADJUSTMENT_ORIGIN,
+    owner: TRADING_OWNER_MONEY_ORIGIN,
   }[action];
 };
 
@@ -391,43 +414,109 @@ const getAdjustmentSourceType = (scope) =>
 
 const getSystemAccountConfig = (scope, purpose) => {
   if (scope === MODULE_SCOPES.TRAVEL) {
+    if (purpose === "capital") {
+      return {
+        code: "TRAVEL_OWNER_CAPITAL",
+        name: "Travel Owner Capital",
+        moduleScope: MODULE_SCOPES.TRAVEL,
+        category: "capital",
+        normalBalance: "credit",
+      };
+    }
+    if (purpose === "drawings") {
+      return {
+        code: "TRAVEL_OWNER_DRAWINGS",
+        name: "Travel Owner Drawings",
+        moduleScope: MODULE_SCOPES.TRAVEL,
+        category: "drawings",
+        normalBalance: "debit",
+      };
+    }
     return purpose === "adjustment"
       ? {
           code: "TRAVEL_ACCOUNT_ADJUSTMENT",
           name: "Travel Account Adjustment",
           moduleScope: MODULE_SCOPES.TRAVEL,
+          category: "other",
+          normalBalance: "credit",
         }
       : {
           code: "TRAVEL_OPENING_BALANCE",
           name: "Travel Opening Balance",
           moduleScope: MODULE_SCOPES.TRAVEL,
+          category: "other",
+          normalBalance: "credit",
         };
   }
 
   if (scope === MODULE_SCOPES.WEAVING) {
+    if (purpose === "capital") {
+      return {
+        code: "WEAVING_OWNER_CAPITAL",
+        name: "Weaving Owner Capital",
+        moduleScope: MODULE_SCOPES.WEAVING,
+        category: "capital",
+        normalBalance: "credit",
+      };
+    }
+    if (purpose === "drawings") {
+      return {
+        code: "WEAVING_OWNER_DRAWINGS",
+        name: "Weaving Owner Drawings",
+        moduleScope: MODULE_SCOPES.WEAVING,
+        category: "drawings",
+        normalBalance: "debit",
+      };
+    }
     return purpose === "adjustment"
       ? {
           code: "WEAVING_ACCOUNT_ADJUSTMENT",
           name: "Weaving Account Adjustment",
           moduleScope: MODULE_SCOPES.WEAVING,
+          category: "other",
+          normalBalance: "credit",
         }
       : {
           code: "WEAVING_OPENING_BALANCE",
           name: "Weaving Opening Balance",
           moduleScope: MODULE_SCOPES.WEAVING,
+          category: "other",
+          normalBalance: "credit",
         };
   }
 
+  if (purpose === "capital") {
+    return {
+      code: "OWNER_CAPITAL",
+      name: "Owner Capital",
+      moduleScope: MODULE_SCOPES.TRADING,
+      category: "capital",
+      normalBalance: "credit",
+    };
+  }
+  if (purpose === "drawings") {
+    return {
+      code: "OWNER_DRAWINGS",
+      name: "Owner Drawings",
+      moduleScope: MODULE_SCOPES.TRADING,
+      category: "drawings",
+      normalBalance: "debit",
+    };
+  }
   return purpose === "adjustment"
     ? {
         code: "ACCOUNT_ADJUSTMENT",
         name: "Account Adjustment",
         moduleScope: MODULE_SCOPES.TRADING,
+        category: "other",
+        normalBalance: "credit",
       }
     : {
         code: "OPENING_BALANCE",
         name: "opening balance equity",
         moduleScope: MODULE_SCOPES.TRADING,
+        category: "other",
+        normalBalance: "credit",
       };
 };
 
@@ -439,14 +528,17 @@ const getOrCreateSystemAccount = async ({ userId, scope, purpose }) => {
     code: config.code,
   });
 
+  const targetCategory = config.category || "other";
+  const targetNormalBalance = config.normalBalance || "credit";
+
   if (!account) {
     return Account.create({
       userId: userObjectId,
       name: config.name,
       type: "Equity",
-      category: "other",
+      category: targetCategory,
       code: config.code,
-      normalBalance: "credit",
+      normalBalance: targetNormalBalance,
       openingBalance: 0,
       isSystem: true,
       isActive: true,
@@ -473,13 +565,13 @@ const getOrCreateSystemAccount = async ({ userId, scope, purpose }) => {
     changed = true;
   }
 
-  if (account.category !== "other") {
-    account.category = "other";
+  if (account.category !== targetCategory) {
+    account.category = targetCategory;
     changed = true;
   }
 
-  if (account.normalBalance !== "credit") {
-    account.normalBalance = "credit";
+  if (account.normalBalance !== targetNormalBalance) {
+    account.normalBalance = targetNormalBalance;
     changed = true;
   }
 
@@ -642,16 +734,19 @@ const syncManualAccountOpeningBalance = async ({
     );
   }
 
-  await JournalEntry.updateMany(getManualOpeningQuery({
-    accountId: account._id,
-    userId,
-    scope,
-  }), {
-    $set: {
-      isDeleted: true,
-      note: "Retired after manual account opening balance update",
+  await JournalEntry.updateMany(
+    getManualOpeningQuery({
+      accountId: account._id,
+      userId,
+      scope,
+    }),
+    {
+      $set: {
+        isDeleted: true,
+        note: "Retired after manual account opening balance update",
+      },
     },
-  });
+  );
 
   if (normalizedAmount <= 0 || !isBalanceSheetAccountType(account.type)) {
     return null;
@@ -806,7 +901,10 @@ exports.createAccount = async (req, res) => {
     assertScopeEnabled(req, accessScope);
     assertScopeEnabled(req, moduleScope);
 
-    if (accessScope === MODULE_SCOPES.WEAVING && moduleScope !== MODULE_SCOPES.WEAVING) {
+    if (
+      accessScope === MODULE_SCOPES.WEAVING &&
+      moduleScope !== MODULE_SCOPES.WEAVING
+    ) {
       return res.status(403).json({
         message: "New accounts created from Weaving must use Weaving scope.",
       });
@@ -825,7 +923,8 @@ exports.createAccount = async (req, res) => {
 
     if (openingBalance > 0 && !isBalanceSheetAccountType(type)) {
       return res.status(400).json({
-        message: "Opening Balance is only allowed for Asset, Liability and Equity accounts.",
+        message:
+          "Opening Balance is only allowed for Asset, Liability and Equity accounts.",
       });
     }
 
@@ -838,7 +937,7 @@ exports.createAccount = async (req, res) => {
       category,
       userId,
       moduleScope,
-      normalBalance: rule.normalBalance,
+      normalBalance: ACCOUNT_RULES.getNormalBalance(type, category),
       openingBalance,
     });
 
@@ -983,9 +1082,7 @@ exports.updateAccount = async (req, res) => {
 
     if (
       accessScope === MODULE_SCOPES.WEAVING &&
-      ![MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(
-        nextModuleScope,
-      )
+      ![MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(nextModuleScope)
     ) {
       return res.status(403).json({
         message: "Weaving accounts cannot modify Trading or Travel accounts.",
@@ -1015,11 +1112,17 @@ exports.updateAccount = async (req, res) => {
     account.code = nextCode;
     account.category = nextCategory;
     account.moduleScope = nextModuleScope;
-    account.normalBalance = rule.normalBalance;
+    account.normalBalance = ACCOUNT_RULES.getNormalBalance(
+      nextType,
+      nextCategory,
+    );
 
     await account.save();
 
-    if (hasOwn(req.body, "openingBalance") || !isBalanceSheetAccountType(nextType)) {
+    if (
+      hasOwn(req.body, "openingBalance") ||
+      !isBalanceSheetAccountType(nextType)
+    ) {
       const openingBalance = isBalanceSheetAccountType(nextType)
         ? parseAmount(req.body.openingBalance, {
             allowZero: true,
@@ -1132,16 +1235,21 @@ exports.transferBetweenAccounts = async (req, res) => {
     }
 
     const { date, time } = getJournalDateTime(req.body.date);
+
+    if (await isPeriodLocked(userId, date)) {
+      throw makeHttpError("This accounting period is locked.", 403);
+    }
+
     const note = String(req.body.note || req.body.reference || "").trim();
     const journal = await JournalEntry.create({
       date,
       time,
       description: `Account Transfer - ${fromAccount.name} to ${toAccount.name}`,
       note,
-    sourceType: "account_transfer",
-    originModule: getManualAccountOrigin(moduleScope, "transfer"),
-    moduleScope,
-    createdBy: toObjectId(userId),
+      sourceType: "account_transfer",
+      originModule: getManualAccountOrigin(moduleScope, "transfer"),
+      moduleScope,
+      createdBy: toObjectId(userId),
       lines: [
         {
           account: toAccount._id,
@@ -1156,6 +1264,17 @@ exports.transferBetweenAccounts = async (req, res) => {
       ],
     });
 
+    await recalculateAccountBalances([fromAccount._id, toAccount._id]);
+
+    await logAudit({
+      userId,
+      action: "CREATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: null,
+      after: journal.toObject(),
+    });
+
     return res.status(201).json({
       message: "Transfer recorded",
       journal,
@@ -1163,6 +1282,173 @@ exports.transferBetweenAccounts = async (req, res) => {
   } catch (error) {
     console.error("ACCOUNT TRANSFER ERROR:", error);
     return sendControllerError(res, error, "Transfer failed");
+  }
+};
+
+exports.getAccountTransfer = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid transfer ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: "account_transfer",
+      isDeleted: false,
+    })
+      .populate("lines.account", "name type category code moduleScope")
+      .lean();
+
+    if (!journal) {
+      return res.status(404).json({ message: "Account transfer not found." });
+    }
+
+    assertScopeEnabled(req, journal.moduleScope);
+
+    const debitLine = (journal.lines || []).find((l) => l.type === "debit");
+    const creditLine = (journal.lines || []).find((l) => l.type === "credit");
+    const amount = debitLine ? Number(debitLine.amount || 0) : 0;
+
+    return res.status(200).json({
+      _id: journal._id,
+      fromAccountId: creditLine?.account?._id || creditLine?.account,
+      fromAccount: creditLine?.account || null,
+      toAccountId: debitLine?.account?._id || debitLine?.account,
+      toAccount: debitLine?.account || null,
+      amount,
+      date: journal.date,
+      time: journal.time || "",
+      note: journal.note || "",
+      description: journal.description || "",
+      moduleScope: journal.moduleScope,
+      originModule: journal.originModule,
+    });
+  } catch (error) {
+    console.error("GET ACCOUNT TRANSFER ERROR:", error);
+    return sendControllerError(res, error, "Failed to get transfer");
+  }
+};
+
+exports.updateAccountTransfer = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid transfer ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: "account_transfer",
+      isDeleted: false,
+    });
+
+    if (!journal) {
+      return res.status(404).json({ message: "Account transfer not found." });
+    }
+
+    const moduleScope = journal.moduleScope;
+    assertScopeEnabled(req, moduleScope);
+
+    const fromAccountId = req.body.fromAccountId;
+    const toAccountId = req.body.toAccountId;
+    const amount = parseAmount(req.body.amount, { label: "Transfer amount" });
+
+    if (
+      !mongoose.Types.ObjectId.isValid(fromAccountId) ||
+      !mongoose.Types.ObjectId.isValid(toAccountId)
+    ) {
+      throw makeHttpError("Valid From and To accounts are required.", 400);
+    }
+
+    if (String(fromAccountId) === String(toAccountId)) {
+      throw makeHttpError("From and To accounts cannot be the same.", 400);
+    }
+
+    const [fromAccount, toAccount] = await Promise.all([
+      findScopedAccount({ id: fromAccountId, userId, moduleScope }),
+      findScopedAccount({ id: toAccountId, userId, moduleScope }),
+    ]);
+
+    if (!fromAccount || !toAccount) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isTransferAccount(fromAccount) || !isTransferAccount(toAccount)) {
+      throw makeHttpError(
+        "Transfers are allowed only between cash, bank, online and cheque Asset accounts.",
+        400,
+      );
+    }
+
+    if (await isPeriodLocked(userId, journal.date)) {
+      throw makeHttpError(
+        "The original transaction period is locked and cannot be edited.",
+        403,
+      );
+    }
+
+    const { date: newDate, time: newTime } = getJournalDateTime(req.body.date);
+    if (await isPeriodLocked(userId, newDate)) {
+      throw makeHttpError("The target transaction period is locked.", 403);
+    }
+
+    const beforeUpdate = journal.toObject();
+    const oldAccountIds = (journal.lines || []).map((l) =>
+      l.account.toString(),
+    );
+
+    const note = String(req.body.note || req.body.reference || "").trim();
+    journal.date = newDate;
+    journal.time = newTime;
+    journal.description = `Account Transfer - ${fromAccount.name} to ${toAccount.name}`;
+    journal.note = note;
+    journal.lines = [
+      {
+        account: toAccount._id,
+        type: "debit",
+        amount,
+      },
+      {
+        account: fromAccount._id,
+        type: "credit",
+        amount,
+      },
+    ];
+
+    await journal.save();
+
+    const allInvolvedIds = [
+      ...new Set([
+        ...oldAccountIds,
+        fromAccount._id.toString(),
+        toAccount._id.toString(),
+      ]),
+    ];
+    await recalculateAccountBalances(allInvolvedIds);
+
+    await logAudit({
+      userId,
+      action: "UPDATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: beforeUpdate,
+      after: journal.toObject(),
+    });
+
+    return res.status(200).json({
+      message: "Transfer updated",
+      journal,
+    });
+  } catch (error) {
+    console.error("UPDATE ACCOUNT TRANSFER ERROR:", error);
+    return sendControllerError(res, error, "Transfer update failed");
   }
 };
 
@@ -1174,7 +1460,9 @@ exports.adjustAccountBalance = async (req, res) => {
       label: "Adjustment amount",
     });
     const accountId = req.body.accountId;
-    const direction = String(req.body.direction || "").trim().toLowerCase();
+    const direction = String(req.body.direction || "")
+      .trim()
+      .toLowerCase();
 
     assertScopeEnabled(req, moduleScope);
 
@@ -1183,7 +1471,10 @@ exports.adjustAccountBalance = async (req, res) => {
     }
 
     if (!["increase", "decrease"].includes(direction)) {
-      throw makeHttpError("Adjustment direction must be increase or decrease.", 400);
+      throw makeHttpError(
+        "Adjustment direction must be increase or decrease.",
+        400,
+      );
     }
 
     const account = await findScopedAccount({
@@ -1203,12 +1494,17 @@ exports.adjustAccountBalance = async (req, res) => {
       );
     }
 
+    const { date, time } = getJournalDateTime(req.body.date);
+
+    if (await isPeriodLocked(userId, date)) {
+      throw makeHttpError("This accounting period is locked.", 403);
+    }
+
     const balancingAccount = await getOrCreateSystemAccount({
       userId,
       scope: moduleScope,
       purpose: "adjustment",
     });
-    const { date, time } = getJournalDateTime(req.body.date);
     const note = String(req.body.note || req.body.reason || "").trim();
     const journal = await JournalEntry.create({
       date,
@@ -1228,6 +1524,17 @@ exports.adjustAccountBalance = async (req, res) => {
       }),
     });
 
+    await recalculateAccountBalances([account._id, balancingAccount._id]);
+
+    await logAudit({
+      userId,
+      action: "CREATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: null,
+      after: journal.toObject(),
+    });
+
     return res.status(201).json({
       message: "Adjustment recorded",
       journal,
@@ -1235,6 +1542,524 @@ exports.adjustAccountBalance = async (req, res) => {
   } catch (error) {
     console.error("ACCOUNT ADJUSTMENT ERROR:", error);
     return sendControllerError(res, error, "Adjustment failed");
+  }
+};
+
+exports.getAccountAdjustment = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid adjustment ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: { $in: ["adjustment", "travel_adjustment"] },
+      isDeleted: false,
+    })
+      .populate("lines.account", "name type category code moduleScope")
+      .lean();
+
+    if (!journal) {
+      return res.status(404).json({ message: "Adjustment not found." });
+    }
+
+    assertScopeEnabled(req, journal.moduleScope);
+
+    let adjustedLine = (journal.lines || []).find(
+      (l) =>
+        String(l.account?._id || l.account) === String(journal.referenceId),
+    );
+    if (!adjustedLine) {
+      adjustedLine = (journal.lines || []).find(
+        (l) =>
+          !RESERVED_BALANCING_ACCOUNT_CODES.includes(
+            String(l.account?.code || "").toUpperCase(),
+          ),
+      );
+    }
+    if (!adjustedLine && journal.lines?.length) {
+      adjustedLine = journal.lines[0];
+    }
+
+    const account = adjustedLine?.account || null;
+    const accountType = account?.type || "Asset";
+    const lineType = adjustedLine?.type || "debit";
+    const amount = adjustedLine ? Number(adjustedLine.amount || 0) : 0;
+
+    let direction = "increase";
+    if (accountType === "Asset") {
+      direction = lineType === "debit" ? "increase" : "decrease";
+    } else {
+      direction = lineType === "credit" ? "increase" : "decrease";
+    }
+
+    return res.status(200).json({
+      _id: journal._id,
+      accountId: account?._id || adjustedLine?.account,
+      account,
+      amount,
+      direction,
+      date: journal.date,
+      time: journal.time || "",
+      note: journal.note || "",
+      description: journal.description || "",
+      moduleScope: journal.moduleScope,
+      originModule: journal.originModule,
+    });
+  } catch (error) {
+    console.error("GET ACCOUNT ADJUSTMENT ERROR:", error);
+    return sendControllerError(res, error, "Failed to get adjustment");
+  }
+};
+
+exports.updateAccountAdjustment = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid adjustment ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: { $in: ["adjustment", "travel_adjustment"] },
+      isDeleted: false,
+    });
+
+    if (!journal) {
+      return res.status(404).json({ message: "Adjustment not found." });
+    }
+
+    const moduleScope = journal.moduleScope;
+    assertScopeEnabled(req, moduleScope);
+
+    const accountId = req.body.accountId;
+    const amount = parseAmount(req.body.amount, { label: "Adjustment amount" });
+    const direction = String(req.body.direction || "")
+      .trim()
+      .toLowerCase();
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      throw makeHttpError("Valid account is required.", 400);
+    }
+
+    if (!["increase", "decrease"].includes(direction)) {
+      throw makeHttpError(
+        "Adjustment direction must be increase or decrease.",
+        400,
+      );
+    }
+
+    const account = await findScopedAccount({
+      id: accountId,
+      userId,
+      moduleScope,
+    });
+    if (!account) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isManualAdjustmentAccount(account)) {
+      throw makeHttpError(
+        "Balance Adjustment is allowed only for manually usable balance accounts.",
+        400,
+      );
+    }
+
+    if (await isPeriodLocked(userId, journal.date)) {
+      throw makeHttpError(
+        "The original transaction period is locked and cannot be edited.",
+        403,
+      );
+    }
+
+    const { date: newDate, time: newTime } = getJournalDateTime(req.body.date);
+    if (await isPeriodLocked(userId, newDate)) {
+      throw makeHttpError("The target transaction period is locked.", 403);
+    }
+
+    const balancingAccount = await getOrCreateSystemAccount({
+      userId,
+      scope: moduleScope,
+      purpose: "adjustment",
+    });
+
+    const beforeUpdate = journal.toObject();
+    const oldAccountIds = (journal.lines || []).map((l) =>
+      l.account.toString(),
+    );
+
+    const note = String(req.body.note || req.body.reason || "").trim();
+    journal.date = newDate;
+    journal.time = newTime;
+    journal.description = `Account Balance Adjustment - ${account.name}`;
+    journal.note = note;
+    journal.referenceId = account._id;
+    journal.lines = buildAdjustmentLines({
+      account,
+      balancingAccount,
+      amount,
+      direction,
+    });
+
+    await journal.save();
+
+    const allInvolvedIds = [
+      ...new Set([
+        ...oldAccountIds,
+        account._id.toString(),
+        balancingAccount._id.toString(),
+      ]),
+    ];
+    await recalculateAccountBalances(allInvolvedIds);
+
+    await logAudit({
+      userId,
+      action: "UPDATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: beforeUpdate,
+      after: journal.toObject(),
+    });
+
+    return res.status(200).json({
+      message: "Adjustment updated",
+      journal,
+    });
+  } catch (error) {
+    console.error("UPDATE ACCOUNT ADJUSTMENT ERROR:", error);
+    return sendControllerError(res, error, "Adjustment update failed");
+  }
+};
+
+const buildOwnerMoneyLines = ({
+  account,
+  equityAccount,
+  amount,
+  transactionType,
+}) => {
+  if (transactionType === "owner_money_in") {
+    return [
+      {
+        account: account._id,
+        type: "debit",
+        amount,
+      },
+      {
+        account: equityAccount._id,
+        type: "credit",
+        amount,
+      },
+    ];
+  }
+
+  return [
+    {
+      account: equityAccount._id,
+      type: "debit",
+      amount,
+    },
+    {
+      account: account._id,
+      type: "credit",
+      amount,
+    },
+  ];
+};
+
+exports.createOwnerTransaction = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getJournalContextScope(getAccountScope(req.query));
+    assertScopeEnabled(req, moduleScope);
+
+    const transactionType = String(
+      req.body.transactionType || req.body.type || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!["owner_money_in", "owner_money_out"].includes(transactionType)) {
+      throw makeHttpError(
+        "Transaction type must be 'owner_money_in' or 'owner_money_out'.",
+        400,
+      );
+    }
+
+    const amount = parseAmount(req.body.amount, { label: "Amount" });
+    const accountId = req.body.accountId;
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      throw makeHttpError("Valid payment account is required.", 400);
+    }
+
+    const account = await findScopedAccount({
+      id: accountId,
+      userId,
+      moduleScope,
+    });
+    if (!account) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isTransferAccount(account)) {
+      throw makeHttpError(
+        "Owner Money transactions are allowed only with cash, bank, online or cheque accounts.",
+        400,
+      );
+    }
+
+    const { date, time } = getJournalDateTime(req.body.date);
+
+    if (await isPeriodLocked(userId, date)) {
+      throw makeHttpError("This accounting period is locked.", 403);
+    }
+
+    const purpose =
+      transactionType === "owner_money_in" ? "capital" : "drawings";
+    const equityAccount = await getOrCreateSystemAccount({
+      userId,
+      scope: moduleScope,
+      purpose,
+    });
+
+    const note = String(req.body.note || req.body.reference || "").trim();
+    const description =
+      transactionType === "owner_money_in"
+        ? `Owner Money In - ${account.name}`
+        : `Owner Money Out - ${account.name}`;
+
+    const journal = await JournalEntry.create({
+      date,
+      time,
+      description,
+      note,
+      sourceType: transactionType,
+      originModule: getManualAccountOrigin(moduleScope, "owner"),
+      moduleScope,
+      referenceId: account._id,
+      createdBy: toObjectId(userId),
+      lines: buildOwnerMoneyLines({
+        account,
+        equityAccount,
+        amount,
+        transactionType,
+      }),
+    });
+
+    await recalculateAccountBalances([account._id, equityAccount._id]);
+
+    await logAudit({
+      userId,
+      action: "CREATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: null,
+      after: journal.toObject(),
+    });
+
+    return res.status(201).json({
+      message: "Owner transaction recorded",
+      journal,
+    });
+  } catch (error) {
+    console.error("CREATE OWNER TRANSACTION ERROR:", error);
+    return sendControllerError(res, error, "Owner transaction failed");
+  }
+};
+
+exports.getOwnerTransaction = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid transaction ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: { $in: ["owner_money_in", "owner_money_out"] },
+      isDeleted: false,
+    })
+      .populate("lines.account", "name type category code moduleScope")
+      .lean();
+
+    if (!journal) {
+      return res.status(404).json({ message: "Owner transaction not found." });
+    }
+
+    assertScopeEnabled(req, journal.moduleScope);
+
+    let paymentLine = (journal.lines || []).find(
+      (l) =>
+        l.account?.type === "Asset" ||
+        String(l.account?._id || l.account) === String(journal.referenceId),
+    );
+    if (!paymentLine && journal.lines?.length) {
+      paymentLine = journal.lines.find(
+        (l) => !["capital", "drawings"].includes(l.account?.category),
+      );
+    }
+    const paymentAccount = paymentLine?.account || null;
+    const amount = paymentLine ? Number(paymentLine.amount || 0) : 0;
+
+    return res.status(200).json({
+      _id: journal._id,
+      transactionType: journal.sourceType,
+      accountId: paymentAccount?._id || paymentLine?.account,
+      account: paymentAccount,
+      amount,
+      date: journal.date,
+      time: journal.time || "",
+      note: journal.note || "",
+      description: journal.description || "",
+      moduleScope: journal.moduleScope,
+      originModule: journal.originModule,
+    });
+  } catch (error) {
+    console.error("GET OWNER TRANSACTION ERROR:", error);
+    return sendControllerError(res, error, "Failed to get owner transaction");
+  }
+};
+
+exports.updateOwnerTransaction = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid transaction ID." });
+    }
+
+    const journal = await JournalEntry.findOne({
+      _id: id,
+      createdBy: userId,
+      sourceType: { $in: ["owner_money_in", "owner_money_out"] },
+      isDeleted: false,
+    });
+
+    if (!journal) {
+      return res.status(404).json({ message: "Owner transaction not found." });
+    }
+
+    const moduleScope = journal.moduleScope;
+    assertScopeEnabled(req, moduleScope);
+
+    const transactionType = String(
+      req.body.transactionType || req.body.type || journal.sourceType,
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!["owner_money_in", "owner_money_out"].includes(transactionType)) {
+      throw makeHttpError(
+        "Transaction type must be 'owner_money_in' or 'owner_money_out'.",
+        400,
+      );
+    }
+
+    const amount = parseAmount(req.body.amount, { label: "Amount" });
+    const accountId = req.body.accountId;
+
+    if (!mongoose.Types.ObjectId.isValid(accountId)) {
+      throw makeHttpError("Valid payment account is required.", 400);
+    }
+
+    const account = await findScopedAccount({
+      id: accountId,
+      userId,
+      moduleScope,
+    });
+    if (!account) {
+      throw makeHttpError("Selected account not found in this module.", 404);
+    }
+
+    if (!isTransferAccount(account)) {
+      throw makeHttpError(
+        "Owner Money transactions are allowed only with cash, bank, online or cheque accounts.",
+        400,
+      );
+    }
+
+    if (await isPeriodLocked(userId, journal.date)) {
+      throw makeHttpError(
+        "The original transaction period is locked and cannot be edited.",
+        403,
+      );
+    }
+
+    const { date: newDate, time: newTime } = getJournalDateTime(req.body.date);
+    if (await isPeriodLocked(userId, newDate)) {
+      throw makeHttpError("The target transaction period is locked.", 403);
+    }
+
+    const purpose =
+      transactionType === "owner_money_in" ? "capital" : "drawings";
+    const equityAccount = await getOrCreateSystemAccount({
+      userId,
+      scope: moduleScope,
+      purpose,
+    });
+
+    const beforeUpdate = journal.toObject();
+    const oldAccountIds = (journal.lines || []).map((l) =>
+      l.account.toString(),
+    );
+
+    const note = String(req.body.note || req.body.reference || "").trim();
+    const description =
+      transactionType === "owner_money_in"
+        ? `Owner Money In - ${account.name}`
+        : `Owner Money Out - ${account.name}`;
+
+    journal.date = newDate;
+    journal.time = newTime;
+    journal.description = description;
+    journal.note = note;
+    journal.sourceType = transactionType;
+    journal.referenceId = account._id;
+    journal.lines = buildOwnerMoneyLines({
+      account,
+      equityAccount,
+      amount,
+      transactionType,
+    });
+
+    await journal.save();
+
+    const allInvolvedIds = [
+      ...new Set([
+        ...oldAccountIds,
+        account._id.toString(),
+        equityAccount._id.toString(),
+      ]),
+    ];
+    await recalculateAccountBalances(allInvolvedIds);
+
+    await logAudit({
+      userId,
+      action: "UPDATE",
+      entityType: "JournalEntry",
+      entityId: journal._id,
+      before: beforeUpdate,
+      after: journal.toObject(),
+    });
+
+    return res.status(200).json({
+      message: "Owner transaction updated",
+      journal,
+    });
+  } catch (error) {
+    console.error("UPDATE OWNER TRANSACTION ERROR:", error);
+    return sendControllerError(res, error, "Owner transaction update failed");
   }
 };
 
@@ -1391,7 +2216,7 @@ exports.getAccountTransactions = async (req, res) => {
           const debit = line.type === "debit" ? Number(line.amount || 0) : 0;
           const credit = line.type === "credit" ? Number(line.amount || 0) : 0;
           const clickableReferenceId =
-            entry.referenceId || entry.invoiceId || null;
+            entry.referenceId || entry.invoiceId || entry._id || null;
 
           return {
             _id: entry._id,

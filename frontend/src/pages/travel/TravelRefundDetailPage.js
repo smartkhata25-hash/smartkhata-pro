@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { FaArrowLeft, FaEye, FaFilePdf, FaPlus, FaPrint, FaShareAlt, FaTrash } from 'react-icons/fa';
+import {
+  FaArrowLeft,
+  FaEye,
+  FaFilePdf,
+  FaPlus,
+  FaPrint,
+  FaShareAlt,
+  FaTrash,
+} from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
@@ -13,6 +21,11 @@ import {
 import { formatDateWithOptionalTime } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
 import { sharePdfDocument } from '../../utils/documentShare';
+import {
+  downloadBackendPdf,
+  openBackendPreviewWindow,
+  openBackendPrintWindow,
+} from '../../utils/backendPrintDocument';
 import {
   TravelActionButton,
   TravelMasterPageFrame,
@@ -32,7 +45,9 @@ const Section = ({ children }) => (
 
 const DetailLine = ({ labelKey, value }) => (
   <div className="min-w-0">
-    <p className="text-[11px] font-extrabold uppercase tracking-normal text-slate-400">{t(labelKey)}</p>
+    <p className="text-[11px] font-extrabold uppercase tracking-normal text-slate-400">
+      {t(labelKey)}
+    </p>
     <p className="mt-1 break-words text-sm font-bold text-slate-800">
       {value === undefined || value === null || value === '' ? '-' : value}
     </p>
@@ -50,14 +65,6 @@ const getRefundCustomerName = (refund) =>
 
 const getRefundItemVendorName = (item) =>
   getVendorName(item?.vendor || item?.vendorPartyId || item?.vendorId);
-
-const openDocumentUrl = (url) => {
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-
-  if (!opened) {
-    alert(t('alerts.printWindowBlocked'));
-  }
-};
 
 const TravelRefundDetailPage = () => {
   const { id } = useParams();
@@ -112,22 +119,37 @@ const TravelRefundDetailPage = () => {
     }
   };
 
-  const handleOpenPrint = () => {
+  const handleOpenPrint = async () => {
     if (!refund?._id) return;
 
-    openDocumentUrl(getTravelRefundPrintUrl(refund._id));
+    try {
+      await openBackendPrintWindow({ url: getTravelRefundPrintUrl(refund._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handleOpenPreview = () => {
+  const handleOpenPreview = async () => {
     if (!refund?._id) return;
 
-    openDocumentUrl(getTravelRefundPreviewUrl(refund._id));
+    try {
+      await openBackendPreviewWindow({ url: getTravelRefundPreviewUrl(refund._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handleOpenPdf = () => {
+  const handleOpenPdf = async () => {
     if (!refund?._id) return;
 
-    openDocumentUrl(getTravelRefundPdfUrl(refund._id));
+    try {
+      await downloadBackendPdf({
+        url: getTravelRefundPdfUrl(refund._id),
+        fileName: `TravelRefund-${refund.refundNumber || refund._id}.pdf`,
+      });
+    } catch (error) {
+      setPageError(error.message || t('pdf.shareFailed'));
+    }
   };
 
   const handleSharePdf = async () => {
@@ -161,10 +183,18 @@ const TravelRefundDetailPage = () => {
       subtitleKey="travel.refund.detail.subtitle"
       actions={
         <div className="flex flex-wrap gap-2">
-          <TravelActionButton icon={FaArrowLeft} variant="secondary" onClick={() => navigate('/travel/refunds')}>
+          <TravelActionButton
+            icon={FaArrowLeft}
+            variant="secondary"
+            onClick={() => navigate('/travel/refunds')}
+          >
             {t('travel.refund.actions.backToList')}
           </TravelActionButton>
-          <TravelActionButton icon={FaPlus} variant="soft" onClick={() => navigate('/travel/refunds/new')}>
+          <TravelActionButton
+            icon={FaPlus}
+            variant="soft"
+            onClick={() => navigate('/travel/refunds/new')}
+          >
             {t('travel.refund.actions.new')}
           </TravelActionButton>
           {refund && (
@@ -217,34 +247,81 @@ const TravelRefundDetailPage = () => {
         <div className="space-y-4">
           <Section>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <DetailLine labelKey="travel.refund.fields.refundNumber" value={refund.refundNumber} />
-              <DetailLine labelKey="travel.refund.fields.originalInvoice" value={getInvoiceNumber(refund)} />
+              <DetailLine
+                labelKey="travel.refund.fields.refundNumber"
+                value={refund.refundNumber}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.originalInvoice"
+                value={getInvoiceNumber(refund)}
+              />
               <DetailLine
                 labelKey="travel.refund.fields.refundDate"
                 value={formatDateWithOptionalTime(refund.refundDate, refund.refundTime)}
               />
-              <DetailLine labelKey="travel.booking.fields.customer" value={getRefundCustomerName(refund)} />
-              <DetailLine labelKey="travel.refund.fields.refundMode" value={t(`travel.refund.modes.${refund.refundMode || 'partial'}`)} />
-              <DetailLine labelKey="travel.refund.fields.grossRefundAmount" value={formatBookingMoney(refund.grossRefundAmount)} />
-              <DetailLine labelKey="travel.refund.fields.penaltyAmount" value={formatBookingMoney(refund.penaltyAmount)} />
-              <DetailLine labelKey="travel.refund.fields.customerRefundAmount" value={formatBookingMoney(refund.customerRefundAmount)} />
-              <DetailLine labelKey="travel.refund.fields.vendorRecoveryAmount" value={formatBookingMoney(refund.vendorRecoveryAmount)} />
-              <DetailLine labelKey="travel.refund.fields.paidBackAmount" value={formatBookingMoney(refund.paidBackAmount)} />
-              <DetailLine labelKey="travel.booking.fields.paymentAccount" value={refund.accountId?.name || '-'} />
+              <DetailLine
+                labelKey="travel.booking.fields.customer"
+                value={getRefundCustomerName(refund)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.refundMode"
+                value={t(`travel.refund.modes.${refund.refundMode || 'partial'}`)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.grossRefundAmount"
+                value={formatBookingMoney(refund.grossRefundAmount)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.penaltyAmount"
+                value={formatBookingMoney(refund.penaltyAmount)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.customerRefundAmount"
+                value={formatBookingMoney(refund.customerRefundAmount)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.vendorRecoveryAmount"
+                value={formatBookingMoney(refund.vendorRecoveryAmount)}
+              />
+              <DetailLine
+                labelKey="travel.refund.fields.paidBackAmount"
+                value={formatBookingMoney(refund.paidBackAmount)}
+              />
+              <DetailLine
+                labelKey="travel.booking.fields.paymentAccount"
+                value={refund.accountId?.name || '-'}
+              />
               <DetailLine labelKey="travel.fields.notes" value={refund.notes} />
             </div>
           </Section>
 
           <Section>
-            <h2 className="mb-3 text-sm font-black text-slate-900">{t('travel.refund.sections.items')}</h2>
+            <h2 className="mb-3 text-sm font-black text-slate-900">
+              {t('travel.refund.sections.items')}
+            </h2>
             <div className="space-y-2">
               {(refund.refundItems || []).map((item, index) => (
-                <div key={item._id || item.bookingItemId || index} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div
+                  key={item._id || item.bookingItemId || index}
+                  className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-2 lg:grid-cols-5"
+                >
                   <DetailLine labelKey="travel.booking.fields.itemTitle" value={item.title} />
-                  <DetailLine labelKey="travel.booking.fields.bookingItem" value={t(`travel.booking.itemTypes.${item.itemType || 'service'}`)} />
-                  <DetailLine labelKey="travel.refund.fields.refundAmount" value={formatBookingMoney(item.refundAmount)} />
-                  <DetailLine labelKey="travel.booking.fields.vendor" value={getRefundItemVendorName(item)} />
-                  <DetailLine labelKey="travel.refund.fields.vendorRecoveryAmount" value={formatBookingMoney(item.vendorRecoveryAmount)} />
+                  <DetailLine
+                    labelKey="travel.booking.fields.bookingItem"
+                    value={t(`travel.booking.itemTypes.${item.itemType || 'service'}`)}
+                  />
+                  <DetailLine
+                    labelKey="travel.refund.fields.refundAmount"
+                    value={formatBookingMoney(item.refundAmount)}
+                  />
+                  <DetailLine
+                    labelKey="travel.booking.fields.vendor"
+                    value={getRefundItemVendorName(item)}
+                  />
+                  <DetailLine
+                    labelKey="travel.refund.fields.vendorRecoveryAmount"
+                    value={formatBookingMoney(item.vendorRecoveryAmount)}
+                  />
                 </div>
               ))}
               {(refund.refundItems || []).length === 0 && (
@@ -256,7 +333,9 @@ const TravelRefundDetailPage = () => {
           </Section>
 
           <Section>
-            <h2 className="mb-3 text-sm font-black text-slate-900">{t('travel.booking.fields.attachments')}</h2>
+            <h2 className="mb-3 text-sm font-black text-slate-900">
+              {t('travel.booking.fields.attachments')}
+            </h2>
             <div className="space-y-2">
               {(refund.attachments || []).map((attachment) => (
                 <a

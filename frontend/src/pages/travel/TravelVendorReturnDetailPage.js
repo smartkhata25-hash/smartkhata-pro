@@ -22,6 +22,11 @@ import { formatDateWithOptionalTime } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
 import { sharePdfDocument } from '../../utils/documentShare';
 import {
+  downloadBackendPdf,
+  openBackendPreviewWindow,
+  openBackendPrintWindow,
+} from '../../utils/backendPrintDocument';
+import {
   TravelActionButton,
   TravelMasterPageFrame,
   buildTravelConfirmMessage,
@@ -30,18 +35,12 @@ import {
 
 const DetailLine = ({ labelKey, value }) => (
   <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-    <p className="text-[11px] font-extrabold uppercase tracking-normal text-slate-400">{t(labelKey)}</p>
+    <p className="text-[11px] font-extrabold uppercase tracking-normal text-slate-400">
+      {t(labelKey)}
+    </p>
     <p className="mt-1 truncate text-sm font-black text-slate-900">{value || '-'}</p>
   </div>
 );
-
-const openDocumentUrl = (url) => {
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-
-  if (!opened) {
-    alert(t('alerts.printWindowBlocked'));
-  }
-};
 
 const TravelVendorReturnDetailPage = () => {
   const navigate = useNavigate();
@@ -108,22 +107,37 @@ const TravelVendorReturnDetailPage = () => {
     }
   };
 
-  const handleOpenPrint = () => {
+  const handleOpenPrint = async () => {
     if (!record?._id) return;
 
-    openDocumentUrl(getTravelVendorReturnPrintUrl(record._id));
+    try {
+      await openBackendPrintWindow({ url: getTravelVendorReturnPrintUrl(record._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handleOpenPreview = () => {
+  const handleOpenPreview = async () => {
     if (!record?._id) return;
 
-    openDocumentUrl(getTravelVendorReturnPreviewUrl(record._id));
+    try {
+      await openBackendPreviewWindow({ url: getTravelVendorReturnPreviewUrl(record._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handleOpenPdf = () => {
+  const handleOpenPdf = async () => {
     if (!record?._id) return;
 
-    openDocumentUrl(getTravelVendorReturnPdfUrl(record._id));
+    try {
+      await downloadBackendPdf({
+        url: getTravelVendorReturnPdfUrl(record._id),
+        fileName: `TravelVendorReturn-${record.returnNumber || record._id}.pdf`,
+      });
+    } catch (error) {
+      setPageError(error.message || t('pdf.shareFailed'));
+    }
   };
 
   const handleSharePdf = async () => {
@@ -219,19 +233,45 @@ const TravelVendorReturnDetailPage = () => {
         </div>
       ) : record ? (
         <section className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-3">
-          <DetailLine labelKey="travel.vendorReturns.fields.returnNumber" value={record.returnNumber} />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.returnNumber"
+            value={record.returnNumber}
+          />
           <DetailLine
             labelKey="travel.vendorReturns.fields.returnDate"
             value={formatDateWithOptionalTime(record.returnDate, record.returnTime)}
           />
           <DetailLine labelKey="travel.fields.vendor" value={vendorName} />
-          <DetailLine labelKey="travel.vendorReturns.fields.originalInvoice" value={record.originalInvoiceNumber} />
-          <DetailLine labelKey="travel.vendorReturns.fields.serviceLabel" value={record.serviceLabel} />
-          <DetailLine labelKey="travel.vendorReturns.fields.originalCost" value={formatTravelMoney(record.originalCost)} />
-          <DetailLine labelKey="travel.vendorReturns.fields.vendorReturnAmount" value={formatTravelMoney(record.vendorReturnAmount)} />
-          <DetailLine labelKey="travel.vendorReturns.fields.vendorPenaltyAmount" value={formatTravelMoney(record.vendorPenaltyAmount)} />
-          <DetailLine labelKey="travel.vendorReturns.fields.amountReceivedNow" value={formatTravelMoney(record.amountReceivedNow)} />
-          <DetailLine labelKey="travel.fields.paymentType" value={record.paymentType ? t(`travel.payments.paymentTypes.${record.paymentType}`) : '-'} />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.originalInvoice"
+            value={record.originalInvoiceNumber}
+          />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.serviceLabel"
+            value={record.serviceLabel}
+          />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.originalCost"
+            value={formatTravelMoney(record.originalCost)}
+          />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.vendorReturnAmount"
+            value={formatTravelMoney(record.vendorReturnAmount)}
+          />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.vendorPenaltyAmount"
+            value={formatTravelMoney(record.vendorPenaltyAmount)}
+          />
+          <DetailLine
+            labelKey="travel.vendorReturns.fields.amountReceivedNow"
+            value={formatTravelMoney(record.amountReceivedNow)}
+          />
+          <DetailLine
+            labelKey="travel.fields.paymentType"
+            value={
+              record.paymentType ? t(`travel.payments.paymentTypes.${record.paymentType}`) : '-'
+            }
+          />
           <DetailLine
             labelKey="travel.fields.paymentAccount"
             value={

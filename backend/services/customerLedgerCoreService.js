@@ -96,6 +96,7 @@ const getCustomerJournalScopeFilter = (moduleScope) => {
   if (scope === MODULE_SCOPES.TRAVEL) {
     return {
       $or: getTravelJournalConditions(),
+      $nor: [{ originModule: "travel_receive_payment", isReversed: true }],
     };
   }
 

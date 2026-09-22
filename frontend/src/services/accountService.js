@@ -33,20 +33,17 @@ const getCurrentUserScope = () => {
     user?._id ||
     localStorage.getItem('userId') ||
     'anonymous';
-  const actorId =
-    user?._id ||
-    localStorage.getItem('userId') ||
-    businessId;
+  const actorId = user?._id || localStorage.getItem('userId') || businessId;
 
   return `${businessId}:${actorId}`;
 };
 
 const normalizeModuleScope = (moduleScope = MODULE_SCOPES.TRADING) => {
-  const cleanScope = String(moduleScope || '').trim().toLowerCase();
+  const cleanScope = String(moduleScope || '')
+    .trim()
+    .toLowerCase();
 
-  return Object.values(MODULE_SCOPES).includes(cleanScope)
-    ? cleanScope
-    : MODULE_SCOPES.TRADING;
+  return Object.values(MODULE_SCOPES).includes(cleanScope) ? cleanScope : MODULE_SCOPES.TRADING;
 };
 
 const normalizeOptions = (forceRefreshOrOptions = false, maybeOptions = {}) => {
@@ -264,6 +261,77 @@ export const adjustAccountBalance = async (data, options = {}) => {
   return res.data;
 };
 
+export const getAccountTransferById = async (id, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.get(
+    `${API_URL}/transfer/${id}`,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  return res.data;
+};
+
+export const updateAccountTransfer = async (id, data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.put(
+    `${API_URL}/transfer/${id}`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  clearAccountsCache();
+  return res.data;
+};
+
+export const getAccountAdjustmentById = async (id, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.get(
+    `${API_URL}/adjustment/${id}`,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  return res.data;
+};
+
+export const updateAccountAdjustment = async (id, data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.put(
+    `${API_URL}/adjustment/${id}`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  clearAccountsCache();
+  return res.data;
+};
+
+export const createOwnerTransaction = async (data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.post(
+    `${API_URL}/owner-transaction`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  clearAccountsCache();
+  return res.data;
+};
+
+export const getOwnerTransactionById = async (id, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.get(
+    `${API_URL}/owner-transaction/${id}`,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  return res.data;
+};
+
+export const updateOwnerTransaction = async (id, data, options = {}) => {
+  const normalizedOptions = normalizeOptions(options);
+  const res = await axios.put(
+    `${API_URL}/owner-transaction/${id}`,
+    data,
+    authHeaders({ moduleScope: normalizedOptions.moduleScope })
+  );
+  clearAccountsCache();
+  return res.data;
+};
+
 export const getCashSummary = async (options = {}) => {
   const normalizedOptions = normalizeOptions(options);
   const res = await axios.get(
@@ -291,7 +359,10 @@ export const getAccountTransactions = async (accountId, params = {}) => {
     ...params,
     moduleScope: normalizeModuleScope(params.moduleScope),
   };
-  const res = await axios.get(`${API_URL}/${accountId}/transactions`, authHeaders(normalizedParams));
+  const res = await axios.get(
+    `${API_URL}/${accountId}/transactions`,
+    authHeaders(normalizedParams)
+  );
 
   return Array.isArray(res.data) ? res.data : [];
 };

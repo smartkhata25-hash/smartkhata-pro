@@ -33,6 +33,11 @@ import { formatDateWithOptionalTime } from '../../utils/localDateTime';
 import { buildTravelRouteState } from '../../utils/travelContext';
 import { sharePdfDocument } from '../../utils/documentShare';
 import {
+  downloadBackendPdf,
+  openBackendPreviewWindow,
+  openBackendPrintWindow,
+} from '../../utils/backendPrintDocument';
+import {
   TravelCardLine,
   TravelFilterSelect,
   TravelMasterList,
@@ -105,14 +110,6 @@ const getPaymentDocumentId = (record) => record?.journalEntryId || record?._id |
 const getPaymentDocumentNumber = (record) =>
   record?.referenceNo || record?.receiptNumber || record?.paymentNumber || record?._id || 'payment';
 
-const openDocumentUrl = (url) => {
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-
-  if (!opened) {
-    alert(t('alerts.printWindowBlocked'));
-  }
-};
-
 const getFiltersFromParams = (searchParams, isVendorMode) => ({
   search: searchParams.get('search') || FILTER_DEFAULTS.search,
 
@@ -163,13 +160,9 @@ const buildSelectOptions = (records, travelParties, allKey) => [
   ...travelParties.map((record) => ({
     value: `party:${record._id}`,
     label:
-      [
-        record.name,
-        t('travel.counterparty.party'),
-        record.phone,
-      ]
-        .filter(Boolean)
-        .join(' - ') || record.name || '-',
+      [record.name, t('travel.counterparty.party'), record.phone].filter(Boolean).join(' - ') ||
+      record.name ||
+      '-',
   })),
 ];
 
@@ -198,9 +191,7 @@ const IconButton = ({
       onClick={onClick}
       className={`inline-flex flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 ${
         compact ? 'h-[30px] w-[30px]' : 'h-8 w-8 sm:h-9 sm:w-9'
-      } ${
-        variants[variant] || variants.blue
-      }`}
+      } ${variants[variant] || variants.blue}`}
     >
       <Icon
         aria-hidden="true"
@@ -485,7 +476,7 @@ const TravelPaymentHistoryPage = () => {
   );
 
   const handleOpenPaymentPreview = useCallback(
-    (record, event = null) => {
+    async (record, event = null) => {
       event?.stopPropagation?.();
 
       const documentId = getPaymentDocumentId(record);
@@ -494,13 +485,17 @@ const TravelPaymentHistoryPage = () => {
         return;
       }
 
-      openDocumentUrl(getPreviewUrl(documentId));
+      try {
+        await openBackendPreviewWindow({ url: getPreviewUrl(documentId) });
+      } catch (error) {
+        alert(error.message || t('alerts.printWindowBlocked'));
+      }
     },
     [getPreviewUrl]
   );
 
   const handleOpenPaymentPrint = useCallback(
-    (record, event = null) => {
+    async (record, event = null) => {
       event?.stopPropagation?.();
 
       const documentId = getPaymentDocumentId(record);
@@ -509,13 +504,17 @@ const TravelPaymentHistoryPage = () => {
         return;
       }
 
-      openDocumentUrl(getPrintUrl(documentId));
+      try {
+        await openBackendPrintWindow({ url: getPrintUrl(documentId) });
+      } catch (error) {
+        alert(error.message || t('alerts.printWindowBlocked'));
+      }
     },
     [getPrintUrl]
   );
 
   const handleOpenPaymentPdf = useCallback(
-    (record, event = null) => {
+    async (record, event = null) => {
       event?.stopPropagation?.();
 
       const documentId = getPaymentDocumentId(record);
@@ -524,9 +523,18 @@ const TravelPaymentHistoryPage = () => {
         return;
       }
 
-      openDocumentUrl(getPdfUrl(documentId));
+      const documentNumber = getPaymentDocumentNumber(record);
+      const fileName = `${
+        isVendorMode ? 'TravelVendorPaymentReceipt' : 'TravelReceivePaymentReceipt'
+      }-${documentNumber}.pdf`;
+
+      try {
+        await downloadBackendPdf({ url: getPdfUrl(documentId), fileName });
+      } catch (error) {
+        alert(error.message || t('pdf.shareFailed'));
+      }
     },
-    [getPdfUrl]
+    [getPdfUrl, isVendorMode]
   );
 
   const handleSharePaymentPdf = useCallback(
@@ -932,13 +940,13 @@ const TravelPaymentHistoryPage = () => {
               )}
 
               <IconButton
-              icon={record.invoiceId ? FaEye : FaBookOpen}
-              variant={record.invoiceId ? 'blue' : 'emerald'}
-              title={record.invoiceId ? t('travel.common.view') : t('travel.common.viewLedger')}
-              compact
-              onClick={(event) => {
-                event.stopPropagation();
-                openRow(record);
+                icon={record.invoiceId ? FaEye : FaBookOpen}
+                variant={record.invoiceId ? 'blue' : 'emerald'}
+                title={record.invoiceId ? t('travel.common.view') : t('travel.common.viewLedger')}
+                compact
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openRow(record);
                 }}
               />
 

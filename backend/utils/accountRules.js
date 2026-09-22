@@ -66,4 +66,13 @@ const ACCOUNT_RULES = {
   },
 };
 
+const getNormalBalance = (type, category) => {
+  if (category === "drawings") {
+    return "debit";
+  }
+  return ACCOUNT_RULES[type]?.normalBalance || "debit";
+};
+
+ACCOUNT_RULES.getNormalBalance = getNormalBalance;
+
 module.exports = ACCOUNT_RULES;

@@ -5,6 +5,8 @@ import { FaHistory, FaSave, FaUsers } from 'react-icons/fa';
 import { t } from '../../i18n/i18n';
 import {
   createTravelReceivePayment,
+  fetchTravelReceivePayment,
+  updateTravelReceivePayment,
   fetchTravelCustomers,
   fetchTravelParties,
   fetchTravelPaymentAccounts,
@@ -159,6 +161,8 @@ const inputClass =
 const TravelReceivePaymentPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const paymentId = searchParams.get('paymentId') || '';
+  const [loadedPaymentId, setLoadedPaymentId] = useState('');
 
   const [formState, setFormState] = useState(createInitialForm);
   const [customers, setCustomers] = useState([]);
@@ -245,7 +249,36 @@ const TravelReceivePaymentPage = () => {
   }, [loadReferences]);
 
   useEffect(() => {
-    if (!queryCustomerId && !queryCustomerPartyId) {
+    if (!paymentId) return;
+    let cancelled = false;
+    setLoadedPaymentId('');
+    fetchTravelReceivePayment(paymentId)
+      .then((payment) => {
+        if (cancelled) return;
+        setFormState({
+          ...createInitialForm(),
+          customerType: payment.partyId ? 'party' : 'customer',
+          customerId: getRecordId(payment.customer),
+          customerPartyId: getRecordId(payment.partyId),
+          amount: payment.amount,
+          accountId: getRecordId(payment.account),
+          paymentType: payment.paymentType === 'bank' ? 'online' : payment.paymentType,
+          date: payment.date,
+          time: payment.time || '',
+          notes: payment.description || '',
+        });
+        setLoadedPaymentId(paymentId);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setFormError(error?.response?.data?.message || t('travel.payments.referencesFailed'));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [paymentId]);
+
+  useEffect(() => {
+    if (paymentId || (!queryCustomerId && !queryCustomerPartyId)) {
       return;
     }
 
@@ -255,7 +288,7 @@ const TravelReceivePaymentPage = () => {
       customerId: queryCustomerType === 'party' ? '' : queryCustomerId,
       customerPartyId: queryCustomerType === 'party' ? queryCustomerPartyId || queryCustomerId : '',
     }));
-  }, [queryCustomerId, queryCustomerPartyId, queryCustomerType]);
+  }, [paymentId, queryCustomerId, queryCustomerPartyId, queryCustomerType]);
 
   const updateCustomerCounterparty = (value, record) => {
     const selection = getCounterpartySelection(value, record, 'customer');
@@ -281,13 +314,24 @@ const TravelReceivePaymentPage = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (paymentId && loadedPaymentId !== paymentId) return;
 
     try {
       setSaving(true);
       setFormError('');
       setSuccessMessage('');
 
-      const saved = await createTravelReceivePayment(formState);
+      const saved = paymentId
+        ? await updateTravelReceivePayment(paymentId, {
+            ...formState,
+            description: [formState.reference, formState.notes].filter(Boolean).join(' - '),
+          })
+        : await createTravelReceivePayment(formState);
+
+      if (paymentId) {
+        navigate('/travel/payments/received');
+        return;
+      }
 
       const savedCustomerId = getRecordId(saved.customer);
       const isSavedParty =
@@ -511,11 +555,12 @@ const TravelReceivePaymentPage = () => {
               disabled={
                 saving ||
                 loading ||
+                (paymentId && loadedPaymentId !== paymentId) ||
                 (!formState.customerId && !formState.customerPartyId) ||
                 !formState.accountId
               }
             >
-              {saving ? t('travel.common.saving') : t('travel.payments.receiveAction')}
+              {saving ? t('travel.common.saving') : paymentId ? t('updateClose') : t('travel.payments.receiveAction')}
             </TravelActionButton>
           </div>
         </div>

@@ -44,11 +44,60 @@ router.post(
   accountController.transferBetweenAccounts,
 );
 
+router.get(
+  "/transfer/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.getAccountTransfer,
+);
+
+router.put(
+  "/transfer/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.updateAccountTransfer,
+);
+
 router.post(
   "/adjustment",
   authenticate,
   requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
   accountController.adjustAccountBalance,
+);
+
+router.get(
+  "/adjustment/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.getAccountAdjustment,
+);
+
+router.put(
+  "/adjustment/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.updateAccountAdjustment,
+);
+
+router.post(
+  "/owner-transaction",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.createOwnerTransaction,
+);
+
+router.get(
+  "/owner-transaction/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.getOwnerTransaction,
+);
+
+router.put(
+  "/owner-transaction/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountController.updateOwnerTransaction,
 );
 
 router.put(

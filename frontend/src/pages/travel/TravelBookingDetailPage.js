@@ -53,6 +53,11 @@ import {
 import { getCurrentLanguage, t } from '../../i18n/i18n';
 import { hasPermission } from '../../utils/permissionHelper';
 import { sharePdfDocument } from '../../utils/documentShare';
+import {
+  downloadBackendPdf,
+  openBackendPreviewWindow,
+  openBackendPrintWindow,
+} from '../../utils/backendPrintDocument';
 import { generateWhatsAppLink } from '../../utils/whatsapp';
 
 import {
@@ -60,9 +65,7 @@ import {
   TravelMasterPageFrame,
   buildTravelConfirmMessage,
 } from '../../components/travel/master/TravelMasterUI';
-import {
-  TravelReminderStatusPanel,
-} from '../../components/travel/reminders/TravelReminderCenter';
+import { TravelReminderStatusPanel } from '../../components/travel/reminders/TravelReminderCenter';
 
 import {
   formatBookingMoney,
@@ -76,14 +79,6 @@ import {
 } from '../../components/travel/bookings/travelBookingConfig';
 
 import BookingStatusBadge from '../../components/travel/bookings/BookingStatusBadge';
-
-const openDocumentUrl = (url) => {
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-
-  if (!opened) {
-    alert(t('alerts.printWindowBlocked'));
-  }
-};
 
 const tabConfig = [
   {
@@ -128,7 +123,8 @@ const tabConfig = [
   },
 ];
 
-const getBookingCustomer = (booking) => booking?.customer || booking?.customerPartyId || booking?.customerId;
+const getBookingCustomer = (booking) =>
+  booking?.customer || booking?.customerPartyId || booking?.customerId;
 
 const getBookingCustomerName = (booking) => getCustomerName(getBookingCustomer(booking));
 
@@ -983,7 +979,11 @@ const renderUmrahComponent = (component, index) => {
 
       <div className="space-y-4 p-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <InfoCard icon={FaUser} label="Vendor" value={getVendorName(getBookingVendor(component))} />
+          <InfoCard
+            icon={FaUser}
+            label="Vendor"
+            value={getVendorName(getBookingVendor(component))}
+          />
 
           {type === 'hotel' && (
             <InfoCard
@@ -1097,12 +1097,7 @@ const renderItemSpecificDetails = (booking, item) => {
             tone="violet"
           />
 
-          <InfoCard
-            icon={FaUsers}
-            label="Pax"
-            value={pricingSummary.pax || '-'}
-            tone="cyan"
-          />
+          <InfoCard icon={FaUsers} label="Pax" value={pricingSummary.pax || '-'} tone="cyan" />
 
           <InfoCard
             icon={FaPlane}
@@ -1419,28 +1414,45 @@ const TravelBookingDetailPage = () => {
     }
   };
 
-  const handlePreviewInvoice = () => {
+  const handlePreviewInvoice = async () => {
     if (!booking?._id) {
       return;
     }
 
-    openDocumentUrl(getTravelBookingPreviewUrl(booking._id));
+    try {
+      await openBackendPreviewWindow({ url: getTravelBookingPreviewUrl(booking._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handlePrintInvoice = () => {
+  const handlePrintInvoice = async () => {
     if (!booking?._id) {
       return;
     }
 
-    openDocumentUrl(getTravelBookingPrintUrl(booking._id));
+    try {
+      await openBackendPrintWindow({ url: getTravelBookingPrintUrl(booking._id) });
+    } catch (error) {
+      setPageError(error.message || t('alerts.printWindowBlocked'));
+    }
   };
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
     if (!booking?._id) {
       return;
     }
 
-    openDocumentUrl(getTravelBookingPdfUrl(booking._id));
+    const invoiceNumber = booking.invoiceNumber || booking.bookingNumber || booking._id;
+
+    try {
+      await downloadBackendPdf({
+        url: getTravelBookingPdfUrl(booking._id),
+        fileName: `TravelInvoice-${invoiceNumber}.pdf`,
+      });
+    } catch (error) {
+      setPageError(error.message || t('pdf.shareFailed'));
+    }
   };
 
   const handleReminderEmail = async (reminder) => {

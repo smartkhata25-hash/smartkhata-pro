@@ -101,6 +101,8 @@ const journalEntrySchema = new mongoose.Schema(
         "payment",
         "adjustment",
         "account_transfer",
+        "owner_money_in",
+        "owner_money_out",
         "manual",
         "expense",
         "reversal",

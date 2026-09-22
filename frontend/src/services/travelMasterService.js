@@ -756,6 +756,17 @@ export const createTravelReceivePayment = async (data) => {
   return response.data;
 };
 
+export const fetchTravelReceivePayment = async (id) => {
+  const response = await axios.get(`${TRAVEL_API}/payments/received/${id}`, getConfig());
+  return response.data;
+};
+
+export const updateTravelReceivePayment = async (id, data) => {
+  const response = await axios.put(`${TRAVEL_API}/payments/received/${id}`, data, getConfig());
+  clearTravelCustomerFinancialCaches();
+  return response.data;
+};
+
 export const fetchTravelReceivePayments = async (params = {}) => {
   const response = await axios.get(
     `${TRAVEL_API}/payments/received`,

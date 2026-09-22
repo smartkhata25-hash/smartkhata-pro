@@ -785,6 +785,11 @@ export default function CustomerLedgerPage() {
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
 
+              if (type === 'receive_payment' && entry.originModule === 'travel_receive_payment' && entry.referenceId) {
+                navigate(`/travel/payments/receive?paymentId=${entry.referenceId}`);
+                return;
+              }
+
               if (type === 'travel_booking' && entry.referenceId) {
                 navigate(`/travel/bookings/${entry.referenceId}`);
 

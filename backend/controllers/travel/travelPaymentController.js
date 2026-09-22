@@ -733,7 +733,26 @@ const getPaymentAccount = async (userId, accountId) => {
   return account;
 };
 
+const travelReceivePaymentQuery = (req) => ({
+  _id: toObjectId(req.params.id, "payment"),
+  userId: toObjectId(getUserId(req), "user"),
+  originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
+  isDeleted: false,
+  isReversed: { $ne: true },
+});
+
+exports.getTravelReceivePayment = async (req, res) => {
+  try {
+    const payment = await ReceivePayment.findOne(travelReceivePaymentQuery(req)).lean();
+    if (!payment) throw createHttpError(404, "Travel receive payment not found");
+    return res.json(payment);
+  } catch (error) {
+    return sendError(res, error, "Travel receive payment fetch failed");
+  }
+};
+
 exports.createTravelReceivePayment = async (req, res) => {
+  let session = null;
   try {
     const userId = getUserId(req);
     const actorId = getActorId(req);
@@ -756,19 +775,23 @@ exports.createTravelReceivePayment = async (req, res) => {
       throw createHttpError(404, "Travel customer account not found");
     }
 
-    const billNo = await generateTravelPaymentNumber({
+    const existingPayment = req.params.id
+      ? await ReceivePayment.findOne(travelReceivePaymentQuery(req))
+      : null;
+    if (req.params.id && !existingPayment) {
+      throw createHttpError(404, "Travel receive payment not found");
+    }
+    const billNo = existingPayment?.billNo || await generateTravelPaymentNumber({
       userId,
       date: paymentDate,
       counterType: "travel_receive_payment",
       prefix: "TRP",
     });
-    const description = buildDescription(
-      `Travel Receive Payment ${billNo}`,
-      reference,
-      notes,
-    );
+    const description = existingPayment && req.body.description !== undefined
+      ? cleanString(req.body.description)
+      : buildDescription(`Travel Receive Payment ${billNo}`, reference, notes);
 
-    const payment = await ReceivePayment.create({
+    const paymentData = {
       customer: customer.customerId,
       partyId: customer.partyId,
       date: formatDateInput(paymentDate, req.body.date),
@@ -783,26 +806,62 @@ exports.createTravelReceivePayment = async (req, res) => {
       description,
       originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
       userId,
-    });
+    };
 
-    const journal = await createPaymentEntry({
-      userId,
-      referenceId: payment._id,
-      sourceType: "receive_payment",
-      originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
-      billNo,
-      accountId: paymentAccount._id,
-      counterPartyAccountId: customer.accountId,
-      amount,
-      paymentType,
-      description,
-      ...getCustomerJournalIdentity(customer),
-      entryDate: paymentDate,
-      entryTime: time,
-    });
+    let payment;
+    let journal;
+    let accountIds = [];
+    const savePayment = async () => {
+      if (existingPayment) {
+        payment = await ReceivePayment.findOne(travelReceivePaymentQuery(req)).session(session);
+        if (!payment) throw createHttpError(404, "Travel receive payment not found");
+        const reversal = await reverseTravelJournals({
+          userId: toObjectId(userId, "user"),
+          referenceId: payment._id,
+          originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
+          sourceTypes: ["receive_payment"],
+          session,
+          reason: "Travel receive payment edited",
+        });
+        if (!reversal.journals.length) {
+          throw createHttpError(409, "Travel receive payment journal was not found for reversal");
+        }
+        accountIds = reversal.accountIds;
+        payment.set(paymentData);
+      } else {
+        payment = await ReceivePayment.create(paymentData);
+      }
 
-    payment.journalEntryId = journal._id;
-    await payment.save();
+      journal = await createPaymentEntry({
+        userId,
+        referenceId: payment._id,
+        sourceType: "receive_payment",
+        originModule: TRAVEL_RECEIVE_PAYMENT_ORIGIN,
+        billNo,
+        accountId: paymentAccount._id,
+        counterPartyAccountId: customer.accountId,
+        amount,
+        paymentType,
+        description,
+        ...getCustomerJournalIdentity(customer),
+        entryDate: paymentDate,
+        entryTime: time,
+        session,
+      });
+
+      payment.journalEntryId = journal._id;
+      await payment.save(session ? { session } : undefined);
+    };
+
+    if (existingPayment) {
+      session = await mongoose.startSession();
+      await session.withTransaction(savePayment);
+      await recalculateTravelSoftDeleteAccounts([
+        ...accountIds, paymentAccount._id, customer.accountId,
+      ]);
+    } else {
+      await savePayment();
+    }
 
     const balanceMap =
       customer.entityType === "party"
@@ -814,13 +873,14 @@ exports.createTravelReceivePayment = async (req, res) => {
     try {
       await logActivity({
         req,
-        action: "create",
+        action: existingPayment ? "update" : "create",
         module: "travel.payments",
         entityType: "ReceivePayment",
         entityId: payment._id,
         title: `Travel Receive Payment ${billNo}`,
         billNo,
         description,
+        before: existingPayment?.toObject(),
         after: payment,
         createdBy: actorId,
       });
@@ -833,7 +893,7 @@ exports.createTravelReceivePayment = async (req, res) => {
 
     clearTravelReportCache(userId);
 
-    return res.status(201).json({
+    return res.status(existingPayment ? 200 : 201).json({
       payment,
       journalEntryId: journal._id,
       customer: serializeCounterparty(customer),
@@ -843,6 +903,8 @@ exports.createTravelReceivePayment = async (req, res) => {
     });
   } catch (error) {
     return sendError(res, error, "Travel receive payment failed");
+  } finally {
+    if (session) await session.endSession();
   }
 };
 

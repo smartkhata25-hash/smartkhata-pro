@@ -34,6 +34,18 @@ router.delete(
   ctrl.reverseTravelReceivePayment,
 );
 
+router.get(
+  "/received/:id",
+  requirePermission("travel.bookings.view", "travel.bookings.edit", "travel.payments"),
+  ctrl.getTravelReceivePayment,
+);
+
+router.put(
+  "/received/:id",
+  requirePermission("travel.bookings.view", "travel.bookings.edit", "travel.payments"),
+  ctrl.createTravelReceivePayment,
+);
+
 router.post(
   "/vendor",
   requirePermission("travel.vendors.view", "travel.vendors.manage", "travel.payments"),

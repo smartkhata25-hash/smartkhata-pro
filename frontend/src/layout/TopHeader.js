@@ -852,16 +852,6 @@ const TopHeader = ({
                 {t('whatsappSettings.menu')}
               </div>
 
-              <div
-                onClick={() => {
-                  navigateFromHeader('/change-pin');
-                  setShowUserMenu(false);
-                }}
-                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-              >
-                🔑 Change PIN
-              </div>
-
               {isOwner && (
                 <>
                   <div className="border-t my-1"></div>
@@ -887,54 +877,6 @@ const TopHeader = ({
                   </div>
                 </>
               )}
-              <div
-                onClick={() => {
-                  const userId = localStorage.getItem('userId');
-                  const isEnabled = localStorage.getItem(`lockEnabled_${userId}`);
-
-                  if (isEnabled === 'true') {
-                    const confirmOff = window.confirm(
-                      'Are you sure you want to turn OFF the lock?'
-                    );
-
-                    if (!confirmOff) {
-                      setShowUserMenu(false);
-                      return;
-                    }
-
-                    localStorage.setItem(`lockEnabled_${userId}`, 'false');
-                    localStorage.setItem(`isUnlocked_${userId}`, 'true');
-
-                    window.location.href = '/#/dashboard';
-                  } else {
-                    const confirmOn = window.confirm('Do you want to enable the lock?');
-
-                    if (!confirmOn) {
-                      setShowUserMenu(false);
-                      return;
-                    }
-
-                    const pin = localStorage.getItem(`appPin_${userId}`);
-
-                    if (!pin) {
-                      alert('Please set a PIN first.');
-                      window.location.href = '/#/set-pin';
-                      return;
-                    }
-
-                    localStorage.setItem(`lockEnabled_${userId}`, 'true');
-                    localStorage.setItem(`isUnlocked_${userId}`, 'false');
-
-                    window.location.href = '/#/lock';
-                  }
-
-                  setShowUserMenu(false);
-                }}
-                className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-              >
-                🔒 Lock On / Off
-              </div>
-
               <div className="border-t"></div>
 
               {/* Language */}
@@ -947,10 +889,6 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
-                  const userId = localStorage.getItem('userId');
-
-                  localStorage.setItem(`isUnlocked_${userId}`, 'false');
-
                   localStorage.removeItem('token');
                   localStorage.removeItem('userId');
                   localStorage.removeItem('user');

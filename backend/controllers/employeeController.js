@@ -790,6 +790,10 @@ const buildEmployeePayload = async ({
   const pieceOnlyKnotting = ["per_beam", "per_set"].includes(
     knottingPaymentMethod,
   );
+  const knottingRate = payload.knottingDefaultRate;
+  if (knottingRate !== undefined && (!Number.isFinite(Number(knottingRate)) || Number(knottingRate) < 0)) {
+    throw createHttpError("Default Knotting rate must be zero or greater", 400);
+  }
 
   return {
     ...basePayload,
@@ -814,6 +818,7 @@ const buildEmployeePayload = async ({
     salaryType: weavingSalaryType,
     baseSalary: pieceOnlyKnotting ? 0 : roundMoney(payload.baseSalary),
     knottingPaymentMethod,
+    ...(knottingRate !== undefined ? { knottingDefaultRate: roundMoney(knottingRate) } : {}),
     dutyHours: normalizeDutyHours(payload.dutyHours),
     weeklyOffDays: normalizeWeeklyOffDays(payload.weeklyOffDays),
     paidLeaveAllowance: normalizePaidLeaveAllowance(payload.paidLeaveAllowance),

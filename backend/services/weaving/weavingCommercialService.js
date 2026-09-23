@@ -79,13 +79,13 @@ const ensurePartyAccount = async (userId, party, session = null) => {
   party.accountId = account._id; await party.save(sessionOptions(session)); return account;
 };
 
-const createJournal = async ({ userId, date, description, sourceType = "manual", originModule, referenceId, invoiceId, invoiceModel, billNo = "", lines }) => {
+const createJournal = async ({ userId, date, description, sourceType = "manual", originModule, referenceId, invoiceId, invoiceModel, billNo = "", lines, session = null }) => {
   const normalized = lines.filter((line) => round(line.amount) > 0).map((line) => ({ ...line, amount: round(line.amount) }));
   const debit = round(normalized.filter((line) => line.type === "debit").reduce((sum, line) => sum + line.amount, 0));
   const credit = round(normalized.filter((line) => line.type === "credit").reduce((sum, line) => sum + line.amount, 0));
   if (normalized.length < 2 || debit !== credit) throw error("Weaving journal is not balanced");
-  const journal = await JournalEntry.create({ date: new Date(`${date}T00:00:00.000Z`), description, createdBy: userId, sourceType, originModule, moduleScope: "weaving", referenceId, invoiceId, invoiceModel, billNo, lines: normalized });
-  await recalculateAccountBalances([...new Set(normalized.map((line) => String(line.account)))]);
+  const journal = await createOne(JournalEntry, { date: new Date(`${date}T00:00:00.000Z`), description, createdBy: userId, sourceType, originModule, moduleScope: "weaving", referenceId, invoiceId, invoiceModel, billNo, lines: normalized }, session);
+  await recalculateAccountBalances([...new Set(normalized.map((line) => String(line.account)))], session);
   return journal;
 };
 
@@ -99,12 +99,12 @@ const allocateLedgerVoucherBlock = async (userId, type, prefix, count = 1) => {
   return Array.from({ length: count }, (_, index) => `${prefix}-${String(end - count + index + 1).padStart(5, "0")}`);
 };
 
-const reverseJournal = async (userId, journalId, date, reason) => {
+const reverseJournal = async (userId, journalId, date, reason, session = null) => {
   if (!journalId) return null;
-  const original = await JournalEntry.findOne({ _id: journalId, createdBy: userId, moduleScope: "weaving", isDeleted: false, isReversed: false });
+  const original = await JournalEntry.findOne({ _id: journalId, createdBy: userId, moduleScope: "weaving", isDeleted: false, isReversed: false }).session(session);
   if (!original) return null;
-  const reversal = await createJournal({ userId, date, description: reason, sourceType: "reversal", originModule: "weaving.reversal", referenceId: original.referenceId, lines: original.lines.map((line) => ({ account: line.account, type: line.type === "debit" ? "credit" : "debit", amount: line.amount })) });
-  original.isReversed = true; await original.save(); reversal.isReversal = true; reversal.reversalOf = original._id; await reversal.save(); return reversal;
+  const reversal = await createJournal({ session, userId, date, description: reason, sourceType: "reversal", originModule: "weaving.reversal", referenceId: original.referenceId, lines: original.lines.map((line) => ({ account: line.account, type: line.type === "debit" ? "credit" : "debit", amount: line.amount })) });
+  original.isReversed = true; await original.save({ session }); reversal.isReversal = true; reversal.reversalOf = original._id; await reversal.save({ session }); return reversal;
 };
 
 const openingBalanceIsUnchanged = ({ currentAmount, currentType, currentJournalId, currentDate, nextAmount, nextType, nextDate, journalExists }) =>
@@ -366,23 +366,23 @@ const mergeParties = async (userId, sourceId, targetId) => {
   await recalculateAccountBalances([sourceAccount._id, targetAccount._id]); return result;
 };
 
-const ensurePaymentAccount = async (userId, id) => {
-  const account = await Account.findOne({ _id: id, userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } });
+const ensurePaymentAccount = async (userId, id, session = null) => {
+  const account = await Account.findOne({ _id: id, userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } }).session(session);
   if (!account) throw error("Valid payment account is required"); return account;
 };
 
-const nextNo = async (Model, userId, field, prefix) => { const latest = await Model.findOne({ userId }).sort({ createdAt: -1 }).select(field).lean(); const value = latest?.[field] || ""; return `${prefix}-${String((Number(String(value).match(/(\d+)$/)?.[1]) || 0) + 1).padStart(5, "0")}`; };
+const nextNo = async (Model, userId, field, prefix, session = null) => { const latest = await Model.findOne({ userId }).session(session).sort({ createdAt: -1 }).select(field).lean(); const value = latest?.[field] || ""; return `${prefix}-${String((Number(String(value).match(/(\d+)$/)?.[1]) || 0) + 1).padStart(5, "0")}`; };
 
-const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, salesInvoice = null }) => {
+const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, salesInvoice = null, session = null }) => {
   const requestKey = text(payload.requestKey);
   if (requestKey) {
-    const existing = await WeavingMoneyTransaction.findOne({ userId, requestKey });
+    const existing = await WeavingMoneyTransaction.findOne({ userId, requestKey }).session(session);
     if (existing) {
       if (existing.salesInvoiceId) {
-        const invoice = salesInvoice || await WeavingSalesInvoice.findOne({ _id: existing.salesInvoiceId, userId });
+        const invoice = salesInvoice || await WeavingSalesInvoice.findOne({ _id: existing.salesInvoiceId, userId }).session(session);
         if (invoice) {
-          const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: invoice._id, type: "receive", status: "posted" }).select("amount").lean();
-          invoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); invoice.balanceDue = round(Math.max(0, invoice.grandTotal - invoice.paidAmount)); invoice.paymentStatus = invoice.balanceDue <= 0 ? "paid" : invoice.paidAmount > 0 ? "partial" : "unpaid"; await invoice.save();
+          const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: invoice._id, type: "receive", status: "posted" }).session(session).select("amount").lean();
+          invoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); invoice.balanceDue = round(Math.max(0, invoice.grandTotal - invoice.paidAmount)); invoice.paymentStatus = invoice.balanceDue <= 0 ? "paid" : invoice.paidAmount > 0 ? "partial" : "unpaid"; await invoice.save({ session });
         }
       }
       return existing;
@@ -390,20 +390,37 @@ const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, s
   }
   const type = payload.type === "receive" ? "receive" : "pay"; const amount = round(payload.amount); if (amount <= 0) throw error("Amount must be greater than zero");
   const allowedRoles = type === "receive" ? ["customer", "both"] : ["supplier", "both"];
-  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: allowedRoles } });
+  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: allowedRoles } }).session(session);
   if (!party) throw error(type === "receive" ? "Customer / Party is required" : "Supplier / Party is required");
-  const [partyAccount, paymentAccount] = await Promise.all([ensurePartyAccount(userId, party), ensurePaymentAccount(userId, payload.paymentAccountId)]);
+  const [partyAccount, paymentAccount] = [await ensurePartyAccount(userId, party, session), await ensurePaymentAccount(userId, payload.paymentAccountId, session)];
   if (purchaseInvoice && amount > purchaseInvoice.balanceDue) throw error("Payment exceeds invoice balance");
   if (salesInvoice && amount > salesInvoice.balanceDue) throw error("Receipt exceeds invoice balance");
-  const transactionNo = payload.transactionNo || await nextNo(WeavingMoneyTransaction, userId, "transactionNo", type === "receive" ? "RCV" : "PAY");
-  if (payload.paymentMethod === "cheque" && (!text(payload.chequeNo) || !text(payload.chequeDueDate))) throw error("Cheque Number and Clearing / Due Date are required");
+  const transactionNo = await nextNo(WeavingMoneyTransaction, userId, "transactionNo", type === "receive" ? "RCV" : "PAY", session);
+  if (payload.paymentMethod === "cheque" && (!text(payload.chequeNo) || !text(payload.chequeDate))) throw error("Cheque Number and Cheque Date are required");
   const transaction = new WeavingMoneyTransaction({ userId, requestKey: requestKey || null, transactionNo, type, date: payload.date, partyId: party._id, purchaseInvoiceId: purchaseInvoice?._id || payload.purchaseInvoiceId || null, salesInvoiceId: salesInvoice?._id || payload.salesInvoiceId || null, sizingBillId: payload.sizingBillId || null, amount, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || paymentAccount.category, description: text(payload.description), attachmentUrl: text(payload.attachmentUrl), attachments: payload.attachments || [], chequeNo: text(payload.chequeNo), chequeBank: text(payload.chequeBank), chequeDate: text(payload.chequeDate), chequeDueDate: text(payload.chequeDueDate), chequeStatus: payload.paymentMethod === "cheque" ? "pending" : "", journalEntryId: partyAccount._id });
-  const journal = await createJournal({ userId, date: payload.date, description: payload.description || `${type === "receive" ? "Received from" : "Paid to"} ${party.name}`, sourceType: type === "receive" ? "receive_payment" : "pay_bill", originModule: type === "receive" ? "weaving.receive_payment" : "weaving.pay_bill", referenceId: transaction._id, billNo: transactionNo, lines: type === "receive" ? [{ account: paymentAccount._id, type: "debit", amount }, { account: partyAccount._id, type: "credit", amount }] : [{ account: partyAccount._id, type: "debit", amount }, { account: paymentAccount._id, type: "credit", amount }] });
-  transaction.journalEntryId = journal._id; await transaction.save();
-  if (purchaseInvoice) { purchaseInvoice.paidAmount = round(purchaseInvoice.paidAmount + amount); purchaseInvoice.balanceDue = round(purchaseInvoice.grandTotal - purchaseInvoice.paidAmount); purchaseInvoice.paymentStatus = purchaseInvoice.balanceDue <= 0 ? "paid" : "partial"; purchaseInvoice.paymentTransactionIds.push(transaction._id); await purchaseInvoice.save(); }
-  if (salesInvoice) { const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: salesInvoice._id, type: "receive", status: "posted" }).select("amount").lean(); salesInvoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); salesInvoice.balanceDue = round(Math.max(0, salesInvoice.grandTotal - salesInvoice.paidAmount)); salesInvoice.paymentStatus = salesInvoice.balanceDue <= 0 ? "paid" : salesInvoice.paidAmount > 0 ? "partial" : "unpaid"; await salesInvoice.save(); }
+  const journal = await createJournal({ session, userId, date: payload.date, description: payload.description || `${type === "receive" ? "Received from" : "Paid to"} ${party.name}`, sourceType: type === "receive" ? "receive_payment" : "pay_bill", originModule: type === "receive" ? "weaving.receive_payment" : "weaving.pay_bill", referenceId: transaction._id, billNo: transactionNo, lines: type === "receive" ? [{ account: paymentAccount._id, type: "debit", amount }, { account: partyAccount._id, type: "credit", amount }] : [{ account: partyAccount._id, type: "debit", amount }, { account: paymentAccount._id, type: "credit", amount }] });
+  transaction.journalEntryId = journal._id; await transaction.save({ session });
+  if (purchaseInvoice) { purchaseInvoice.paidAmount = round(purchaseInvoice.paidAmount + amount); purchaseInvoice.balanceDue = round(purchaseInvoice.grandTotal - purchaseInvoice.paidAmount); purchaseInvoice.paymentStatus = purchaseInvoice.balanceDue <= 0 ? "paid" : "partial"; purchaseInvoice.paymentTransactionIds.push(transaction._id); await purchaseInvoice.save({ session }); }
+  if (salesInvoice) { const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: salesInvoice._id, type: "receive", status: "posted" }).session(session).select("amount").lean(); salesInvoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); salesInvoice.balanceDue = round(Math.max(0, salesInvoice.grandTotal - salesInvoice.paidAmount)); salesInvoice.paymentStatus = salesInvoice.balanceDue <= 0 ? "paid" : salesInvoice.paidAmount > 0 ? "partial" : "unpaid"; await salesInvoice.save({ session }); }
   return transaction;
 };
+
+const recalculatePaymentLinks = async (userId, transaction, session = null) => {
+  const totalFor = async (field, value, type) => {
+    const rows = await WeavingMoneyTransaction.find({ userId, [field]: value, type, status: "posted" }).session(session).select("amount").lean();
+    return round(rows.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+  };
+  if (transaction.purchaseInvoiceId) {
+    const row = await WeavingPurchaseInvoice.findOne({ _id: transaction.purchaseInvoiceId, userId }).session(session);
+    if (row) { row.paidAmount = await totalFor("purchaseInvoiceId", row._id, "pay"); row.balanceDue = round(Math.max(0, row.grandTotal - row.paidAmount)); row.paymentStatus = row.balanceDue <= 0 ? "paid" : row.paidAmount > 0 ? "partial" : "unpaid"; await row.save({ session }); }
+  }
+  if (transaction.salesInvoiceId) {
+    const row = await WeavingSalesInvoice.findOne({ _id: transaction.salesInvoiceId, userId }).session(session);
+    if (row) { row.paidAmount = await totalFor("salesInvoiceId", row._id, "receive"); row.balanceDue = round(Math.max(0, row.grandTotal - row.paidAmount)); row.paymentStatus = row.balanceDue <= 0 ? "paid" : row.paidAmount > 0 ? "partial" : "unpaid"; await row.save({ session }); }
+  }
+};
+const voidMoneyTransaction = async (userId, id, reason = "", session = null) => { const row = await WeavingMoneyTransaction.findOne({ _id: id, userId, status: "posted" }).session(session); if (!row) throw error("Posted payment not found", 404); const reversal = await reverseJournal(userId, row.journalEntryId, new Date().toISOString().slice(0, 10), `Void ${row.transactionNo}: ${text(reason)}`, session); row.status = "void"; row.voidedAt = new Date(); row.voidReason = text(reason); row.reversalJournalId = reversal?._id || null; await row.save({ session }); await recalculatePaymentLinks(userId, row, session); return row; };
+const updateMoneyTransaction = async (userId, id, payload) => { const current = await WeavingMoneyTransaction.findOne({ _id: id, userId, status: "posted" }); if (!current) throw error("Posted payment not found", 404); await voidMoneyTransaction(userId, id, "Edited and replaced"); const replacement = await postMoneyTransaction({ userId, payload: { ...payload, type: current.type, purchaseInvoiceId: payload.purchaseInvoiceId || current.purchaseInvoiceId, salesInvoiceId: payload.salesInvoiceId || current.salesInvoiceId, sizingBillId: payload.sizingBillId || current.sizingBillId, requestKey: "" } }); await recalculatePaymentLinks(userId, replacement); return replacement; };
 
 const normalizePurchaseLines = async (userId, payload) => {
   if (!Array.isArray(payload.lines) || !payload.lines.length) throw error("Add at least one purchase line");
@@ -422,7 +439,7 @@ const createFabricPurchase = async (userId, payload) => {
   if (!requestKey) throw error("Request key is required");
   const existing = await WeavingPurchaseInvoice.findOne({ userId, requestKey });
   if (existing) return existing;
-  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: ["supplier", "both"] } });
+  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["supplier", "both"] } });
   if (!party) throw error("Supplier / Party is required");
   const lines = await normalizePurchaseLines(userId, { ...payload, purchaseType: "fabric" });
   const grandTotal = round(lines.reduce((sum, line) => sum + line.amount, 0));
@@ -431,7 +448,7 @@ const createFabricPurchase = async (userId, payload) => {
   const partyAccount = await ensurePartyAccount(userId, party);
   const inventoryAccount = await ensureAccount(userId, "WEAVING_FABRIC_INVENTORY");
   const paymentAccount = paidNow > 0 ? await ensurePaymentAccount(userId, payload.paymentAccountId) : null;
-  const purchaseNo = payload.purchaseNo || await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
+  const purchaseNo = await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
   const paymentNo = paidNow > 0 ? await nextNo(WeavingMoneyTransaction, userId, "transactionNo", "PAY") : "";
   const creditDays = Math.max(0, Number(payload.creditDays) || 0);
   const calculatedDue = creditDays && payload.purchaseDate ? new Date(`${payload.purchaseDate}T00:00:00.000Z`) : null;
@@ -466,7 +483,7 @@ const createPurchase = async (userId, payload) => {
   const purchaseType = ["yarn", "fabric", "parts", "other"].includes(payload.purchaseType) ? payload.purchaseType : "other"; const yarnSource = payload.yarnSource === "party" ? "party" : "own";
   const nonFinancialPartyYarn = purchaseType === "yarn" && yarnSource === "party";
   const allowedRoles = nonFinancialPartyYarn ? ["customer", "both"] : ["supplier", "both"];
-  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: allowedRoles } });
+  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: allowedRoles } });
   if (!party) throw error(nonFinancialPartyYarn ? "Customer / Party is required for Party-owned Yarn" : "Supplier / Party is required");
   const entryMode = ["yarn", "fabric"].includes(purchaseType) ? "detailed" : payload.entryMode === "detailed" ? "detailed" : "quick";
   const lines = entryMode === "quick" ? [] : await normalizePurchaseLines(userId, { ...payload, purchaseType });
@@ -475,7 +492,7 @@ const createPurchase = async (userId, payload) => {
   const grandTotal = entryMode === "quick" ? quickAmount : round(lines.reduce((s, l) => s + l.amount, 0)); const nonFinancial = purchaseType === "yarn" && yarnSource === "party";
   const paidNow = round(payload.paidNow);
   if (paidNow < 0 || paidNow > grandTotal || (nonFinancial && paidNow > 0)) throw error("Paid Now cannot exceed Bill Total");
-  const purchaseNo = payload.purchaseNo || await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
+  const purchaseNo = await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
   const creditDays = Math.max(0, Number(payload.creditDays) || 0); const calculatedDue = creditDays && payload.purchaseDate ? new Date(`${payload.purchaseDate}T00:00:00.000Z`) : null; if (calculatedDue) calculatedDue.setUTCDate(calculatedDue.getUTCDate() + creditDays);
   const partyAccount = nonFinancial ? null : await ensurePartyAccount(userId, party);
   const paymentAccount = paidNow > 0 ? await ensurePaymentAccount(userId, payload.paymentAccountId) : null;
@@ -632,4 +649,4 @@ const updatePurchase = async (userId, invoiceId, payload, actorId) => {
   return replacement;
 };
 
-module.exports = { ensureAccount, ensurePartyAccount, createJournal, reverseJournal, reconcileOpeningBalance, resolveEffectiveWeavingPartyLedgerJournals, partyBalance, getPartyLedger, mergeParties: costing.withCostingInvalidation(mergeParties, "party_merge"), postMoneyTransaction, createPurchase: costing.withCostingInvalidation(createPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), updatePurchase: costing.withCostingInvalidation(updatePurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), voidPurchase: costing.withCostingInvalidation(voidPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), nextNo, round, _test: { buildLedgerSource, calculateEffectivePartyLedger, openingBalanceIsUnchanged, resolveEffectiveWeavingPartyLedgerJournals, createJournal, reverseJournal, normalizePurchaseLines, consolidateJournalLines, mergeRoles, assertPurchaseHasNoDownstreamUse } };
+module.exports = { ensureAccount, ensurePartyAccount, createJournal, reverseJournal, reconcileOpeningBalance, resolveEffectiveWeavingPartyLedgerJournals, partyBalance, getPartyLedger, mergeParties: costing.withCostingInvalidation(mergeParties, "party_merge"), postMoneyTransaction, updateMoneyTransaction, voidMoneyTransaction, createPurchase: costing.withCostingInvalidation(createPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), updatePurchase: costing.withCostingInvalidation(updatePurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), voidPurchase: costing.withCostingInvalidation(voidPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), nextNo, round, _test: { buildLedgerSource, calculateEffectivePartyLedger, openingBalanceIsUnchanged, resolveEffectiveWeavingPartyLedgerJournals, createJournal, reverseJournal, normalizePurchaseLines, consolidateJournalLines, mergeRoles, assertPurchaseHasNoDownstreamUse } };

@@ -11,6 +11,7 @@ const schema = new mongoose.Schema({
   purchaseInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingPurchaseInvoice", default: null },
   sizingIssueId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingSizingIssue", default: null },
   sizingReceiptId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingSizingReceipt", default: null },
+  partyReturnNo: { type: String, trim: true, default: "" },
   stockAdjustmentId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingStockAdjustment", default: null },
   stockAdjustmentNo: { type: String, trim: true, default: "" },
   requestKey: { type: String, trim: true, default: null },

@@ -98,7 +98,7 @@ exports.recalculateAccountBalance = async (accountId) => {
 };
 
 // ✅ Multiple involved accounts کو ایک ہی aggregation میں recalculate کریں
-exports.recalculateAccountBalances = async (accountIds = []) => {
+exports.recalculateAccountBalances = async (accountIds = [], session = null) => {
   const validIds = [
     ...new Set(
       accountIds
@@ -115,7 +115,7 @@ exports.recalculateAccountBalances = async (accountIds = []) => {
 
   const accounts = await Account.find({
     _id: { $in: objectIds },
-  }).select("_id userId name normalBalance");
+  }).session(session).select("_id userId name normalBalance");
 
   if (accounts.length === 0) {
     return [];
@@ -158,7 +158,7 @@ exports.recalculateAccountBalances = async (accountIds = []) => {
         },
       },
     },
-  ]);
+  ]).session(session);
 
   const summaryMap = new Map(
     summary.map((item) => [
@@ -195,7 +195,7 @@ exports.recalculateAccountBalances = async (accountIds = []) => {
   });
 
   if (updates.length > 0) {
-    await Account.bulkWrite(updates, { strict: false });
+    await Account.bulkWrite(updates, { strict: false, ...(session ? { session } : {}) });
   }
 
   return accounts.map((account) => {

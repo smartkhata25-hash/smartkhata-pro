@@ -11,6 +11,7 @@ const schema = new mongoose.Schema(
     status: { type: String, enum: ["available", "knotting", "loaded", "completed"], default: "available" },
     knottingJobId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingKnottingJob", default: null },
     activeLoomId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingLoom", default: null },
+    loomNumber: { type: String, trim: true, default: "" },
     loadedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
   },
@@ -19,4 +20,5 @@ const schema = new mongoose.Schema(
 
 schema.index({ userId: 1, sizingReceiptId: 1, beamIndex: 1 }, { unique: true });
 schema.index({ userId: 1, activeLoomId: 1 }, { unique: true, partialFilterExpression: { activeLoomId: { $type: "objectId" }, status: "loaded" } });
+schema.index({ userId: 1, loomNumber: 1 }, { unique: true, partialFilterExpression: { loomNumber: { $gt: "" }, status: "loaded" } });
 module.exports = mongoose.model("WeavingBeam", schema);

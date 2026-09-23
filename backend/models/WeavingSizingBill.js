@@ -8,6 +8,7 @@ const schema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
   moduleScope: { type: String, enum: ["weaving"], default: "weaving", immutable: true },
   billNo: { type: String, required: true },
+  partyInvoiceNo: { type: String, trim: true, default: "" },
   billDate: { type: String, required: true },
   sizingPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", required: true },
   receiptId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingSizingReceipt", default: null },

@@ -294,7 +294,7 @@ const normalizeSaleTerms = (payload, grandTotal) => {
 };
 
 const createDirectDraft = async (userId, payload, actorId) => {
-  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } });
+  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } });
   if (!party) throw fail("Customer / Party is required");
   const saleNature = ["fabric", "yarn", "other"].includes(payload.saleNature) ? payload.saleNature : "fabric";
   const otherSubtype = saleNature === "other" && ["rejected", "cut_piece", "waste", "other"].includes(payload.otherSubtype) ? payload.otherSubtype : "";
@@ -496,7 +496,7 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId) => {
   if (!seed) throw fail("Posted Invoice not found", 404);
   const activeReceipts = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: seed._id, type: "receive", status: "posted" });
   if (activeReceipts.some((row) => !seed.receiptRequestKey || row.requestKey !== seed.receiptRequestKey)) throw fail("Reverse later receipts linked to this Invoice before editing it", 409);
-  const party = await WeavingParty.findOne({ _id: payload.partyId || seed.partyId, userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } });
+  const party = await WeavingParty.findOne({ _id: payload.partyId || seed.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } });
   if (!party) throw fail("Customer / Party is required");
   const invoiceDate = clean(payload.invoiceDate) || seed.invoiceDate;
   const quantity = qty(payload.quantity ?? seed.quantity);

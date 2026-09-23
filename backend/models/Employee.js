@@ -144,6 +144,7 @@ const employeeSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    knottingDefaultRate: { type: Number, min: 0 },
     knottingPaymentMethod: {
       type: String,
       enum: ["monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"],

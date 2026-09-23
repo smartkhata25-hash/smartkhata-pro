@@ -11,24 +11,6 @@ export default function ProtectedRoute({ children, permission = null }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Lock Settings
-  let lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
-  let isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
-
-  if (lockEnabled === null) {
-    localStorage.setItem(`lockEnabled_${userId}`, 'false');
-    lockEnabled = 'false';
-  }
-
-  if (isUnlocked === null) {
-    localStorage.setItem(`isUnlocked_${userId}`, 'false');
-    isUnlocked = 'false';
-  }
-
-  if (lockEnabled === 'true' && isUnlocked !== 'true') {
-    return <Navigate to="/lock" state={{ from: location }} replace />;
-  }
-
   // Current User
   let user = null;
 

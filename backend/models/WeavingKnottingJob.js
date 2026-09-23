@@ -10,6 +10,12 @@ const schema = new mongoose.Schema(
     employeeId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true },
     loomId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingLoom", default: null },
     beamIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeam" }],
+    beamAssignments: [{
+      _id: false,
+      beamId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeam", required: true },
+      loomId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingLoom", default: null },
+      loomNumber: { type: String, trim: true, default: "" },
+    }],
     workDate: { type: String, required: true },
     paymentMethod: { type: String, enum: PAYMENT_METHODS, required: true },
     completedBeams: { type: Number, min: 0, default: 0 },

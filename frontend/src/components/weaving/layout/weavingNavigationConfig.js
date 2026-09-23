@@ -213,6 +213,78 @@ export const weavingTopMenuConfig = Object.freeze([
     ],
   },
   {
+    label: 'weaving.nav.banking',
+    module: MODULE_KEYS.WEAVING,
+    permission: paymentView,
+    sections: [
+      {
+        title: 'weaving.nav.banking',
+        items: [
+          { label: 'weaving.nav.receivePayment', path: '/weaving/payments?tab=receive', allPermissions: [paymentView, 'weaving.payments.create'] },
+          { label: 'weaving.nav.payBill', path: '/weaving/payments?tab=pay', allPermissions: [paymentView, 'weaving.payments.create'] },
+          { label: 'weaving.nav.receivePaymentList', path: '/weaving/payments?tab=history&type=receive', permission: paymentView },
+          { label: 'weaving.nav.payBillList', path: '/weaving/payments?tab=history&type=pay', permission: paymentView },
+        ],
+      },
+    ],
+  },
+  {
+    label: 'weaving.nav.purchase',
+    module: MODULE_KEYS.WEAVING,
+    permission: 'weaving.purchases.view',
+    sections: [
+      {
+        title: 'weaving.nav.newPurchase',
+        items: [
+          { label: 'weaving.nav.yarnPurchase', path: '/weaving/purchase?tab=yarn', permission: 'weaving.purchases.view' },
+          { label: 'weaving.nav.fabricPurchase', path: '/weaving/purchase?tab=fabric', permission: 'weaving.purchases.view' },
+          { label: 'weaving.nav.generalPurchase', path: '/weaving/purchase?tab=general', permission: 'weaving.purchases.view' },
+        ],
+      },
+      {
+        title: 'weaving.nav.purchaseLists',
+        items: [
+          { label: 'weaving.nav.allPurchaseList', path: '/weaving/purchase?view=list', permission: 'weaving.purchases.view' },
+          { label: 'weaving.nav.yarnPurchaseList', path: '/weaving/purchase?view=list&type=yarn', permission: 'weaving.purchases.view' },
+          { label: 'weaving.nav.fabricPurchaseList', path: '/weaving/purchase?view=list&type=fabric', permission: 'weaving.purchases.view' },
+          { label: 'weaving.nav.generalPurchaseList', path: '/weaving/purchase?view=list&type=general', permission: 'weaving.purchases.view' },
+        ],
+      },
+    ],
+  },
+  {
+    label: 'weaving.sidebar.sizing',
+    module: MODULE_KEYS.WEAVING,
+    permission: 'weaving.sizing.view',
+    sections: [
+      {
+        title: 'weaving.sidebar.sizing',
+        items: [
+          { label: 'Yarn Issue', path: '/weaving/sizing?tab=issue', permission: 'weaving.sizing.view' },
+          { label: 'Sizing Receiving', path: '/weaving/sizing?tab=receiving', permission: 'weaving.sizing.view' },
+        ],
+      },
+      {
+        title: 'Lists',
+        items: [
+          { label: 'Combined Receiving List', path: '/weaving/sizing?tab=list&type=combined', permission: 'weaving.sizing.view' },
+          { label: 'Yarn Issue List', path: '/weaving/sizing?tab=list&type=issue', permission: 'weaving.sizing.view' },
+          { label: 'Sizing Receiving List', path: '/weaving/sizing?tab=list&type=receipt', permission: 'weaving.sizing.view' },
+          { label: 'Yarn Return List', path: '/weaving/sizing?tab=list&type=return', permission: 'weaving.sizing.view' },
+          { label: 'Sizing Bill List', path: '/weaving/sizing?tab=list&type=bill', permission: 'weaving.sizing.view' },
+        ],
+      },
+      {
+        title: 'Reports',
+        items: [
+          { label: 'Stock at Sizing', path: '/weaving/sizing?tab=stock', permission: 'weaving.sizing.view_material_ledger' },
+          { label: 'Material Ledger', path: '/weaving/sizing?tab=ledger', permission: 'weaving.sizing.view_material_ledger' },
+          { label: 'Sizing Party Ledger', path: '/weaving/party-ledger?type=sizing', permission: partyLedger },
+        ],
+      },
+    ],
+  },
+  {
     label: 'weaving.nav.production',
     module: MODULE_KEYS.WEAVING,
     sections: [

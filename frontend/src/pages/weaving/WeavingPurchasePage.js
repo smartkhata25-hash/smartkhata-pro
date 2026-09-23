@@ -133,6 +133,8 @@ export default function WeavingPurchasePage() {
   const requestedKind = ['yarn', 'fabric', 'general'].includes(params.get('tab'))
     ? params.get('tab')
     : 'yarn';
+  const listMode = params.get('view') === 'list';
+  const listType = ['yarn', 'fabric', 'general'].includes(params.get('type')) ? params.get('type') : '';
   const [kind, setKind] = useState(requestedKind);
   const [form, setForm] = useState(() => restorePurchase(requestedKind));
 
@@ -149,6 +151,7 @@ export default function WeavingPurchasePage() {
   });
 
   const [history, setHistory] = useState([]);
+  const [filters, setFilters] = useState({ search: '', date: 'all', from: '', to: '', status: '', type: '' });
   const [notice, setNotice] = useState('');
   useWeavingFeedback(notice, setNotice, { type: 'error' });
   const [saving, setSaving] = useState(false);
@@ -192,16 +195,17 @@ export default function WeavingPurchasePage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      const now = new Date(); const iso = (value) => value.toISOString().slice(0, 10); const start = (value) => new Date(value.getFullYear(), value.getMonth(), value.getDate()); const weekStart = new Date(start(now)); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); const lastWeekEnd = new Date(weekStart); lastWeekEnd.setDate(lastWeekEnd.getDate() - 1); const lastWeekStart = new Date(lastWeekEnd); lastWeekStart.setDate(lastWeekStart.getDate() - 6); const ranges = { today: [iso(now), iso(now)], yesterday: [iso(new Date(start(now).getTime() - 86400000)), iso(new Date(start(now).getTime() - 86400000))], thisWeek: [iso(weekStart), iso(now)], lastWeek: [iso(lastWeekStart), iso(lastWeekEnd)], thisMonth: [iso(new Date(now.getFullYear(), now.getMonth(), 1)), iso(now)], lastMonth: [iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), iso(new Date(now.getFullYear(), now.getMonth(), 0))], thisYear: [`${now.getFullYear()}-01-01`, iso(now)], lastYear: [`${now.getFullYear() - 1}-01-01`, `${now.getFullYear() - 1}-12-31`] }; const range = filters.date === 'custom' ? [filters.from, filters.to] : ranges[filters.date] || [];
       listPurchases({
-        type: kind === 'general' ? 'parts' : kind,
-        includeVoided: true,
+        ...(listMode ? (listType ? { type: listType === 'general' ? 'parts' : listType } : {}) : { type: kind === 'general' ? 'parts' : kind }),
+        ...(listMode ? { search: filters.search, status: filters.status, ...(listType ? {} : filters.type ? { type: filters.type === 'general' ? 'parts' : filters.type } : {}), from: range[0], to: range[1] } : { includeVoided: true }),
       })
         .then(setHistory)
         .catch(() => {});
     }, 375);
 
     return () => clearTimeout(timer);
-  }, [kind]);
+  }, [kind, listMode, listType, filters]);
 
   useEffect(() => {
     const purchaseId = params.get('purchaseId');
@@ -266,7 +270,7 @@ export default function WeavingPurchasePage() {
     });
     if (!reason) return;
     setSaving(true);
-    try { await voidPurchase(row._id, reason); setNotice(''); closePurchaseDetail(); setHistory(await listPurchases({ type: kind === 'general' ? 'parts' : kind, includeVoided: true })); }
+    try { await voidPurchase(row._id, reason); setNotice(''); closePurchaseDetail(); setHistory(await listPurchases(listMode ? { ...(listType ? { type: listType === 'general' ? 'parts' : listType } : {}), ...(listType ? {} : filters.type ? { type: filters.type === 'general' ? 'parts' : filters.type } : {}) } : { type: kind === 'general' ? 'parts' : kind, includeVoided: true })); }
     catch (error) { setNotice(error.response?.data?.message || 'Could not void purchase'); }
     finally { setSaving(false); }
   };
@@ -498,6 +502,9 @@ export default function WeavingPurchasePage() {
       setPackingOpen({});
       setForm(initial(kind));
       setEditingId(null);
+      const freshMeta = await getCommercialMeta({ force: true });
+      setMeta(freshMeta);
+      setForm((current) => ({ ...current, purchaseNo: freshMeta.nextPurchaseNo || '' }));
 
       listPurchases({
         type: kind === 'general' ? 'parts' : kind,
@@ -566,6 +573,7 @@ export default function WeavingPurchasePage() {
   return (
     <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-teal-50/50 px-2 pb-3 pt-1 sm:px-3 sm:pb-4">
       <div className="mx-auto max-w-[1700px] space-y-2">
+        {!listMode && <>
         {/* PURCHASE DETAILS */}
         <section className="overflow-visible rounded-md border border-slate-200 bg-white shadow-sm">
           <div className="flex min-h-[46px] flex-wrap items-center justify-between gap-2 border-b border-teal-100 bg-gradient-to-r from-teal-100 via-cyan-50 to-emerald-50 px-3 py-1.5">
@@ -605,11 +613,7 @@ export default function WeavingPurchasePage() {
                 className={control}
                 value={form.purchaseNo}
                 placeholder="e.g. WP-00001"
-                onChange={(e) =>
-                  patch({
-                    purchaseNo: e.target.value,
-                  })
-                }
+                disabled
               />
             )}
 
@@ -636,7 +640,7 @@ export default function WeavingPurchasePage() {
               }
               placeholder="Search supplier or party"
               options={meta.parties.filter((row) =>
-                !row.isHidden && (
+                !row.isHidden && !row.serviceTypes?.includes('sizing') && (
                   row.role === 'both' ||
                   row.role === (kind === 'yarn' && form.yarnSource === 'party' ? 'customer' : 'supplier')
                 )
@@ -1634,7 +1638,7 @@ export default function WeavingPurchasePage() {
             }}
             className="rounded-md border border-slate-300 bg-white px-4 py-2 font-medium text-slate-700 transition hover:bg-slate-50"
           >
-            Clear
+            {editingId ? 'Cancel Edit' : 'Clear'}
           </button>
 
           <button
@@ -1647,10 +1651,13 @@ export default function WeavingPurchasePage() {
           </button>
         </div>
 
-        {/* RECENT PURCHASES */}
+        </>}
+
+        {/* PURCHASE LIST */}
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {listMode && <div className="grid gap-2 border-b p-3 sm:grid-cols-3 lg:grid-cols-6"><input className={control} placeholder="Search purchase or supplier" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /><select className={control} value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })}>{[['all','All Dates'],['today','Today'],['yesterday','Yesterday'],['thisWeek','This Week'],['lastWeek','Last Week'],['thisMonth','This Month'],['lastMonth','Last Month'],['thisYear','This Year'],['lastYear','Last Year'],['custom','Custom Date']].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select>{filters.date === 'custom' && <><input type="date" className={control} value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} /><input type="date" className={control} value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} /></>}<select className={control} value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All Payment Status</option><option value="paid">Paid</option><option value="partial">Partial</option><option value="unpaid">Unpaid</option></select>{!listType && <select className={control} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All Types</option><option value="yarn">Yarn</option><option value="fabric">Fabric</option><option value="general">Parts / Other</option></select>}<button type="button" className="rounded-md border px-3 text-sm" onClick={() => setFilters({ search: '', date: 'all', from: '', to: '', status: '', type: '' })}>Clear Filters</button></div>}
           <div className="border-b border-slate-100 px-4 py-3">
-            <h2 className="font-semibold text-slate-800">Purchase Invoices <span className="ml-2 text-xs font-normal text-slate-500">Recent first</span></h2>
+            <h2 className="font-semibold text-slate-800">{listMode ? `${listType === 'yarn' ? 'Yarn' : listType === 'fabric' ? 'Fabric' : listType === 'general' ? 'Parts / Other' : 'All'} Purchase List` : 'Purchase Invoices'} <span className="ml-2 text-xs font-normal text-slate-500">Recent first</span></h2>
           </div>
 
           {history.length ? (
@@ -1660,30 +1667,36 @@ export default function WeavingPurchasePage() {
                   <tr>
                     <th className="px-4 py-3 text-left">Purchase No.</th>
 
+                    {listMode && <th className="px-4 py-3 text-left">Date</th>}
+
                     <th className="px-4 py-3 text-left">Supplier / Party</th>
+
+                    {listMode && <th className="px-4 py-3 text-left">Supplier Invoice No.</th>}
 
                     <th className="px-4 py-3 text-left">Type</th>
 
                     <th className="px-4 py-3 text-right">Total</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    {!listMode && <th className="px-4 py-3 text-left">Status</th>}<th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {history.map((row) => (
-                    <tr key={row._id} role="button" tabIndex={0} onClick={() => setParams({ tab: kind, purchaseId: row._id })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setParams({ tab: kind, purchaseId: row._id }); } }} className="cursor-pointer border-t border-slate-100 hover:bg-teal-50">
+                    <tr key={row._id} role="button" tabIndex={0} onClick={() => listMode ? beginEdit(row) : setParams({ tab: kind, purchaseId: row._id })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); listMode ? beginEdit(row) : setParams({ tab: kind, purchaseId: row._id }); } }} className="cursor-pointer border-t border-slate-100 hover:bg-teal-50">
                       <td className="px-4 py-3 font-semibold text-slate-800">{row.purchaseNo}</td>
 
+                      {listMode && <td className="px-4 py-3">{row.purchaseDate}</td>}
+
                       <td className="px-4 py-3">{row.partyName}</td>
+
+                      {listMode && <td className="px-4 py-3">{row.supplierInvoiceNo || '-'}</td>}
 
                       <td className="px-4 py-3 capitalize">{row.purchaseType}</td>
 
                       <td className="px-4 py-3 text-right font-semibold">
                         Rs. {money(row.grandTotal)}
                       </td>
-                      <td className="px-4 py-3 capitalize">{row.status}</td>
-                      <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" title="View" onClick={(event) => { event.stopPropagation(); setParams({ tab: kind, purchaseId: row._id }); }} className="rounded-md border p-2 text-slate-600 hover:bg-white"><FaEye /></button>{canEdit && row.status === 'posted' && <button type="button" title="Edit" onClick={(event) => { event.stopPropagation(); beginEdit(row); }} className="rounded-md border p-2 text-teal-700 hover:bg-white"><FaEdit /></button>}{canVoid && row.status === 'posted' && <button type="button" title="Void" onClick={(event) => { event.stopPropagation(); removePurchase(row); }} className="rounded-md border p-2 text-rose-700 hover:bg-rose-50"><FaTrash /></button>}</div></td>
+                      {(listMode || !listMode) && <>{!listMode && <td className="px-4 py-3 capitalize">{row.status}</td>}<td className="px-4 py-3"><div className="flex justify-end gap-2">{!listMode && <button type="button" title="View" onClick={(event) => { event.stopPropagation(); setParams({ tab: kind, purchaseId: row._id }); }} className="rounded-md border p-2 text-slate-600 hover:bg-white"><FaEye /></button>}{canEdit && row.status === 'posted' && <button type="button" title="Edit" onClick={(event) => { event.stopPropagation(); beginEdit(row); }} className="rounded-md border p-2 text-teal-700 hover:bg-white"><FaEdit /></button>}{canVoid && row.status === 'posted' && <button type="button" title="Delete" onClick={(event) => { event.stopPropagation(); removePurchase(row); }} className="rounded-md border p-2 text-rose-700 hover:bg-rose-50"><FaTrash /></button>}</div></td></>}
                     </tr>
                   ))}
                 </tbody>

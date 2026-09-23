@@ -56,9 +56,6 @@ const InviteUser = lazy(() => import('./pages/InviteUser'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AdminDevices = lazy(() => import('./pages/AdminDevices'));
-const LockScreen = lazy(() => import('./pages/LockScreen'));
-const SetPinPage = lazy(() => import('./pages/SetPinPage'));
-const ChangePinPage = lazy(() => import('./pages/ChangePinPage'));
 const StaffManagementPage = lazy(() => import('./pages/StaffManagementPage'));
 const StaffFormPage = lazy(() => import('./pages/StaffFormPage'));
 const StaffPermissionsPage = lazy(() => import('./pages/StaffPermissionsPage'));
@@ -223,19 +220,20 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleAppClose = () => {
-      const userId = localStorage.getItem('userId');
-
-      if (userId) {
-        localStorage.setItem(`isUnlocked_${userId}`, 'false');
-      }
-    };
-
-    window.addEventListener('beforeunload', handleAppClose);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleAppClose);
-    };
+    // Remove retired screen-lock settings without touching authentication or preferences.
+    try {
+      Object.keys(localStorage).forEach((key) => {
+        if (['appPin_', 'lockEnabled_', 'isUnlocked_'].some((prefix) => key.startsWith(prefix))) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch {
+      // Storage may be unavailable; the removed feature must not block startup.
+    }
+    // Recover old bookmarks/open tabs through the normal login/workspace flow.
+    if (/^#\/(lock|set-pin|change-pin)\/?(?:[?].*)?$/.test(window.location.hash)) {
+      window.location.replace('#/login');
+    }
   }, []);
 
   useEffect(() => {
@@ -290,26 +288,6 @@ function App() {
           <Route path="/invite" element={<InviteUser />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/lock" element={<LockScreen onUnlock={() => window.location.reload()} />} />
-
-          <Route
-            path="/set-pin"
-            element={
-              <ProtectedRoute>
-                <SetPinPage />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/change-pin"
-            element={
-              <ProtectedRoute>
-                <ChangePinPage />
-              </ProtectedRoute>
-            }
-          />
-
           <Route
             path="/admin/devices"
             element={

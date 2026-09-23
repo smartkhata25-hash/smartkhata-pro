@@ -45,6 +45,7 @@ const EMPTY_FORM = {
   salaryType: 'monthly',
   baseSalary: '',
   knottingPaymentMethod: 'monthly',
+  knottingDefaultRate: '',
   dutyHours: '',
   weeklyOffDays: [],
   paidLeaveAllowance: '0',
@@ -276,6 +277,7 @@ const buildEmployeeForm = (employee) => {
     salaryType: normalizeSalaryType(employee.salaryType),
     baseSalary: employee.baseSalary || '',
     knottingPaymentMethod: employee.knottingPaymentMethod || 'monthly',
+    knottingDefaultRate: employee.knottingDefaultRate ?? '',
     dutyHours: Number(employee.dutyHours || 0) > 0 ? String(employee.dutyHours) : '',
     weeklyOffDays: normalizeWeeklyOffDays(employee.weeklyOffDays),
     paidLeaveAllowance: String(employee.paidLeaveAllowance ?? 0),
@@ -294,7 +296,7 @@ const buildEmployeeForm = (employee) => {
 const buildDefaultForm = (formMeta = {}, normalizedMeta = EMPTY_META) => ({
   ...EMPTY_FORM,
   employeeNo: formMeta?.nextEmployeeNo || '',
-  listOrder: formMeta?.nextListOrder || '',
+  listOrder: '',
   joiningDate: todayInput(),
   shiftId: getDefaultShiftId(normalizedMeta.shifts),
 });
@@ -309,6 +311,7 @@ const InputField = ({
   inputMode,
   min,
   step,
+  disabled = false,
   placeholderKey,
   className = '',
   error = '',
@@ -326,6 +329,7 @@ const InputField = ({
       inputMode={inputMode}
       min={min}
       step={step}
+      disabled={disabled}
       placeholder={placeholderKey ? t(placeholderKey) : ''}
       aria-invalid={Boolean(error)}
       className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 ${
@@ -906,6 +910,7 @@ const WeavingEmployeeFormPage = () => {
         salaryType: normalizeSalaryType(form.salaryType),
         baseSalary: Number(form.baseSalary || 0),
         knottingPaymentMethod: form.knottingPaymentMethod || 'monthly',
+        knottingDefaultRate: Number(form.knottingDefaultRate || 0),
         dutyHours: Number(form.dutyHours || 0),
         weeklyOffDays: normalizeWeeklyOffDays(form.weeklyOffDays),
         paidLeaveAllowance: Number(form.paidLeaveAllowance || 0),
@@ -1015,6 +1020,7 @@ const WeavingEmployeeFormPage = () => {
                 name="employeeNo"
                 value={form.employeeNo}
                 onChange={handleChange}
+                disabled
                 error={fieldErrors.employeeNo}
               />
               <InputField
@@ -1146,19 +1152,29 @@ const WeavingEmployeeFormPage = () => {
             {isKnottingWorker && (
               <label className="block min-w-0 xl:col-span-2">
                 <span className="mb-1 block text-xs font-extrabold text-slate-500">
-                  Knotting Payment Method
+                  {t('weaving.beams.paymentBasis')}
                 </span>
                 <select
                   value={form.knottingPaymentMethod || 'monthly'}
                   onChange={(event) => handleChange('knottingPaymentMethod', event.target.value)}
                   className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
                 >
-                  <option value="monthly">Monthly</option>
-                  <option value="per_beam">Per Beam</option>
-                  <option value="per_set">Per Set</option>
-                  <option value="monthly_per_beam">Monthly + Per Beam Bonus</option>
-                  <option value="monthly_per_set">Monthly + Per Set Bonus</option>
+                  <option value="monthly">{t('weaving.beams.methods.monthly')}</option>
+                  <option value="per_beam">{t('weaving.beams.methods.per_beam')}</option>
+                  <option value="per_set">{t('weaving.beams.methods.per_set')}</option>
+                  <option value="monthly_per_beam">{t('weaving.beams.methods.monthly_per_beam')}</option>
+                  <option value="monthly_per_set">{t('weaving.beams.methods.monthly_per_set')}</option>
                 </select>
+              </label>
+            )}
+            {isKnottingWorker && form.knottingPaymentMethod !== 'monthly' && (
+              <label className="block min-w-0 xl:col-span-2">
+                <span className="mb-1 block text-xs font-extrabold text-slate-500">
+                  {t(form.knottingPaymentMethod.includes('per_beam') ? 'weaving.beams.defaultPerBeam' : 'weaving.beams.defaultPerSet')}
+                </span>
+                <input type="number" min="0" step="0.01" value={form.knottingDefaultRate}
+                  onChange={(event) => handleChange('knottingDefaultRate', event.target.value)}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-cyan-500" />
               </label>
             )}
             {!isPieceOnlyKnotting && <>

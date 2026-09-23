@@ -17,15 +17,25 @@ import WeightKgLbsInput from '../../components/weaving/WeightKgLbsInput';
 import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 
 import {
-  createSizingBill,
   createSizingIssue,
   createSizingReceipt,
-  createSizingReturn,
   getCommercialMeta,
   getSizingMaterialLedger,
   getSizingMeta,
   getSizingBillById,
   getSizingStock,
+  listSizingBills,
+  listSizingIssues,
+  listSizingReceipts,
+  listSizingReturns,
+  voidSizingBill,
+  voidSizingIssue,
+  voidSizingReceipt,
+  voidSizingReturn,
+  updateSizingBill,
+  updateSizingIssue,
+  updateSizingReceipt,
+  updateSizingReturn,
 } from '../../services/weavingCommercialService';
 
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
@@ -61,7 +71,9 @@ const Field = ({ label, children, className = '' }) => (
 
 const WeavingSizingPage = () => {
   const [params, setParams] = useSearchParams();
-  const requestedTab = ['issue', 'receiving', 'stock', 'ledger'].includes(params.get('tab')) ? params.get('tab') : 'issue';
+  const requestedTab = ['issue', 'receiving', 'stock', 'ledger', 'list'].includes(params.get('tab'))
+    ? params.get('tab')
+    : 'issue';
   const [tab, setTab] = useState(requestedTab);
 
   const [meta, setMeta] = useState({
@@ -78,9 +90,20 @@ const WeavingSizingPage = () => {
   });
 
   const [rows, setRows] = useState([]);
+  const [listFilters, setListFilters] = useState({
+    search: '',
+    dateRange: 'all',
+    from: '',
+    to: '',
+    sizingPartyId: '',
+    yarnId: '',
+    ownershipType: '',
+    paymentStatus: '',
+  });
   const [notice, setNotice] = useState(null);
   useWeavingFeedback(notice, setNotice);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null);
 
   const [packingOpen, setPackingOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -113,6 +136,7 @@ const WeavingSizingPage = () => {
 
   const [receipt, setReceipt] = useState({
     receiptNo: '',
+    partyReceiptNo: '',
     date: today(),
 
     sizingPartyId: '',
@@ -133,6 +157,7 @@ const WeavingSizingPage = () => {
 
   const [yarnReturn, setYarnReturn] = useState({
     returnNo: '',
+    partyReturnNo: '',
     date: today(),
 
     sizingPartyId: '',
@@ -155,6 +180,7 @@ const WeavingSizingPage = () => {
 
   const [bill, setBill] = useState({
     billNo: '',
+    partyInvoiceNo: '',
     billDate: today(),
 
     sizingPartyId: '',
@@ -170,6 +196,9 @@ const WeavingSizingPage = () => {
     paidNow: '',
     paymentMethod: 'cash',
     paymentAccountId: '',
+    chequeNo: '',
+    chequeBank: '',
+    chequeDate: '',
 
     notes: '',
   });
@@ -199,16 +228,76 @@ const WeavingSizingPage = () => {
       ...value,
       billNo: value.billNo || sizingMeta.nextBillNo || '',
     }));
+    return sizingMeta;
   };
 
+  const dateParams = () => {
+    const now = new Date();
+    const start = (d) => d.toISOString().slice(0, 10);
+    const day = (offset) =>
+      start(new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset));
+    if (listFilters.dateRange === 'today') return { from: day(0), to: day(0) };
+    if (listFilters.dateRange === 'yesterday') return { from: day(-1), to: day(-1) };
+    if (listFilters.dateRange === 'thisWeek') {
+      const first = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - ((now.getDay() + 6) % 7)
+      );
+      return { from: start(first), to: day(0) };
+    }
+    if (listFilters.dateRange === 'lastWeek') {
+      const last = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - ((now.getDay() + 6) % 7) - 7
+      );
+      return {
+        from: start(last),
+        to: start(new Date(last.getFullYear(), last.getMonth(), last.getDate() + 6)),
+      };
+    }
+    if (listFilters.dateRange === 'thisMonth')
+      return { from: start(new Date(now.getFullYear(), now.getMonth(), 1)), to: day(0) };
+    if (listFilters.dateRange === 'lastMonth')
+      return {
+        from: start(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+        to: start(new Date(now.getFullYear(), now.getMonth(), 0)),
+      };
+    if (listFilters.dateRange === 'thisYear')
+      return { from: start(new Date(now.getFullYear(), 0, 1)), to: day(0) };
+    if (listFilters.dateRange === 'lastYear')
+      return {
+        from: start(new Date(now.getFullYear() - 1, 0, 1)),
+        to: start(new Date(now.getFullYear() - 1, 11, 31)),
+      };
+    return listFilters.dateRange === 'custom' ? { from: listFilters.from, to: listFilters.to } : {};
+  };
   const loadRows = async (nextTab = tab) => {
+    const query = {
+      ...dateParams(),
+      sizingPartyId: listFilters.sizingPartyId || undefined,
+      yarnId: listFilters.yarnId || undefined,
+      ownershipType: listFilters.ownershipType || undefined,
+    };
+    if (nextTab === 'list') {
+      const type = params.get('type') || 'combined';
+      if (type === 'issue') setRows(await listSizingIssues(query));
+      else if (type === 'receipt' || type === 'combined') setRows(await listSizingReceipts(query));
+      else if (type === 'return') setRows(await listSizingReturns(query));
+      else
+        setRows(
+          await listSizingBills({ ...query, paymentStatus: listFilters.paymentStatus || undefined })
+        );
+      return;
+    }
     if (nextTab === 'stock') {
-      setRows(await getSizingStock());
+      setRows(await getSizingStock(query));
       return;
     }
 
     if (nextTab === 'ledger') {
-      setRows(await getSizingMaterialLedger());
+      setRows(await getSizingMaterialLedger(query));
       return;
     }
 
@@ -226,7 +315,7 @@ const WeavingSizingPage = () => {
 
   useEffect(() => {
     loadRows(tab).catch(() => setRows([]));
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, listFilters, params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (requestedTab !== tab) setTab(requestedTab);
@@ -240,14 +329,166 @@ const WeavingSizingPage = () => {
     }
     getSizingBillById(billId)
       .then(setBillDetail)
-      .catch((error) => setNotice({ error: true, text: error.response?.status === 404 ? 'Source record is no longer available.' : error.response?.data?.message || 'Could not load Sizing bill' }));
+      .catch((error) =>
+        setNotice({
+          error: true,
+          text:
+            error.response?.status === 404
+              ? 'Source record is no longer available.'
+              : error.response?.data?.message || 'Could not load Sizing bill',
+        })
+      );
   }, [params]);
+
+  useEffect(() => {
+    const editId = params.get('editId');
+    const editType = params.get('editType');
+    if (!editId || !editType) return;
+    (async () => {
+      if (editType === 'issue') {
+        const row = (await listSizingIssues()).find((item) => item._id === editId);
+        if (!row) return;
+        const line = row.lines?.[0] || {};
+        setIssue({
+          ...issue,
+          ...row,
+          yarnId: line.yarnId?._id || line.yarnId || '',
+          sourceGodownId: line.sourceGodownId || '',
+          quantityKg: line.quantityKg || '',
+          packageType: line.packageType || '',
+          packageQty: line.packageQty || '',
+          coneSize: line.coneSize || '',
+          conesPerPackage: line.conesPerPackage || '',
+          extraCones: line.extraCones || '',
+          lotReference: line.lotReference || '',
+          ownershipType: line.ownershipType || 'own',
+          ownerPartyId: line.ownerPartyId || '',
+        });
+        setEditing({ type: 'issue', id: editId });
+        setTab('issue');
+      } else if (editType === 'receipt') {
+        const row = (await listSizingReceipts()).find((item) => item._id === editId);
+        if (!row) return;
+        setReceipt({
+          ...receipt,
+          ...row,
+          sizingPartyId: row.sizingPartyId?._id || row.sizingPartyId,
+          issueId: row.issueId?._id || row.issueId || '',
+        });
+        const [returns, bills] = await Promise.all([listSizingReturns(), listSizingBills()]);
+        const linkedReturn = returns.find(
+          (item) => String(item.sizingReceiptId?._id || item.sizingReceiptId) === editId
+        );
+        const linkedBill = bills.find(
+          (item) => String(item.receiptId?._id || item.receiptId) === editId
+        );
+        if (linkedReturn) {
+          setYarnReturn({
+            ...yarnReturn,
+            ...linkedReturn,
+            sizingPartyId: linkedReturn.sizingPartyId?._id || linkedReturn.sizingPartyId,
+            yarnId: linkedReturn.yarnId?._id || linkedReturn.yarnId,
+            destinationGodownId: linkedReturn.godownId?._id || linkedReturn.godownId || '',
+            returnedKg: linkedReturn.quantityKg || '',
+          });
+          setReturnOpen(true);
+        }
+        if (linkedBill) {
+          const payment =
+            linkedBill.paymentTransactionIds?.find((item) => item.status === 'posted') || {};
+          setBill({
+            ...bill,
+            ...linkedBill,
+            sizingPartyId: linkedBill.sizingPartyId?._id || linkedBill.sizingPartyId,
+            receiptId: editId,
+            paidNow: linkedBill.paidAmount || '',
+            paymentMethod: payment.paymentMethod || 'cash',
+            paymentAccountId: payment.paymentAccountId || '',
+            chequeNo: payment.chequeNo || '',
+            chequeBank: payment.chequeBank || '',
+            chequeDate: payment.chequeDate || '',
+          });
+          setBillOpen(true);
+        }
+        setEditing({ type: 'receipt', id: editId });
+        setTab('receiving');
+      } else if (editType === 'return') {
+        const row = (await listSizingReturns()).find((item) => item._id === editId);
+        if (!row) return;
+        const receiptId = row.sizingReceiptId?._id || row.sizingReceiptId;
+        if (receiptId) {
+          setParams({ tab: 'receiving', editType: 'receipt', editId: receiptId });
+          return;
+        }
+        setYarnReturn({
+          ...yarnReturn,
+          ...row,
+          sizingPartyId: row.sizingPartyId?._id || row.sizingPartyId,
+          yarnId: row.yarnId?._id || row.yarnId,
+          destinationGodownId: row.godownId?._id || row.godownId || '',
+          returnedKg: row.quantityKg || '',
+        });
+        setReturnOpen(true);
+        setEditing({ type: 'return', id: editId });
+        setTab('receiving');
+      } else if (editType === 'bill') {
+        const row = (await listSizingBills()).find((item) => item._id === editId);
+        const receiptId = row?.receiptId?._id || row?.receiptId;
+        if (receiptId) {
+          setParams({ tab: 'receiving', editType: 'receipt', editId: receiptId });
+          return;
+        }
+        if (!row) return;
+        const payment = row.paymentTransactionIds?.find((item) => item.status === 'posted') || {};
+        setBill({
+          ...bill,
+          ...row,
+          sizingPartyId: row.sizingPartyId?._id || row.sizingPartyId,
+          paidNow: row.paidAmount || '',
+          paymentMethod: payment.paymentMethod || 'cash',
+          paymentAccountId: payment.paymentAccountId || '',
+          chequeNo: payment.chequeNo || '',
+          chequeBank: payment.chequeBank || '',
+          chequeDate: payment.chequeDate || '',
+        });
+        setBillOpen(true);
+        setEditing({ type: 'bill', id: editId });
+        setTab('receiving');
+      }
+    })().catch((error) =>
+      setNotice({
+        error: true,
+        text: error.response?.data?.message || 'Could not load source transaction',
+      })
+    );
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const closeBillDetail = () => {
     const next = new URLSearchParams(params);
     next.delete('billId');
     setParams(next, { replace: true });
     setBillDetail(null);
+  };
+  const voidSizingRow = async (type, id, event) => {
+    event.stopPropagation();
+    if (!window.confirm('Delete this posted record by safely voiding its active effects?')) return;
+    const actions = {
+      issue: voidSizingIssue,
+      receipt: voidSizingReceipt,
+      combined: voidSizingReceipt,
+      return: voidSizingReturn,
+      bill: voidSizingBill,
+    };
+    try {
+      await actions[type](id, 'Deleted from Sizing list');
+      await Promise.all([loadRows('list'), loadMeta()]);
+      setNotice({ text: 'Record safely voided.' });
+    } catch (error) {
+      setNotice({
+        error: true,
+        text: error.response?.data?.message || 'Could not void this record.',
+      });
+    }
   };
 
   const totalCones =
@@ -310,16 +551,17 @@ const WeavingSizingPage = () => {
     }));
   };
 
-  const clearReceiving = () => {
+  const clearReceiving = (numbers = meta) => {
     setReturnOpen(false);
     setBillOpen(false);
 
     setReceipt({
-      receiptNo: meta.nextReceiptNo || '',
+      receiptNo: numbers.nextReceiptNo || '',
       date: today(),
 
       sizingPartyId: '',
       issueId: '',
+      partyReceiptNo: '',
 
       beamCount: '',
       length: '',
@@ -335,7 +577,8 @@ const WeavingSizingPage = () => {
     });
 
     setYarnReturn({
-      returnNo: meta.nextReturnNo || '',
+      returnNo: numbers.nextReturnNo || '',
+      partyReturnNo: '',
       date: today(),
 
       sizingPartyId: '',
@@ -357,7 +600,8 @@ const WeavingSizingPage = () => {
     });
 
     setBill({
-      billNo: meta.nextBillNo || '',
+      billNo: numbers.nextBillNo || '',
+      partyInvoiceNo: '',
       billDate: today(),
 
       sizingPartyId: '',
@@ -373,9 +617,39 @@ const WeavingSizingPage = () => {
       paidNow: '',
       paymentMethod: 'cash',
       paymentAccountId: '',
+      chequeNo: '',
+      chequeBank: '',
+      chequeDate: '',
 
       notes: '',
     });
+  };
+
+  const clearIssue = (numbers = meta) =>
+    setIssue({
+      issueNo: numbers.nextIssueNo || '',
+      date: today(),
+      sizingPartyId: '',
+      contractId: '',
+      sourceGodownId: '',
+      yarnId: '',
+      quantityKg: '',
+      quantityLbs: '',
+      gatePassNo: '',
+      lotReference: '',
+      notes: '',
+      packageType: '',
+      packageQty: '',
+      coneSize: '',
+      conesPerPackage: '',
+      extraCones: '',
+    });
+  const cancelEdit = async () => {
+    setEditing(null);
+    setParams({ tab: tab === 'issue' ? 'issue' : 'receiving' }, { replace: true });
+    const freshMeta = await loadMeta();
+    clearIssue(freshMeta);
+    clearReceiving(freshMeta);
   };
 
   const saveIssue = async () => {
@@ -383,7 +657,7 @@ const WeavingSizingPage = () => {
     setNotice(null);
 
     try {
-      await createSizingIssue({
+      const payload = {
         ...issue,
 
         lines: [
@@ -405,16 +679,27 @@ const WeavingSizingPage = () => {
 
             sourceGodownId: issue.sourceGodownId,
 
+            ownershipType: issue.ownershipType || 'own',
+            ownerPartyId: issue.ownerPartyId || '',
+
             lotReference: issue.lotReference,
           },
         ],
-      });
+      };
+      if (editing?.type === 'issue') await updateSizingIssue(editing.id, payload);
+      else await createSizingIssue(payload);
 
       setNotice({
-        text: 'Yarn Issue saved successfully',
+        text:
+          editing?.type === 'issue'
+            ? 'Yarn Issue updated successfully'
+            : 'Yarn Issue saved successfully',
       });
 
-      await loadMeta();
+      const freshMeta = await loadMeta();
+      setEditing(null);
+      setParams({ tab: 'issue' }, { replace: true });
+      clearIssue(freshMeta);
     } catch (error) {
       setNotice({
         error: true,
@@ -430,51 +715,61 @@ const WeavingSizingPage = () => {
     setNotice(null);
 
     try {
-      /*
-       * 1. MAIN RECEIVING
-       */
-      const savedReceipt = await createSizingReceipt({
-        ...receipt,
-      });
-
-      const savedReceiptId = savedReceipt?._id || savedReceipt?.data?._id || '';
-
-      /*
-       * 2. OPTIONAL YARN RETURN
-       */
-      if (returnOpen) {
-        await createSizingReturn({
+      if (editing?.type === 'return') {
+        await updateSizingReturn(editing.id, {
           ...yarnReturn,
-
-          date: yarnReturn.date || receipt.date,
-
-          sizingPartyId: yarnReturn.sizingPartyId || receipt.sizingPartyId,
-
-          issueId: yarnReturn.issueId || receipt.issueId,
+          receiptId: yarnReturn.sizingReceiptId?._id || yarnReturn.sizingReceiptId || '',
         });
-      }
-
-      /*
-       * 3. OPTIONAL SIZING BILL
-       */
-      if (billOpen) {
-        await createSizingBill({
-          ...bill,
-
-          billDate: bill.billDate || receipt.date,
-
-          sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
-
-          receiptId: savedReceiptId || bill.receiptId,
-
-          billableWeightKg:
-            bill.billableWeightKg || receipt.netWeightKg || receipt.yarnGrossWeightKg,
+      } else if (editing?.type === 'bill') {
+        await updateSizingBill(editing.id, bill);
+      } else if (editing?.type === 'receipt') {
+        await updateSizingReceipt(editing.id, {
+          receipt,
+          return: returnOpen
+            ? {
+                ...yarnReturn,
+                date: yarnReturn.date || receipt.date,
+                sizingPartyId: yarnReturn.sizingPartyId || receipt.sizingPartyId,
+                issueId: yarnReturn.issueId || receipt.issueId,
+              }
+            : null,
+          bill: billOpen
+            ? {
+                ...bill,
+                billDate: bill.billDate || receipt.date,
+                sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
+                billableWeightKg:
+                  bill.billableWeightKg || receipt.netWeightKg || receipt.yarnGrossWeightKg,
+              }
+            : null,
+        });
+      } else {
+        await createSizingReceipt({
+          receipt,
+          return: returnOpen
+            ? {
+                ...yarnReturn,
+                date: yarnReturn.date || receipt.date,
+                sizingPartyId: yarnReturn.sizingPartyId || receipt.sizingPartyId,
+                issueId: yarnReturn.issueId || receipt.issueId,
+              }
+            : null,
+          bill: billOpen
+            ? {
+                ...bill,
+                billDate: bill.billDate || receipt.date,
+                sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
+                billableWeightKg:
+                  bill.billableWeightKg || receipt.netWeightKg || receipt.yarnGrossWeightKg,
+              }
+            : null,
         });
       }
 
       setNotice({
-        text:
-          returnOpen && billOpen
+        text: editing
+          ? 'Sizing record updated successfully'
+          : returnOpen && billOpen
             ? 'Receiving, Yarn Return and Bill saved successfully'
             : returnOpen
               ? 'Receiving and Yarn Return saved successfully'
@@ -483,8 +778,10 @@ const WeavingSizingPage = () => {
                 : 'Receiving saved successfully',
       });
 
-      await loadMeta();
-      clearReceiving();
+      const freshMeta = await loadMeta();
+      setEditing(null);
+      setParams({ tab: 'receiving' }, { replace: true });
+      clearReceiving(freshMeta);
     } catch (error) {
       setNotice({
         error: true,
@@ -520,7 +817,10 @@ const WeavingSizingPage = () => {
               <button
                 type="button"
                 key={key}
-                onClick={() => { setTab(key); setParams({ tab: key }); }}
+                onClick={() => {
+                  setTab(key);
+                  setParams({ tab: key });
+                }}
                 className={`flex shrink-0 items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition ${
                   tab === key
                     ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-md'
@@ -549,12 +849,7 @@ const WeavingSizingPage = () => {
                   className={control}
                   value={issue.issueNo}
                   placeholder="e.g. SI-00001"
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      issueNo: e.target.value,
-                    })
-                  }
+                  disabled
                 />
               </Field>
 
@@ -824,18 +1119,351 @@ const WeavingSizingPage = () => {
               )}
             </div>
 
-            <div className="flex justify-end border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+              {editing?.type === 'issue' && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={cancelEdit}
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  Cancel Edit
+                </button>
+              )}
               <button
                 type="button"
                 disabled={saving}
                 onClick={saveIssue}
                 className="rounded-md bg-gradient-to-r from-teal-600 to-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:from-teal-700 hover:to-emerald-700 disabled:opacity-60"
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? 'Saving...' : editing?.type === 'issue' ? 'Update Issue' : 'Save Issue'}
               </button>
             </div>
           </section>
         )}
+
+        {tab === 'list' &&
+          (() => {
+            const type = params.get('type') || 'combined';
+
+            const title =
+              {
+                combined: 'Combined Receiving List',
+                issue: 'Yarn Issue List',
+                receipt: 'Sizing Receiving List',
+                return: 'Yarn Return List',
+                bill: 'Sizing Bill List',
+              }[type] || 'Sizing List';
+
+            const filtered = rows.filter((row) => {
+              const term = listFilters.search.trim().toLowerCase();
+
+              if (!term) return true;
+
+              return [
+                row.issueNo,
+                row.receiptNo,
+                row.returnNo,
+                row.billNo,
+                row.partyReceiptNo,
+                row.partyReturnNo,
+                row.partyInvoiceNo,
+                row.sizingPartyId?.name,
+                row.yarnId?.name,
+              ].some((value) =>
+                String(value || '')
+                  .toLowerCase()
+                  .includes(term)
+              );
+            });
+
+            const clearFilters = () =>
+              setListFilters({
+                search: '',
+                dateRange: 'all',
+                from: '',
+                to: '',
+                sizingPartyId: '',
+                yarnId: '',
+                ownershipType: '',
+                paymentStatus: '',
+              });
+
+            return (
+              <section className="overflow-hidden rounded-2xl border border-teal-100 bg-white shadow-lg shadow-slate-200/60">
+                {/* HEADER */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-emerald-600 px-4 py-3 text-white">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 ring-1 ring-white/25">
+                      <FaListAlt />
+                    </div>
+
+                    <div>
+                      <h2 className="text-base font-bold sm:text-lg">{title}</h2>
+
+                      <p className="text-[11px] font-medium text-white/80">
+                        Click a row to open and edit the original record
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-full border border-white/25 bg-white/15 px-3 py-1 text-xs font-bold">
+                    {filtered.length} {filtered.length === 1 ? 'Record' : 'Records'}
+                  </div>
+                </div>
+
+                {/* FILTERS */}
+                <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-teal-50/70 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+                    <input
+                      className="h-10 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition hover:border-teal-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                      placeholder="Search number, party or yarn..."
+                      value={listFilters.search}
+                      onChange={(e) =>
+                        setListFilters((v) => ({
+                          ...v,
+                          search: e.target.value,
+                        }))
+                      }
+                    />
+
+                    <select
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none sm:w-[150px]"
+                      value={listFilters.dateRange}
+                      onChange={(e) =>
+                        setListFilters((v) => ({
+                          ...v,
+                          dateRange: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="all">All Dates</option>
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="thisMonth">This Month</option>
+                      <option value="thisYear">This Year</option>
+                      <option value="custom">Custom</option>
+                    </select>
+
+                    <select
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none sm:w-[195px]"
+                      value={listFilters.sizingPartyId}
+                      onChange={(e) =>
+                        setListFilters((v) => ({
+                          ...v,
+                          sizingPartyId: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">All Sizing Parties</option>
+
+                      {meta.parties.map((party) => (
+                        <option key={party._id} value={party._id}>
+                          {party.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {(type === 'return' || type === 'issue') && (
+                      <select
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none sm:w-[165px]"
+                        value={listFilters.yarnId}
+                        onChange={(e) =>
+                          setListFilters((v) => ({
+                            ...v,
+                            yarnId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">All Yarn</option>
+
+                        {meta.yarns.map((yarn) => (
+                          <option key={yarn._id} value={yarn._id}>
+                            {yarn.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {type === 'bill' && (
+                      <select
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none sm:w-[175px]"
+                        value={listFilters.paymentStatus}
+                        onChange={(e) =>
+                          setListFilters((v) => ({
+                            ...v,
+                            paymentStatus: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">All Payment Status</option>
+                        <option value="paid">Paid</option>
+                        <option value="partial">Partial</option>
+                        <option value="unpaid">Unpaid</option>
+                      </select>
+                    )}
+
+                    {listFilters.dateRange === 'custom' && (
+                      <>
+                        <input
+                          type="date"
+                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none sm:w-[145px]"
+                          value={listFilters.from}
+                          onChange={(e) =>
+                            setListFilters((v) => ({
+                              ...v,
+                              from: e.target.value,
+                            }))
+                          }
+                        />
+
+                        <input
+                          type="date"
+                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none sm:w-[145px]"
+                          value={listFilters.to}
+                          onChange={(e) =>
+                            setListFilters((v) => ({
+                              ...v,
+                              to: e.target.value,
+                            }))
+                          }
+                        />
+                      </>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="h-10 shrink-0 rounded-lg bg-gradient-to-r from-slate-700 to-slate-900 px-4 text-sm font-bold text-white shadow-sm transition hover:from-slate-800 hover:to-black"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                </div>
+
+                {/* TABLE */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
+                    <thead className="bg-gradient-to-r from-slate-800 via-teal-800 to-emerald-800 text-[11px] font-bold uppercase tracking-wide text-white">
+                      <tr>
+                        {[
+                          'No.',
+                          'Date',
+                          'Sizing Party',
+                          'Yarn / Linked Issue',
+                          'Amount / Weight',
+                          'Status',
+                          'Actions',
+                        ].map((head) => (
+                          <th
+                            key={head}
+                            className="whitespace-nowrap border-r border-white/10 px-3 py-3 text-center last:border-r-0"
+                          >
+                            {head}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100">
+                      {filtered.map((row, index) => {
+                        const externalNo =
+                          row.partyReceiptNo || row.partyReturnNo || row.partyInvoiceNo || '';
+
+                        const status = row.paymentStatus || row.status || 'posted';
+
+                        const statusClass =
+                          status === 'paid'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : status === 'partial'
+                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                              : status === 'unpaid'
+                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                : 'border-sky-200 bg-sky-50 text-sky-700';
+
+                        return (
+                          <tr
+                            key={row._id}
+                            className={`cursor-pointer transition hover:bg-teal-50 ${
+                              index % 2 ? 'bg-slate-50/60' : 'bg-white'
+                            }`}
+                            onClick={() =>
+                              setParams({
+                                tab: type === 'issue' ? 'issue' : 'receiving',
+                                editType: type === 'combined' ? 'receipt' : type,
+                                editId: row._id,
+                              })
+                            }
+                          >
+                            <td className="whitespace-nowrap px-3 py-3">
+                              <div className="font-bold text-slate-800">
+                                {row.issueNo || row.receiptNo || row.returnNo || row.billNo}
+                              </div>
+
+                              {externalNo && (
+                                <div className="mt-0.5 text-[11px] font-medium text-slate-500">
+                                  Party: {externalNo}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-slate-600">
+                              {row.date || row.billDate}
+                            </td>
+
+                            <td className="px-3 py-3 font-semibold text-slate-800">
+                              {row.sizingPartyId?.name || '-'}
+                            </td>
+
+                            <td className="px-3 py-3 text-slate-600">
+                              {row.yarnId?.name ||
+                                row.issueId?.issueNo ||
+                                row.receiptId?.receiptNo ||
+                                '-'}
+                            </td>
+
+                            <td className="whitespace-nowrap px-3 py-3 text-right font-bold text-slate-800">
+                              {row.billAmount
+                                ? money(row.billAmount)
+                                : `${row.quantityKg || row.netWeightKg || '-'} KG`}
+                            </td>
+
+                            <td className="whitespace-nowrap px-3 py-3 text-center">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold capitalize ${statusClass}`}
+                              >
+                                {status}
+                              </span>
+                            </td>
+
+                            <td className="whitespace-nowrap px-3 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={(event) => voidSizingRow(type, row._id, event)}
+                                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {!filtered.length && (
+                    <div className="bg-gradient-to-r from-slate-50 via-white to-teal-50/50 px-4 py-10 text-center">
+                      <div className="font-semibold text-slate-500">No records found</div>
+
+                      <div className="mt-1 text-xs text-slate-400">
+                        Change or clear the filters.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })()}
 
         {/* ===================================================
             COMBINED SIZING RECEIVING
@@ -862,47 +1490,6 @@ const WeavingSizingPage = () => {
               </div>
 
               <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                <Field label="Receipt No.">
-                  <input
-                    className={control}
-                    value={receipt.receiptNo}
-                    onChange={(e) =>
-                      setReceipt({
-                        ...receipt,
-                        receiptNo: e.target.value,
-                      })
-                    }
-                  />
-                </Field>
-
-                <Field label="Date *">
-                  <input
-                    type="date"
-                    className={control}
-                    value={receipt.date}
-                    onChange={(e) => {
-                      const date = e.target.value;
-
-                      setReceipt({
-                        ...receipt,
-                        date,
-                      });
-
-                      setYarnReturn((current) => ({
-                        ...current,
-                        date,
-                      }));
-
-                      setBill((current) => ({
-                        ...current,
-                        billDate: date,
-
-                        dueDate: dueFrom(date, current.creditDays),
-                      }));
-                    }}
-                  />
-                </Field>
-
                 <SearchableCreatableSelect
                   label="Sizing Party"
                   required
@@ -929,7 +1516,7 @@ const WeavingSizingPage = () => {
                   }}
                 />
 
-                <Field label="Issue / Job *">
+                <Field label="Issue / Job">
                   <select
                     className={control}
                     value={receipt.issueId}
@@ -952,6 +1539,36 @@ const WeavingSizingPage = () => {
                         </option>
                       ))}
                   </select>
+                </Field>
+
+                <Field label="Party Receiving / Challan No. *">
+                  <input
+                    className={control}
+                    value={receipt.partyReceiptNo}
+                    onChange={(e) => setReceipt({ ...receipt, partyReceiptNo: e.target.value })}
+                  />
+                </Field>
+
+                <Field label="Receipt No.">
+                  <input className={control} value={receipt.receiptNo} disabled />
+                </Field>
+
+                <Field label="Date *">
+                  <input
+                    type="date"
+                    className={control}
+                    value={receipt.date}
+                    onChange={(e) => {
+                      const date = e.target.value;
+                      setReceipt({ ...receipt, date });
+                      setYarnReturn((current) => ({ ...current, date }));
+                      setBill((current) => ({
+                        ...current,
+                        billDate: date,
+                        dueDate: dueFrom(date, current.creditDays),
+                      }));
+                    }}
+                  />
                 </Field>
 
                 <Field label="Beam Count *">
@@ -1151,11 +1768,16 @@ const WeavingSizingPage = () => {
                         className={control}
                         value={yarnReturn.returnNo}
                         placeholder="e.g. SRN-00001"
+                        disabled
+                      />
+                    </Field>
+
+                    <Field label="Party Return / Challan No. *">
+                      <input
+                        className={control}
+                        value={yarnReturn.partyReturnNo}
                         onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            returnNo: e.target.value,
-                          })
+                          setYarnReturn({ ...yarnReturn, partyReturnNo: e.target.value })
                         }
                       />
                     </Field>
@@ -1343,17 +1965,15 @@ const WeavingSizingPage = () => {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Field label="Bill No. *">
+                    <Field label="Party Invoice No.">
                       <input
                         className={control}
-                        value={bill.billNo}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            billNo: e.target.value,
-                          })
-                        }
+                        value={bill.partyInvoiceNo}
+                        onChange={(e) => setBill({ ...bill, partyInvoiceNo: e.target.value })}
                       />
+                    </Field>
+                    <Field label="Bill No. *">
+                      <input className={control} value={bill.billNo} disabled />
                     </Field>
 
                     <Field label="Bill Date *">
@@ -1501,43 +2121,77 @@ const WeavingSizingPage = () => {
                       />
                     </Field>
 
-                    <Field label="Payment Method">
-                      <select
-                        className={control}
-                        value={bill.paymentMethod}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            paymentMethod: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="cash">Cash</option>
+                    {Number(bill.paidNow || 0) > 0 && (
+                      <>
+                        <Field label="Payment Method">
+                          <select
+                            className={control}
+                            value={bill.paymentMethod}
+                            onChange={(e) =>
+                              setBill({
+                                ...bill,
+                                paymentMethod: e.target.value,
+                                ...(e.target.value === 'cheque'
+                                  ? {}
+                                  : { chequeNo: '', chequeBank: '', chequeDate: '' }),
+                              })
+                            }
+                          >
+                            <option value="cash">Cash</option>
 
-                        <option value="bank">Bank</option>
+                            <option value="bank">Bank</option>
 
-                        <option value="online">Online</option>
+                            <option value="online">Online</option>
 
-                        <option value="cheque">Cheque</option>
-                      </select>
-                    </Field>
+                            <option value="cheque">Cheque</option>
+                          </select>
+                        </Field>
 
-                    <Field label="Payment Account">
-                      <select
-                        className={control}
-                        value={bill.paymentAccountId}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            paymentAccountId: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="">Select Account</option>
+                        <Field label="Payment Account">
+                          <select
+                            className={control}
+                            value={bill.paymentAccountId}
+                            onChange={(e) =>
+                              setBill({
+                                ...bill,
+                                paymentAccountId: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="">Select Account</option>
 
-                        {options(commercial.paymentAccounts)}
-                      </select>
-                    </Field>
+                            {options(commercial.paymentAccounts)}
+                          </select>
+                        </Field>
+
+                        {bill.paymentMethod === 'cheque' && (
+                          <>
+                            <Field label="Cheque Number *">
+                              <input
+                                className={control}
+                                value={bill.chequeNo}
+                                onChange={(e) => setBill({ ...bill, chequeNo: e.target.value })}
+                              />
+                            </Field>
+                            <Field label="Bank Name">
+                              <input
+                                className={control}
+                                value={bill.chequeBank}
+                                onChange={(e) => setBill({ ...bill, chequeBank: e.target.value })}
+                              />
+                            </Field>
+                            <Field label="Cheque Date *">
+                              <input
+                                type="date"
+                                className={control}
+                                value={bill.chequeDate}
+                                onChange={(e) => setBill({ ...bill, chequeDate: e.target.value })}
+                              />
+                            </Field>
+                          </>
+                        )}
+                      </>
+                    )}
 
                     <Field label="Bill Notes" className="sm:col-span-2 xl:col-span-4">
                       <textarea
@@ -1562,7 +2216,9 @@ const WeavingSizingPage = () => {
             ================================================= */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-slate-50 to-teal-50/50 px-4 py-4">
               <div className="text-sm text-slate-500">
-                {returnOpen || billOpen ? (
+                {editing ? (
+                  <>Updating the existing posted Sizing record and its active linked sections</>
+                ) : returnOpen || billOpen ? (
                   <>
                     Saving will create <strong className="text-slate-700">Receiving</strong>
                     {returnOpen && (
@@ -1586,10 +2242,10 @@ const WeavingSizingPage = () => {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={clearReceiving}
+                  onClick={editing ? cancelEdit : clearReceiving}
                   className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
-                  Clear
+                  {editing ? 'Cancel Edit' : 'Clear'}
                 </button>
 
                 <button
@@ -1598,7 +2254,15 @@ const WeavingSizingPage = () => {
                   onClick={saveReceivingAll}
                   className="rounded-md bg-gradient-to-r from-teal-600 to-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-md transition hover:from-teal-700 hover:to-emerald-700 disabled:opacity-60"
                 >
-                  {saving ? 'Saving...' : 'Save Receiving'}
+                  {saving
+                    ? 'Saving...'
+                    : editing
+                      ? editing.type === 'return'
+                        ? 'Update Yarn Return'
+                        : editing.type === 'bill'
+                          ? 'Update Sizing Bill'
+                          : 'Update Receiving'
+                      : 'Save Receiving'}
                 </button>
               </div>
             </div>
@@ -1609,14 +2273,118 @@ const WeavingSizingPage = () => {
             STOCK AT SIZING
         =================================================== */}
         {tab === 'stock' && (
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-teal-200 bg-gradient-to-r from-teal-200 via-cyan-100 to-emerald-100 px-4 py-3">
-              <h2 className="font-bold text-teal-950">Stock at Sizing</h2>
+          <section className="overflow-hidden rounded-2xl border border-teal-100 bg-white shadow-lg shadow-slate-200/60">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-emerald-600 px-4 py-3 text-white">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 ring-1 ring-white/25">
+                  <FaBoxes />
+                </div>
+
+                <div>
+                  <h2 className="text-base font-bold sm:text-lg">Stock at Sizing</h2>
+
+                  <p className="text-[11px] text-white/80">
+                    Click a row to view its Material Ledger
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-full border border-white/25 bg-white/15 px-3 py-1 text-xs font-bold">
+                {rows.length} Balances
+              </div>
+            </div>
+
+            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-teal-50/70 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+                <input
+                  className="h-10 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                  placeholder="Search stock..."
+                  value={listFilters.search}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      search: e.target.value,
+                    }))
+                  }
+                />
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[195px]"
+                  value={listFilters.sizingPartyId}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      sizingPartyId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All Sizing Parties</option>
+
+                  {meta.parties.map((party) => (
+                    <option key={party._id} value={party._id}>
+                      {party.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[165px]"
+                  value={listFilters.yarnId}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      yarnId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All Yarn</option>
+
+                  {meta.yarns.map((yarn) => (
+                    <option key={yarn._id} value={yarn._id}>
+                      {yarn.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[160px]"
+                  value={listFilters.ownershipType}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      ownershipType: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All Ownership</option>
+                  <option value="own">Own</option>
+                  <option value="party">Party</option>
+                </select>
+
+                <button
+                  type="button"
+                  className="h-10 shrink-0 rounded-lg bg-gradient-to-r from-slate-700 to-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:from-slate-800 hover:to-black"
+                  onClick={() =>
+                    setListFilters({
+                      search: '',
+                      dateRange: 'all',
+                      from: '',
+                      to: '',
+                      sizingPartyId: '',
+                      yarnId: '',
+                      ownershipType: '',
+                      paymentStatus: '',
+                    })
+                  }
+                >
+                  Clear Filters
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-sm">
-                <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <thead className="bg-gradient-to-r from-slate-800 via-teal-800 to-emerald-800 text-[11px] font-bold uppercase tracking-wide text-white">
                   <tr>
                     {[
                       'Sizing Party',
@@ -1630,7 +2398,7 @@ const WeavingSizingPage = () => {
                     ].map((head) => (
                       <th
                         key={head}
-                        className="whitespace-nowrap border border-slate-200 px-4 py-3 text-center"
+                        className="whitespace-nowrap border-r border-white/10 px-4 py-3 text-center last:border-r-0"
                       >
                         {head}
                       </th>
@@ -1638,62 +2406,219 @@ const WeavingSizingPage = () => {
                   </tr>
                 </thead>
 
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={index} className="hover:bg-teal-50/40">
-                      <td className="border border-slate-200 px-4 py-3">
-                        {row.sizingParty?.name || '-'}
-                      </td>
+                <tbody className="divide-y divide-slate-100">
+                  {rows
+                    .filter(
+                      (row) =>
+                        !listFilters.search ||
+                        [row.sizingParty?.name, row.yarn?.name, row.owner?.name].some((value) =>
+                          String(value || '')
+                            .toLowerCase()
+                            .includes(listFilters.search.toLowerCase())
+                        )
+                    )
+                    .map((row, index) => (
+                      <tr
+                        key={index}
+                        className={`cursor-pointer transition hover:bg-teal-50 ${
+                          index % 2 ? 'bg-slate-50/60' : 'bg-white'
+                        }`}
+                        onClick={() =>
+                          setParams({
+                            tab: 'ledger',
+                            sizingPartyId: row.sizingParty?._id || '',
+                            yarnId: row.yarn?._id || '',
+                            ownershipType: row.ownershipType || '',
+                          })
+                        }
+                      >
+                        <td className="px-4 py-3 font-semibold text-slate-800">
+                          {row.sizingParty?.name || '-'}
+                        </td>
 
-                      <td className="border border-slate-200 px-4 py-3">{row.yarn?.name || '-'}</td>
+                        <td className="px-4 py-3">{row.yarn?.name || '-'}</td>
 
-                      <td className="border border-slate-200 px-4 py-3 text-center">
-                        {row.ownershipType || '-'}
-                      </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold capitalize text-sky-700">
+                            {row.ownershipType || '-'}
+                          </span>
+                        </td>
 
-                      <td className="border border-slate-200 px-4 py-3">
-                        {row.owner?.name || '-'}
-                      </td>
+                        <td className="px-4 py-3">{row.owner?.name || '-'}</td>
 
-                      <td className="border border-slate-200 px-4 py-3 text-right font-bold">
-                        {row.balanceKg ?? 0}
-                      </td>
+                        <td className="px-4 py-3 text-right font-bold text-teal-700">
+                          {row.balanceKg ?? 0}
+                        </td>
 
-                      <td className="border border-slate-200 px-4 py-3 text-right font-semibold">
-                        {row.balancePackages ?? row.packageBalance ?? 0}
-                      </td>
+                        <td className="px-4 py-3 text-right font-semibold">
+                          {row.balancePackages ?? row.packageBalance ?? 0}
+                        </td>
 
-                      <td className="border border-slate-200 px-4 py-3 text-right">
-                        {row.balanceSmallCones ?? row.smallConeBalance ?? 0}
-                      </td>
+                        <td className="px-4 py-3 text-right">
+                          {row.balanceSmallCones ?? row.smallConeBalance ?? 0}
+                        </td>
 
-                      <td className="border border-slate-200 px-4 py-3 text-right">
-                        {row.balanceLargeCones ?? row.largeConeBalance ?? 0}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-4 py-3 text-right">
+                          {row.balanceLargeCones ?? row.largeConeBalance ?? 0}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
 
               {!rows.length && (
-                <div className="p-10 text-center text-sm text-slate-400">No records found</div>
+                <div className="bg-gradient-to-r from-slate-50 via-white to-teal-50/50 p-10 text-center text-sm text-slate-400">
+                  No Stock Found
+                </div>
               )}
             </div>
           </section>
         )}
-
         {/* ===================================================
             MATERIAL LEDGER
         =================================================== */}
         {tab === 'ledger' && (
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-teal-200 bg-gradient-to-r from-teal-200 via-cyan-100 to-emerald-100 px-4 py-3">
-              <h2 className="font-bold text-teal-950">Material Ledger</h2>
+          <section className="overflow-hidden rounded-2xl border border-teal-100 bg-white shadow-lg shadow-slate-200/60">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-emerald-600 px-4 py-3 text-white">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 ring-1 ring-white/25">
+                  <FaListAlt />
+                </div>
+
+                <div>
+                  <h2 className="text-base font-bold sm:text-lg">Material Ledger</h2>
+
+                  <p className="text-[11px] text-white/80">Complete yarn movement history</p>
+                </div>
+              </div>
+
+              <div className="rounded-full border border-white/25 bg-white/15 px-3 py-1 text-xs font-bold">
+                {rows.length} Movements
+              </div>
+            </div>
+
+            <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-teal-50/70 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+                <input
+                  className="h-10 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                  placeholder="Search ledger..."
+                  value={listFilters.search}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      search: e.target.value,
+                    }))
+                  }
+                />
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[150px]"
+                  value={listFilters.dateRange}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      dateRange: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="all">All Dates</option>
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="thisMonth">This Month</option>
+                  <option value="thisYear">This Year</option>
+                  <option value="custom">Custom</option>
+                </select>
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[195px]"
+                  value={listFilters.sizingPartyId}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      sizingPartyId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All Sizing Parties</option>
+
+                  {meta.parties.map((party) => (
+                    <option key={party._id} value={party._id}>
+                      {party.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm sm:w-[165px]"
+                  value={listFilters.yarnId}
+                  onChange={(e) =>
+                    setListFilters((v) => ({
+                      ...v,
+                      yarnId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All Yarn</option>
+
+                  {meta.yarns.map((yarn) => (
+                    <option key={yarn._id} value={yarn._id}>
+                      {yarn.name}
+                    </option>
+                  ))}
+                </select>
+
+                {listFilters.dateRange === 'custom' && (
+                  <>
+                    <input
+                      type="date"
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm sm:w-[145px]"
+                      value={listFilters.from}
+                      onChange={(e) =>
+                        setListFilters((v) => ({
+                          ...v,
+                          from: e.target.value,
+                        }))
+                      }
+                    />
+
+                    <input
+                      type="date"
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm sm:w-[145px]"
+                      value={listFilters.to}
+                      onChange={(e) =>
+                        setListFilters((v) => ({
+                          ...v,
+                          to: e.target.value,
+                        }))
+                      }
+                    />
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  className="h-10 shrink-0 rounded-lg bg-gradient-to-r from-slate-700 to-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:from-slate-800 hover:to-black"
+                  onClick={() =>
+                    setListFilters({
+                      search: '',
+                      dateRange: 'all',
+                      from: '',
+                      to: '',
+                      sizingPartyId: '',
+                      yarnId: '',
+                      ownershipType: '',
+                      paymentStatus: '',
+                    })
+                  }
+                >
+                  Clear Filters
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-sm">
-                <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <thead className="bg-gradient-to-r from-slate-800 via-teal-800 to-emerald-800 text-[11px] font-bold uppercase tracking-wide text-white">
                   <tr>
                     {[
                       'Date',
@@ -1713,7 +2638,7 @@ const WeavingSizingPage = () => {
                     ].map((head) => (
                       <th
                         key={head}
-                        className="whitespace-nowrap border border-slate-200 px-3 py-3 text-center"
+                        className="whitespace-nowrap border-r border-white/10 px-3 py-3 text-center last:border-r-0"
                       >
                         {head}
                       </th>
@@ -1721,71 +2646,104 @@ const WeavingSizingPage = () => {
                   </tr>
                 </thead>
 
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={row._id || index} className="hover:bg-teal-50/40">
-                      <td className="whitespace-nowrap border border-slate-200 px-3 py-3">
-                        {row.date}
-                      </td>
+                <tbody className="divide-y divide-slate-100">
+                  {rows
+                    .filter(
+                      (row) =>
+                        !listFilters.search ||
+                        [
+                          row.movementLabel,
+                          row.sizingPartyId?.name,
+                          row.yarnId?.name,
+                          row.returnNo,
+                        ].some((value) =>
+                          String(value || '')
+                            .toLowerCase()
+                            .includes(listFilters.search.toLowerCase())
+                        )
+                    )
+                    .map((row, index) => (
+                      <tr
+                        key={row._id || index}
+                        className={`cursor-pointer transition hover:bg-teal-50 ${
+                          index % 2 ? 'bg-slate-50/60' : 'bg-white'
+                        }`}
+                        onClick={() => {
+                          const type =
+                            row.movementType === 'sizing_issue'
+                              ? 'issue'
+                              : row.movementType === 'sizing_return'
+                                ? 'return'
+                                : 'receipt';
 
-                      <td className="whitespace-nowrap border border-slate-200 px-3 py-3">
-                        {row.movementLabel}
-                      </td>
+                          const id =
+                            type === 'issue'
+                              ? row.sizingIssueId
+                              : type === 'return'
+                                ? row._id
+                                : row.sizingReceiptId;
 
-                      <td className="border border-slate-200 px-3 py-3">
-                        {row.sizingPartyId?.name || '-'}
-                      </td>
+                          if (id) {
+                            setParams({
+                              tab: type === 'issue' ? 'issue' : 'receiving',
+                              editType: type,
+                              editId: String(id),
+                            });
+                          } else {
+                            setNotice({
+                              text: 'This historical ledger row has no editable source record.',
+                            });
+                          }
+                        }}
+                      >
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-600">{row.date}</td>
 
-                      <td className="border border-slate-200 px-3 py-3">
-                        {row.yarnId?.name || '-'}
-                      </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-bold text-cyan-800">
+                            {row.movementLabel}
+                          </span>
+                        </td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right font-semibold text-emerald-700">
-                        {row.inKg || '-'}
-                      </td>
+                        <td className="px-3 py-3 font-semibold text-slate-800">
+                          {row.sizingPartyId?.name || '-'}
+                        </td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right font-semibold text-rose-700">
-                        {row.outKg || '-'}
-                      </td>
+                        <td className="px-3 py-3">{row.yarnId?.name || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.packageIn || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right font-bold text-emerald-700">
+                          {row.inKg || '-'}
+                        </td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.packageOut || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right font-bold text-rose-700">
+                          {row.outKg || '-'}
+                        </td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.smallConesIn || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right">{row.packageIn || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.smallConesOut || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right">{row.packageOut || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.largeConesIn || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right">{row.smallConesIn || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right">
-                        {row.largeConesOut || '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right">{row.smallConesOut || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3 text-right font-bold">
-                        {row.balanceKg ?? '-'}
-                      </td>
+                        <td className="px-3 py-3 text-right">{row.largeConesIn || '-'}</td>
 
-                      <td className="border border-slate-200 px-3 py-3">
-                        {row.contractId?.contractNo || '-'}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-3 py-3 text-right">{row.largeConesOut || '-'}</td>
+
+                        <td className="px-3 py-3 text-right font-black text-teal-700">
+                          {row.balanceKg ?? '-'}
+                        </td>
+
+                        <td className="px-3 py-3">{row.contractId?.contractNo || '-'}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
 
               {!rows.length && (
-                <div className="p-10 text-center text-sm text-slate-400">No records found</div>
+                <div className="bg-gradient-to-r from-slate-50 via-white to-teal-50/50 p-10 text-center text-sm text-slate-400">
+                  No Ledger Movements Found
+                </div>
               )}
             </div>
           </section>

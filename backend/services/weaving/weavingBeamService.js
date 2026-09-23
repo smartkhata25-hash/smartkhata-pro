@@ -90,7 +90,7 @@ const getSet = async (userId, id) => {
 
 const getMeta = async (userId) => {
   const [employees, looms] = await Promise.all([
-    Employee.find({ userId, moduleScope: WEAVING_SCOPE, isDeleted: false, status: "active", designationName: "Beam Knotting Worker" }).select("name employeeNo designationName knottingPaymentMethod").sort({ name: 1 }).lean(),
+    Employee.find({ userId, moduleScope: WEAVING_SCOPE, isDeleted: false, status: "active", designationName: "Beam Knotting Worker" }).select("name employeeNo designationName knottingPaymentMethod knottingDefaultRate").sort({ name: 1 }).lean(),
     WeavingLoom.find({ userId, isActive: true }).select("name loomNumber").sort({ loomNumber: 1 }).lean(),
   ]);
   return { employees, looms };
@@ -111,26 +111,46 @@ const validateJobEntities = async ({ userId, payload, session }) => {
   if (beams.some((beam) => beam.status !== "available" || beam.knottingJobId)) {
     throw createHttpError("One or more selected beams already have an active knotting or loading job.", 409);
   }
-  let loom = null;
-  if (payload.loomId) {
-    loom = await getSessionQuery(WeavingLoom.findOne({ _id: payload.loomId, userId, isActive: true }), session);
-    if (!loom) throw createHttpError("Active Loom not found.", 400);
-    const occupied = await getSessionQuery(WeavingBeam.findOne({ userId, activeLoomId: loom._id, status: "loaded", _id: { $nin: beams.map((beam) => beam._id) } }), session);
-    if (occupied) throw createHttpError("This Loom already has an active beam.", 409);
-    if (beams.length > 1) throw createHttpError("Only one beam can be loaded on a Loom.", 400);
+  const load = payload.load === true || Boolean(payload.loomId);
+  if (payload.loomId && beams.length > 1) throw createHttpError("Assign a Loom to each beam separately.", 400);
+  const supplied = payload.beamAssignments || [];
+  if (!Array.isArray(supplied) || supplied.some((row) => !beamIds.includes(String(row.beamId))) || new Set(supplied.map((row) => String(row.beamId))).size !== supplied.length) {
+    throw createHttpError("Invalid beam Loom assignments.", 400);
   }
-  return { set, employee, beams, loom };
+  const assignments = [];
+  const usedLooms = new Set();
+  for (const beam of beams) {
+    const input = supplied.find((row) => String(row.beamId) === String(beam._id)) || {};
+    let loomNumber = clean(input.loomNumber);
+    const loomId = input.loomId || payload.loomId;
+    const loom = loomId || loomNumber
+      ? await getSessionQuery(WeavingLoom.findOne({ userId, ...(loomId ? { _id: loomId } : { loomNumber }) }), session)
+      : null;
+    if ((loomId && !loom) || (loom && !loom.isActive)) throw createHttpError("Active Loom not found.", 400);
+    if (loom) loomNumber = loom.loomNumber;
+    if (load && loomNumber) {
+      if (usedLooms.has(loomNumber)) throw createHttpError("Only one beam can be loaded on a Loom.", 400);
+      usedLooms.add(loomNumber);
+      const occupied = await getSessionQuery(WeavingBeam.findOne({ userId, status: "loaded", $or: [{ loomNumber }, ...(loom ? [{ activeLoomId: loom._id }] : [])] }), session);
+      if (occupied) throw createHttpError("This Loom already has an active beam.", 409);
+    }
+    assignments.push({ beamId: beam._id, loomId: loom?._id || null, loomNumber });
+  }
+  return { set, employee, beams, assignments, load };
 };
 
 const createJob = async ({ userId, actorId, payload }) => {
   const session = await mongoose.startSession(); let result; let touched = [];
   try {
     await session.withTransaction(async () => {
-      const { set, employee, beams, loom } = await validateJobEntities({ userId, payload, session });
+      touched = [];
+      const { set, employee, beams, assignments, load } = await validateJobEntities({ userId, payload, session });
       const paymentMethod = employee.knottingPaymentMethod || "monthly";
-      const completedBeams = Number(payload.completedBeams) || beams.length;
-      const earning = calculateKnottingEarning({ paymentMethod, completedBeams, rate: payload.rate });
-      const job = new WeavingKnottingJob({ userId, moduleScope: WEAVING_SCOPE, beamSetId: set._id, sizingReceiptId: set.sizingReceiptId, employeeId: employee._id, loomId: loom?._id || null, beamIds: beams.map((beam) => beam._id), workDate: clean(payload.workDate), paymentMethod, completedBeams, rate: roundMoney(payload.rate), ...earning, notes: clean(payload.notes), status: payload.approve ? "approved" : "draft", approvedAt: payload.approve ? new Date() : null, approvedBy: payload.approve ? actorId : null });
+      const completedBeams = beams.length;
+      const rate = paymentMethod === "monthly" ? 0 : Number(payload.rate === undefined || payload.rate === "" ? employee.knottingDefaultRate || 0 : payload.rate);
+      if (!Number.isFinite(rate) || rate < 0) throw createHttpError("Knotting rate must be zero or greater.", 400);
+      const earning = calculateKnottingEarning({ paymentMethod, completedBeams, rate });
+      const job = new WeavingKnottingJob({ userId, moduleScope: WEAVING_SCOPE, beamSetId: set._id, sizingReceiptId: set.sizingReceiptId, employeeId: employee._id, loomId: assignments.length === 1 ? assignments[0].loomId : null, beamAssignments: assignments, beamIds: beams.map((beam) => beam._id), workDate: clean(payload.workDate), paymentMethod, completedBeams, rate: roundMoney(rate), ...earning, notes: clean(payload.notes), status: payload.approve ? "approved" : "draft", approvedAt: payload.approve ? new Date() : null, approvedBy: payload.approve ? actorId : null });
       if (!job.workDate) throw createHttpError("Work Date is required.", 400);
       await job.save({ session });
       if (payload.approve && earning.amount > 0) {
@@ -138,7 +158,9 @@ const createJob = async ({ userId, actorId, payload }) => {
         const journal = await createEmployeeJournal({ userId, moduleScope: WEAVING_SCOPE, employee, date: job.workDate, description: `Beam knotting ${set.setNo || set.receiptNo} - ${employee.name}`, sourceType: "expense", originModule: "weaving.knotting", referenceId: job._id, lines: [{ account: expenseAccount._id, type: "debit", amount: earning.amount }, { account: employeeAccount._id, type: "credit", amount: earning.amount }], session });
         job.journalEntryId = journal._id; await job.save({ session }); touched.push(...collectAccountIdsFromJournal(journal));
       }
-      await WeavingBeam.updateMany({ _id: { $in: beams.map((beam) => beam._id) } }, { $set: { status: loom ? "loaded" : "knotting", knottingJobId: job._id, activeLoomId: loom?._id || null, loadedAt: loom ? new Date() : null } }, sessionOptions(session));
+      for (const assignment of assignments) {
+        await WeavingBeam.updateOne({ _id: assignment.beamId, userId }, { $set: { status: load ? "loaded" : "knotting", knottingJobId: job._id, activeLoomId: load ? assignment.loomId : null, loomNumber: load ? assignment.loomNumber : "", loadedAt: load ? new Date() : null } }, sessionOptions(session));
+      }
       await refreshSetStatus(set._id, session); result = job;
     });
   } finally { await session.endSession(); }
@@ -153,7 +175,7 @@ const voidJob = async ({ userId, actorId, jobId, reason }) => {
       if (!job) throw createHttpError("Knotting Job not found.", 404);
       if (job.journalEntryId) { const reversal = await reverseJournals({ journalIds: [job.journalEntryId], userId, date: new Date(), session }); job.reversalJournalEntryIds.push(...reversal.reversalIds); touched.push(...reversal.accountIds); }
       job.status = "void"; job.voidedAt = new Date(); job.voidedBy = actorId; job.voidReason = clean(reason); await job.save({ session });
-      await WeavingBeam.updateMany({ userId, knottingJobId: job._id, status: { $ne: "completed" } }, { $set: { status: "available", knottingJobId: null, activeLoomId: null, loadedAt: null } }, sessionOptions(session));
+      await WeavingBeam.updateMany({ userId, knottingJobId: job._id, status: { $ne: "completed" } }, { $set: { status: "available", knottingJobId: null, activeLoomId: null, loomNumber: "", loadedAt: null } }, sessionOptions(session));
       await refreshSetStatus(job.beamSetId, session); result = job;
     });
   } finally { await session.endSession(); }

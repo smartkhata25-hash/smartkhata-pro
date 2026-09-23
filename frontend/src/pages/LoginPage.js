@@ -22,16 +22,10 @@ export default function LoginPage() {
     const token = localStorage.getItem('token');
     const userId = localStorage.getItem('userId');
 
-    const lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
-    const isUnlocked = localStorage.getItem(`isUnlocked_${userId}`);
     const user = readStoredUser();
 
     if (token && userId) {
-      if (lockEnabled === 'true' && isUnlocked !== 'true') {
-        navigate('/lock');
-      } else {
-        navigate(getDefaultWorkspacePath(user));
-      }
+      navigate(getDefaultWorkspacePath(user));
     }
   }, [navigate]);
 
@@ -46,19 +40,6 @@ export default function LoginPage() {
         localStorage.setItem('user', JSON.stringify(res.user));
         localStorage.setItem('mode', res.mode);
 
-        // ✅ 🔐 Lock system setup (FIXED)
-        const userId = res.user._id;
-
-        let lockEnabled = localStorage.getItem(`lockEnabled_${userId}`);
-
-        if (!lockEnabled) {
-          localStorage.setItem(`lockEnabled_${userId}`, 'false');
-          lockEnabled = 'false';
-        }
-
-        if (lockEnabled !== 'true') {
-          localStorage.setItem(`isUnlocked_${userId}`, 'true');
-        }
         alert(t('alerts.loginSuccess'));
 
         const user = res.user;

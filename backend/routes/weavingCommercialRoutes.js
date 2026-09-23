@@ -32,15 +32,29 @@ router.get("/purchase-history", requirePermission("weaving.purchases.view"), ctr
 router.get("/payments", requirePermission("weaving.payments.view"), ctrl.listPayments);
 router.get("/payments/:id", requirePermission("weaving.payments.view"), ctrl.getPayment);
 router.post("/payments", requirePermission("weaving.payments.create"), upload.array("attachments", 3), ctrl.returnExistingPayment, ctrl.createPayment);
+router.put("/payments/:id", requirePermission("weaving.payments.edit"), upload.array("attachments", 3), ctrl.updatePayment);
+router.post("/payments/:id/void", requirePermission("weaving.payments.void"), ctrl.voidPayment);
 router.get("/sizing/meta", requirePermission("weaving.sizing.view"), sizing.meta);
 router.get("/sizing/issues", requirePermission("weaving.sizing.view"), sizing.listIssues);
 router.post("/sizing/issues", requirePermission("weaving.sizing.issue"), sizing.createIssue);
+router.put("/sizing/issues/:id", requirePermission("weaving.sizing.issue"), sizing.updateIssue);
+router.post("/sizing/issues/:id/void", requirePermission("weaving.sizing.issue"), sizing.voidIssue);
 router.get("/sizing/receipts", requirePermission("weaving.sizing.view"), sizing.listReceipts);
-router.post("/sizing/receipts", requirePermission("weaving.sizing.receive"), sizing.createReceipt);
+const requireSizingBundleBillPermission = (req, res, next) => req.body?.bill
+  ? requirePermission("weaving.sizing.bill")(req, res, next)
+  : next();
+router.post("/sizing/receipts", requirePermission("weaving.sizing.receive"), requireSizingBundleBillPermission, sizing.createReceipt);
+router.put("/sizing/receipts/:id", requirePermission("weaving.sizing.receive"), requireSizingBundleBillPermission, sizing.updateReceipt);
+router.post("/sizing/receipts/:id/void", requirePermission("weaving.sizing.receive"), sizing.voidReceipt);
 router.post("/sizing/returns", requirePermission("weaving.sizing.receive"), sizing.createReturn);
+router.put("/sizing/returns/:id", requirePermission("weaving.sizing.receive"), sizing.updateReturn);
+router.get("/sizing/returns", requirePermission("weaving.sizing.view"), sizing.listReturns);
+router.post("/sizing/returns/:id/void", requirePermission("weaving.sizing.receive"), sizing.voidReturn);
 router.get("/sizing/bills", requirePermission("weaving.sizing.view"), sizing.listBills);
 router.get("/sizing/bills/:id", requirePermission("weaving.sizing.view"), sizing.getBill);
 router.post("/sizing/bills", requirePermission("weaving.sizing.bill"), sizing.createBill);
+router.put("/sizing/bills/:id", requirePermission("weaving.sizing.bill"), sizing.updateBill);
+router.post("/sizing/bills/:id/void", requirePermission("weaving.sizing.bill"), sizing.voidBill);
 router.get("/sizing/material-ledger", requirePermission("weaving.sizing.view_material_ledger"), sizing.materialLedger);
 router.get("/sizing/stock", requirePermission("weaving.sizing.view_material_ledger"), sizing.stock);
 router.get("/journals/:id", requirePermission("weaving.counterparties.view_ledger"), ctrl.getJournal);

@@ -283,7 +283,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
 
           <div className="grid gap-x-3 gap-y-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label={`${label('contractNo')} *`}>
-              <input className={input} value={form.contractNo} onChange={patch('contractNo')} />
+              <input disabled className={input} value={form.contractNo} />
             </Field>
 
             <Field label={`${label('contractDate')} *`}>

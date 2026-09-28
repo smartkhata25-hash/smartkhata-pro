@@ -325,6 +325,11 @@ export const searchPurchaseInvoices = async (query, limit = 25) => {
   }
 };
 
+export const getTemporaryRecoveryAudit = async () => {
+  const response = await axios.get(`${API_URL}/temporary-recovery-audit`, getConfig());
+  return response.data;
+};
+
 const getPurchaseInvoices = getAllPurchaseInvoices;
 
 const getItemPurchaseHistory = async (productId, filters = {}) => {

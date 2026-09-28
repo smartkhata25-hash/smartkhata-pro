@@ -30,6 +30,8 @@ import {
 } from '../services/accountService';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
+import { isOwner } from '../utils/permissionHelper';
+import TemporaryRecoveryAuditModal from '../components/TemporaryRecoveryAuditModal';
 import { getBusinessDateInputValue } from '../utils/localDateTime';
 import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
@@ -211,6 +213,7 @@ const ChartOfAccountsPage = () => {
   const isWeavingScoped = pageModuleScope === MODULE_SCOPES.WEAVING;
 
   const canEditAccounts = hasPermission('accounts.edit');
+  const [showRecoveryAudit, setShowRecoveryAudit] = useState(false);
   const [ownerForm, setOwnerForm] = useState(buildEmptyOwnerForm);
   const [showOwnerForm, setShowOwnerForm] = useState(false);
   const [manualEdit, setManualEdit] = useState(null);
@@ -719,6 +722,7 @@ const ChartOfAccountsPage = () => {
               className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-2 text-sm text-white transition hover:bg-white/20 sm:h-9">
               <FaUser aria-hidden="true" /><span className="hidden lg:inline">{t('accounts.ownerTransaction')}</span>
             </button>}
+            {!isTravelScoped && !isWeavingScoped && isOwner() && <button type="button" title="Recovery Audit" onClick={() => setShowRecoveryAudit(true)} className="inline-flex h-8 items-center justify-center rounded-md border border-white/20 bg-white/10 px-2 text-sm text-white transition hover:bg-white/20 sm:h-9">Recovery Audit</button>}
 
             <button
               type="button"
@@ -923,6 +927,7 @@ const ChartOfAccountsPage = () => {
               </button>
             </div>
           </form>
+      {showRecoveryAudit && <TemporaryRecoveryAuditModal onClose={() => setShowRecoveryAudit(false)} />}
         </section>
       )}
 

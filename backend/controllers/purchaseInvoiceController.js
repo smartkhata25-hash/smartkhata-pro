@@ -35,6 +35,7 @@ const {
   buildBusinessPresetDateRange,
   parseBusinessDateTime,
 } = require("../utils/businessDate");
+const { auditPurchaseInvoiceRecoveryCandidates } = require("../services/purchaseInvoiceRecoveryAuditService");
 const canPayPurchaseBill = (req) => {
   if (req.user?.accountRole === "owner") {
     return true;
@@ -1246,6 +1247,13 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   }
 });
 
+// TEMPORARY OWNER-ONLY, READ-ONLY endpoint. No repair/apply route exists.
+const getTemporaryRecoveryAudit = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+  const report = await auditPurchaseInvoiceRecoveryCandidates(userId);
+  res.json(report);
+});
+
 // ✅ Delete invoice
 const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
@@ -1814,6 +1822,7 @@ module.exports = {
   getAllPurchaseInvoices,
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
+  getTemporaryRecoveryAudit,
   deletePurchaseInvoice,
   searchPurchaseInvoices,
   getItemPurchaseHistory,

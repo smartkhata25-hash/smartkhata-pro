@@ -927,7 +927,6 @@ const ChartOfAccountsPage = () => {
               </button>
             </div>
           </form>
-      {showRecoveryAudit && <TemporaryRecoveryAuditModal onClose={() => setShowRecoveryAudit(false)} />}
         </section>
       )}
 
@@ -1552,6 +1551,7 @@ const ChartOfAccountsPage = () => {
           </div>
         </div>
       )}
+      {showRecoveryAudit && <TemporaryRecoveryAuditModal onClose={() => setShowRecoveryAudit(false)} />}
     </div>
   );
 };

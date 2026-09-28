@@ -35,7 +35,7 @@ const {
   buildBusinessPresetDateRange,
   parseBusinessDateTime,
 } = require("../utils/businessDate");
-const { auditPurchaseInvoiceRecoveryCandidates } = require("../services/purchaseInvoiceRecoveryAuditService");
+const { auditPurchaseInvoiceRecoveryCandidates, recoverApprovedPurchaseInvoices } = require("../services/purchaseInvoiceRecoveryAuditService");
 const canPayPurchaseBill = (req) => {
   if (req.user?.accountRole === "owner") {
     return true;
@@ -1254,6 +1254,13 @@ const getTemporaryRecoveryAudit = asyncHandler(async (req, res) => {
   res.json(report);
 });
 
+// TEMPORARY OWNER-ONLY controlled apply. Only explicit approved IDs are accepted.
+const recoverTemporaryApprovedRecords = asyncHandler(async (req, res) => {
+  const userId = req.user?.id || req.userId;
+  const report = await recoverApprovedPurchaseInvoices(userId, req.body?.invoiceIds);
+  res.json(report);
+});
+
 // ✅ Delete invoice
 const deletePurchaseInvoice = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
@@ -1823,6 +1830,7 @@ module.exports = {
   getPurchaseInvoiceById,
   updatePurchaseInvoice,
   getTemporaryRecoveryAudit,
+  recoverTemporaryApprovedRecords,
   deletePurchaseInvoice,
   searchPurchaseInvoices,
   getItemPurchaseHistory,

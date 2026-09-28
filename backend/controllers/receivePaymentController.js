@@ -777,6 +777,26 @@ exports.updateReceivePayment = async (req, res) => {
       return res.status(404).json({ error: "Record not found" });
     }
 
+    // Converted counterparties keep their historical account/journal trail.
+    // Reject before attachments, document, or journals can be changed.
+    const historicalCustomer = payment.customer
+      ? await Customer.findOne({ _id: payment.customer, createdBy: userId })
+      : null;
+    const historicalParty = payment.partyId
+      ? await Party.findOne({ _id: payment.partyId, userId })
+      : null;
+    if (
+      historicalCustomer?.isActive === false ||
+      historicalCustomer?.hiddenReason === "converted" ||
+      historicalParty?.isActive === false ||
+      historicalParty?.hiddenReason === "converted"
+    ) {
+      return res.status(409).json({
+        code: "CONVERTED_HISTORICAL_RECORD",
+        error: "This historical receive payment belongs to a converted entity and is read-only. It can still be viewed, printed, or closed.",
+      });
+    }
+
     const beforeUpdate = {
       customer: payment.customer,
       partyId: payment.partyId,

@@ -620,6 +620,10 @@ const PayBillForm = () => {
         return;
       }
     } catch (err) {
+      if (err?.response?.data?.code === 'CONVERTED_HISTORICAL_RECORD') {
+        alert('This is a historical record linked to a converted Supplier or Party. Historical accounting cannot be edited. You can view, print or close this record.');
+        return;
+      }
       alert(t('alerts.error') + ': ' + err.message);
     } finally {
       setLoading(false);

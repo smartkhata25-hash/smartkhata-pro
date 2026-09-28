@@ -330,6 +330,11 @@ export const getTemporaryRecoveryAudit = async () => {
   return response.data;
 };
 
+export const recoverTemporaryApprovedRecords = async (invoiceIds) => {
+  const response = await axios.post(`${API_URL}/temporary-recovery-audit/recover-approved`, { invoiceIds }, getConfig());
+  return response.data;
+};
+
 const getPurchaseInvoices = getAllPurchaseInvoices;
 
 const getItemPurchaseHistory = async (productId, filters = {}) => {

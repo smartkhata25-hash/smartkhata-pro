@@ -670,6 +670,12 @@ exports.updatePayBill = async (req, res) => {
       });
     }
 
+    const historicalSupplier = bill.supplier ? await Supplier.findOne({ _id: bill.supplier, userId }) : null;
+    const historicalParty = bill.partyId ? await Party.findOne({ _id: bill.partyId, userId }) : null;
+    if (historicalSupplier?.isDeleted === true || historicalSupplier?.hiddenReason === "converted" || historicalParty?.isActive === false || historicalParty?.hiddenReason === "converted") {
+      return res.status(409).json({ code: "CONVERTED_HISTORICAL_RECORD", error: "This historical pay bill belongs to a converted entity and is read-only. It can still be viewed, printed, or closed." });
+    }
+
     const beforeUpdate = {
       supplier: bill.supplier,
       partyId: bill.partyId,

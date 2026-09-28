@@ -567,6 +567,12 @@ exports.updateRefundInvoice = async (req, res) => {
       });
     }
 
+    const historicalCustomer = refund.customerId ? await Customer.findOne({ _id: refund.customerId, createdBy: userId }) : null;
+    const historicalParty = refund.partyId ? await Party.findOne({ _id: refund.partyId, userId }) : null;
+    if (historicalCustomer?.isActive === false || historicalCustomer?.hiddenReason === "converted" || historicalParty?.isActive === false || historicalParty?.hiddenReason === "converted") {
+      return res.status(409).json({ code: "CONVERTED_HISTORICAL_RECORD", error: "This historical sale return belongs to a converted entity and is read-only. It can still be viewed, printed, or exported." });
+    }
+
     const wasOpeningRefund = Boolean(refund.isOpening);
 
     const beforeUpdate = {

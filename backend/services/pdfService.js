@@ -45,7 +45,7 @@ const getBrowser = async () => {
   }
 };
 
-const generatePdfFromHtml = async (html) => {
+const generatePdfFromHtml = async (html, options = {}) => {
   const browser = await getBrowser();
   const page = await browser.newPage();
 
@@ -62,6 +62,29 @@ const generatePdfFromHtml = async (html) => {
           await document.fonts.ready;
         }
       });
+
+      if (options.waitForImages) {
+        await page.evaluate(async (requireImages) => {
+          const images = Array.from(document.images || []);
+
+          await Promise.all(
+            images.map(async (image) => {
+              if (!image.complete) {
+                await new Promise((resolve, reject) => {
+                  image.addEventListener("load", resolve, { once: true });
+                  image.addEventListener("error", reject, { once: true });
+                });
+              }
+
+              if (typeof image.decode === "function") await image.decode();
+
+              if (requireImages && image.naturalWidth < 1) {
+                throw new Error("A required document image could not be rendered");
+              }
+            }),
+          );
+        }, options.requireImages === true);
+      }
     }
 
     const pdfBuffer = await page.pdf({

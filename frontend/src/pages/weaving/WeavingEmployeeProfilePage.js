@@ -24,12 +24,14 @@ import {
 
 const MODULE_SCOPE = EMPLOYEE_MODULE_SCOPES.WEAVING;
 const MISSING_VALUE = '\u2014';
+
 const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 const getErrorMessage = (error, fallbackKey) => error?.response?.data?.message || t(fallbackKey);
 
 const getUnitLabel = (employee = {}) => {
   if (!employee.unitNo) return MISSING_VALUE;
+
   return employee.unitName
     ? `Unit ${employee.unitNo} - ${employee.unitName}`
     : `Unit ${employee.unitNo}`;
@@ -37,8 +39,13 @@ const getUnitLabel = (employee = {}) => {
 
 const formatDate = (value) => {
   if (!value) return MISSING_VALUE;
+
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
   return date.toLocaleDateString('en-GB');
 };
 
@@ -55,6 +62,7 @@ const getNextMonth = (year, month) =>
 
 const deriveSalaryCycle = (cycleKey = '') => {
   const match = String(cycleKey || '').match(/^(\d{4})-(\d{2})-H([12])$/i);
+
   if (!match) return null;
 
   const year = Number.parseInt(match[1], 10);
@@ -75,11 +83,13 @@ const deriveSalaryCycle = (cycleKey = '') => {
 
 const getGenderLabel = (gender) => {
   if (!gender) return MISSING_VALUE;
+
   return t(`weaving.employees.gender.${gender}`);
 };
 
 const getOpeningBalanceLabel = (openingBalance = {}) => {
   const amount = Number(openingBalance.amount || 0);
+
   if (!amount) return MISSING_VALUE;
 
   const typeKey =
@@ -97,6 +107,7 @@ const getSalaryTypeLabel = (salaryType) =>
 
 const getSalaryValue = (employee = {}) => {
   const amount = formatMoney(employee.baseSalary);
+
   const unitKey =
     employee.salaryType === 'daily'
       ? 'weaving.employees.salary.day'
@@ -107,13 +118,18 @@ const getSalaryValue = (employee = {}) => {
 
 const getDutyHoursLabel = (dutyHours) => {
   const hours = Number(dutyHours || 0);
-  if (!hours) return t('weaving.employees.notSet');
+
+  if (!hours) {
+    return t('weaving.employees.notSet');
+  }
 
   return `${hours} ${t('weaving.employees.duty.hours')}`;
 };
 
 const getWeeklyOffDaysLabel = (days = []) => {
-  if (!Array.isArray(days) || days.length === 0) return t('weaving.employees.notSet');
+  if (!Array.isArray(days) || days.length === 0) {
+    return t('weaving.employees.notSet');
+  }
 
   return days
     .map((day) =>
@@ -149,9 +165,12 @@ const getSalaryCycleLabel = (openingBalance = {}) => {
   }
 
   const cycle = deriveSalaryCycle(openingBalance.targetCycleKey);
+
   const payDate = openingBalance.targetPayDate || cycle?.payDate;
 
-  if (!openingBalance.targetCycleKey && !payDate) return MISSING_VALUE;
+  if (!openingBalance.targetCycleKey && !payDate) {
+    return MISSING_VALUE;
+  }
 
   const period = cycle
     ? `${formatBusinessDateForDisplay(cycle.periodStart)} - ${formatBusinessDateForDisplay(
@@ -161,20 +180,28 @@ const getSalaryCycleLabel = (openingBalance = {}) => {
 
   return `${openingBalance.targetCycleKey || t('weaving.employees.notSet')} - ${period} / ${t(
     'weaving.employees.fields.paymentDate'
-  )}: ${formatBusinessDateForDisplay(payDate, { fallback: MISSING_VALUE })}`;
+  )}: ${formatBusinessDateForDisplay(payDate, {
+    fallback: MISSING_VALUE,
+  })}`;
 };
 
 const WeavingEmployeeProfilePage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [employee, setEmployee] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  useWeavingFeedback(error, setError, { type: 'error' });
+
+  useWeavingFeedback(error, setError, {
+    type: 'error',
+  });
 
   const canEdit = hasPermission('employees.edit');
+
   const canDelete = hasPermission('employees.delete');
+
   const canViewLedger = hasPermission('employees.view_ledger');
 
   const loadEmployee = useCallback(async () => {
@@ -184,8 +211,11 @@ const WeavingEmployeeProfilePage = () => {
     try {
       const employeeData = await getEmployeeById(id, {
         moduleScope: MODULE_SCOPE,
-        params: { includeHidden: 'true' },
+        params: {
+          includeHidden: 'true',
+        },
       });
+
       setEmployee(employeeData || null);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'weaving.employees.messages.loadFailed'));
@@ -254,8 +284,17 @@ const WeavingEmployeeProfilePage = () => {
     setError('');
 
     try {
-      const response = await deleteEmployee(employee._id, { moduleScope: MODULE_SCOPE });
-      setEmployee(response || { ...employee, isDeleted: true, status: 'inactive' });
+      const response = await deleteEmployee(employee._id, {
+        moduleScope: MODULE_SCOPE,
+      });
+
+      setEmployee(
+        response || {
+          ...employee,
+          isDeleted: true,
+          status: 'inactive',
+        }
+      );
     } catch (hideError) {
       setError(getErrorMessage(hideError, 'weaving.employees.messages.hideFailed'));
     } finally {
@@ -281,8 +320,17 @@ const WeavingEmployeeProfilePage = () => {
     setError('');
 
     try {
-      const response = await restoreEmployee(employee._id, { moduleScope: MODULE_SCOPE });
-      setEmployee(response || { ...employee, isDeleted: false, status: 'active' });
+      const response = await restoreEmployee(employee._id, {
+        moduleScope: MODULE_SCOPE,
+      });
+
+      setEmployee(
+        response || {
+          ...employee,
+          isDeleted: false,
+          status: 'active',
+        }
+      );
     } catch (restoreError) {
       setError(getErrorMessage(restoreError, 'weaving.employees.messages.restoreFailed'));
     } finally {
@@ -302,87 +350,110 @@ const WeavingEmployeeProfilePage = () => {
 
   return (
     <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
-      <section className="mb-3 overflow-hidden rounded-lg border border-cyan-100 bg-white shadow-sm">
-        <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
-        <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between md:px-4">
-          <div className="min-w-0">
+      {!employee ? (
+        <section className="overflow-hidden rounded-lg border border-cyan-100 bg-white shadow-sm">
+          <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
+
+          <div className="flex items-center justify-between gap-3 p-3 md:px-4">
+            <div className="text-sm font-bold text-slate-500">{t('weaving.employees.empty')}</div>
+
             <button
               type="button"
               onClick={() => navigate('/weaving/employees')}
-              className="mb-2 inline-flex items-center gap-2 text-xs font-extrabold text-cyan-700"
+              className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700"
             >
               {t('common.back')}
             </button>
-            <h1 className="text-lg font-extrabold leading-tight text-slate-950 md:text-xl">
-              {t('weaving.employees.profile')}
-            </h1>
           </div>
-          {employee && (
-            <div className="flex flex-wrap gap-2">
-              {canEdit && !employee.isDeleted && (
-                <TravelActionButton
-                  icon={FaEdit}
-                  variant="secondary"
-                  onClick={() => navigate(`/weaving/employees/${employee._id}/edit`)}
-                >
-                  {t('travel.common.edit')}
-                </TravelActionButton>
-              )}
-              {canViewLedger && (
-                <TravelActionButton
-                  icon={FaBook}
-                  variant="soft"
-                  onClick={() => navigate(`/weaving/employees/${employee._id}/ledger`)}
-                >
-                  {t('weaving.employees.actions.viewLedger')}
-                </TravelActionButton>
-              )}
-              {canEdit && employee.isDeleted && (
-                <TravelActionButton
-                  icon={FaRedo}
-                  variant="success"
-                  onClick={restoreHiddenEmployee}
-                  disabled={saving}
-                >
-                  {t('weaving.employees.actions.restore')}
-                </TravelActionButton>
-              )}
-              {canDelete && !employee.isDeleted && (
-                <TravelActionButton
-                  icon={FaTrash}
-                  variant="danger"
-                  onClick={hideEmployee}
-                  disabled={saving}
-                >
-                  {t('weaving.employees.actions.hide')}
-                </TravelActionButton>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {!employee ? (
-        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-500">
-          {t('weaving.employees.empty')}
-        </div>
+        </section>
       ) : (
         <div className="space-y-3">
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <section className="overflow-hidden rounded-lg border border-cyan-100 bg-white shadow-sm">
+            <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
+
+            <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between md:px-4">
               <div className="flex min-w-0 items-center gap-3">
-                <FaUserCircle
-                  className="h-16 w-16 flex-shrink-0 text-cyan-700"
-                  aria-hidden="true"
-                />
+                {employee.photoUrl ? (
+                  <img
+                    src={employee.photoUrl}
+                    alt=""
+                    className="h-14 w-14 flex-shrink-0 rounded-lg object-cover sm:h-16 sm:w-16"
+                  />
+                ) : (
+                  <FaUserCircle
+                    className="h-14 w-14 flex-shrink-0 text-cyan-700 sm:h-16 sm:w-16"
+                    aria-hidden="true"
+                  />
+                )}
+
                 <div className="min-w-0">
-                  <h2 className="truncate text-xl font-black text-slate-950">{employee.name}</h2>
-                  <p className="truncate text-sm font-bold text-slate-500">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-lg font-black text-slate-950 sm:text-xl">
+                      {employee.name}
+                    </h2>
+
+                    <TravelStatusBadge
+                      active={!employee.isDeleted && employee.status !== 'inactive'}
+                    />
+                  </div>
+
+                  <p className="mt-0.5 truncate text-sm font-bold text-slate-500">
                     {employee.employeeNo || MISSING_VALUE}
                   </p>
                 </div>
               </div>
-              <TravelStatusBadge active={!employee.isDeleted && employee.status !== 'inactive'} />
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {canEdit && !employee.isDeleted && (
+                  <TravelActionButton
+                    icon={FaEdit}
+                    variant="secondary"
+                    onClick={() => navigate(`/weaving/employees/${employee._id}/edit`)}
+                  >
+                    {t('travel.common.edit')}
+                  </TravelActionButton>
+                )}
+
+                {canViewLedger && (
+                  <TravelActionButton
+                    icon={FaBook}
+                    variant="soft"
+                    onClick={() => navigate(`/weaving/employees/${employee._id}/ledger`)}
+                  >
+                    {t('weaving.employees.actions.viewLedger')}
+                  </TravelActionButton>
+                )}
+
+                {canEdit && employee.isDeleted && (
+                  <TravelActionButton
+                    icon={FaRedo}
+                    variant="success"
+                    onClick={restoreHiddenEmployee}
+                    disabled={saving}
+                  >
+                    {t('weaving.employees.actions.restore')}
+                  </TravelActionButton>
+                )}
+
+                {canDelete && !employee.isDeleted && (
+                  <TravelActionButton
+                    icon={FaTrash}
+                    variant="danger"
+                    onClick={hideEmployee}
+                    disabled={saving}
+                  >
+                    {t('weaving.employees.actions.hide')}
+                  </TravelActionButton>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/weaving/employees')}
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700"
+                >
+                  {t('common.back')}
+                </button>
+              </div>
             </div>
           </section>
 

@@ -42,6 +42,7 @@ const combined = _test.summarizeProfitRows(mapped, { hasCostingRun: true });
 assert.strictEqual(combined.revenue.grossRevenue, 2000, "Combined gross revenue reconciles");
 assert.strictEqual(combined.revenue.netRevenue, 1950, "Discounts reconcile to net revenue");
 assert.strictEqual(combined.knownDirectStockCost, 1050, "Invoice COGS reconciles to Direct COGS");
+assert.strictEqual(combined.knownCostInvoiceCount, 3, "Cost coverage reports how many invoices have known snapshots");
 assert.strictEqual(combined.components.material + combined.components.processing + combined.components.otherDirect, combined.knownDirectStockCost, "Cost parents reconcile without adding Warp/Weft or Sizing/Knotting twice");
 assert.strictEqual(_test.safeMargin(900, 1950, true), 46.15);
 
@@ -66,6 +67,16 @@ assert.strictEqual(partialRows[0].directCost, null);
 assert.strictEqual(partialRows[0].profit, null);
 assert.strictEqual(partialRows[0].margin, null, "Partial cost never produces an exact margin");
 assert.strictEqual(_test.summarizeProfitRows(partialRows).exact, false);
+
+const staleRows = _test.mapProfitRows({ sales: [sales[0]], costRows: [cost("1", 600)], hasCostingRun: true, costingFresh: false });
+assert.strictEqual(staleRows[0].directCost, null, "Stale costing is never presented as exact");
+assert.strictEqual(staleRows[0].knownDirectCost, 600, "Stale known cost remains available for a provisional estimate");
+assert.deepStrictEqual(staleRows[0].missingReasons, ["Costing is out of date"]);
+
+const uncostedRows = _test.mapProfitRows({ sales: [sales[0]], costRows: [], hasCostingRun: false, costingFresh: false });
+assert.strictEqual(uncostedRows[0].knownDirectCost, 0);
+assert.deepStrictEqual(uncostedRows[0].missingReasons, ["Costing has not been calculated"]);
+assert.strictEqual(_test.summarizeProfitRows(uncostedRows).knownCostInvoiceCount, 0, "No-costing state cannot masquerade as a known zero cost");
 
 const range = _test.resolveRange({ from: "2026-09-01", to: "2026-09-15" });
 const ownMatch = _test.buildProfitSalesMatch("user1", { partyId: "party1", fabricQualityId: "q1", saleType: "fabric" }, range, "own");

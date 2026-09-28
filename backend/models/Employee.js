@@ -46,6 +46,9 @@ const employeeSchema = new mongoose.Schema(
       default: "",
       index: true,
     },
+    employmentType: { type: String, enum: ["regular", "temporary"], default: "regular" },
+    photoKey: { type: String, default: "" },
+    photoUrl: { type: String, default: "" },
     listOrder: {
       type: Number,
       default: 0,
@@ -131,6 +134,10 @@ const employeeSchema = new mongoose.Schema(
       default: "",
     },
     joiningDate: {
+      type: Date,
+      default: null,
+    },
+    employmentEndDate: {
       type: Date,
       default: null,
     },

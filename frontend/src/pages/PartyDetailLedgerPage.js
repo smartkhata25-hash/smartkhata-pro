@@ -1,7 +1,7 @@
 // src/pages/PartyDetailLedgerPage.js
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
 import WhatsAppShareModal from '../components/WhatsAppShareModal';
@@ -31,6 +31,8 @@ const PARTY_DETAIL_LEDGER_DEFAULTS = {
 const PartyDetailLedgerPage = () => {
   const { partyId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const moduleScope = searchParams.get('moduleScope') === 'travel' ? 'travel' : '';
 
   const token = localStorage.getItem('token');
 
@@ -55,7 +57,7 @@ const PartyDetailLedgerPage = () => {
   const handledRoutePartyRef = useRef('');
 
   const { state: pageMemory, updateField: updatePageField } = usePageMemory(
-    'party_detail_ledger_page_state',
+    `party_detail_ledger_page_state${moduleScope ? `_${moduleScope}` : ''}`,
     PARTY_DETAIL_LEDGER_DEFAULTS,
     {
       expiryHours: 24,
@@ -172,7 +174,9 @@ const PartyDetailLedgerPage = () => {
       setLoading(true);
 
       try {
-        const data = await getPartyDetailedLedger(id, start || '', end || '');
+        const data = await getPartyDetailedLedger(id, start || '', end || '', {
+          moduleScope,
+        });
 
         setSelectedPartyId(data?.partyId || id);
         setPartyName(data?.partyName || '');
@@ -203,12 +207,13 @@ const PartyDetailLedgerPage = () => {
         setLoading(false);
       }
     },
-    [startDate, endDate, buildBlocks, setSelectedPartyId, setPartyName]
+    [startDate, endDate, buildBlocks, moduleScope, setSelectedPartyId, setPartyName]
   );
   useEffect(() => {
     fetchParties({
       status: 'active',
       includeBalance: 'false',
+      moduleScope,
     })
       .then((data) => {
         setParties(Array.isArray(data) ? data : []);
@@ -218,7 +223,7 @@ const PartyDetailLedgerPage = () => {
 
         setParties([]);
       });
-  }, []);
+  }, [moduleScope]);
 
   useEffect(() => {
     if (!partyId) return;
@@ -297,6 +302,7 @@ const PartyDetailLedgerPage = () => {
       endDate: endDate || '',
       size: printSize || 'A5',
       lang: getCurrentLanguage(),
+      ...(moduleScope ? { moduleScope } : {}),
     }).toString();
 
   const handleSelectParty = (party) => {
@@ -309,9 +315,12 @@ const PartyDetailLedgerPage = () => {
     setPartyPhone(party.phone || '');
     setShowSuggestions(false);
 
-    navigate(`/party-ledger/${party._id}/detail`, {
+    navigate(
+      `/party-ledger/${party._id}/detail${moduleScope ? '?moduleScope=travel' : ''}`,
+      {
       replace: true,
-    });
+      }
+    );
 
     loadData(party._id, startDate, endDate);
   };

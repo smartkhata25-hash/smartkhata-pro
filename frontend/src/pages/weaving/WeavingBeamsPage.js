@@ -1,3 +1,4 @@
+import WeavingProductionContext from '../../components/weaving/WeavingProductionContext';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FaEye as Eye,
@@ -8,9 +9,12 @@ import {
 import {
   requestWeavingConfirmation,
   showWeavingError,
+  showWeavingSuccess,
+  showWeavingWarning,
 } from '../../components/weaving/WeavingFeedbackModal';
 import {
   createKnottingJob,
+  completeBeam,
   getBeamMeta,
   getBeamSet,
   listBeamSets,
@@ -100,12 +104,45 @@ export default function WeavingBeamsPage() {
   const method = selectedWorker?.knottingPaymentMethod || 'monthly';
   const perBeam = ['per_beam', 'monthly_per_beam'].includes(method);
   const needsRate = perBeam || ['per_set', 'monthly_per_set'].includes(method);
-  const amount =
-    job.beamIds.length && needsRate
-      ? (perBeam ? job.beamIds.length : 1) * Number(job.rate || 0)
-      : 0;
-  const selectable =
-    selected?.beams?.filter((beam) => beam.status === 'available' && !beam.knottingJobId) || [];
+
+  const selectable = selected?.beams?.filter(
+    (beam) =>
+      (beam.status === 'available' && !beam.knottingJobId) ||
+      (beam.status === 'knotting' && beam.knottingJobId)
+  ) || [];
+  const selectedBeams = selected?.beams?.filter((beam) => job.beamIds.includes(beam._id)) || [];
+  const needsNewKnotting = selectedBeams.some(
+    (beam) => beam.status === 'available' && !beam.knottingJobId
+  );
+  const newBeamCount = selectedBeams.filter((beam) => beam.status === 'available' && !beam.knottingJobId).length;
+  const amount = newBeamCount && needsRate ? (perBeam ? newBeamCount : 1) * Number(job.rate || 0) : 0;
+  const hasNewBeams = selectable.some((beam) => beam.status === 'available' && !beam.knottingJobId);
+  const closeSet = async () => {
+    if (saving) return;
+    const dirty = job.employeeId || job.beamIds.length || Object.values(job.loomNumbers).some(Boolean) || job.notes || startLoom || job.rate !== '' || job.workDate !== getBusinessDateInputValue() || job.approve !== canApprove;
+    if (dirty && !await requestWeavingConfirmation({ message: tr('discardChanges') })) return;
+    setSelected(null);
+  };
+  const unload = async (beam) => {
+    if (saving || !canLoad) return;
+    const context = selected.productionContext || {};
+    const details = [
+      t('weaving.folding.loom') + ': ' + (beam.activeLoomId?.loomNumber || beam.loomNumber || '-'),
+      t('weaving.production.beam') + ': ' + beam.beamNo,
+      t('weaving.production.contract') + ': ' + (context.contractNo || '-'),
+      t('weaving.production.customer') + ': ' + (context.customerName || context.ownerName || '-'),
+      t('weaving.folding.quality') + ': ' + (context.qualityName || selected.fabricQualityId?.name || '-'),
+    ].join('\n');
+    if (!await requestWeavingConfirmation({ message: tr('completeConfirm') + '\n\n' + details })) return;
+    setSaving(true);
+    try {
+      await completeBeam(beam._id);
+      setSelected(await getBeamSet(selected._id));
+      showWeavingSuccess(tr('completedSuccess'));
+      load();
+    } catch (error) { showWeavingError(error, tr('saveError')); }
+    finally { setSaving(false); }
+  };
   const toggleBeam = (id) =>
     setJob((current) => ({
       ...current,
@@ -128,20 +165,41 @@ export default function WeavingBeamsPage() {
   };
   const submitJob = async (event) => {
     event.preventDefault();
-    if (!selected || saving || !canSave || !job.beamIds.length) return;
-    const loadBeams = event.nativeEvent.submitter?.value === 'load';
-    if (loadBeams && !canLoad) return;
+    if (!selected || saving || !canSave || !canLoad) return;
+    if (!job.beamIds.length) { showWeavingWarning(tr('selectBeamWarning')); return; }
+    if (needsNewKnotting && !job.employeeId) { showWeavingWarning(tr('selectWorker')); return; }
+    if (needsNewKnotting && needsRate && (job.rate === '' || !Number.isFinite(Number(job.rate)) || Number(job.rate) < 0)) { showWeavingWarning(tr('rateWarning')); return; }
+    if (job.beamIds.some((id) => !String(job.loomNumbers[id] || '').trim())) { showWeavingWarning(tr('loomWarning')); return; }
+    if (!job.workDate) { showWeavingWarning(tr('dateWarning')); return; }
     setSaving(true);
     try {
+      let completeBeamIds = [];
+      const setup = await getBeamMeta();
+      setMeta(setup);
+      const numbers = new Set(job.beamIds.map((id) => String(job.loomNumbers[id] || '').trim()));
+      const occupied = (setup.currentRuns || []).filter((run) => {
+        const loom = setup.looms.find((row) => String(row._id) === String(run.beam.activeLoomId));
+        return numbers.has(loom?.loomNumber || run.beam.loomNumber);
+      });
+      if (occupied.length) {
+        const details = occupied.map((run) => {
+          const loom = setup.looms.find((row) => String(row._id) === String(run.beam.activeLoomId));
+          return [t('weaving.folding.loom') + ' ' + (loom?.loomNumber || run.beam.loomNumber), run.beam.beamNo,
+            run.contract?.contractNo || '-', run.contract?.partyName || run.ownerParty?.name || '-', run.ownershipType === 'own' ? t('weaving.production.own') : t('weaving.production.partyOwned'), run.quality?.name || '-'].join(' / ');
+        }).join('\n');
+        if (!await requestWeavingConfirmation({ message: t('weaving.production.replaceRun') + '\n\n' + details })) return;
+        completeBeamIds = occupied.map((run) => run.beam._id);
+      }
       await createKnottingJob({
-        employeeId: job.employeeId,
+        completeBeamIds,
+        employeeId: needsNewKnotting ? job.employeeId : '',
         beamSetId: selected._id,
         beamIds: job.beamIds,
         workDate: job.workDate,
-        rate: needsRate ? Number(job.rate || 0) : 0,
+        rate: needsNewKnotting && needsRate ? Number(job.rate || 0) : 0,
         approve: canApprove && job.approve,
         notes: job.notes,
-        load: loadBeams,
+        load: true,
         beamAssignments: job.beamIds.map((beamId) => ({
           beamId,
           loomNumber: job.loomNumbers[beamId] || '',
@@ -149,7 +207,12 @@ export default function WeavingBeamsPage() {
       });
       setSelected(null);
       setJob(freshJob(canApprove));
-      await load();
+      showWeavingSuccess('Selected Beams loaded successfully.');
+
+      // The Knotting/Beam Load request is already server-confirmed. Refresh the
+      // list in the background so a slow optional refresh cannot trap the modal
+      // in its saving state.
+      load();
     } catch (error) {
       showWeavingError(error, tr('saveError'));
     } finally {
@@ -180,12 +243,7 @@ export default function WeavingBeamsPage() {
       setLoading(false);
     }
   };
-  const disabledSave =
-    saving ||
-    !canSave ||
-    !job.employeeId ||
-    !job.beamIds.length ||
-    (needsRate && (job.rate === '' || !Number.isFinite(Number(job.rate)) || Number(job.rate) < 0));
+  const disabledSave = saving || !canSave || !canLoad;
 
   return (
     <div className="min-h-full bg-slate-50 p-4 sm:p-6">
@@ -212,7 +270,7 @@ export default function WeavingBeamsPage() {
               {tr(`status.${status}`)}
             </div>
             <div className="mt-1 text-2xl font-black text-slate-900">
-              {sets.filter((row) => row.status === status).length}
+              {sets.reduce((total, row) => total + (row.beamCounts?.[status] || 0), 0)}
             </div>
           </div>
         ))}
@@ -229,7 +287,7 @@ export default function WeavingBeamsPage() {
             <tr>
               {['reference', 'party', 'quality', 'beams', 'statusLabel', 'action'].map((key) => (
                 <th key={key} className="px-4 py-3">
-                  {tr(key)}
+                  {key === 'party' ? t('weaving.production.customer') : tr(key)}
                 </th>
               ))}
             </tr>
@@ -264,16 +322,20 @@ export default function WeavingBeamsPage() {
                       <div className="text-xs font-normal text-slate-500">{row.receiptNo}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3">{row.sizingPartyId?.name || '-'}</td>
+                  <td className="px-4 py-3">
+                    <div>{row.productionContext?.customerName || row.productionContext?.ownerName || '-'}</div>
+                    <div className="text-xs text-slate-500">{row.productionContext?.contractNo || t('weaving.production.noContract')}</div>
+                    <div className="text-xs text-slate-500">{t('weaving.production.sizingVendor')}: {row.sizingPartyId?.name || '-'}</div>
+                  </td>
                   <td className="px-4 py-3">
                     {row.fabricQualityId?.qualityName ||
                       row.fabricQualityId?.name ||
                       row.count ||
                       '-'}
                   </td>
-                  <td className="px-4 py-3 font-bold">{row.beamCount}</td>
+                  <td className="px-4 py-3"><strong>{tr('totalBeams')}: {row.beamCounts?.total || 0}</strong><div className="mt-1 text-xs text-slate-600">{['loaded', 'available', 'knotting', 'completed'].map((status) => tr('status.' + status) + ': ' + (row.beamCounts?.[status] || 0)).join(' / ')}</div></td>
                   <td className="px-4 py-3">
-                    <Status value={row.status} />
+                    <span className="text-xs font-bold">{tr(row.beamCounts?.total && row.beamCounts.completed === row.beamCounts.total ? 'status.completed' : row.beamCounts?.loaded ? (row.beamCounts.loaded === row.beamCounts.total ? 'fullyLoaded' : 'partiallyLoaded') : row.beamCounts?.knotting ? 'status.knotting' : 'status.available')}</span>
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -311,6 +373,7 @@ export default function WeavingBeamsPage() {
           aria-labelledby="knotting-title"
         >
           <form
+            noValidate
             onSubmit={submitJob}
             className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
           >
@@ -328,7 +391,7 @@ export default function WeavingBeamsPage() {
                 type="button"
                 disabled={saving}
                 aria-label={tr('close')}
-                onClick={() => setSelected(null)}
+                onClick={closeSet}
                 className="rounded-lg p-2 hover:bg-white/10"
               >
                 <X size={20} />
@@ -340,7 +403,8 @@ export default function WeavingBeamsPage() {
                   <label className="text-xs font-bold text-slate-600">
                     {tr('worker')}
                     <select
-                      required
+                      required={needsNewKnotting}
+                      disabled={!hasNewBeams || !canSave}
                       value={job.employeeId}
                       onChange={(event) => {
                         const worker = meta.employees.find((row) => row._id === event.target.value);
@@ -371,7 +435,7 @@ export default function WeavingBeamsPage() {
                     />
                   </label>
                 </div>
-                {selectedWorker && (
+                {hasNewBeams && selectedWorker && (
                   <div className="mt-4 grid items-end gap-3 rounded-xl border border-cyan-100 bg-cyan-50 p-3 sm:grid-cols-2">
                     <div>
                       <div className="text-xs font-bold text-cyan-700">{tr('paymentBasis')}</div>
@@ -396,7 +460,7 @@ export default function WeavingBeamsPage() {
                     )}
                     {needsRate && (
                       <div className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-emerald-700 sm:col-span-2">
-                        {perBeam ? `${job.beamIds.length} ${tr('beams')}` : `1 ${tr('set')}`} ×{' '}
+                        {perBeam ? `${newBeamCount} ${tr('beams')}` : `${newBeamCount ? 1 : 0} ${tr('set')}`} ×{' '}
                         {tr('rs')} {money(job.rate)} = {tr('rs')} {money(amount)}
                       </div>
                     )}
@@ -458,7 +522,8 @@ export default function WeavingBeamsPage() {
                 </datalist>
                 <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                   {selected.beams?.map((beam) => {
-                    const available = beam.status === 'available' && !beam.knottingJobId;
+                    const available = (beam.status === 'available' && !beam.knottingJobId) ||
+                      (beam.status === 'knotting' && beam.knottingJobId);
                     const checked = job.beamIds.includes(beam._id);
                     return (
                       <div
@@ -469,7 +534,7 @@ export default function WeavingBeamsPage() {
                           <input
                             type="checkbox"
                             checked={checked}
-                            disabled={!available}
+                            disabled={!available || !canSave}
                             onChange={() => toggleBeam(beam._id)}
                             className="h-4 w-4 accent-cyan-700"
                           />
@@ -481,8 +546,8 @@ export default function WeavingBeamsPage() {
                             <input
                               type="text"
                               list="knotting-looms"
-                              aria-label={`${beam.beamNo} ${tr('loomOptional')}`}
-                              placeholder={tr('loomOptional')}
+                              aria-label={`${beam.beamNo} ${tr('loomRequired')}`}
+                              placeholder={tr('loomRequired')}
                               disabled={!checked}
                               value={job.loomNumbers[beam._id] || ''}
                               onChange={(event) =>
@@ -526,6 +591,12 @@ export default function WeavingBeamsPage() {
                   </label>
                 )}
               </fieldset>
+              {canLoad && selected.beams?.some((beam) => beam.status === 'loaded') && <div className="mt-4 space-y-2 border-t pt-3">
+                {selected.beams.filter((beam) => beam.status === 'loaded').map((beam) => <div key={beam._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 p-3">
+                  <span className="text-sm font-bold">{beam.beamNo} / {tr('loomRequired')} {beam.activeLoomId?.loomNumber || beam.loomNumber}</span>
+                  <button type="button" disabled={saving} onClick={() => unload(beam)} className="rounded border border-amber-300 px-3 py-2 text-xs font-bold text-amber-800">{tr('completeUnload')}</button>
+                </div>)}
+              </div>}
               {!!selected.jobs?.length && (
                 <details className="mt-5 border-t border-slate-200 pt-3">
                   <summary className="cursor-pointer text-sm font-bold text-slate-700">
@@ -575,33 +646,23 @@ export default function WeavingBeamsPage() {
                 </details>
               )}
             </div>
+            <WeavingProductionContext context={selected.productionContext} />
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
               <button
                 type="button"
                 disabled={saving}
-                onClick={() => setSelected(null)}
+                onClick={closeSet}
                 className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-bold"
               >
                 {tr('close')}
               </button>
-              {canSave && (
-                <button
-                  type="submit"
-                  value="knotting"
-                  disabled={disabledSave}
-                  className="h-10 rounded-lg border border-cyan-700 bg-white px-4 text-sm font-bold text-cyan-800 disabled:opacity-50"
-                >
-                  {saving ? tr('saving') : tr('saveKnotting')}
-                </button>
-              )}
               {canSave && canLoad && (
                 <button
                   type="submit"
-                  value="load"
                   disabled={disabledSave}
                   className="h-10 rounded-lg bg-gradient-to-r from-slate-900 to-cyan-800 px-4 text-sm font-bold text-white disabled:opacity-50"
                 >
-                  {saving ? tr('saving') : tr('saveLoad')}
+                  {saving ? tr('saving') : 'Load Selected Beams'}
                 </button>
               )}
             </div>

@@ -8,6 +8,8 @@ const { MODULE_KEYS } = require("../utils/moduleConfig");
 const { PERMISSIONS } = require("../utils/permissionList");
 
 const router = express.Router();
+const employeePhoto = require("../controllers/weavingEmployeePhotoController");
+const photoUpload = require("../middleware/uploadMiddleware");
 
 router.use(protect);
 router.use((req, res, next) => {
@@ -26,6 +28,9 @@ router.get(
   requirePermission(PERMISSIONS.EMPLOYEES.VIEW),
   ctrl.getEmployeeFormMeta,
 );
+const weavingPhotoOnly = (req, res, next) => String(req.originalUrl || "").startsWith("/api/weaving/") ? next() : res.status(404).json({ message: "Not found" });
+router.post("/:id/photo", weavingPhotoOnly, requirePermission(PERMISSIONS.EMPLOYEES.CREATE, PERMISSIONS.EMPLOYEES.EDIT), (req, res, next) => photoUpload.single("photo")(req, res, (error) => error ? res.status(400).json({ message: "Select a valid image up to 5MB." }) : next()), employeePhoto.save);
+router.delete("/:id/photo", weavingPhotoOnly, requirePermission(PERMISSIONS.EMPLOYEES.EDIT), employeePhoto.save);
 
 router.get(
   "/summary",
@@ -110,6 +115,8 @@ router.post(
   requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),
   ctrl.finalizePayrollCycle,
 );
+router.post("/payroll/range/precheck", requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE), ctrl.precheckPayrollRange);
+router.post("/payroll/range/finalize", requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE), ctrl.finalizePayrollRange);
 router.post(
   "/payroll/early-close",
   requirePermission(PERMISSIONS.PAYROLL.EDIT, PERMISSIONS.PAYROLL.CREATE),

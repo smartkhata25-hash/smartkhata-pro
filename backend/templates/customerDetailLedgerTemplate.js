@@ -1,6 +1,10 @@
 // Customer Detailed Ledger HTML Template
 
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 
 const escapeHtml = (value, fallback = "-") => {
   const text = String(value ?? "").trim() || fallback;
@@ -65,6 +69,8 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
     period = {},
     summary = {},
     blocks = [],
+    header = null,
+    showDescription = false,
   } = data || {};
 
   const lang = data?.lang || "ur";
@@ -109,6 +115,8 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
       width: 100%;
     }
 
+    ${ledgerBusinessHeaderStyles}
+
     .title {
       text-align: center;
       font-size: 18px;
@@ -146,6 +154,15 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
       padding: 6px 8px;
       font-weight: 700;
       border-bottom: 1px solid #d1d5db;
+    }
+
+    .description {
+      padding: 5px 8px 0;
+      color: #6b7280;
+      font-size: 10px;
+      font-weight: 400;
+      line-height: 1.4;
+      white-space: pre-line;
     }
 
     table {
@@ -191,6 +208,7 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
 
 <body>
   <div class="page">
+    ${renderLedgerBusinessHeader(header)}
 
     <div class="title">
       ${escapeHtml(title)}
@@ -247,6 +265,12 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
                     &nbsp; — &nbsp;
                     ${escapeHtml(blk.date)}
                   </div>
+
+                  ${
+                    showDescription && String(blk.description ?? "").trim()
+                      ? `<div class="description"><strong>${escapeHtml(t("common.description", lang), "")}</strong>: ${escapeHtml(String(blk.description).trim(), "")}</div>`
+                      : ""
+                  }
 
                   ${
                     Array.isArray(blk.items) && blk.items.length > 0

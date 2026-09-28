@@ -5,6 +5,7 @@ const Customer = require("../models/Customer");
 const Party = require("../models/Party");
 
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { roundMoney } = require("../utils/money");
 const {
   createPaymentEntry,
   createReceivePaymentDiscountEntry,
@@ -207,18 +208,19 @@ exports.createReceivePayment = async (req, res) => {
         ? JSON.parse(paymentEntries || "[]")
         : paymentEntries || [];
 
-    const totalAmount = payments.reduce(
-      (sum, p) => sum + Number(p.amount || 0),
-      0,
+    const totalAmount = roundMoney(
+      payments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
     );
 
     const rawDiscount = Array.isArray(discountAmount)
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+    const parsedDiscount = roundMoney(
+      isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount),
+    );
 
-    const finalAmount = totalAmount + parsedDiscount;
+    const finalAmount = roundMoney(totalAmount + parsedDiscount);
     const businessDate = getBusinessDateKey(date, {
       fallback: new Date(),
       label: "receive payment date",
@@ -747,18 +749,19 @@ exports.updateReceivePayment = async (req, res) => {
         ? JSON.parse(paymentEntries || "[]")
         : paymentEntries || [];
 
-    const totalAmount = payments.reduce(
-      (sum, p) => sum + Number(p.amount || 0),
-      0,
+    const totalAmount = roundMoney(
+      payments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
     );
 
     const rawDiscount = Array.isArray(discountAmount)
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount);
+    const parsedDiscount = roundMoney(
+      isNaN(Number(rawDiscount)) ? 0 : Number(rawDiscount),
+    );
 
-    const finalAmount = totalAmount + parsedDiscount;
+    const finalAmount = roundMoney(totalAmount + parsedDiscount);
 
     if (totalAmount <= 0) {
       return res.status(400).json({ error: "Invalid payment amount" });

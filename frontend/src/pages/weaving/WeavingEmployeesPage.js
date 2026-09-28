@@ -1,4 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import WeavingEmployeeSetupModal from '../../components/weaving/WeavingEmployeeSetupModal';
+import WeavingQuickEmployeeModal from '../../components/weaving/WeavingQuickEmployeeModal';
+import { employeeText } from '../../components/weaving/weavingEmployeeMasterUtils';
 import { useNavigate } from 'react-router-dom';
 import {
   FaBook,
@@ -7,7 +10,6 @@ import {
   FaEdit,
   FaEye,
   FaEyeSlash,
-  FaPlus,
   FaRedo,
   FaTrash,
   FaUserCircle,
@@ -145,6 +147,8 @@ const WeavingEmployeesPage = () => {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState('');
   const [unitMasterOpen, setUnitMasterOpen] = useState(false);
+  const [employeeSetupOpen, setEmployeeSetupOpen] = useState(false);
+  const [quickEmployeeOpen, setQuickEmployeeOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState(null);
   const [unitForm, setUnitForm] = useState(EMPTY_UNIT_FORM);
   const [unitError, setUnitError] = useState('');
@@ -464,15 +468,22 @@ const WeavingEmployeesPage = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            {canEdit && <TravelActionButton variant="secondary" onClick={() => setEmployeeSetupOpen(true)}>{employeeText('Employee Setup', 'ملازم سیٹ اپ')}</TravelActionButton>}
+            {employeeSetupOpen && <WeavingEmployeeSetupModal onClose={() => setEmployeeSetupOpen(false)} onChanged={loadData} />}
+            {quickEmployeeOpen && <WeavingQuickEmployeeModal onClose={() => setQuickEmployeeOpen(false)} onSaved={() => { setQuickEmployeeOpen(false); loadData(); }} />}
             {canEdit && (
               <TravelActionButton icon={FaWarehouse} variant="secondary" onClick={openUnitMaster}>
                 {t('weaving.employees.unitMaster')}
               </TravelActionButton>
             )}
             {canCreate && (
-              <TravelActionButton icon={FaPlus} onClick={() => navigate('/weaving/employees/new')}>
-                {t('weaving.employees.add')}
-              </TravelActionButton>
+              <details className="relative">
+                <summary className="cursor-pointer list-none rounded-lg bg-cyan-700 px-4 py-2 text-sm font-bold text-white">+ {t('weaving.employees.add')} ▾</summary>
+                <div className="absolute end-0 z-20 mt-2 min-w-52 rounded-lg border bg-white p-2 shadow-lg">
+                  <button type="button" className="block w-full rounded px-3 py-2 text-start text-sm hover:bg-cyan-50" onClick={() => navigate('/weaving/employees/new')}>{employeeText('Full Employee', 'مکمل ملازم فارم')}</button>
+                  <button type="button" className="block w-full rounded px-3 py-2 text-start text-sm hover:bg-cyan-50" onClick={(event) => { event.currentTarget.closest('details').open = false; setQuickEmployeeOpen(true); }}>{employeeText('Quick / Temporary Worker', 'عارضی ملازم')}</button>
+                </div>
+              </details>
             )}
           </div>
         </div>

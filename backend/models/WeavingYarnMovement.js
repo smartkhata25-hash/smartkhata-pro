@@ -22,6 +22,7 @@ const schema = new mongoose.Schema({
   beamId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeam", default: null },
   beamSetId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeamSet", default: null },
   fabricQualityId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingFabricQuality", default: null },
+  purchaseContractId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingContract", default: null },
   contractId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingContract", default: null },
   quantityKg: { type: Number, min: 0.000001, required: true },
   packageType: { type: String, enum: ["", "bag", "carton"], default: "" },

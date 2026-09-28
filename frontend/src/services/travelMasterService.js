@@ -614,6 +614,15 @@ export const fetchTravelBookingById = async (id) => {
 
 export const getTravelBookingPreviewUrl = (id) => `${TRAVEL_API}/print/bookings/${id}/preview`;
 
+export const fetchTravelPrintBranding = async () => {
+  const response = await axios.get(`${TRAVEL_API}/print/branding`, {
+    ...getConfig(),
+    params: { output: 'print' },
+  });
+
+  return response.data;
+};
+
 export const getTravelBookingPrintUrl = (id) => `${TRAVEL_API}/print/bookings/${id}/print`;
 
 export const getTravelBookingPdfUrl = (id) => `${TRAVEL_API}/print/bookings/${id}/pdf`;

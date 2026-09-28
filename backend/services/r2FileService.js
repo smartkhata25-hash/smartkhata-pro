@@ -3,6 +3,7 @@ const {
   PutObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  GetObjectCommand,
 } = require("@aws-sdk/client-s3");
 
 const path = require("path");
@@ -111,6 +112,24 @@ async function fileExists(key) {
   }
 }
 
+async function getFileBuffer(key) {
+  if (!key) throw new Error("File key is required");
+
+  const response = await s3.send(
+    new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+    }),
+  );
+
+  if (!response.Body) throw new Error("Stored file has no content");
+
+  return {
+    buffer: Buffer.from(await response.Body.transformToByteArray()),
+    mimeType: response.ContentType || "application/octet-stream",
+  };
+}
+
 function getFileUrl(key) {
   if (!key) return "";
 
@@ -123,5 +142,6 @@ module.exports = {
   uploadFile,
   deleteFile,
   fileExists,
+  getFileBuffer,
   getFileUrl,
 };

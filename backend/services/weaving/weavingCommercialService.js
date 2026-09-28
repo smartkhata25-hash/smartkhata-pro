@@ -1,3 +1,4 @@
+const { purchaseLineContext } = require("./weavingProductionContextService");
 const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const Counter = require("../../models/Counter");
@@ -382,7 +383,7 @@ const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, s
         const invoice = salesInvoice || await WeavingSalesInvoice.findOne({ _id: existing.salesInvoiceId, userId }).session(session);
         if (invoice) {
           const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: invoice._id, type: "receive", status: "posted" }).session(session).select("amount").lean();
-          invoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); invoice.balanceDue = round(Math.max(0, invoice.grandTotal - invoice.paidAmount)); invoice.paymentStatus = invoice.balanceDue <= 0 ? "paid" : invoice.paidAmount > 0 ? "partial" : "unpaid"; await invoice.save({ session });
+          invoice.paidAmount = round(Math.min(invoice.grandTotal, rows.reduce((sum, row) => sum + row.amount, 0))); invoice.balanceDue = round(Math.max(0, invoice.grandTotal - invoice.paidAmount)); invoice.paymentStatus = invoice.balanceDue <= 0 ? "paid" : invoice.paidAmount > 0 ? "partial" : "unpaid"; await invoice.save({ session });
         }
       }
       return existing;
@@ -401,7 +402,7 @@ const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, s
   const journal = await createJournal({ session, userId, date: payload.date, description: payload.description || `${type === "receive" ? "Received from" : "Paid to"} ${party.name}`, sourceType: type === "receive" ? "receive_payment" : "pay_bill", originModule: type === "receive" ? "weaving.receive_payment" : "weaving.pay_bill", referenceId: transaction._id, billNo: transactionNo, lines: type === "receive" ? [{ account: paymentAccount._id, type: "debit", amount }, { account: partyAccount._id, type: "credit", amount }] : [{ account: partyAccount._id, type: "debit", amount }, { account: paymentAccount._id, type: "credit", amount }] });
   transaction.journalEntryId = journal._id; await transaction.save({ session });
   if (purchaseInvoice) { purchaseInvoice.paidAmount = round(purchaseInvoice.paidAmount + amount); purchaseInvoice.balanceDue = round(purchaseInvoice.grandTotal - purchaseInvoice.paidAmount); purchaseInvoice.paymentStatus = purchaseInvoice.balanceDue <= 0 ? "paid" : "partial"; purchaseInvoice.paymentTransactionIds.push(transaction._id); await purchaseInvoice.save({ session }); }
-  if (salesInvoice) { const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: salesInvoice._id, type: "receive", status: "posted" }).session(session).select("amount").lean(); salesInvoice.paidAmount = round(rows.reduce((sum, row) => sum + row.amount, 0)); salesInvoice.balanceDue = round(Math.max(0, salesInvoice.grandTotal - salesInvoice.paidAmount)); salesInvoice.paymentStatus = salesInvoice.balanceDue <= 0 ? "paid" : salesInvoice.paidAmount > 0 ? "partial" : "unpaid"; await salesInvoice.save({ session }); }
+  if (salesInvoice) { const rows = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: salesInvoice._id, type: "receive", status: "posted" }).session(session).select("amount").lean(); salesInvoice.paidAmount = round(Math.min(salesInvoice.grandTotal, rows.reduce((sum, row) => sum + row.amount, 0))); salesInvoice.balanceDue = round(Math.max(0, salesInvoice.grandTotal - salesInvoice.paidAmount)); salesInvoice.paymentStatus = salesInvoice.balanceDue <= 0 ? "paid" : salesInvoice.paidAmount > 0 ? "partial" : "unpaid"; await salesInvoice.save({ session }); }
   return transaction;
 };
 
@@ -416,32 +417,34 @@ const recalculatePaymentLinks = async (userId, transaction, session = null) => {
   }
   if (transaction.salesInvoiceId) {
     const row = await WeavingSalesInvoice.findOne({ _id: transaction.salesInvoiceId, userId }).session(session);
-    if (row) { row.paidAmount = await totalFor("salesInvoiceId", row._id, "receive"); row.balanceDue = round(Math.max(0, row.grandTotal - row.paidAmount)); row.paymentStatus = row.balanceDue <= 0 ? "paid" : row.paidAmount > 0 ? "partial" : "unpaid"; await row.save({ session }); }
+    if (row) { row.paidAmount = Math.min(row.grandTotal, await totalFor("salesInvoiceId", row._id, "receive")); row.balanceDue = round(Math.max(0, row.grandTotal - row.paidAmount)); row.paymentStatus = row.balanceDue <= 0 ? "paid" : row.paidAmount > 0 ? "partial" : "unpaid"; await row.save({ session }); }
   }
 };
 const voidMoneyTransaction = async (userId, id, reason = "", session = null) => { const row = await WeavingMoneyTransaction.findOne({ _id: id, userId, status: "posted" }).session(session); if (!row) throw error("Posted payment not found", 404); const reversal = await reverseJournal(userId, row.journalEntryId, new Date().toISOString().slice(0, 10), `Void ${row.transactionNo}: ${text(reason)}`, session); row.status = "void"; row.voidedAt = new Date(); row.voidReason = text(reason); row.reversalJournalId = reversal?._id || null; await row.save({ session }); await recalculatePaymentLinks(userId, row, session); return row; };
 const updateMoneyTransaction = async (userId, id, payload) => { const current = await WeavingMoneyTransaction.findOne({ _id: id, userId, status: "posted" }); if (!current) throw error("Posted payment not found", 404); await voidMoneyTransaction(userId, id, "Edited and replaced"); const replacement = await postMoneyTransaction({ userId, payload: { ...payload, type: current.type, purchaseInvoiceId: payload.purchaseInvoiceId || current.purchaseInvoiceId, salesInvoiceId: payload.salesInvoiceId || current.salesInvoiceId, sizingBillId: payload.sizingBillId || current.sizingBillId, requestKey: "" } }); await recalculatePaymentLinks(userId, replacement); return replacement; };
 
-const normalizePurchaseLines = async (userId, payload) => {
+const normalizePurchaseLines = async (userId, payload, existingPurchase = null) => {
   if (!Array.isArray(payload.lines) || !payload.lines.length) throw error("Add at least one purchase line");
   const result = [];
   for (const source of payload.lines) {
+    const previous = existingPurchase?.lines.find((line) => String(line._id) === String(source._id));
+    const context = ["yarn", "fabric"].includes(payload.purchaseType) ? await purchaseLineContext(userId, payload, source, previous) : {};
     const quantity = round(source.quantityKg ?? source.quantity); const rate = round(source.rate); if (quantity <= 0) throw error("Line quantity must be greater than zero");
-    if (payload.purchaseType === "yarn") { const yarn = await WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }); if (!yarn) throw error("Valid Yarn is required"); if (source.destinationType !== "direct_sizing" && !await WeavingGodown.exists({ _id: source.godownId, userId, isActive: true })) throw error("Godown is required"); if (source.destinationType === "direct_sizing" && !await WeavingParty.exists({ _id: source.sizingPartyId, userId, isActive: true, isHidden: false, serviceTypes: "sizing" })) throw error("Sizing Party is required"); const quantityLbs = round(source.quantityLbs || quantity * 2.2046226218); const rateBasis = source.rateBasis === "lbs" ? "lbs" : "kg"; const packing = normalizePacking(source, yarn); result.push({ itemKind: "yarn", yarnId: yarn._id, name: yarn.name, quantity, quantityLbs, ...packing, unit: "KG", rate, rateBasis, amount: round((rateBasis === "lbs" ? quantityLbs : quantity) * rate), contractId: source.contractId || null, destinationType: source.destinationType || "godown", godownId: source.godownId || null, sizingPartyId: source.sizingPartyId || null, lotReference: text(source.lotReference) }); }
-    else if (payload.purchaseType === "fabric") { const quality = await WeavingFabricQuality.findOne({ _id: source.fabricQualityId, userId, isActive: true }); if (!quality) throw error("Valid Fabric Quality is required"); if (!await WeavingGodown.exists({ _id: source.godownId, userId, isActive: true })) throw error("Godown is required"); result.push({ itemKind: "fabric", fabricQualityId: quality._id, name: quality.name, quantity, unit: "Meter", rate, amount: round(quantity * rate), fabricGrade: ["normal", "b", "rejected", "cut_piece", "waste"].includes(source.fabricGrade) ? source.fabricGrade : "normal", weightKg: round(source.weightKg), thanCount: round(source.thanCount), pieceCount: round(source.pieceCount), godownId: source.godownId }); }
+    if (payload.purchaseType === "yarn") { const yarn = await WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }); if (!yarn) throw error("Valid Yarn is required"); if (source.destinationType !== "direct_sizing" && !await WeavingGodown.exists({ _id: source.godownId, userId, isActive: true })) throw error("Godown is required"); if (source.destinationType === "direct_sizing" && !await WeavingParty.exists({ _id: source.sizingPartyId, userId, isActive: true, isHidden: false, serviceTypes: "sizing" })) throw error("Sizing Party is required"); const quantityLbs = round(source.quantityLbs || quantity * 2.2046226218); const rateBasis = source.rateBasis === "lbs" ? "lbs" : "kg"; const packing = normalizePacking(source, yarn); result.push({ itemKind: "yarn", yarnId: yarn._id, name: yarn.name, quantity, quantityLbs, ...packing, unit: "KG", rate, rateBasis, amount: round((rateBasis === "lbs" ? quantityLbs : quantity) * rate), ...context, destinationType: source.destinationType || "godown", godownId: source.godownId || null, sizingPartyId: source.sizingPartyId || null, lotReference: text(source.lotReference) }); }
+    else if (payload.purchaseType === "fabric") { const quality = await WeavingFabricQuality.findOne({ _id: source.fabricQualityId, userId, isActive: true }); if (!quality) throw error("Valid Fabric Quality is required"); if (source.unit === "KG" && round(source.weightKg) <= 0) throw error("Actual Fabric KG is required for this Contract"); if (!await WeavingGodown.exists({ _id: source.godownId, userId, isActive: true })) throw error("Godown is required"); result.push({ itemKind: "fabric", fabricQualityId: quality._id, name: quality.name, quantity: round(quantity * (source.unit === "Yard" ? 0.9144 : 1)), unit: "Meter", rate: source.unit === "KG" ? round(round(source.weightKg) * rate / quantity) : round(rate / (source.unit === "Yard" ? 0.9144 : 1)), sourceEntryUnit: ["KG", "Yard"].includes(source.unit) ? source.unit : "Meter", sourceQuantity: source.unit === "KG" ? round(source.weightKg) : quantity, sourceRate: rate, ...context, amount: round((source.unit === "KG" ? round(source.weightKg) : quantity) * rate), fabricGrade: ["normal", "b", "rejected", "cut_piece", "waste"].includes(source.fabricGrade) ? source.fabricGrade : "normal", weightKg: round(source.weightKg), thanCount: round(source.thanCount), pieceCount: round(source.pieceCount), godownId: source.godownId }); }
     else { let item = source.itemId ? await WeavingItem.findOne({ _id: source.itemId, userId, isActive: true }) : null; if (!item && source.name) item = await WeavingItem.findOneAndUpdate({ userId, normalizedName: text(source.name).toLowerCase(), category: payload.purchaseType === "parts" ? "part" : "other" }, { $setOnInsert: { userId, name: text(source.name), normalizedName: text(source.name).toLowerCase(), category: payload.purchaseType === "parts" ? "part" : "other", unit: text(source.unit) || "Nos", description: text(source.description), isActive: true } }, { upsert: true, new: true, setDefaultsOnInsert: true }); if (!item) throw error("Product / Part is required"); result.push({ itemKind: payload.purchaseType === "parts" ? "part" : "other", itemId: item._id, name: item.name, description: text(source.description), quantity, unit: text(source.unit) || item.unit, rate, amount: round(quantity * rate), loomId: source.loomId || null, nature: payload.purchaseType === "parts" ? "expense" : source.nature === "asset" ? "asset" : "expense", debitAccountId: source.debitAccountId || null }); }
   }
   return result;
 };
 
-const createFabricPurchase = async (userId, payload) => {
+const createFabricPurchase = async (userId, payload, existingPurchase = null) => {
   const requestKey = text(payload.requestKey);
   if (!requestKey) throw error("Request key is required");
   const existing = await WeavingPurchaseInvoice.findOne({ userId, requestKey });
   if (existing) return existing;
   const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["supplier", "both"] } });
   if (!party) throw error("Supplier / Party is required");
-  const lines = await normalizePurchaseLines(userId, { ...payload, purchaseType: "fabric" });
+  const lines = await normalizePurchaseLines(userId, { ...payload, purchaseType: "fabric" }, existingPurchase);
   const grandTotal = round(lines.reduce((sum, line) => sum + line.amount, 0));
   const paidNow = round(payload.paidNow);
   if (paidNow < 0 || paidNow > grandTotal) throw error("Paid Now cannot exceed Bill Total");
@@ -474,8 +477,8 @@ const createFabricPurchase = async (userId, payload) => {
   return invoice;
 };
 
-const createPurchase = async (userId, payload) => {
-  if (payload.purchaseType === "fabric") return createFabricPurchase(userId, payload);
+const createPurchase = async (userId, payload, existingPurchase = null) => {
+  if (payload.purchaseType === "fabric") return createFabricPurchase(userId, payload, existingPurchase);
   const requestKey = text(payload.requestKey);
   if (!requestKey) throw error("Request key is required");
   const existing = await WeavingPurchaseInvoice.findOne({ userId, requestKey });
@@ -486,7 +489,7 @@ const createPurchase = async (userId, payload) => {
   const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: allowedRoles } });
   if (!party) throw error(nonFinancialPartyYarn ? "Customer / Party is required for Party-owned Yarn" : "Supplier / Party is required");
   const entryMode = ["yarn", "fabric"].includes(purchaseType) ? "detailed" : payload.entryMode === "detailed" ? "detailed" : "quick";
-  const lines = entryMode === "quick" ? [] : await normalizePurchaseLines(userId, { ...payload, purchaseType });
+  const lines = entryMode === "quick" ? [] : await normalizePurchaseLines(userId, { ...payload, purchaseType }, existingPurchase);
   let quickDebit = null; const quickAmount = entryMode === "quick" ? round(payload.quickAmount) : 0;
   if (entryMode === "quick") { if (quickAmount <= 0) throw error("Bill Amount is required"); const allowedType = payload.quickNature === "asset" ? "Asset" : "Expense"; quickDebit = await Account.findOne({ _id: payload.quickDebitAccountId, userId, moduleScope: "weaving", isActive: true, type: allowedType }); if (!quickDebit) throw error(`Valid ${allowedType} account is required`); }
   const grandTotal = entryMode === "quick" ? quickAmount : round(lines.reduce((s, l) => s + l.amount, 0)); const nonFinancial = purchaseType === "yarn" && yarnSource === "party";
@@ -508,7 +511,7 @@ const createPurchase = async (userId, payload) => {
   const directGroups = new Map();
   lines.forEach((line) => {
     if (line.destinationType !== "direct_sizing") return;
-    const groupKey = `${line.sizingPartyId}:${line.contractId || ""}`;
+    const groupKey = `${line.sizingPartyId}:${line.productionContractId || ""}:${line.productionFabricQualityId || ""}`;
     if (!directGroups.has(groupKey)) directGroups.set(groupKey, []);
     directGroups.get(groupKey).push(line);
   });
@@ -521,13 +524,13 @@ const createPurchase = async (userId, payload) => {
     if (duplicate) return duplicate;
     const row = await createOne(WeavingPurchaseInvoice, { userId, requestKey, purchaseNo, purchaseDate: payload.purchaseDate, purchaseType, yarnSource, partyId: party._id, partyName: party.name, supplierInvoiceNo: text(payload.supplierInvoiceNo), attachmentUrl: text(payload.attachmentUrl), attachments: payload.attachments || [], notes: text(payload.notes), dueDate: text(payload.dueDate) || (calculatedDue ? calculatedDue.toISOString().slice(0, 10) : ""), creditDays, gatePassNo: text(payload.gatePassNo), entryMode, quickAmount, quickNature: entryMode === "quick" ? (payload.quickNature === "asset" ? "asset" : "expense") : "", quickDebitAccountId: quickDebit?._id || null, lines, grandTotal, paidAmount: paidNow, balanceDue: nonFinancial ? 0 : round(grandTotal - paidNow), paymentStatus: nonFinancial ? "non_financial" : paidNow >= grandTotal ? "paid" : paidNow > 0 ? "partial" : "unpaid" }, session);
     let yarnMovements = [];
-    if (purchaseType === "yarn") yarnMovements = await WeavingYarnMovement.insertMany(row.lines.map((line) => ({ userId, yarnId: line.yarnId, date: payload.purchaseDate, movementType: nonFinancial ? "party_inward" : "purchase_in", ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null, purchaseInvoiceId: row._id, contractId: line.contractId, quantityKg: line.quantity, rate: line.rate, destinationType: line.destinationType, godownId: line.godownId, sizingPartyId: line.sizingPartyId, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, notes: payload.notes })), sessionOptions(session));
+    if (purchaseType === "yarn") yarnMovements = await WeavingYarnMovement.insertMany(row.lines.map((line) => ({ userId, yarnId: line.yarnId, date: payload.purchaseDate, movementType: nonFinancial ? "party_inward" : "purchase_in", ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null, purchaseInvoiceId: row._id, purchaseContractId: line.purchaseContractId || null, contractId: line.productionContractId || null, quantityKg: line.quantity, rate: line.rate, destinationType: line.destinationType, godownId: line.godownId, sizingPartyId: line.sizingPartyId, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, notes: payload.notes })), sessionOptions(session));
     if (directGroups.size) {
       const movementByLine = new Map(row.lines.map((line, index) => [String(line._id), yarnMovements[index]]));
       const invoiceGroups = new Map();
       row.lines.forEach((line) => {
         if (line.destinationType !== "direct_sizing") return;
-        const groupKey = `${line.sizingPartyId}:${line.contractId || ""}`;
+        const groupKey = `${line.sizingPartyId}:${line.productionContractId || ""}:${line.productionFabricQualityId || ""}`;
         if (!invoiceGroups.has(groupKey)) invoiceGroups.set(groupKey, []);
         invoiceGroups.get(groupKey).push(line);
       });
@@ -535,7 +538,7 @@ const createPurchase = async (userId, payload) => {
       for (const invoiceLines of invoiceGroups.values()) {
         const issueNo = `SI-${String(firstIssueSequence + issueIndex).padStart(5, "0")}`;
         issueIndex += 1;
-        const issue = await createOne(WeavingSizingIssue, { userId, issueNo, date: payload.purchaseDate, sizingPartyId: invoiceLines[0].sizingPartyId, contractId: invoiceLines[0].contractId || null, gatePassNo: text(payload.gatePassNo), notes: `Direct Purchase ${purchaseNo}`, sourceType: "direct_purchase", sourcePurchaseId: row._id, lines: invoiceLines.map((line) => ({ yarnId: line.yarnId, quantityKg: line.quantity, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, sourcePurchaseLineId: line._id, ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null })), movementIds: invoiceLines.map((line) => movementByLine.get(String(line._id))?._id).filter(Boolean) }, session);
+        const issue = await createOne(WeavingSizingIssue, { userId, issueNo, date: payload.purchaseDate, sizingPartyId: invoiceLines[0].sizingPartyId, contractId: invoiceLines[0].productionContractId || null, fabricQualityId: invoiceLines[0].productionFabricQualityId || null, ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null, gatePassNo: text(payload.gatePassNo), notes: `Direct Purchase ${purchaseNo}`, sourceType: "direct_purchase", sourcePurchaseId: row._id, lines: invoiceLines.map((line) => ({ yarnId: line.yarnId, quantityKg: line.quantity, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, sourcePurchaseLineId: line._id, ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null })), movementIds: invoiceLines.map((line) => movementByLine.get(String(line._id))?._id).filter(Boolean) }, session);
         await WeavingYarnMovement.updateMany({ _id: { $in: issue.movementIds }, userId }, { $set: { sizingIssueId: issue._id } }, sessionOptions(session));
         row.sizingIssueIds.push(issue._id);
       }
@@ -634,7 +637,7 @@ const updatePurchase = async (userId, invoiceId, payload, actorId) => {
     attachmentUrl: payload.attachmentUrl ?? current.attachmentUrl,
     attachments: payload.attachments?.length ? payload.attachments : current.attachments,
   };
-  const replacement = await createPurchase(userId, replacementPayload);
+  const replacement = await createPurchase(userId, replacementPayload, current);
   try {
     await voidPurchase(userId, current._id, actorId, `Edited and replaced by ${replacement.purchaseNo}`);
   } catch (failure) {

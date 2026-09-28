@@ -27,6 +27,12 @@ import CustomerForm from './CustomerForm';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
 import {
+  getInvoiceItemMoney,
+  moneyNumber,
+  roundMoney,
+  sanitizeMoneyInput,
+} from '../utils/money';
+import {
   createQuotation,
   deleteQuotation,
   getQuotationById,
@@ -377,7 +383,7 @@ const InvoiceForm = ({
       setPaymentType('cash');
     }
 
-    if (paidAmount === 0) {
+    if (moneyNumber(paidAmount) === 0) {
       setPaymentType('credit');
       setSelectedAccountId('');
     }
@@ -1048,10 +1054,13 @@ const InvoiceForm = ({
     }
   }, [printSettings, showPrintSettings, generateLivePreview]);
   const finalDiscount =
-    discountPercent > 0 ? (totalAmount * discountPercent) / 100 : discountAmount;
+    discountPercent > 0
+      ? roundMoney((totalAmount * discountPercent) / 100)
+      : moneyNumber(discountAmount);
   const grandTotal = isOpeningInvoice
-    ? Number(openingBalanceAmount || 0)
-    : totalAmount - finalDiscount;
+    ? moneyNumber(openingBalanceAmount)
+    : roundMoney(totalAmount - finalDiscount);
+  const numericPaidAmount = moneyNumber(paidAmount);
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -1408,8 +1417,7 @@ const InvoiceForm = ({
       .map((item) => ({
         productId: item.productId,
         quantity: Number(item.quantity),
-        price: Number(item.rate),
-        total: Number(item.quantity) * Number(item.rate),
+        ...getInvoiceItemMoney(item),
       }));
 
     if (mappedItems.length === 0 && !isOpeningInvoice) {
@@ -1417,7 +1425,7 @@ const InvoiceForm = ({
       setSaveLoading(false);
       return;
     }
-    const remaining = grandTotal - paidAmount;
+    const remaining = roundMoney(grandTotal - numericPaidAmount);
 
     if (remaining < 0 && !skipOverpayCheck) {
       setOverpayAmount(Math.abs(remaining));
@@ -1463,18 +1471,21 @@ const InvoiceForm = ({
       formData.append('customerId', selectedCustomerId);
     }
     const finalOpeningAmount = isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal;
-    formData.append('totalAmount', finalOpeningAmount);
+    formData.append('totalAmount', moneyNumber(finalOpeningAmount));
 
-    formData.append('subTotal', isOpeningInvoice ? Number(openingBalanceAmount || 0) : totalAmount);
+    formData.append(
+      'subTotal',
+      isOpeningInvoice ? moneyNumber(openingBalanceAmount) : moneyNumber(totalAmount)
+    );
 
     formData.append('discountPercent', discountPercent);
-    formData.append('discountAmount', finalDiscount);
+    formData.append('discountAmount', moneyNumber(finalDiscount));
 
     formData.append(
       'grandTotal',
-      isOpeningInvoice ? Number(openingBalanceAmount || 0) : grandTotal
+      isOpeningInvoice ? moneyNumber(openingBalanceAmount) : moneyNumber(grandTotal)
     );
-    formData.append('paidAmount', paidAmount);
+    formData.append('paidAmount', numericPaidAmount);
     formData.append('lang', localStorage.getItem('lang') || 'en');
 
     // ✅ FINAL paymentType decision
@@ -1705,9 +1716,25 @@ const InvoiceForm = ({
                     await loadPrintSettings();
                     setShowPrintSettings(true);
                   }}
+                  title="Settings"
                   className="px-2 md:px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200 text-xs md:text-sm"
                 >
                   ⚙️
+                </button>
+              )}
+
+              {/* 📋 Quotations Icon */}
+              {canViewSales && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuotationDrawer(true);
+                    loadQuotations();
+                  }}
+                  title={t('quotation.list')}
+                  className="px-2 md:px-3 py-1 border rounded bg-amber-50 hover:bg-amber-100 text-xs md:text-sm"
+                >
+                  📋
                 </button>
               )}
               <button
@@ -1918,8 +1945,11 @@ const InvoiceForm = ({
                       placeholder={t('discountRS')}
                       value={discountAmount === 0 ? '' : discountAmount}
                       onChange={(e) => {
-                        setDiscountAmount(+e.target.value || 0);
-                        setDiscountPercent(0);
+                        const value = sanitizeMoneyInput(e.target.value);
+                        if (value !== null) {
+                          setDiscountAmount(value);
+                          setDiscountPercent(0);
+                        }
                       }}
                       className="border px-2 py-0 text-sm h-8 w-28 appearance-none"
                     />
@@ -1932,7 +1962,10 @@ const InvoiceForm = ({
                           inputMode="decimal"
                           placeholder={t('amount')}
                           value={paidAmount === 0 ? '' : paidAmount}
-                          onChange={(e) => setPaidAmount(+e.target.value || 0)}
+                          onChange={(e) => {
+                            const value = sanitizeMoneyInput(e.target.value);
+                            if (value !== null) setPaidAmount(value);
+                          }}
                           className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
                         />
 
@@ -2057,41 +2090,6 @@ const InvoiceForm = ({
 
                 {/* Buttons */}
                 <div className="flex flex-wrap gap-2 md:gap-3 no-print mt-6 md:mt-8">
-                  {!editingInvoiceFromAPI &&
-                    ((activeQuotationId && canEditSales) ||
-                      (!activeQuotationId && canCreateSales)) && (
-                      <button
-                        type="button"
-                        disabled={quotationSaving}
-                        onClick={handleSaveQuotation}
-                        className={`rounded px-3 py-1.5 text-xs text-white md:px-4 md:py-2 md:text-sm ${
-                          quotationSaving
-                            ? 'cursor-not-allowed bg-gray-400'
-                            : 'bg-amber-600 hover:bg-amber-700'
-                        }`}
-                      >
-                        {quotationSaving
-                          ? t('quotation.saving')
-                          : activeQuotationId
-                            ? t('quotation.update')
-                            : t('quotation.save')}
-                      </button>
-                    )}
-
-                  {canViewSales && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowQuotationDrawer(true);
-                        loadQuotations();
-                      }}
-                      className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 md:px-4 md:py-2 md:text-sm"
-                    >
-                      {t('quotation.list')}
-                      {quotations.length > 0 ? ` (${quotations.length})` : ''}
-                    </button>
-                  )}
-
                   {((editingInvoiceFromAPI && canEditSales) ||
                     (!editingInvoiceFromAPI && canCreateSales)) && (
                     <>
@@ -2164,14 +2162,14 @@ const InvoiceForm = ({
                               totalAmount,
                               discountAmount: finalDiscount,
                               grandTotal,
-                              paidAmount,
+                              paidAmount: numericPaidAmount,
                               paymentType,
                               customerTotalBalance: editingInvoiceFromAPI
                                 ? customerBalance -
                                   ((editingInvoiceFromAPI.totalAmount || 0) -
                                     (editingInvoiceFromAPI.paidAmount || 0)) +
-                                  (grandTotal - paidAmount)
-                                : customerBalance + (grandTotal - paidAmount),
+                                  (grandTotal - numericPaidAmount)
+                                : customerBalance + (grandTotal - numericPaidAmount),
                             };
 
                             const saved = await handleSubmit(e, 'preview');
@@ -2229,14 +2227,14 @@ const InvoiceForm = ({
                               totalAmount,
                               discountAmount: finalDiscount,
                               grandTotal,
-                              paidAmount,
+                              paidAmount: numericPaidAmount,
                               paymentType,
                               customerTotalBalance: editingInvoiceFromAPI
                                 ? customerBalance -
                                   ((editingInvoiceFromAPI.totalAmount || 0) -
                                     (editingInvoiceFromAPI.paidAmount || 0)) +
-                                  (grandTotal - paidAmount)
-                                : customerBalance + (grandTotal - paidAmount),
+                                  (grandTotal - numericPaidAmount)
+                                : customerBalance + (grandTotal - numericPaidAmount),
                             };
 
                             const saved = await handleSubmit(e, 'print');
@@ -2295,14 +2293,14 @@ const InvoiceForm = ({
                                 totalAmount,
                                 discountAmount: finalDiscount,
                                 grandTotal,
-                                paidAmount,
+                                paidAmount: numericPaidAmount,
                                 paymentType,
                                 customerTotalBalance: editingInvoiceFromAPI
                                   ? customerBalance -
                                     ((editingInvoiceFromAPI.totalAmount || 0) -
                                       (editingInvoiceFromAPI.paidAmount || 0)) +
-                                    (grandTotal - paidAmount)
-                                  : customerBalance + (grandTotal - paidAmount),
+                                    (grandTotal - numericPaidAmount)
+                                  : customerBalance + (grandTotal - numericPaidAmount),
                               };
 
                               if (editingInvoiceFromAPI?._id) {
@@ -2372,6 +2370,27 @@ const InvoiceForm = ({
                   >
                     🔍 <span>{t('findInvoice')}</span>
                   </button>
+
+                  {!editingInvoiceFromAPI &&
+                    ((activeQuotationId && canEditSales) ||
+                      (!activeQuotationId && canCreateSales)) && (
+                      <button
+                        type="button"
+                        disabled={quotationSaving}
+                        onClick={handleSaveQuotation}
+                        className={`rounded px-3 py-1.5 text-xs text-white md:px-4 md:py-2 md:text-sm ${
+                          quotationSaving
+                            ? 'cursor-not-allowed bg-gray-400'
+                            : 'bg-amber-600 hover:bg-amber-700'
+                        }`}
+                      >
+                        {quotationSaving
+                          ? t('quotation.saving')
+                          : activeQuotationId
+                            ? t('quotation.update')
+                            : t('quotation.save')}
+                      </button>
+                    )}
                 </div>
               </div>
 
@@ -2387,10 +2406,10 @@ const InvoiceForm = ({
                   {t('netTotal')}: Rs. {grandTotal.toFixed(2)}
                 </p>
                 <p>
-                  {t('paid')}: Rs. {paidAmount.toFixed(2)}
+                  {t('paid')}: Rs. {numericPaidAmount.toFixed(2)}
                 </p>
                 <p className="text-red-600 font-semibold">
-                  {t('remaining')}: Rs. {(grandTotal - paidAmount).toFixed(2)}
+                  {t('remaining')}: Rs. {(grandTotal - numericPaidAmount).toFixed(2)}
                 </p>
                 {printSettings?.sales?.settings?.showCustomerTotalBalance !== false && (
                   <p className="text-blue-600 font-semibold">
@@ -2399,8 +2418,8 @@ const InvoiceForm = ({
                       ? customerBalance -
                         ((editingInvoiceFromAPI.totalAmount || 0) -
                           (editingInvoiceFromAPI.paidAmount || 0)) +
-                        (grandTotal - paidAmount)
-                      : customerBalance + (grandTotal - paidAmount)
+                        (grandTotal - numericPaidAmount)
+                      : customerBalance + (grandTotal - numericPaidAmount)
                     ).toFixed(2)}
                   </p>
                 )}
@@ -2484,14 +2503,14 @@ const InvoiceForm = ({
                         totalAmount,
                         discountAmount: finalDiscount,
                         grandTotal,
-                        paidAmount,
+                        paidAmount: numericPaidAmount,
                         paymentType,
                         customerTotalBalance: editingInvoiceFromAPI
                           ? customerBalance -
                             ((editingInvoiceFromAPI.totalAmount || 0) -
                               (editingInvoiceFromAPI.paidAmount || 0)) +
-                            (grandTotal - paidAmount)
-                          : customerBalance + (grandTotal - paidAmount),
+                            (grandTotal - numericPaidAmount)
+                          : customerBalance + (grandTotal - numericPaidAmount),
                       };
 
                       const saved = await handleSubmit(e, 'print', true);

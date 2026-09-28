@@ -10,6 +10,7 @@ import Select from 'react-select';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import { sanitizeMoneyInput } from '../utils/money';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -289,7 +290,9 @@ const PayBillForm = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const nextValue = name === 'discountAmount' ? sanitizeMoneyInput(value) : value;
+    if (nextValue === null) return;
+    setFormData((prev) => ({ ...prev, [name]: nextValue }));
   };
 
   const handleSupplierChange = (selected) => {
@@ -915,7 +918,8 @@ const PayBillForm = () => {
                 className="col-span-3 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm text-right shadow-sm"
                 value={entry.amount}
                 onChange={(e) => {
-                  const value = e.target.value;
+                  const value = sanitizeMoneyInput(e.target.value);
+                  if (value === null) return;
 
                   const handCash = accounts.find(
                     (a) => a.category?.toLowerCase() === 'cash' || a.type?.toLowerCase() === 'cash'

@@ -40,6 +40,7 @@ const renderTravelVendorReturnHtml = (data, options = {}) => `
       h1 { color: #0f172a; font-size: 24px; letter-spacing: 0; }
       h2 { color: #0e7490; font-size: 18px; margin-top: 2px; }
       .company { font-size: 20px; font-weight: 800; }
+      ${travelDocumentHeaderStyles}
       .muted { color: #64748b; }
       .right { text-align: right; }
       .section { margin-top: 16px; }
@@ -93,16 +94,7 @@ const renderTravelVendorReturnHtml = (data, options = {}) => `
       <div class="topline"></div>
 
       <section class="header">
-        <div>
-          ${
-            data.header
-              ? `<p class="company">${escapeHtml(data.header.companyName)}</p>
-                 <p class="muted">${escapeHtml(data.header.address)}</p>
-                 <p class="muted">${escapeHtml(data.header.phone)}</p>
-                 <p class="muted">${escapeHtml(data.header.taxNumber)}</p>`
-              : ""
-          }
-        </div>
+        ${renderTravelCompanyHeader(data.header)}
         <div class="right">
           <h1>${escapeHtml(data.documentTitle)}</h1>
           <h2>${escapeHtml(data.documentInfo.number)}</h2>
@@ -155,3 +147,7 @@ const renderTravelVendorReturnHtml = (data, options = {}) => `
 module.exports = {
   renderTravelVendorReturnHtml,
 };
+const {
+  renderTravelCompanyHeader,
+  travelDocumentHeaderStyles,
+} = require("./travelDocumentHeader");

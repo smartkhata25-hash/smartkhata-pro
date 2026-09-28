@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
+import { buildTravelRouteState } from '../utils/travelContext';
+import { buildWeavingRouteState } from '../utils/weavingContext';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -17,6 +20,7 @@ const AccountTransactionTable = ({
   isWeavingScoped = false,
 }) => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -241,7 +245,19 @@ const AccountTransactionTable = ({
       .toLowerCase()
       .replace(/-/g, '_');
 
+  const getManualType = (txn) => ({
+    account_transfer: 'transfer', adjustment: 'adjustment', travel_adjustment: 'adjustment',
+    owner_money_in: 'owner', owner_money_out: 'owner',
+  })[txn.sourceType] || null;
+
   const getTransactionRoute = (txn) => {
+    const manualType = getManualType(txn);
+    if (manualType) {
+      if (!txn._id || !hasPermission('accounts.edit')) return null;
+      const scope = txn.moduleScope || (isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading');
+      const base = scope === 'weaving' ? '/weaving/accounts' : scope === 'travel' ? '/travel/accounts' : '/accounts';
+      return base + '?' + new URLSearchParams({ manualType, manualId: txn._id }).toString();
+    }
     const referenceId = getReferenceId(txn);
 
     if (!referenceId) {
@@ -334,7 +350,16 @@ const AccountTransactionTable = ({
     const route = getTransactionRoute(txn);
 
     if (route) {
-      navigate(route);
+      if (getManualType(txn)) {
+        const params = new URLSearchParams(location.search);
+        if (/^[a-f0-9]{24}$/i.test(selectedAccount?._id || '')) params.set('accountId', selectedAccount._id);
+        const returnTo = location.pathname + (params.size ? '?' + params.toString() : '');
+        const context = route.startsWith('/weaving/') ? buildWeavingRouteState(returnTo)
+          : route.startsWith('/travel/') ? buildTravelRouteState(returnTo) : {};
+        navigate(route, { state: { ...context, manualReturnTo: returnTo } });
+      } else {
+        navigate(route);
+      }
     }
   };
 

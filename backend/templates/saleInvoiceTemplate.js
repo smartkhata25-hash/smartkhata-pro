@@ -1,4 +1,6 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
+
 const generateSaleInvoiceHTML = (data) => {
   const lang = data?.lang || "ur";
   if (!data) {
@@ -369,8 +371,8 @@ ${
   ${columns?.showDescription ? `<td>${item.description || "-"}</td>` : ""}
   ${columns?.showUOM ? `<td>${item.uom || "-"}</td>` : ""}
   <td>${item.quantity || 0}</td>
-  <td>${item.price || 0}</td>
-  <td>${item.total || 0}</td>
+  <td>${formatMoney(item.price)}</td>
+  <td>${formatMoney(item.total)}</td>
 </tr>`,
         )
         .join("")
@@ -382,14 +384,14 @@ ${
 <div class="totals">
   <div class="totals-row">
     <span>${t("total", lang)}:</span>
-    <span>${total}</span>
+    <span>${formatMoney(total)}</span>
   </div>
 
   ${
     totals?.discountAmount
       ? `<div class="totals-row">
            <span>${t("discount", lang)}:</span>
-           <span>${totals.discountAmount}</span>
+           <span>${formatMoney(totals.discountAmount)}</span>
          </div>`
       : ""
   }
@@ -399,13 +401,13 @@ ${
       ? `
 <div class="totals-row">
   <span>${t("netTotal", lang)}:</span>
-  <span>${totals?.grandTotal || total}</span>
+  <span>${formatMoney(totals?.grandTotal ?? total)}</span>
 </div>
 `
       : ""
   }
 
-  ${totals?.paidAmount !== null && totals?.paidAmount !== undefined ? `<div class="totals-row"><span>${t("paid", lang)}:</span><span>${paid}</span></div>` : ""}
+  ${totals?.paidAmount !== null && totals?.paidAmount !== undefined ? `<div class="totals-row"><span>${t("paid", lang)}:</span><span>${formatMoney(paid)}</span></div>` : ""}
 
  ${
    columns?.showCustomerTotalBalance !== false &&
@@ -414,7 +416,7 @@ ${
      ? `
 <div class="totals-row">
   <span>${balanceLabel}:</span>
-  <span>${party.customerTotalBalance}</span>
+  <span>${formatMoney(party.customerTotalBalance)}</span>
 </div>
 `
      : ""

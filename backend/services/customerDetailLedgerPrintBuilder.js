@@ -61,6 +61,8 @@ const buildCustomerDetailLedgerPrint = ({
   endDate,
   openingBalance = 0,
   ledger = [],
+  header = null,
+  showDescription = false,
 }) => {
   const opening = safeNumber(openingBalance);
 
@@ -96,6 +98,8 @@ const buildCustomerDetailLedgerPrint = ({
 
         sourceLabel: entry.sourceLabel || resolveSourceLabel(entry.sourceType),
 
+        description: entry.description || "",
+
         items: normalizeItems(entry.items),
 
         debit: debit > 0 ? debit : null,
@@ -112,6 +116,8 @@ const buildCustomerDetailLedgerPrint = ({
 
   return {
     documentTitle: "Customer Detailed Ledger",
+    header,
+    showDescription,
 
     customer: {
       name: customerName || "-",

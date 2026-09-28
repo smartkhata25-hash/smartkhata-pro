@@ -177,5 +177,8 @@ assert.doesNotMatch(source, /JournalEntry\.(create|insertMany)|WeavingYarnMoveme
 assert.match(source, /bulkWrite/);
 assert.match(source, /runToken/);
 assert.match(source, /costingVersion/);
+assert.match(source, /ensureFreshRun\(userId, \{ rebuildMissing: true \}\)/, "Profit reads automatically reuse or rebuild missing costing through the shared freshness check");
+assert.match(source, /if \(run && !isCostingRunDirty\(run\)\) return run/, "Current costing is reused without an unnecessary rebuild");
+assert.match(source, /if \(!run && !rebuildMissing\) return null/, "Missing-run auto rebuild remains scoped to callers that request it");
 
 console.log("weaving costing service tests passed");

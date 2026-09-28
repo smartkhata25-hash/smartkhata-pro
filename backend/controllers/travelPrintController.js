@@ -2,12 +2,10 @@ const mongoose = require("mongoose");
 
 const JournalEntry = require("../models/JournalEntry");
 const PayBill = require("../models/PayBill");
-const PrintSetting = require("../models/PrintSetting");
 const ReceivePayment = require("../models/ReceivePayment");
 const TravelBooking = require("../models/TravelBooking");
 const TravelRefund = require("../models/TravelRefund");
 const TravelVendorReturn = require("../models/TravelVendorReturn");
-const { defaultSettings } = require("./printSettingController");
 const { generatePdfFromHtml } = require("../services/pdfService");
 const {
   buildTravelInvoicePrint,
@@ -26,6 +24,10 @@ const {
   sendError,
   serializeBooking,
 } = require("../services/travel/travelBookingService");
+const {
+  OUTPUT_TYPES,
+  resolveTravelBranding,
+} = require("../services/travel/travelBrandingService");
 const { renderTravelInvoiceHtml } = require("../templates/travelInvoiceTemplate");
 const {
   renderTravelPaymentReceiptHtml,
@@ -38,17 +40,6 @@ const {
 const safeFilename = (value = "travel-invoice") =>
   String(value || "travel-invoice").replace(/[^a-z0-9._-]+/gi, "-");
 
-const getTravelPrintSetting = async (userId) => {
-  const existing = await PrintSetting.findOne({ userId }).lean();
-  const defaults = await defaultSettings(userId);
-
-  return {
-    ...defaults,
-    ...(existing || {}),
-    travelInvoice: existing?.travelInvoice || defaults.travelInvoice,
-  };
-};
-
 const sendHtml = (res, html) => {
   res.set("Content-Type", "text/html; charset=utf-8");
 
@@ -56,7 +47,10 @@ const sendHtml = (res, html) => {
 };
 
 const sendPdf = async ({ res, html, filePrefix, documentNumber }) => {
-  const pdfBuffer = await generatePdfFromHtml(html);
+  const pdfBuffer = await generatePdfFromHtml(html, {
+    waitForImages: true,
+    requireImages: true,
+  });
 
   res.set({
     "Content-Type": "application/pdf",
@@ -74,10 +68,31 @@ const assertValidDocumentId = (id, label) => {
   }
 };
 
+exports.getTravelBranding = async (req, res) => {
+  try {
+    const outputType =
+      req.query.output === OUTPUT_TYPES.PDF
+        ? OUTPUT_TYPES.PDF
+        : OUTPUT_TYPES.PRINT;
+    const { branding } = await resolveTravelBranding({
+      userId: getUserId(req),
+      outputType,
+    });
+
+    return res.json(branding);
+  } catch (error) {
+    return sendError(res, error, "Travel branding load failed");
+  }
+};
+
 const getPaymentLine = (journal, lineType) =>
   (journal.lines || []).find((line) => line.type === lineType) || {};
 
-const getTravelBookingDocument = async ({ req, autoPrint = false }) => {
+const getTravelBookingDocument = async ({
+  req,
+  autoPrint = false,
+  outputType = OUTPUT_TYPES.PREVIEW,
+}) => {
   const userId = getUserId(req);
   const { id } = req.params;
 
@@ -99,8 +114,27 @@ const getTravelBookingDocument = async ({ req, autoPrint = false }) => {
     });
   }
 
-  const printSetting = await getTravelPrintSetting(userId);
-  const built = buildTravelInvoicePrint(serializeBooking(booking), printSetting);
+  const [invoiceJournal, { printSetting }] = await Promise.all([
+    JournalEntry.findOne({
+      createdBy: userId,
+      sourceType: "travel_booking",
+      originModule: TRAVEL_INVOICE_ORIGIN,
+      referenceId: booking._id,
+      isDeleted: false,
+      isReversed: { $ne: true },
+    })
+      .select("description")
+      .sort({ createdAt: -1, date: -1, time: -1, _id: -1 })
+      .lean(),
+    resolveTravelBranding({ userId, outputType }),
+  ]);
+  const built = buildTravelInvoicePrint(
+    {
+      ...serializeBooking(booking),
+      ledgerDescription: invoiceJournal?.description || "",
+    },
+    printSetting,
+  );
   const documentNumber =
     booking.invoiceNumber || booking.bookingNumber || `travel-${id}`;
 
@@ -110,7 +144,12 @@ const getTravelBookingDocument = async ({ req, autoPrint = false }) => {
   };
 };
 
-const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false }) => {
+const getPaymentReceiptDocument = async ({
+  req,
+  documentType,
+  autoPrint = false,
+  outputType = OUTPUT_TYPES.PREVIEW,
+}) => {
   const userId = getUserId(req);
   const { id } = req.params;
   const isVendor = documentType === "vendor";
@@ -219,7 +258,7 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
     invoice?.invoiceNumber ||
     invoice?.bookingNumber ||
     id;
-  const printSetting = await getTravelPrintSetting(userId);
+  const { printSetting } = await resolveTravelBranding({ userId, outputType });
   const built = buildTravelPaymentReceiptPrint(
     {
       documentType,
@@ -246,7 +285,11 @@ const getPaymentReceiptDocument = async ({ req, documentType, autoPrint = false 
   };
 };
 
-const getTravelRefundDocument = async ({ req, autoPrint = false }) => {
+const getTravelRefundDocument = async ({
+  req,
+  autoPrint = false,
+  outputType = OUTPUT_TYPES.PREVIEW,
+}) => {
   const userId = getUserId(req);
   const { id } = req.params;
 
@@ -275,7 +318,7 @@ const getTravelRefundDocument = async ({ req, autoPrint = false }) => {
     });
   }
 
-  const printSetting = await getTravelPrintSetting(userId);
+  const { printSetting } = await resolveTravelBranding({ userId, outputType });
   const built = buildTravelRefundPrint(refund, printSetting);
 
   return {
@@ -284,7 +327,11 @@ const getTravelRefundDocument = async ({ req, autoPrint = false }) => {
   };
 };
 
-const getTravelVendorReturnDocument = async ({ req, autoPrint = false }) => {
+const getTravelVendorReturnDocument = async ({
+  req,
+  autoPrint = false,
+  outputType = OUTPUT_TYPES.PREVIEW,
+}) => {
   const userId = getUserId(req);
   const { id } = req.params;
 
@@ -311,7 +358,7 @@ const getTravelVendorReturnDocument = async ({ req, autoPrint = false }) => {
     });
   }
 
-  const printSetting = await getTravelPrintSetting(userId);
+  const { printSetting } = await resolveTravelBranding({ userId, outputType });
   const built = buildTravelVendorReturnPrint(vendorReturn, printSetting);
 
   return {
@@ -332,7 +379,11 @@ exports.previewTravelBookingInvoice = async (req, res) => {
 
 exports.printTravelBookingInvoice = async (req, res) => {
   try {
-    const { html } = await getTravelBookingDocument({ req, autoPrint: true });
+    const { html } = await getTravelBookingDocument({
+      req,
+      autoPrint: true,
+      outputType: OUTPUT_TYPES.PRINT,
+    });
 
     return sendHtml(res, html);
   } catch (error) {
@@ -342,7 +393,10 @@ exports.printTravelBookingInvoice = async (req, res) => {
 
 exports.generateTravelBookingPdf = async (req, res) => {
   try {
-    const { html, documentNumber } = await getTravelBookingDocument({ req });
+    const { html, documentNumber } = await getTravelBookingDocument({
+      req,
+      outputType: OUTPUT_TYPES.PDF,
+    });
 
     return sendPdf({
       res,
@@ -374,6 +428,7 @@ exports.printTravelReceivePaymentReceipt = async (req, res) => {
       req,
       documentType: "customer",
       autoPrint: true,
+      outputType: OUTPUT_TYPES.PRINT,
     });
 
     return sendHtml(res, html);
@@ -387,6 +442,7 @@ exports.generateTravelReceivePaymentReceiptPdf = async (req, res) => {
     const { html, documentNumber } = await getPaymentReceiptDocument({
       req,
       documentType: "customer",
+      outputType: OUTPUT_TYPES.PDF,
     });
 
     return sendPdf({
@@ -419,6 +475,7 @@ exports.printTravelVendorPaymentReceipt = async (req, res) => {
       req,
       documentType: "vendor",
       autoPrint: true,
+      outputType: OUTPUT_TYPES.PRINT,
     });
 
     return sendHtml(res, html);
@@ -432,6 +489,7 @@ exports.generateTravelVendorPaymentReceiptPdf = async (req, res) => {
     const { html, documentNumber } = await getPaymentReceiptDocument({
       req,
       documentType: "vendor",
+      outputType: OUTPUT_TYPES.PDF,
     });
 
     return sendPdf({
@@ -457,7 +515,11 @@ exports.previewTravelRefund = async (req, res) => {
 
 exports.printTravelRefund = async (req, res) => {
   try {
-    const { html } = await getTravelRefundDocument({ req, autoPrint: true });
+    const { html } = await getTravelRefundDocument({
+      req,
+      autoPrint: true,
+      outputType: OUTPUT_TYPES.PRINT,
+    });
 
     return sendHtml(res, html);
   } catch (error) {
@@ -467,7 +529,10 @@ exports.printTravelRefund = async (req, res) => {
 
 exports.generateTravelRefundPdf = async (req, res) => {
   try {
-    const { html, documentNumber } = await getTravelRefundDocument({ req });
+    const { html, documentNumber } = await getTravelRefundDocument({
+      req,
+      outputType: OUTPUT_TYPES.PDF,
+    });
 
     return sendPdf({
       res,
@@ -495,6 +560,7 @@ exports.printTravelVendorReturn = async (req, res) => {
     const { html } = await getTravelVendorReturnDocument({
       req,
       autoPrint: true,
+      outputType: OUTPUT_TYPES.PRINT,
     });
 
     return sendHtml(res, html);
@@ -507,6 +573,7 @@ exports.generateTravelVendorReturnPdf = async (req, res) => {
   try {
     const { html, documentNumber } = await getTravelVendorReturnDocument({
       req,
+      outputType: OUTPUT_TYPES.PDF,
     });
 
     return sendPdf({

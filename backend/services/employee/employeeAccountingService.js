@@ -222,14 +222,13 @@ const syncEmployeeAccountName = async ({ employee, session }) => {
   );
 };
 
-const validateEmployee = async ({ userId, employeeId, moduleScope, session }) => {
+const validateEmployee = async ({ userId, employeeId, moduleScope, session, includeInactive = false }) => {
   const employee = await getSessionQuery(
     Employee.findOne({
       _id: toObjectId(employeeId, "employee"),
       userId,
       moduleScope,
-      isDeleted: false,
-      status: "active",
+      ...(includeInactive ? {} : { isDeleted: false, status: "active" }),
     }),
     session,
   );

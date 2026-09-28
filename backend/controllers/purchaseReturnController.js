@@ -1196,6 +1196,12 @@ exports.updatePurchaseReturn = async (req, res) => {
       });
     }
 
+    const historicalSupplier = pr.supplierId ? await Supplier.findOne({ _id: pr.supplierId, userId }) : null;
+    const historicalParty = pr.partyId ? await Party.findOne({ _id: pr.partyId, userId }) : null;
+    if (historicalSupplier?.isDeleted === true || historicalSupplier?.hiddenReason === "converted" || historicalParty?.isActive === false || historicalParty?.hiddenReason === "converted") {
+      return res.status(409).json({ code: "CONVERTED_HISTORICAL_RECORD", error: "This historical purchase return belongs to a converted entity and is read-only. It can still be viewed, printed, or exported." });
+    }
+
     oldPurchaseReturnSnapshot = pr.toObject({
       depopulate: true,
     });

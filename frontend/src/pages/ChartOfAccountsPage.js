@@ -10,6 +10,7 @@ import {
   FaTrash,
   FaUniversity,
   FaWallet,
+  FaUser,
 } from 'react-icons/fa';
 
 import {
@@ -19,8 +20,17 @@ import {
   deleteAccount,
   transferBetweenAccounts,
   adjustAccountBalance,
+  getAccountTransferById,
+  updateAccountTransfer,
+  getAccountAdjustmentById,
+  updateAccountAdjustment,
+  createOwnerTransaction,
+  getOwnerTransactionById,
+  updateOwnerTransaction,
 } from '../services/accountService';
 import { t } from '../i18n/i18n';
+import { hasPermission } from '../utils/permissionHelper';
+import { getBusinessDateInputValue } from '../utils/localDateTime';
 import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
 
@@ -156,6 +166,8 @@ const buildEmptyAdjustmentForm = () => ({
   note: '',
 });
 
+const buildEmptyOwnerForm = () => ({ transactionType: 'owner_money_in', accountId: '', amount: '', date: getTodayDateKey(), note: '' });
+
 const normalizeScope = (scope, fallback = MODULE_SCOPES.TRADING) =>
   Object.values(MODULE_SCOPES).includes(String(scope || '').toLowerCase())
     ? String(scope || '').toLowerCase()
@@ -198,6 +210,12 @@ const ChartOfAccountsPage = () => {
   const isTravelScoped = pageModuleScope === MODULE_SCOPES.TRAVEL;
   const isWeavingScoped = pageModuleScope === MODULE_SCOPES.WEAVING;
 
+  const canEditAccounts = hasPermission('accounts.edit');
+  const [ownerForm, setOwnerForm] = useState(buildEmptyOwnerForm);
+  const [showOwnerForm, setShowOwnerForm] = useState(false);
+  const [manualEdit, setManualEdit] = useState(null);
+  const [manualBusy, setManualBusy] = useState(false);
+
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState(buildEmptyForm(pageModuleScope));
   const [search, setSearch] = useState('');
@@ -234,8 +252,96 @@ const ChartOfAccountsPage = () => {
     setForm(buildEmptyForm(pageModuleScope));
     setEditId(null);
     setShowForm(false);
+    setShowTransferForm(false);
+    setShowAdjustmentForm(false);
+    setShowOwnerForm(false);
+    setManualEdit(null);
     fetchAccounts();
   }, [fetchAccounts, pageModuleScope]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams(location.search);
+    const type = params.get('manualType');
+    const id = params.get('manualId');
+    const getters = { transfer: getAccountTransferById, adjustment: getAccountAdjustmentById, owner: getOwnerTransactionById };
+    setManualEdit(null);
+    setManualBusy(false);
+    if (!id || !getters[type] || !canEditAccounts) return undefined;
+    setShowTransferForm(false);
+    setShowAdjustmentForm(false);
+    setShowOwnerForm(false);
+    setError('');
+    setManualBusy(true);
+    getters[type](id, { moduleScope: pageModuleScope }).then((row) => {
+      if (cancelled) return;
+      if (row.moduleScope && row.moduleScope !== pageModuleScope) throw new Error(t('accounts.manualScopeMismatch'));
+      const common = { amount: row.amount, date: getBusinessDateInputValue(row.date), note: row.note || '' };
+      if (type === 'transfer') setTransferForm({ ...common, fromAccountId: row.fromAccountId, toAccountId: row.toAccountId });
+      if (type === 'adjustment') setAdjustmentForm({ ...common, accountId: row.accountId, direction: row.direction });
+      if (type === 'owner') setOwnerForm({ ...common, accountId: row.accountId, transactionType: row.transactionType });
+      setManualEdit({ type, id });
+      setShowTransferForm(type === 'transfer');
+      setShowAdjustmentForm(type === 'adjustment');
+      setShowOwnerForm(type === 'owner');
+    }).catch((err) => {
+      if (!cancelled) setError(err.response?.data?.message || err.message || t('accounts.manualLoadFailed'));
+    }).finally(() => { if (!cancelled) setManualBusy(false); });
+    return () => { cancelled = true; };
+  }, [location.search, pageModuleScope, canEditAccounts]);
+
+  const clearManualEdit = () => {
+    setManualEdit(null);
+    const params = new URLSearchParams(location.search);
+    params.delete('manualType');
+    params.delete('manualId');
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true, state: { ...location.state, manualReturnTo: undefined } });
+  };
+
+  const cancelManual = () => {
+    setShowTransferForm(false);
+    setShowAdjustmentForm(false);
+    setShowOwnerForm(false);
+    setError('');
+    clearManualEdit();
+  };
+
+  const saveManualTransaction = async (type, values) => {
+    const payload = { ...values, amount: Number(values.amount || 0) };
+    const options = { moduleScope: pageModuleScope };
+    const isEditing = manualEdit?.type === type;
+    const create = { transfer: transferBetweenAccounts, adjustment: adjustAccountBalance, owner: createOwnerTransaction };
+    const update = { transfer: updateAccountTransfer, adjustment: updateAccountAdjustment, owner: updateOwnerTransaction };
+    if (isEditing) await update[type](manualEdit.id, payload, options);
+    else await create[type](payload, options);
+    await fetchAccounts();
+    setShowTransferForm(false);
+    setShowAdjustmentForm(false);
+    setShowOwnerForm(false);
+    setManualEdit(null);
+    const returnTo = location.state?.manualReturnTo;
+    const base = pageModuleScope === 'weaving' ? '/weaving/accounts' : pageModuleScope === 'travel' ? '/travel/accounts' : '/accounts';
+    if (isEditing && typeof returnTo === 'string' && returnTo.startsWith(base + '/')) {
+      // Returning remounts the existing account detail page, reloading balances and rows.
+      navigate(returnTo, { replace: true });
+    } else {
+      clearManualEdit();
+    }
+  };
+
+  const handleOwnerSubmit = async (event) => {
+    event.preventDefault();
+    if (manualBusy || !canEditAccounts) return;
+    setManualBusy(true);
+    setError('');
+    try {
+      await saveManualTransaction('owner', ownerForm);
+      setOwnerForm(buildEmptyOwnerForm());
+      alert(t('accounts.ownerSaved'));
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || t('accounts.ownerFailed'));
+    } finally { setManualBusy(false); }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -345,6 +451,7 @@ const ChartOfAccountsPage = () => {
 
   const handleTransferSubmit = async (e) => {
     e.preventDefault();
+    if (manualBusy) return;
     setError('');
 
     if (!transferForm.fromAccountId || !transferForm.toAccountId) {
@@ -357,28 +464,23 @@ const ChartOfAccountsPage = () => {
       return;
     }
 
+    setManualBusy(true);
     try {
-      await transferBetweenAccounts(
-        {
-          ...transferForm,
-          amount: Number(transferForm.amount || 0),
-        },
-        {
-          moduleScope: pageModuleScope,
-        }
-      );
+      await saveManualTransaction('transfer', transferForm);
 
       resetTransferForm();
       setShowTransferForm(false);
-      fetchAccounts();
       alert(t('accounts.transferSaved'));
     } catch (err) {
       setError(err.response?.data?.message || err.message || t('accounts.transferFailed'));
+    } finally {
+      setManualBusy(false);
     }
   };
 
   const handleAdjustmentSubmit = async (e) => {
     e.preventDefault();
+    if (manualBusy) return;
     setError('');
 
     if (!adjustmentForm.accountId) {
@@ -386,23 +488,17 @@ const ChartOfAccountsPage = () => {
       return;
     }
 
+    setManualBusy(true);
     try {
-      await adjustAccountBalance(
-        {
-          ...adjustmentForm,
-          amount: Number(adjustmentForm.amount || 0),
-        },
-        {
-          moduleScope: pageModuleScope,
-        }
-      );
+      await saveManualTransaction('adjustment', adjustmentForm);
 
       resetAdjustmentForm();
       setShowAdjustmentForm(false);
-      fetchAccounts();
       alert(t('accounts.adjustmentSaved'));
     } catch (err) {
       setError(err.response?.data?.message || err.message || t('accounts.adjustmentFailed'));
+    } finally {
+      setManualBusy(false);
     }
   };
 
@@ -585,9 +681,13 @@ const ChartOfAccountsPage = () => {
 
             <button
               type="button"
+              disabled={manualBusy}
               title={t('accounts.transferBetweenAccounts')}
               aria-label={t('accounts.transferBetweenAccounts')}
               onClick={() => {
+                clearManualEdit();
+                resetTransferForm();
+                setShowOwnerForm(false);
                 setShowTransferForm((previous) => !previous);
                 setShowAdjustmentForm(false);
               }}
@@ -598,9 +698,13 @@ const ChartOfAccountsPage = () => {
 
             <button
               type="button"
+              disabled={manualBusy}
               title={t('accounts.balanceAdjustment')}
               aria-label={t('accounts.balanceAdjustment')}
               onClick={() => {
+                clearManualEdit();
+                resetAdjustmentForm();
+                setShowOwnerForm(false);
                 setShowAdjustmentForm((previous) => !previous);
                 setShowTransferForm(false);
               }}
@@ -608,6 +712,13 @@ const ChartOfAccountsPage = () => {
             >
               <FaBalanceScale aria-hidden="true" />
             </button>
+
+            {canEditAccounts && <button type="button" disabled={manualBusy}
+              title={t('accounts.ownerTransaction')} aria-label={t('accounts.ownerTransaction')}
+              onClick={() => { clearManualEdit(); setOwnerForm(buildEmptyOwnerForm()); setShowOwnerForm((previous) => !previous); setShowTransferForm(false); setShowAdjustmentForm(false); }}
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-2 text-sm text-white transition hover:bg-white/20 sm:h-9">
+              <FaUser aria-hidden="true" /><span className="hidden lg:inline">{t('accounts.ownerTransaction')}</span>
+            </button>}
 
             <button
               type="button"
@@ -815,8 +926,9 @@ const ChartOfAccountsPage = () => {
         </section>
       )}
 
-      {(showTransferForm || showAdjustmentForm) && (
+      {(showTransferForm || showAdjustmentForm || showOwnerForm) && (
         <section className="mt-3 flex-shrink-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+          <fieldset disabled={manualBusy}>
           {showTransferForm && (
             <>
               <h2 className="text-base font-extrabold text-slate-900">
@@ -929,15 +1041,15 @@ const ChartOfAccountsPage = () => {
                     type="submit"
                     className={`inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold transition ${primaryButtonClass}`}
                   >
-                    {t('accounts.saveTransfer')}
+                    {t(manualEdit?.type === 'transfer' ? 'accounts.updateTransaction' : 'accounts.saveTransfer')}
                   </button>
 
                   <button
                     type="button"
-                    onClick={resetTransferForm}
+                    onClick={manualEdit?.type === 'transfer' ? cancelManual : resetTransferForm}
                     className="inline-flex min-h-10 items-center justify-center rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200"
                   >
-                    {t('clear')}
+                    {t(manualEdit?.type === 'transfer' ? 'cancel' : 'clear')}
                   </button>
                 </div>
               </form>
@@ -1052,20 +1164,65 @@ const ChartOfAccountsPage = () => {
                     type="submit"
                     className={`inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold transition ${primaryButtonClass}`}
                   >
-                    {t('accounts.saveAdjustment')}
+                    {t(manualEdit?.type === 'adjustment' ? 'accounts.updateTransaction' : 'accounts.saveAdjustment')}
                   </button>
 
                   <button
                     type="button"
-                    onClick={resetAdjustmentForm}
+                    onClick={manualEdit?.type === 'adjustment' ? cancelManual : resetAdjustmentForm}
                     className="inline-flex min-h-10 items-center justify-center rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200"
                   >
-                    {t('clear')}
+                    {t(manualEdit?.type === 'adjustment' ? 'cancel' : 'clear')}
                   </button>
                 </div>
               </form>
             </>
           )}
+          {showOwnerForm && (
+            <>
+              <h2 className="text-base font-extrabold text-slate-900">{t('accounts.ownerTransaction')}</h2>
+              <form onSubmit={handleOwnerSubmit} className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.transactionType')}</span>
+                  <select value={ownerForm.transactionType} onChange={(event) => setOwnerForm({ ...ownerForm, transactionType: event.target.value })}
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                    <option value="owner_money_in">{t('accounts.moneyIn')}</option>
+                    <option value="owner_money_out">{t('accounts.moneyOut')}</option>
+                  </select>
+                </label>
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('account')}</span>
+                  <select required value={ownerForm.accountId} onChange={(event) => setOwnerForm({ ...ownerForm, accountId: event.target.value })}
+                    className="min-h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                    <option value="">{t('accounts.selectAccount')}</option>
+                    {transferAccounts.map((account) => <option key={account._id} value={account._id}>{account.name} ({account.code})</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('amount')}</span>
+                  <input required type="number" min="0.01" step="0.01" value={ownerForm.amount} onChange={(event) => setOwnerForm({ ...ownerForm, amount: event.target.value })}
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                </label>
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('date')}</span>
+                  <input required type="date" value={ownerForm.date} onChange={(event) => setOwnerForm({ ...ownerForm, date: event.target.value })}
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                </label>
+                <label className="space-y-1.5 text-sm font-bold text-slate-700">
+                  <span>{t('accounts.ownerNote')}</span>
+                  <input value={ownerForm.note} onChange={(event) => setOwnerForm({ ...ownerForm, note: event.target.value })}
+                    className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                </label>
+                <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-5">
+                  <button type="submit" className={`inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold transition ${primaryButtonClass}`}>
+                    {t(manualEdit?.type === 'owner' ? 'accounts.updateTransaction' : 'accounts.saveTransaction')}
+                  </button>
+                  <button type="button" onClick={cancelManual} className="inline-flex min-h-10 items-center justify-center rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200">{t('cancel')}</button>
+                </div>
+              </form>
+            </>
+          )}
+          </fieldset>
         </section>
       )}
 

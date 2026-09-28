@@ -1,3 +1,4 @@
+import WeavingProductionContext, { contextForRun } from '../../components/weaving/WeavingProductionContext';
 import React, { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -368,6 +369,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
   const [formOpen, setFormOpen] = useState(true);
 
   const [search, setSearch] = useState('');
+  const [showMachineDetails, setShowMachineDetails] = useState(false);
 
   const [loading, setLoading] = useState(true);
 
@@ -403,7 +405,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
 
       const term = search.trim().toLocaleLowerCase('en');
       setRows(tab === 'loom' && term
-        ? data.filter((row) => [row.loomNumber, row.name, row.brand, row.model, row.loomType]
+        ? data.filter((row) => [row.loomNumber, row.name, row.brand, row.model, row.loomType, row.currentRun?.contract?.contractNo, row.currentRun?.contract?.partyName, row.currentRun?.ownerParty?.name, row.currentRun?.quality?.name, row.currentRun?.beam?.beamNo]
           .some((value) => String(value || '').toLocaleLowerCase('en').includes(term)))
         : data);
     } catch (error) {
@@ -1066,6 +1068,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
               )}
 
               {/* LOOM */}
+              {tab === 'loom' && editingId && <WeavingProductionContext context={contextForRun(form.currentRun)}><span>{t('weaving.production.beam')}: <strong>{form.currentRun?.beam?.beamNo || '-'}</strong></span><span>{t(form.currentRun ? 'weaving.beams.status.loaded' : 'weaving.production.free')}</span></WeavingProductionContext>}
               {tab === 'loom' && (
                 <>
                   {bulk ? (
@@ -1229,6 +1232,10 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
           </section>
         )}
 
+        {tab === 'loom' && <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+          <input type="checkbox" checked={showMachineDetails} onChange={(event) => setShowMachineDetails(event.target.checked)} />
+          {t('weaving.production.showMachineDetails')}
+        </label>}
         {/* LIST / TABLE */}
         <section className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
@@ -1257,15 +1264,21 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
             <table className="min-w-full text-sm">
               <thead className="bg-gradient-to-r from-slate-100 to-teal-50 text-left text-xs uppercase text-slate-600">
                 <tr>
-                  <th className="px-4 py-2.5">{t('weaving.operations.name')}</th>
+                  <th className="px-4 py-2.5">{t(tab === 'loom' ? 'weaving.folding.loom' : 'weaving.operations.name')}</th>
+                  {tab === 'loom' && <>
+                    <th className="px-4 py-2.5">{t('weaving.production.contract')}</th>
+                    <th className="px-4 py-2.5">{t('weaving.production.customer')}</th>
+                    <th className="px-4 py-2.5">{t('weaving.folding.quality')}</th>
+                    <th className="px-4 py-2.5">{t('weaving.production.beam')}</th>
+                  </>}
 
-                  <th className="px-4 py-2.5">
+                  {(tab !== 'loom' || showMachineDetails) && <th className="px-4 py-2.5">
                     {tab === 'yarn'
                       ? t('weaving.operations.typeBrand')
                       : tab === 'fabric'
                         ? t('weaving.operations.unitConstruction')
-                        : t('weaving.operations.brandType')}
-                  </th>
+                        : t('weaving.production.machineDetails')}
+                  </th>}
 
                   <th className="px-4 py-2.5">{t('weaving.operations.status')}</th>
 
@@ -1276,7 +1289,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan="4" className="p-10 text-center">
+                    <td colSpan={tab === 'loom' ? (showMachineDetails ? 8 : 7) : 4} className="p-10 text-center">
                       <FaSpinner className="mx-auto animate-spin text-xl text-teal-600" />
                     </td>
                   </tr>
@@ -1303,15 +1316,25 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
                       }}
                       className="cursor-pointer transition hover:bg-teal-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-teal-500"
                     >
-                      <td className="px-4 py-2.5 font-semibold text-slate-900">{row.name}</td>
+                      <td className="px-4 py-2.5 font-semibold text-slate-900">{tab === 'loom' ? row.loomNumber || row.name : row.name}</td>
+                      {tab === 'loom' && <>
+                        <td className="px-4 py-2.5">{row.currentRun?.contract?.contractNo || '-'}
+                          {row.currentRun?.contract && <div className="text-xs text-slate-500">{t(row.currentRun.contract.contractType === 'conversion' ? 'weaving.sales.conversion' : 'weaving.sales.fabricSale')}</div>}
+                        </td>
+                        <td className="px-4 py-2.5">{row.currentRun?.contract?.partyName || row.currentRun?.ownerParty?.name || '-'}
+                          {row.currentRun?.ownershipType && <div className="text-xs text-slate-500">{t('weaving.production.ownership')}: {t(row.currentRun.ownershipType === 'own' ? 'weaving.production.own' : 'weaving.production.partyOwned')}</div>}
+                        </td>
+                        <td className="px-4 py-2.5">{row.currentRun?.quality?.name || '-'}</td>
+                        <td className="px-4 py-2.5">{row.currentRun?.beam?.beamNo || '-'}</td>
+                      </>}
 
-                      <td className="px-4 py-2.5 text-slate-600">
+                      {(tab !== 'loom' || showMachineDetails) && <td className="px-4 py-2.5 text-slate-600">
                         {tab === 'yarn'
                           ? [row.yarnType, row.millBrand].filter(Boolean).join(' / ') || '-'
                           : tab === 'fabric'
                             ? [row.primaryUnit, row.construction].filter(Boolean).join(' / ') || '-'
-                            : [row.brand, row.loomType].filter(Boolean).join(' / ') || '-'}
-                      </td>
+                            : [row.brand, row.model, row.loomType, row.reedSpace].filter(Boolean).join(' / ') || '-'}
+                      </td>}
 
                       <td className="px-4 py-2.5">
                         <span
@@ -1321,9 +1344,8 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
                               : 'bg-slate-100 text-slate-500'
                           }`}
                         >
-                          {row.isActive
-                            ? t('weaving.operations.active')
-                            : t('weaving.operations.inactive')}
+                          {tab === 'loom' && row.currentRun ? t('weaving.beams.status.loaded') : !row.isActive ? t('weaving.operations.inactive')
+                            : tab === 'loom' ? t('weaving.production.free') : t('weaving.operations.active')}
                         </span>
                       </td>
 
@@ -1345,7 +1367,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4" className="p-10 text-center text-slate-500">
+                    <td colSpan={tab === 'loom' ? (showMachineDetails ? 8 : 7) : 4} className="p-10 text-center text-slate-500">
                       <FaIndustry className="mx-auto mb-2 text-2xl text-slate-300" />
 
                       {t('weaving.operations.noRecords')}

@@ -1,3 +1,5 @@
+const { attachProductionContexts } = require("../services/weaving/weavingProductionContextService");
+const WeavingFabricQuality = require("../models/WeavingFabricQuality");
 const WeavingContract = require("../models/WeavingContract");
 const WeavingGodown = require("../models/WeavingGodown");
 const WeavingParty = require("../models/WeavingParty");
@@ -30,7 +32,7 @@ const respond = (res, promise, message) =>
 exports.meta = async (req, res) => {
   try {
     const userId = uid(req);
-    const [parties, yarns, godowns, contracts, issues, receipts] =
+    const [parties, yarns, godowns, contracts, issues, receipts, fabrics, productionParties] =
       await Promise.all([
         WeavingParty.find({
           userId,
@@ -40,21 +42,24 @@ exports.meta = async (req, res) => {
         }).sort({ name: 1 }),
         WeavingYarn.find({ userId, isActive: true }).sort({ name: 1 }),
         WeavingGodown.find({ userId, isActive: true }).sort({ name: 1 }),
-        WeavingContract.find({ userId }).sort({ contractDate: -1 }),
+        WeavingContract.find({ userId }).sort({ contractDate: -1 }).lean(),
         WeavingSizingIssue.find({ userId, status: "posted" })
           .populate("sizingPartyId", "name")
-          .sort({ date: -1 }),
+          .sort({ date: -1 }).lean(),
         WeavingSizingReceipt.find({ userId, status: "posted" })
           .populate("sizingPartyId", "name")
           .sort({ date: -1 }),
+        WeavingFabricQuality.find({ userId, isActive: true }).sort({ name: 1 }),
+        WeavingParty.find({ userId, isActive: true, isHidden: { $ne: true } }).select("name").sort({ name: 1 }),
       ]);
     return res.json({
       data: {
         parties,
+        fabrics,
+        productionParties,
         yarns,
         godowns,
-        contracts,
-        issues,
+        ...attachProductionContexts(contracts, issues),
         receipts,
         nextIssueNo: await commercial.nextNo(
           WeavingSizingIssue,

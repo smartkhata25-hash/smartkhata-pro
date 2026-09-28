@@ -15,6 +15,7 @@ const {
 const buildSupplierLedgerPrint = require("../services/supplierLedgerPrintBuilder");
 const generateSupplierLedgerHTML = require("../templates/supplierLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 
 const resolveSupplierSourceLabel = (entry) => {
   if (
@@ -160,6 +161,8 @@ const fetchSupplierLedgerData = async ({
 
           sourceLabel: resolveSupplierSourceLabel(entry),
 
+          description: entry.description || "",
+
           debit: line.type === "debit" ? Number(line.amount || 0) : 0,
           credit: line.type === "credit" ? Number(line.amount || 0) : 0,
         });
@@ -192,6 +195,10 @@ const getSupplierLedgerHtml = async (req, res) => {
       endDate,
       moduleScope,
     });
+    const header =
+      moduleScope === "travel"
+        ? await getLedgerPrintHeader(userId, moduleScope, "print")
+        : null;
 
     const built = buildSupplierLedgerPrint({
       supplierName: rawData.supplierName,
@@ -199,6 +206,8 @@ const getSupplierLedgerHtml = async (req, res) => {
       endDate,
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
+      header,
+      showDescription: moduleScope === "travel",
     });
 
     built.lang = req.query.lang || "ur";
@@ -235,6 +244,10 @@ const generateSupplierLedgerPdf = async (req, res) => {
       endDate,
       moduleScope,
     });
+    const header =
+      moduleScope === "travel"
+        ? await getLedgerPrintHeader(userId, moduleScope, "pdf")
+        : null;
 
     const built = buildSupplierLedgerPrint({
       supplierName: rawData.supplierName,
@@ -242,13 +255,18 @@ const generateSupplierLedgerPdf = async (req, res) => {
       endDate,
       openingBalance: rawData.openingBalance,
       ledger: rawData.ledger,
+      header,
+      showDescription: moduleScope === "travel",
     });
 
     built.lang = req.query.lang || "ur";
 
     const html = generateSupplierLedgerHTML(built, size || "A5");
 
-    const pdfBuffer = await generatePdfFromHtml(html);
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      waitForImages: moduleScope === "travel",
+      requireImages: moduleScope === "travel",
+    });
 
     res.set({
       "Content-Type": "application/pdf",

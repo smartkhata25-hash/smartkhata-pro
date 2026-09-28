@@ -1,3 +1,5 @@
+import WeavingProductionContext, { contractIsOpen } from '../../components/weaving/WeavingProductionContext';
+import { t } from '../../i18n/i18n';
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -83,6 +85,8 @@ const WeavingSizingPage = () => {
     contracts: [],
     issues: [],
     receipts: [],
+    fabrics: [],
+    productionParties: [],
   });
 
   const [commercial, setCommercial] = useState({
@@ -115,7 +119,7 @@ const WeavingSizingPage = () => {
     date: today(),
 
     sizingPartyId: '',
-    contractId: '',
+    contractId: '', fabricQualityId: '', ownershipType: 'own', ownerPartyId: '', productionMode: 'own',
 
     sourceGodownId: '',
     yarnId: '',
@@ -137,6 +141,7 @@ const WeavingSizingPage = () => {
   const [receipt, setReceipt] = useState({
     receiptNo: '',
     partyReceiptNo: '',
+    contractId: '', fabricQualityId: '', ownershipType: '', ownerPartyId: '',
     date: today(),
 
     sizingPartyId: '',
@@ -361,8 +366,9 @@ const WeavingSizingPage = () => {
           conesPerPackage: line.conesPerPackage || '',
           extraCones: line.extraCones || '',
           lotReference: line.lotReference || '',
-          ownershipType: line.ownershipType || 'own',
-          ownerPartyId: line.ownerPartyId || '',
+          ownershipType: row.ownershipType || line.ownershipType || '',
+          ownerPartyId: row.ownerPartyId || line.ownerPartyId || '',
+          productionMode: row.contractId ? 'contract' : row.ownershipType === 'own' ? 'own' : 'manual',
         });
         setEditing({ type: 'issue', id: editId });
         setTab('issue');
@@ -525,6 +531,25 @@ const WeavingSizingPage = () => {
     }));
   };
 
+  const productionDefaults = (contractId, selectedIssue) => {
+    const context = selectedIssue?.productionContext || meta.contracts.find((row) => String(row._id) === String(contractId))?.productionContext;
+    return { contractId: context?.contractId || '', fabricQualityId: context?.fabricQualityId || '',
+      ownershipType: context?.ownershipType || '', ownerPartyId: context?.ownerPartyId || '' };
+  };
+  const chooseProduction = (value) => {
+    if (value === 'own' || value === 'manual') {
+      setIssue((current) => ({ ...current, contractId: '', productionMode: value, ownershipType: value === 'own' ? 'own' : '', ownerPartyId: '' }));
+    } else {
+      setIssue((current) => ({ ...current, ...productionDefaults(value), productionMode: 'contract' }));
+    }
+  };
+  const issueContext = { ...meta.contracts.find((row) => String(row._id) === String(issue.contractId))?.productionContext,
+    fabricQualityId: issue.fabricQualityId, ownershipType: issue.ownershipType, ownerPartyId: issue.ownerPartyId };
+  const receiptSource = meta.issues.find((row) => String(row._id) === String(receipt.issueId))?.productionContext;
+  const receiptLocked = Boolean(receiptSource?.fabricQualityId && receiptSource?.ownershipType);
+  const receiptContext = { ...meta.contracts.find((row) => String(row._id) === String(receipt.contractId))?.productionContext,
+    fabricQualityId: receipt.fabricQualityId, ownershipType: receipt.ownershipType, ownerPartyId: receipt.ownerPartyId };
+
   const chooseReceiptIssue = (issueId) => {
     const selectedIssue = meta.issues.find((row) => String(row._id) === String(issueId));
 
@@ -540,6 +565,7 @@ const WeavingSizingPage = () => {
     setReceipt((current) => ({
       ...current,
       issueId,
+      ...productionDefaults(selectedIssue?.contractId, selectedIssue),
       sizingPartyId: current.sizingPartyId || issuePartyId,
     }));
 
@@ -562,6 +588,7 @@ const WeavingSizingPage = () => {
       sizingPartyId: '',
       issueId: '',
       partyReceiptNo: '',
+      contractId: '', fabricQualityId: '', ownershipType: '', ownerPartyId: '',
 
       beamCount: '',
       length: '',
@@ -630,7 +657,7 @@ const WeavingSizingPage = () => {
       issueNo: numbers.nextIssueNo || '',
       date: today(),
       sizingPartyId: '',
-      contractId: '',
+      contractId: '', fabricQualityId: '', ownershipType: 'own', ownerPartyId: '', productionMode: 'own',
       sourceGodownId: '',
       yarnId: '',
       quantityKg: '',
@@ -653,6 +680,9 @@ const WeavingSizingPage = () => {
   };
 
   const saveIssue = async () => {
+    if (!editing && (!issue.fabricQualityId || !issue.ownershipType || (issue.ownershipType === 'party' && !issue.ownerPartyId))) {
+      setNotice({ error: true, text: t('weaving.production.requiredIdentity') }); return;
+    }
     setSaving(true);
     setNotice(null);
 
@@ -696,10 +726,27 @@ const WeavingSizingPage = () => {
             : 'Yarn Issue saved successfully',
       });
 
-      const freshMeta = await loadMeta();
       setEditing(null);
       setParams({ tab: 'issue' }, { replace: true });
-      clearIssue(freshMeta);
+
+      // The create/update response confirms the Issue. Do not make the form wait on
+      // optional metadata that also fetches unrelated commercial data.
+      clearIssue({});
+      getSizingMeta()
+        .then((freshMeta) => {
+          setMeta(freshMeta);
+          setIssue((value) => ({
+            ...value,
+            issueNo: value.issueNo || freshMeta?.nextIssueNo || '',
+          }));
+        })
+        .catch((refreshError) => {
+          console.error('Sizing Issue metadata refresh failed:', refreshError);
+          setNotice({
+            error: true,
+            text: 'Yarn Issue was saved, but the next issue number could not refresh. Reload before adding another Issue.',
+          });
+        });
     } catch (error) {
       setNotice({
         error: true,
@@ -710,7 +757,19 @@ const WeavingSizingPage = () => {
     }
   };
 
+  const totalDeductions = Number(receipt.gullaWeightKg || 0) + Number(receipt.packingWeightKg || 0) + Number(receipt.bardanaWeightKg || 0);
+  const calculatedNetKg = receipt.yarnGrossWeightKg === '' ? '' : Math.round((Number(receipt.yarnGrossWeightKg || 0) - totalDeductions) * 1000000) / 1000000;
+  const invalidReceivingWeight = totalDeductions > Number(receipt.yarnGrossWeightKg || 0);
+
   const saveReceivingAll = async () => {
+    if ((!editing || editing.type === 'receipt') && invalidReceivingWeight) {
+      setNotice({ error: true, text: t('weaving.sizingUx.invalidDeductions') }); return;
+    }
+    if (!editing && (!receipt.fabricQualityId || !receipt.ownershipType ||
+      (receipt.ownershipType === 'party' && !receipt.ownerPartyId))) {
+      setNotice({ error: true, text: t('weaving.production.requiredIdentity') });
+      return;
+    }
     setSaving(true);
     setNotice(null);
 
@@ -724,7 +783,7 @@ const WeavingSizingPage = () => {
         await updateSizingBill(editing.id, bill);
       } else if (editing?.type === 'receipt') {
         await updateSizingReceipt(editing.id, {
-          receipt,
+          receipt: { ...receipt, netWeightKg: calculatedNetKg },
           return: returnOpen
             ? {
                 ...yarnReturn,
@@ -739,13 +798,13 @@ const WeavingSizingPage = () => {
                 billDate: bill.billDate || receipt.date,
                 sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
                 billableWeightKg:
-                  bill.billableWeightKg || receipt.netWeightKg || receipt.yarnGrossWeightKg,
+                  bill.billableWeightKg || calculatedNetKg,
               }
             : null,
         });
       } else {
         await createSizingReceipt({
-          receipt,
+          receipt: { ...receipt, netWeightKg: calculatedNetKg },
           return: returnOpen
             ? {
                 ...yarnReturn,
@@ -760,7 +819,7 @@ const WeavingSizingPage = () => {
                 billDate: bill.billDate || receipt.date,
                 sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
                 billableWeightKg:
-                  bill.billableWeightKg || receipt.netWeightKg || receipt.yarnGrossWeightKg,
+                  bill.billableWeightKg || calculatedNetKg,
               }
             : null,
         });
@@ -778,10 +837,35 @@ const WeavingSizingPage = () => {
                 : 'Receiving saved successfully',
       });
 
-      const freshMeta = await loadMeta();
       setEditing(null);
       setParams({ tab: 'receiving' }, { replace: true });
-      clearReceiving(freshMeta);
+
+      // The receipt and its beams are already atomically committed. Reset without
+      // waiting for optional commercial metadata so the form cannot remain stuck.
+      clearReceiving({});
+      getSizingMeta()
+        .then((freshMeta) => {
+          setMeta(freshMeta);
+          setReceipt((value) => ({
+            ...value,
+            receiptNo: value.receiptNo || freshMeta?.nextReceiptNo || '',
+          }));
+          setYarnReturn((value) => ({
+            ...value,
+            returnNo: value.returnNo || freshMeta?.nextReturnNo || '',
+          }));
+          setBill((value) => ({
+            ...value,
+            billNo: value.billNo || freshMeta?.nextBillNo || '',
+          }));
+        })
+        .catch((refreshError) => {
+          console.error('Sizing Receipt metadata refresh failed:', refreshError);
+          setNotice({
+            error: true,
+            text: 'Sizing Receiving was saved, but the next receipt number could not refresh. Reload before adding another Receiving.',
+          });
+        });
     } catch (error) {
       setNotice({
         error: true,
@@ -881,23 +965,30 @@ const WeavingSizingPage = () => {
                 }
               />
 
-              <Field label="Contract">
+              <Field label={t('weaving.production.contract')}>
                 <select
                   className={control}
-                  value={issue.contractId}
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      contractId: e.target.value,
-                    })
-                  }
+                  value={issue.contractId || issue.productionMode || 'manual'}
+                  onChange={(e) => chooseProduction(e.target.value)}
                 >
-                  <option value="">No Contract</option>
-
-                  {options(meta.contracts, 'contractNo')}
+                  <option value="own">{t('weaving.production.ownStock')}</option>
+                  <option value="manual">{t('weaving.production.manual')}</option>
+                  {options(meta.contracts.filter((row) => (row.type === 'sales' && contractIsOpen(row)) || String(row._id) === String(issue.contractId)), 'contractNo')}
                 </select>
               </Field>
 
+              <WeavingProductionContext context={issueContext} fabrics={meta.fabrics} parties={meta.productionParties} />
+              {!issue.contractId && <>
+                {issue.productionMode === 'manual' && <Field label={t('weaving.production.owner')}>
+                  <select className={control} value={issue.ownershipType === 'own' ? 'own' : issue.ownerPartyId || ''}
+                    onChange={(event) => setIssue({ ...issue, ownershipType: event.target.value === 'own' ? 'own' : event.target.value ? 'party' : '', ownerPartyId: event.target.value === 'own' ? '' : event.target.value })}>
+                    <option value="">{t('weaving.production.selectOwner')}</option><option value="own">{t('weaving.production.own')}</option>
+                    {(meta.productionParties || []).map((party) => <option key={party._id} value={party._id}>{party.name}</option>)}
+                  </select>
+                </Field>}
+                <SearchableCreatableSelect label={t('weaving.folding.quality')} options={meta.fabrics || []} value={issue.fabricQualityId || ''}
+                  onChange={(fabricQualityId) => setIssue({ ...issue, fabricQualityId })} />
+              </>}
               <Field label="Source Godown *">
                 <select
                   className={control}
@@ -1130,6 +1221,7 @@ const WeavingSizingPage = () => {
                   Cancel Edit
                 </button>
               )}
+              {!editing && <button type="button" disabled={saving} onClick={() => clearIssue()} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">{t('weaving.sizingUx.clear')}</button>}
               <button
                 type="button"
                 disabled={saving}
@@ -1416,14 +1508,14 @@ const WeavingSizingPage = () => {
                             </td>
 
                             <td className="px-3 py-3 text-slate-600">
-                              {row.yarnId?.name ||
+                              {type === 'issue' ? ([...new Set((row.lines || []).map((line) => line.yarnId?.name).filter(Boolean))].join(', ') || '-') : row.yarnId?.name ||
                                 row.issueId?.issueNo ||
                                 row.receiptId?.receiptNo ||
                                 '-'}
                             </td>
 
                             <td className="whitespace-nowrap px-3 py-3 text-right font-bold text-slate-800">
-                              {row.billAmount
+                              {type === 'issue' ? `${money((row.lines || []).reduce((total, line) => total + Number(line.quantityKg || 0), 0))} KG` : row.billAmount
                                 ? money(row.billAmount)
                                 : `${row.quantityKg || row.netWeightKg || '-'} KG`}
                             </td>
@@ -1540,6 +1632,34 @@ const WeavingSizingPage = () => {
                       ))}
                   </select>
                 </Field>
+
+                <Field label={t('weaving.production.contract')}>
+                  <select disabled={receiptLocked} className={control} value={receipt.contractId || ''} onChange={(event) =>
+                    setReceipt((current) => ({ ...current, ...productionDefaults(event.target.value,
+                      null) }))}>
+                    <option value="">-</option>
+                    {meta.contracts.filter((row) => (row.type === 'sales' && contractIsOpen(row)) || String(row._id) === String(receipt.contractId)).map((row) => <option key={row._id} value={row._id}>{row.contractNo}</option>)}
+                  </select>
+                </Field>
+                <Field label={t('weaving.production.owner')}>
+                  <select disabled={receiptLocked || Boolean(receipt.contractId)} className={control} value={receipt.ownershipType === 'own' ? 'own' : receipt.ownerPartyId || ''}
+                    onChange={(event) => setReceipt({ ...receipt, ownershipType: event.target.value === 'own' ? 'own' : event.target.value ? 'party' : '', ownerPartyId: event.target.value === 'own' ? '' : event.target.value })}>
+                    <option value="">{t('weaving.production.selectOwner')}</option>
+                    <option value="own">{t('weaving.production.own')}</option>
+                    {(meta.productionParties || []).map((party) => <option key={party._id} value={party._id}>{party.name}</option>)}
+                  </select>
+                </Field>
+                <fieldset disabled={receiptLocked || Boolean(receipt.contractId)}>
+                <SearchableCreatableSelect
+                  label={t('weaving.folding.quality')}
+                  placeholder={t('weaving.folding.selectQuality')}
+                  options={meta.fabrics || []}
+                  value={receipt.fabricQualityId || ''}
+                  onChange={(fabricQualityId) => setReceipt({ ...receipt, fabricQualityId })}
+                  getLabel={(quality) => [quality.name, quality.code].filter(Boolean).join(' - ')}
+                />
+                </fieldset>
+                <WeavingProductionContext context={receiptContext} fabrics={meta.fabrics} parties={meta.productionParties} />
 
                 <Field label="Party Receiving / Challan No. *">
                   <input
@@ -1695,25 +1815,15 @@ const WeavingSizingPage = () => {
                     step="0.001"
                     className={control}
                     placeholder="e.g. 1576.160"
-                    value={receipt.netWeightKg}
-                    onChange={(e) => {
-                      const value = e.target.value;
-
-                      setReceipt({
-                        ...receipt,
-                        netWeightKg: value,
-                      });
-
-                      if (!bill.billableWeightKg) {
-                        setBill((current) => ({
-                          ...current,
-                          billableWeightKg: value,
-                        }));
-                      }
-                    }}
+                    value={calculatedNetKg}
+                    readOnly
+                    aria-invalid={invalidReceivingWeight}
                   />
                 </Field>
 
+                <div className="sm:col-span-2 xl:col-span-4 text-xs text-slate-600">{t('weaving.sizingUx.totalDeductions')}: {money(totalDeductions)} KG
+                  {invalidReceivingWeight && <p role="alert" className="mt-1 font-bold text-rose-700">{t('weaving.sizingUx.invalidDeductions')}</p>}
+                </div>
                 <Field label="Notes" className="sm:col-span-2 xl:col-span-4">
                   <textarea
                     className={textarea}
@@ -1745,12 +1855,13 @@ const WeavingSizingPage = () => {
               >
                 <span className="flex items-center gap-2 font-bold">
                   <FaRedoAlt />
-                  Yarn / Material Returned
+                  {t('weaving.sizingUx.returnTitle')}
                   <span className="text-xs font-normal opacity-70">Optional</span>
                 </span>
 
                 {returnOpen ? <FaChevronUp /> : <FaChevronDown />}
               </button>
+              <p className="mt-2 text-xs text-amber-800">{t('weaving.sizingUx.returnHelp')}</p>
 
               {returnOpen && (
                 <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/30 p-4">

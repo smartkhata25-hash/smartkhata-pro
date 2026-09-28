@@ -18,10 +18,12 @@ router.get("/invoices/:id", requirePermission("weaving.sales.view"), ctrl.getInv
 router.post("/kacchi", requirePermission("weaving.sales.create"), ctrl.createKacchi);
 router.put("/kacchi/:id", requirePermission("weaving.sales.edit"), ctrl.updateKacchi);
 router.post("/kacchi/:id/void", requirePermission("weaving.sales.void"), ctrl.voidKacchi);
+router.post("/pakki/confirm", requirePermission("weaving.sales.create"), requirePermission("weaving.sales.post"), ctrl.confirmPakkiInvoice);
 router.post("/pakki", requirePermission("weaving.sales.create"), ctrl.createPakki);
+router.put("/pakki/:id", requirePermission("weaving.sales.edit"), ctrl.updatePakki);
 router.post("/pakki/:id/void", requirePermission("weaving.sales.void"), ctrl.voidPakki);
 router.post("/pakki/:pakkiId/invoice", requirePermission("weaving.sales.create"), ctrl.draftFromPakki);
-router.post("/invoices/direct", requirePermission("weaving.sales.create"), ctrl.createDirect);
+router.post("/invoices/direct", requirePermission("weaving.sales.create"), requirePermission("weaving.sales.post"), ctrl.createDirect);
 router.put("/invoices/:id", requirePermission("weaving.sales.edit"), ctrl.updateDraft);
 router.post("/invoices/:id/post", requirePermission("weaving.sales.post"), ctrl.post);
 router.post("/invoices/:id/void", requirePermission("weaving.sales.void"), ctrl.void);

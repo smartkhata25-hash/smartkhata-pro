@@ -9,6 +9,8 @@ const schema = new mongoose.Schema(
     setNo: { type: String, trim: true, default: "" },
     sizingPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", default: null },
     contractId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingContract", default: null },
+    ownershipType: { type: String, enum: ["own", "party", null], default: null },
+    ownerPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", default: null },
     fabricQualityId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingFabricQuality", default: null },
     count: { type: String, trim: true, default: "" },
     loomSize: { type: String, trim: true, default: "" },

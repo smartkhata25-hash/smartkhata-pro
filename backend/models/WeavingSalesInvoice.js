@@ -2,6 +2,14 @@ const mongoose = require("mongoose");
 const schema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
   moduleScope: { type: String, enum: ["weaving"], default: "weaving", immutable: true },
+  lastEditRequestKey: { type: String, default: "" },
+  editHistory: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  stockRevision: { type: Number, default: 0 },
+  requestKey: { type: String, trim: true, default: null },
+  entryMode: { type: String, enum: ["than", "manual", "legacy"], default: "legacy" },
+  foldingEntryIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "WeavingFoldingEntry" }],
+  accountingOnly: { type: Boolean, default: false },
+  lines: [{ description: { type: String, trim: true }, uom: { type: String, enum: ["Meter", "KG", "Piece", "Nos", "Job", "Other"] }, quantity: { type: Number, min: 0 }, rate: { type: Number, min: 0 }, amount: { type: Number, min: 0 } }],
   invoiceNo: { type: String, required: true, trim: true }, invoiceDate: { type: String, required: true },
   partyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", required: true }, partyName: { type: String, required: true },
   saleSource: { type: String, enum: ["pakki", "direct"], required: true },
@@ -33,6 +41,7 @@ const schema = new mongoose.Schema({
   postedAt: { type: Date, default: null }, postedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   voidedAt: { type: Date, default: null }, voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }, voidReason: { type: String, default: "" }, reversalJournalId: { type: mongoose.Schema.Types.ObjectId, ref: "JournalEntry", default: null },
 }, { timestamps: true });
+schema.index({ userId: 1, requestKey: 1 }, { unique: true, partialFilterExpression: { requestKey: { $type: "string" } } });
 schema.index({ userId: 1, invoiceNo: 1 }, { unique: true });
 schema.index({ userId: 1, sourcePakkiId: 1, activeForPakki: 1 }, { unique: true, partialFilterExpression: { sourcePakkiId: { $type: "objectId" }, activeForPakki: true } });
 schema.index({ userId: 1, status: 1, invoiceDate: -1 });

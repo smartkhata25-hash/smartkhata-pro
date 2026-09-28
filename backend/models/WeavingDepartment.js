@@ -19,6 +19,7 @@ const weavingDepartmentSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    defaultKey: { type: String },
     normalizedName: {
       type: String,
       required: true,

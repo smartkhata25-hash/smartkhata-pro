@@ -67,14 +67,53 @@ const ProductDropdown = ({
 
   // 📐 Dropdown Positioning + Scroll Support
   useEffect(() => {
-    if (showList && inputRef.current) {
+    if (!showList || !inputRef.current) return undefined;
+
+    const updateDropdownPosition = () => {
       const rect = inputRef.current.getBoundingClientRect();
       const dropdownHeight = 300;
+
+      if (window.innerWidth < 768) {
+        const viewport = window.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportWidth = viewport?.width || window.innerWidth;
+        const viewportHeight = viewport?.height || window.innerHeight;
+        const edgeGap = 8;
+        const width = Math.max(0, viewportWidth - edgeGap * 2);
+        const left = Math.min(
+          Math.max(rect.left, viewportLeft + edgeGap),
+          viewportLeft + viewportWidth - width - edgeGap
+        );
+        const spaceBelow = viewportTop + viewportHeight - rect.bottom - edgeGap;
+        const spaceAbove = rect.top - viewportTop - edgeGap;
+        const shouldOpenUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+        const availableHeight = Math.max(0, shouldOpenUpward ? spaceAbove : spaceBelow);
+        const maxHeight = Math.min(dropdownHeight, availableHeight);
+        const top = shouldOpenUpward
+          ? Math.max(viewportTop + edgeGap, rect.top - maxHeight)
+          : rect.bottom;
+
+        setDropdownStyle({
+          position: 'fixed',
+          top: `${top}px`,
+          left: `${left}px`,
+          width: `${width}px`,
+          zIndex: 9999,
+          background: 'white',
+          border: '1px solid #ccc',
+          borderRadius: '4px',
+          maxHeight: `${maxHeight}px`,
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          boxShadow: '0px 4px 8px rgba(0,0,0,0.1)',
+        });
+        return;
+      }
+
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-
       const shouldOpenUpward = spaceBelow < dropdownHeight && spaceAbove > dropdownHeight;
-
       const top = shouldOpenUpward
         ? rect.top + window.scrollY - dropdownHeight
         : rect.bottom + window.scrollY;
@@ -83,10 +122,7 @@ const ProductDropdown = ({
         position: 'absolute',
         top: `${top}px`,
         left: `${rect.left + window.scrollX}px`,
-        width:
-          window.innerWidth < 768
-            ? `${window.innerWidth * 0.85}px`
-            : `${Math.max(rect.width + 80, 280)}px`,
+        width: `${Math.max(rect.width + 80, 280)}px`,
         zIndex: 9999,
         background: 'white',
         border: '1px solid #ccc',
@@ -95,7 +131,20 @@ const ProductDropdown = ({
         overflowY: 'auto',
         boxShadow: '0px 4px 8px rgba(0,0,0,0.1)',
       });
-    }
+    };
+
+    updateDropdownPosition();
+    window.addEventListener('resize', updateDropdownPosition);
+    window.addEventListener('scroll', updateDropdownPosition, true);
+    window.visualViewport?.addEventListener('resize', updateDropdownPosition);
+    window.visualViewport?.addEventListener('scroll', updateDropdownPosition);
+
+    return () => {
+      window.removeEventListener('resize', updateDropdownPosition);
+      window.removeEventListener('scroll', updateDropdownPosition, true);
+      window.visualViewport?.removeEventListener('resize', updateDropdownPosition);
+      window.visualViewport?.removeEventListener('scroll', updateDropdownPosition);
+    };
   }, [showList, query]);
 
   useEffect(() => {
@@ -213,13 +262,13 @@ const ProductDropdown = ({
                   e.stopPropagation();
                   selectProduct(p);
                 }}
-                className={`px-3 py-2 cursor-pointer whitespace-nowrap hover:bg-blue-100 ${
+                className={`px-3 py-2 cursor-pointer whitespace-normal md:whitespace-nowrap hover:bg-blue-100 ${
                   i === highlightIndex ? 'bg-blue-100 font-medium' : ''
                 }`}
               >
-                <div className="flex justify-between items-center gap-3">
-                  <div className="flex flex-col">
-                    <span className="font-medium">{p.name}</span>
+                <div className="flex min-w-0 justify-between items-center gap-3">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="font-medium break-words md:break-normal">{p.name}</span>
 
                     <span className="text-gray-500 text-xs">
                       {p.categoryId?.name || p.category || t('product.inventory')}
@@ -227,7 +276,7 @@ const ProductDropdown = ({
                   </div>
 
                   <div
-                    className={`text-xs px-2 py-1 rounded font-semibold ${
+                    className={`shrink-0 text-xs px-2 py-1 rounded font-semibold ${
                       Number(p.stock || 0) <= 0
                         ? 'bg-red-100 text-red-600'
                         : Number(p.stock || 0) <= Number(p.lowStockThreshold || 0)

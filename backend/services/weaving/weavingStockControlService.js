@@ -13,6 +13,7 @@ const WeavingYarnMovement = require("../../models/WeavingYarnMovement");
 const fabricStock = require("./weavingFoldingService");
 const yarnStock = require("./weavingYarnStockService");
 const costing = require("./weavingCostingService");
+const thanLocation = require("./weavingThanLocationService");
 
 const EPSILON = 0.000001;
 const round = (value) => Math.round((Number(value) || 0) * 1000000) / 1000000;
@@ -22,7 +23,7 @@ const fail = (message, statusCode = 400) => Object.assign(new Error(message), { 
 const sessionOptions = (session) => (session ? { session } : {});
 const setSession = (query, session) => (session ? query.session(session) : query);
 
-const runAtomic = async (work) => {
+const runAtomic = async (work, requireTransaction = false) => {
   const session = await mongoose.startSession();
   let result;
   try {
@@ -31,6 +32,7 @@ const runAtomic = async (work) => {
   } catch (error) {
     const unsupported = /Transaction numbers are only allowed|replica set member|does not support transactions/i.test(error.message || "");
     if (!unsupported) throw error;
+    if (requireTransaction) throw fail("Stock transfers require database transaction support. No transfer was saved.", 503);
     return work(null);
   } finally {
     await session.endSession();
@@ -85,6 +87,15 @@ const ownership = async (userId, payload, session) => {
   return { ownershipType, ownerPartyId: ownerPartyId || null };
 };
 
+const validateTransferOwner = (payload) => {
+  if (!["own", "party"].includes(payload.ownershipType)) throw fail("Select a valid stock ownership.");
+  if (payload.ownershipType === "party" && !mongoose.isValidObjectId(payload.ownerPartyId)) throw fail("Select the Owner Party for this stock.");
+  if (payload.ownershipType === "own" && payload.ownerPartyId) throw fail("Own stock cannot have an Owner Party.");
+};
+const validateIds = (values) => {
+  if (values.some((value) => !mongoose.isValidObjectId(value))) throw fail("Select valid source and destination Items / Locations.");
+};
+
 const fabricGrade = (category) => category === "normal" ? "a" : category;
 const fabricLockKey = (bucket) => ["fabric", bucket.fabricQualityId, bucket.godownId, bucket.category, bucket.ownershipType, bucket.ownerPartyId || "own"].map(id).join(":");
 const yarnLockKey = (bucket) => ["yarn", bucket.yarnId, bucket.godownId, bucket.ownershipType, bucket.ownerPartyId || "own"].map(id).join(":");
@@ -115,12 +126,21 @@ const createFabricTransfer = async (userId, payload, actorId) => {
   const existing = await existingByRequest(userId, requestKey);
   if (existing) return existing;
   const category = ["normal", "b", "rejected", "cut_piece", "waste", "other"].includes(payload.category) ? payload.category : "normal";
+  validateTransferOwner(payload);
   const owner = await ownership(userId, payload);
-  const source = { fabricQualityId: payload.sourceFabricQualityId, godownId: payload.sourceGodownId, category, ...owner };
-  const destination = { fabricQualityId: payload.targetFabricQualityId, godownId: payload.targetGodownId || payload.sourceGodownId, category, ...owner };
+  validateIds([payload.sourceFabricQualityId, payload.targetFabricQualityId, ...(payload.sourceGodownId ? [payload.sourceGodownId] : []), ...(payload.targetGodownId ? [payload.targetGodownId] : [])]);
+  const source = { fabricQualityId: payload.sourceFabricQualityId, godownId: payload.sourceGodownId || null, category, ...owner };
+  const destination = { fabricQualityId: payload.targetFabricQualityId, godownId: payload.targetGodownId === null ? null : payload.targetGodownId || payload.sourceGodownId || null, category, ...owner };
   if (sameBucket(source, destination, "fabricQualityId")) throw fail("Source and destination Fabric buckets must be different");
   const values = { meter: round(payload.meter), weightKg: round(payload.weightKg), thanCount: whole(payload.thanCount, "Than Count"), pieceCount: whole(payload.pieceCount, "Piece Count") };
   if (values.meter <= 0 || values.weightKg < 0) throw fail("Transfer Meter must be greater than zero and KG cannot be negative");
+
+  const suppliedIds = payload.foldingEntryIds || [];
+  if (!Array.isArray(suppliedIds)) throw fail("Select the exact whole Thans to transfer.");
+  validateIds(suppliedIds);
+  const thanIds = [...new Set(suppliedIds.map(id))];
+  if (thanIds.length !== suppliedIds.length || (values.thanCount > 0 && thanIds.length !== values.thanCount) || (!values.thanCount && thanIds.length)) throw fail("Select exactly the number of whole Thans being transferred.");
+  if (values.thanCount && values.pieceCount) throw fail("Transfer whole Thans separately from partial Meter / Pieces.");
 
   return withStockLock(userId, fabricLockKey(source), async () => {
     const retried = await existingByRequest(userId, requestKey); if (retried) return retried;
@@ -129,20 +149,43 @@ const createFabricTransfer = async (userId, payload, actorId) => {
         const [sourceQuality, targetQuality, sourceGodown, targetGodown] = await Promise.all([
           setSession(WeavingFabricQuality.findOne({ _id: source.fabricQualityId, userId, isActive: true }), session),
           setSession(WeavingFabricQuality.findOne({ _id: destination.fabricQualityId, userId, isActive: true }), session),
-          setSession(WeavingGodown.findOne({ _id: source.godownId, userId, isActive: true }), session),
-          setSession(WeavingGodown.findOne({ _id: destination.godownId, userId, isActive: true }), session),
+          source.godownId ? setSession(WeavingGodown.findOne({ _id: source.godownId, userId, isActive: true }), session) : null,
+          destination.godownId ? setSession(WeavingGodown.findOne({ _id: destination.godownId, userId, isActive: true }), session) : null,
         ]);
-        if (!sourceQuality || !targetQuality || !sourceGodown || !targetGodown) throw fail("Active source/target Quality and Godown are required");
+        // Null is the real Folding / Unassigned bucket, never a synthetic Godown.
+        if (!sourceQuality || !targetQuality || (source.godownId && !sourceGodown) || (destination.godownId && !targetGodown)) throw fail("Select active source/target Quality and valid Source/Destination Locations.");
+        source.itemName = sourceQuality.name; source.godownName = sourceGodown?.name || "Folding / Unassigned";
+        destination.itemName = targetQuality.name; destination.godownName = targetGodown?.name || "Folding / Unassigned";
+        const currentThans = await thanLocation.resolveCurrentThans(userId, { session });
+        const selectedThans = thanIds.map((thanId) => currentThans.find((row) => id(row) === thanId));
+        for (let index = 0; index < selectedThans.length; index += 1) {
+          const than = selectedThans[index];
+          if (!than) throw fail("A selected Than is no longer available. Refresh and select again.", 409);
+          if (than.locationState !== "known") throw fail(`Than ${than.thanNo}: ${than.locationReason}`, 409);
+          if (!thanLocation.matchesBucket(than, source)) throw fail(`Than ${than.thanNo} is no longer available in the selected source bucket. Current location: ${than.godownName}.`, 409);
+        }
+        if (values.thanCount && (Math.abs(values.meter - selectedThans.reduce((sum, row) => sum + Number(row.meter), 0)) > EPSILON ||
+          Math.abs(values.weightKg - selectedThans.reduce((sum, row) => sum + Number(row.weightKg), 0)) > EPSILON)) throw fail("Whole-Than Meter and KG must equal the selected complete Thans.");
+        const affectedThans = values.thanCount ? selectedThans : currentThans.filter((row) => thanLocation.matchesBucket(row, source));
         const available = await getFabricBucketBalance(userId, source);
         assertAvailable(available, values, [["meter", "meter", "Meter"], ["weightKg", "kg", "KG"], ["thanCount", "than", "Than Count"], ["pieceCount", "pieceCount", "Piece Count"]]);
-        const adjustment = await createOne(WeavingStockAdjustment, { userId, kind: "fabric_transfer", adjustmentNo: await allocateNo(userId, "weaving_fabric_transfer", "FT", session), requestKey, date: requireDate(payload.date), source, destination, ...values, reason: clean(payload.reason), createdBy: actorId || userId }, session);
+        const adjustment = await createOne(WeavingStockAdjustment, { userId, kind: "fabric_transfer", adjustmentNo: await allocateNo(userId, "weaving_fabric_transfer", "FT", session), requestKey, date: requireDate(payload.date), source, destination, ...values, thanDetails: selectedThans.map((row) => ({ foldingEntryId: row._id, thanNo: row.thanNo, contractId: row.contractId, meter: row.meter, weightKg: row.weightKg, weightLbs: row.weightLbs })), affectedThanIds: affectedThans.map((row) => row._id), reason: clean(payload.reason), createdBy: actorId || userId }, session);
         const movements = await WeavingFabricMovement.insertMany([
-          { userId, date: adjustment.date, movementType: "quality_transfer_out", category, direction: "out", fabricQualityId: source.fabricQualityId, godownId: source.godownId, ...owner, ...values, stockAdjustmentId: adjustment._id, stockAdjustmentNo: adjustment.adjustmentNo, notes: adjustment.reason },
-          { userId, date: adjustment.date, movementType: "quality_transfer_in", category, direction: "in", fabricQualityId: destination.fabricQualityId, godownId: destination.godownId, ...owner, ...values, stockAdjustmentId: adjustment._id, stockAdjustmentNo: adjustment.adjustmentNo, notes: adjustment.reason },
+          { userId, date: adjustment.date, movementType: "quality_transfer_out", category, direction: "out", fabricQualityId: source.fabricQualityId, godownId: source.godownId, ...owner, ...values, stockAdjustmentId: adjustment._id, stockAdjustmentNo: adjustment.adjustmentNo, foldingEntryIds: thanIds, notes: adjustment.reason },
+          { userId, date: adjustment.date, movementType: "quality_transfer_in", category, direction: "in", fabricQualityId: destination.fabricQualityId, godownId: destination.godownId, ...owner, ...values, stockAdjustmentId: adjustment._id, stockAdjustmentNo: adjustment.adjustmentNo, foldingEntryIds: thanIds, notes: adjustment.reason },
         ], sessionOptions(session));
+        for (const than of affectedThans) {
+          await thanLocation.writeCurrentState(userId, than, {
+            state: values.thanCount ? "known" : "unknown",
+            fabricQualityId: values.thanCount ? destination.fabricQualityId : than.fabricQualityId,
+            godownId: values.thanCount ? destination.godownId : than.godownId,
+            category, lastAdjustmentId: adjustment._id,
+            reason: values.thanCount ? "" : `Exact whole-Than identity requires reconciliation after partial transfer ${adjustment.adjustmentNo}.`,
+          }, session);
+        }
         adjustment.movementIds = movements.map((row) => row._id); await adjustment.save(sessionOptions(session));
         return adjustment;
-      });
+      }, true);
     } catch (error) {
       if (error?.code === 11000) { const duplicate = await existingByRequest(userId, requestKey); if (duplicate) return duplicate; }
       throw error;
@@ -153,7 +196,9 @@ const createFabricTransfer = async (userId, payload, actorId) => {
 const createYarnTransfer = async (userId, payload, actorId) => {
   const requestKey = clean(payload.requestKey); if (!requestKey) throw fail("Request key is required");
   const existing = await existingByRequest(userId, requestKey); if (existing) return existing;
+  validateTransferOwner(payload);
   const owner = await ownership(userId, payload);
+  validateIds([payload.sourceYarnId, payload.targetYarnId, payload.sourceGodownId, payload.targetGodownId || payload.sourceGodownId]);
   const source = { yarnId: payload.sourceYarnId, godownId: payload.sourceGodownId, category: "", ...owner };
   const destination = { yarnId: payload.targetYarnId, godownId: payload.targetGodownId || payload.sourceGodownId, category: "", ...owner };
   if (sameBucket(source, destination, "yarnId")) throw fail("Source and destination Yarn buckets must be different");
@@ -171,6 +216,8 @@ const createYarnTransfer = async (userId, payload, actorId) => {
           setSession(WeavingGodown.findOne({ _id: destination.godownId, userId, isActive: true }), session),
         ]);
         if (!sourceYarn || !targetYarn || !sourceGodown || !targetGodown) throw fail("Active source/target Yarn and Godown are required");
+        source.itemName = sourceYarn.name; source.godownName = sourceGodown.name;
+        destination.itemName = targetYarn.name; destination.godownName = targetGodown.name;
         const available = await yarnStock.getGodownBalance({ userId, yarnId: source.yarnId, godownId: source.godownId, ...owner });
         assertAvailable(available, values, [["quantityKg", "kg", "KG"], ["packageQty", "packages", "Packages"], ["smallCones", "smallCones", "Small Cones"], ["largeCones", "largeCones", "Large Cones"]]);
         const adjustment = await createOne(WeavingStockAdjustment, { userId, kind: "yarn_transfer", adjustmentNo: await allocateNo(userId, "weaving_yarn_transfer", "YT", session), requestKey, date: requireDate(payload.date), source, destination, ...values, reason: clean(payload.reason), createdBy: actorId || userId }, session);
@@ -181,7 +228,7 @@ const createYarnTransfer = async (userId, payload, actorId) => {
         ], sessionOptions(session));
         adjustment.movementIds = movements.map((row) => row._id); await adjustment.save(sessionOptions(session));
         return adjustment;
-      });
+      }, true);
     } catch (error) {
       if (error?.code === 11000) { const duplicate = await existingByRequest(userId, requestKey); if (duplicate) return duplicate; }
       throw error;
@@ -299,20 +346,28 @@ const reverseAdjustment = async (userId, adjustmentId, actorId, reason) => {
       if (!locked) throw fail("Stock adjustment was already reversed", 409);
       const Movement = locked.kind === "fabric_transfer" ? WeavingFabricMovement : WeavingYarnMovement;
       await Movement.updateMany({ userId, stockAdjustmentId: locked._id, isVoided: { $ne: true } }, { $set: { isVoided: true } }, sessionOptions(session));
+      if (locked.kind === "fabric_transfer") {
+        const restored = await thanLocation.resolveCurrentThans(userId, { session });
+        const affected = new Set([...(locked.affectedThanIds || []).map(id), ...(locked.thanDetails || []).map((line) => id(line.foldingEntryId))]);
+        for (const than of restored.filter((row) => affected.has(id(row)))) {
+          await thanLocation.writeCurrentState(userId, than, thanLocation.stateFor(than), session);
+        }
+      }
       locked.status = "reversed"; locked.reversedAt = new Date(); locked.reversedBy = actorId || userId; locked.reversalReason = reversalReason;
       return locked.save(sessionOptions(session));
-    });
+    }, current.kind !== "rewinder_recovery");
   });
 };
 
-const getMeta = async (userId) => {
+const getMeta = async (userId, options = {}) => {
   const [qualities, yarns, godowns, parties] = await Promise.all([
     WeavingFabricQuality.find({ userId, isActive: true }).select("name code warpCount weftCount width").sort({ name: 1 }).lean(),
     WeavingYarn.find({ userId, isActive: true }).select("name count quality millBrand").sort({ name: 1 }).lean(),
     WeavingGodown.find({ userId, isActive: true }).select("name").sort({ name: 1 }).lean(),
     WeavingParty.find({ userId, isActive: true, isHidden: false }).select("name role").sort({ name: 1 }).lean(),
   ]);
-  return { qualities, yarns, godowns, parties, suppliers: parties.filter((party) => ["supplier", "both"].includes(party.role)) };
+  const thans = options.kind === "fabric" ? await thanLocation.resolveCurrentThans(userId) : [];
+  return { qualities, yarns, godowns, parties, availableThans: thans.filter((row) => row.locationState === "known"), unknownThans: thans.filter((row) => row.locationState !== "known"), suppliers: parties.filter((party) => ["supplier", "both"].includes(party.role)) };
 };
 
 const getHistory = (userId, query = {}) => {

@@ -130,6 +130,15 @@ export const createEmployee = (data, options = {}) =>
 export const updateEmployee = (employeeId, data, options = {}) =>
   put(`/${employeeId}`, data, options);
 
+export const saveWeavingEmployeePhoto = async (employeeId, file) => {
+  const url = `${getApiUrl(EMPLOYEE_MODULE_SCOPES.WEAVING)}/${employeeId}/photo`;
+  const config = { headers: { Authorization: `Bearer ${getToken()}` } };
+  if (!file) return unwrap(await axios.delete(url, config));
+  const body = new FormData();
+  body.append('photo', file);
+  return unwrap(await axios.post(url, body, config));
+};
+
 export const deleteEmployee = (employeeId, options = {}) =>
   del(`/${employeeId}`, options);
 
@@ -242,15 +251,21 @@ export const voidPayroll = (payrollId, options = {}) =>
 export const restorePayroll = (payrollId, options = {}) =>
   post(`/payroll/${payrollId}/restore`, options.data || {}, options);
 
-export const getAdvanceLoans = (options = {}) =>
-  get('/advance-loans', {
-    moduleScope: options.moduleScope,
-    params: {
+export const getAdvanceLoans = async (options = {}) => {
+  const params = {
       employeeId: options.employeeId || '',
       kind: options.kind || '',
       status: options.status || '',
-    },
-  });
+      search: options.search || '',
+      fromDate: options.fromDate || '',
+      toDate: options.toDate || '',
+      page: options.page || '',
+      limit: options.limit || '',
+    };
+  if (!options.page) return get('/advance-loans', { moduleScope: options.moduleScope, params });
+  const response = await axios.get(`${getApiUrl(options.moduleScope)}/advance-loans`, getConfig(params));
+  return response.data;
+};
 
 export const createAdvanceLoan = (data, options = {}) =>
   post('/advance-loans', data, options);

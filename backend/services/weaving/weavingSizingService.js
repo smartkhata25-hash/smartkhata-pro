@@ -1,3 +1,4 @@
+const { receiptIdentity, productionIdentity } = require("./weavingProductionContextService");
 const mongoose = require("mongoose");
 const WeavingContract = require("../../models/WeavingContract");
 const WeavingGodown = require("../../models/WeavingGodown");
@@ -59,6 +60,7 @@ const createIssue = async (userId, payload) => {
   await requireSizingParty(userId, payload.sizingPartyId);
   if (!Array.isArray(payload.lines) || !payload.lines.length)
     throw fail("Add at least one yarn line");
+  const identity = await productionIdentity(userId, payload);
   const lines = [];
   const reservedByStockKey = new Map();
   for (const source of payload.lines) {
@@ -75,9 +77,10 @@ const createIssue = async (userId, payload) => {
     if (!yarn || !godown)
       throw fail("Valid Yarn and Source Godown are required");
     const packing = normalizePacking(source, yarn);
-    const ownershipType = source.ownershipType === "party" ? "party" : "own";
-    const ownerPartyId =
-      ownershipType === "party" ? source.ownerPartyId || null : null;
+    if (identity.ownershipType && ((source.ownershipType && source.ownershipType !== identity.ownershipType) ||
+      (source.ownerPartyId && String(source.ownerPartyId) !== String(identity.ownerPartyId || "")))) throw fail("Yarn stock ownership must match the production context");
+    const ownershipType = identity.ownershipType || source.ownershipType || "own";
+    const ownerPartyId = ownershipType === "party" ? identity.ownerPartyId || source.ownerPartyId || null : null;
     if (ownershipType === "party" && !ownerPartyId)
       throw fail("Owner Party is required for Party Yarn");
     const available = await getGodownBalance({
@@ -127,7 +130,7 @@ const createIssue = async (userId, payload) => {
     issueNo,
     date: payload.date,
     sizingPartyId: payload.sizingPartyId,
-    contractId: payload.contractId || null,
+    ...identity,
     gatePassNo: clean(payload.gatePassNo),
     notes: clean(payload.notes),
     lines,
@@ -200,7 +203,7 @@ const createReceipt = async (userId, payload, session = null) => {
     receiptNo,
     partyReceiptNo: clean(payload.partyReceiptNo),
     issueId: issue?._id || null,
-    contractId: payload.contractId || issue?.contractId || null,
+    ...await receiptIdentity(userId, payload, issue, session),
     beamCount,
     netWeightKg,
     notes: clean(payload.notes),
@@ -554,6 +557,7 @@ const updateIssue = async (userId, id, payload) => {
     status: "posted",
   });
   if (!issue) throw fail("Posted Sizing issue not found", 404);
+  const identity = await productionIdentity(userId, payload, { existing: issue });
   if (
     await WeavingSizingReceipt.exists({
       userId,
@@ -587,9 +591,10 @@ const updateIssue = async (userId, id, payload) => {
     ]);
     if (!yarn || !godown || quantityKg <= 0)
       throw fail("Valid Yarn, Source Godown and KG are required");
-    const ownershipType = source.ownershipType === "party" ? "party" : "own";
-    const ownerPartyId =
-      ownershipType === "party" ? source.ownerPartyId || null : null;
+    if (identity.ownershipType && ((source.ownershipType && source.ownershipType !== identity.ownershipType) ||
+      (source.ownerPartyId && String(source.ownerPartyId) !== String(identity.ownerPartyId || "")))) throw fail("Yarn stock ownership must match the production context");
+    const ownershipType = identity.ownershipType || source.ownershipType || "own";
+    const ownerPartyId = ownershipType === "party" ? identity.ownerPartyId || source.ownerPartyId || null : null;
     const oldAvailable = issue.lines
       .filter(
         (line) =>
@@ -632,7 +637,7 @@ const updateIssue = async (userId, id, payload) => {
   Object.assign(issue, {
     date: payload.date,
     sizingPartyId: payload.sizingPartyId,
-    contractId: payload.contractId || null,
+    ...identity,
     gatePassNo: clean(payload.gatePassNo),
     notes: clean(payload.notes),
     lines,
@@ -933,7 +938,7 @@ const updateReceiptBundle = async (userId, id, payload, session = null) => {
     ...payload.receipt,
     receiptNo: receipt.receiptNo,
     userId,
-    contractId: payload.receipt.contractId || issue?.contractId || null,
+    ...await receiptIdentity(userId, payload.receipt, issue, session, receipt),
     beamCount,
     netWeightKg,
     partyReceiptNo: clean(payload.receipt.partyReceiptNo),

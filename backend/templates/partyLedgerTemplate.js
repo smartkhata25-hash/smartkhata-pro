@@ -51,6 +51,7 @@ const generatePartyLedgerHTML = (data, pageSize = "A5") => {
     summary = {},
     rows = [],
     header: businessHeader = null,
+    showDescription = false,
   } = data || {};
 
   const safePageSize = pageSize === "A4" ? "A4" : "A5";
@@ -175,6 +176,15 @@ td.left {
 .opening-row td {
   font-weight: 900;
   background: #f5f5f5;
+}
+
+.source-description {
+  margin-top: 2px;
+  color: #666;
+  font-size: ${isA5 ? "10px" : "12px"};
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: pre-line;
 }
 
 .totals-row td {
@@ -320,6 +330,11 @@ td.left {
 
                     <td class="left">
                       ${escapeHtml(row.source || "-")}
+                      ${
+                        showDescription && String(row.description ?? "").trim()
+                          ? `<div class="source-description">${escapeHtml(String(row.description).trim())}</div>`
+                          : ""
+                      }
                     </td>
 
                     <td>

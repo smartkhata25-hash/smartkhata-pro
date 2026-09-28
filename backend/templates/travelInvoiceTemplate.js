@@ -29,6 +29,16 @@ const renderRows = (items = []) =>
     )
     .join("");
 
+const renderLedgerDescription = (value) => {
+  const description = String(value || "").trim();
+
+  if (!description) return "";
+
+  return `<section class="section box"><span class="label">Description</span><p>${escapeHtml(
+    description,
+  ).replace(/\r?\n/g, "<br />")}</p></section>`;
+};
+
 const renderTravelInvoiceHtml = (data, options = {}) => `
 <!doctype html>
 <html>
@@ -59,8 +69,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       h1 { color: #0f172a; font-size: 24px; letter-spacing: 0; }
       h2 { color: #0e7490; font-size: 18px; margin-top: 2px; }
       .company { font-size: 20px; font-weight: 800; }
-      .company-wrap { align-items: flex-start; display: flex; gap: 12px; }
-      .company-logo { height: 58px; object-fit: contain; object-position: left top; width: 86px; }
+      ${travelDocumentHeaderStyles}
       .muted { color: #64748b; }
       .right { text-align: right; }
       .center { text-align: center; }
@@ -136,23 +145,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       <div class="topline"></div>
 
       <section class="header">
-        <div class="company-wrap">
-          ${
-            data.header?.logoUrl
-              ? `<img class="company-logo" src="${escapeHtml(data.header.logoUrl)}" alt="" onerror="this.remove()" />`
-              : ""
-          }
-          <div>
-          ${
-            data.header
-              ? `<p class="company">${escapeHtml(data.header.companyName)}</p>
-                 <p class="muted">${escapeHtml(data.header.address)}</p>
-                 <p class="muted">${escapeHtml(data.header.phone)}</p>
-                 <p class="muted">${escapeHtml(data.header.taxNumber)}</p>`
-              : ""
-          }
-          </div>
-        </div>
+        ${renderTravelCompanyHeader(data.header)}
         <div class="right">
           <h1>${escapeHtml(data.documentTitle)}</h1>
           <h2>${escapeHtml(data.documentInfo.invoiceNumber)}</h2>
@@ -213,6 +206,8 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
         </table>
       </section>
 
+      ${renderLedgerDescription(data.ledgerDescription)}
+
       <section class="totals">
         <div class="total-line"><span>Sale</span><strong>${escapeHtml(data.totals.sale)}</strong></div>
         ${
@@ -260,3 +255,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
 module.exports = {
   renderTravelInvoiceHtml,
 };
+const {
+  renderTravelCompanyHeader,
+  travelDocumentHeaderStyles,
+} = require("./travelDocumentHeader");

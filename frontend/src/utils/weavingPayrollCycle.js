@@ -11,7 +11,7 @@ const getMonthLastDay = (year, month) => new Date(Date.UTC(year, month, 0, 12)).
 const getNextMonth = (year, month) =>
   month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
 
-const getPreviousCycleKey = (cycle) => {
+export const getPreviousWeavingPayrollCycleKey = (cycle) => {
   if (cycle.half === 'H2') {
     return `${cycle.year}-${pad2(cycle.month)}-H1`;
   }
@@ -20,7 +20,7 @@ const getPreviousCycleKey = (cycle) => {
   return `${previous.year}-${pad2(previous.month)}-H2`;
 };
 
-const getNextCycleKey = (cycle) => {
+export const getNextWeavingPayrollCycleKey = (cycle) => {
   if (cycle.half === 'H1') {
     return `${cycle.year}-${pad2(cycle.month)}-H2`;
   }
@@ -64,6 +64,15 @@ export const deriveWeavingPayrollCycle = (cycleKey = getCurrentWeavingCycleKey()
   };
 };
 
+export const getFirstValidWeavingRecoveryCycle = (transactionDate) => {
+  const dateKey = getBusinessDateInputValue(transactionDate);
+  let cycle = deriveWeavingPayrollCycle(getCurrentWeavingCycleKey(dateKey));
+  while (cycle.dueDate < dateKey) {
+    cycle = deriveWeavingPayrollCycle(getNextWeavingPayrollCycleKey(cycle));
+  }
+  return cycle;
+};
+
 export const formatWeavingPayrollCycleLabel = (cycleLike, payText = 'Pay') => {
   const cycle =
     typeof cycleLike === 'string' ? deriveWeavingPayrollCycle(cycleLike) : cycleLike;
@@ -85,7 +94,7 @@ export const getWeavingPayrollCycleOptions = ({
   let first = deriveWeavingPayrollCycle(baseCycleKey);
 
   for (let index = 0; index < before; index += 1) {
-    first = deriveWeavingPayrollCycle(getPreviousCycleKey(first));
+    first = deriveWeavingPayrollCycle(getPreviousWeavingPayrollCycleKey(first));
   }
 
   const options = [];
@@ -96,7 +105,7 @@ export const getWeavingPayrollCycleOptions = ({
       ...cursor,
       label: formatWeavingPayrollCycleLabel(cursor, payText),
     });
-    cursor = deriveWeavingPayrollCycle(getNextCycleKey(cursor));
+    cursor = deriveWeavingPayrollCycle(getNextWeavingPayrollCycleKey(cursor));
   }
 
   return options;

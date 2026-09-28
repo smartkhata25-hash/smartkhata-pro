@@ -333,13 +333,14 @@ const getPartyLedgerHtml = async (req, res) => {
       endDate,
       moduleScope,
     });
-    const header = await getLedgerPrintHeader(userId, moduleScope);
+    const header = await getLedgerPrintHeader(userId, moduleScope, "print");
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
       partyPhone: rawData.partyPhone,
       role: rawData.role,
       moduleScope: rawData.moduleScope,
+      showDescription: moduleScope === MODULE_SCOPES.TRAVEL,
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
@@ -378,13 +379,14 @@ const generatePartyLedgerPdf = async (req, res) => {
       endDate,
       moduleScope,
     });
-    const header = await getLedgerPrintHeader(userId, moduleScope);
+    const header = await getLedgerPrintHeader(userId, moduleScope, "pdf");
 
     const built = buildPartyLedgerPrint({
       partyName: rawData.partyName,
       partyPhone: rawData.partyPhone,
       role: rawData.role,
       moduleScope: rawData.moduleScope,
+      showDescription: moduleScope === MODULE_SCOPES.TRAVEL,
       startDate,
       endDate,
       openingBalance: rawData.openingBalance,
@@ -396,7 +398,10 @@ const generatePartyLedgerPdf = async (req, res) => {
 
     const html = generatePartyLedgerHTML(built, size || "A5");
 
-    const pdfBuffer = await generatePdfFromHtml(html);
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      waitForImages: moduleScope === MODULE_SCOPES.TRAVEL,
+      requireImages: moduleScope === MODULE_SCOPES.TRAVEL,
+    });
 
     const safePartyName =
       String(rawData.partyName || "Party")

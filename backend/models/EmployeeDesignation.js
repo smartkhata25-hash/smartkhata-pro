@@ -19,6 +19,8 @@ const employeeDesignationSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    departmentIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "WeavingDepartment" }], default: undefined },
+    defaultKey: { type: String },
     normalizedName: {
       type: String,
       required: true,

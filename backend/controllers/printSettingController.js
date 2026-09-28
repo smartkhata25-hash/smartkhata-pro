@@ -78,6 +78,8 @@ const buildDefaultHeader = (user) => ({
 
   footerMessage: "Thank you for your business!",
   showLogo: false,
+  showLogoOnPrint: false,
+  showLogoOnPdf: false,
   logoKey: "",
 
   showCompanyAddress: true,
@@ -167,6 +169,15 @@ const updatePrintSetting = async (req, res) => {
     if (req.body.header && setting[type]?.header) {
       const { logoKey, logoUrl, ...safeHeader } = req.body.header;
       Object.assign(setting[type].header, safeHeader);
+      if (
+        type === "travelInvoice" &&
+        (typeof safeHeader.showLogoOnPrint === "boolean" ||
+          typeof safeHeader.showLogoOnPdf === "boolean")
+      ) {
+        setting[type].header.showLogo =
+          setting[type].header.showLogoOnPrint === true ||
+          setting[type].header.showLogoOnPdf === true;
+      }
     }
 
     if (req.body.settings && setting[type]?.settings) {
@@ -258,6 +269,10 @@ const uploadPrintLogo = async (req, res) => {
 
     setting[type].header.logoKey = uploaded.key;
     setting[type].header.showLogo = true;
+    if (type === "travelInvoice") {
+      setting[type].header.showLogoOnPrint = true;
+      setting[type].header.showLogoOnPdf = true;
+    }
     await setting.save();
 
     if (oldKey && oldKey !== uploaded.key) {
@@ -292,6 +307,10 @@ const removePrintLogo = async (req, res) => {
     const oldKey = setting[type].header.logoKey || "";
     setting[type].header.logoKey = "";
     setting[type].header.showLogo = false;
+    if (type === "travelInvoice") {
+      setting[type].header.showLogoOnPrint = false;
+      setting[type].header.showLogoOnPdf = false;
+    }
     await setting.save();
     if (oldKey) {
       deleteFile(oldKey).catch((error) =>

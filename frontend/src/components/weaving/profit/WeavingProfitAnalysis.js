@@ -4,12 +4,12 @@ import {
   FaChartBar,
   FaCoins,
   FaDownload,
+  FaExclamationTriangle,
   FaFileInvoice,
   FaFilter,
   FaIndustry,
   FaPrint,
   FaSpinner,
-  FaSyncAlt,
   FaUsers,
 } from 'react-icons/fa';
 
@@ -18,7 +18,6 @@ import {
   getWeavingProfitDetails,
   getWeavingProfitReport,
   getWeavingReportMeta,
-  rebuildWeavingCosting,
   weavingOperationalReportUrl,
 } from '../../../services/weavingReportService';
 import SearchableCreatableSelect from '../SearchableCreatableSelect';
@@ -81,7 +80,6 @@ const WeavingProfitAnalysis = ({ hideTitle = false, mode = 'page' }) => {
   const [meta, setMeta] = useState({ parties: [], qualities: [] });
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState('');
   useWeavingFeedback(error, setError, { type: 'error' });
   const [drawer, setDrawer] = useState(null);
@@ -140,36 +138,17 @@ const WeavingProfitAnalysis = ({ hideTitle = false, mode = 'page' }) => {
     loadDetail(type);
   };
 
-  const recalculate = async () => {
-    setRecalculating(true);
-    setError('');
-    try {
-      await rebuildWeavingCosting();
-      await loadReport();
-      if (drawer) await loadDetail(drawer, detail?.pagination?.page || 1);
-    } catch (recalcError) {
-      setError(recalcError?.response?.data?.message || t('weaving.operationalReports.recalculateFailed'));
-    } finally {
-      setRecalculating(false);
-    }
-  };
-
   const openOutput = (format) => {
     window.open(weavingOperationalReportUrl('profit', format, requestParams), '_blank', 'noopener,noreferrer');
   };
 
-  const exact = report?.costCoverage === 'complete';
+  const hasCostingRun = Boolean(report?.hasCostingRun ?? report?.calculatedAt);
+  const exact = hasCostingRun && report?.costCoverage === 'complete';
+  const hasUsefulEstimate = exact || Number(report?.knownCostInvoiceCount || 0) > 0 || Number(report?.invoiceCount || 0) === 0;
   const scoped = report?.periodCostsUnallocated;
-  const costingWarning = !loading && report && (!exact || scoped)
-    ? [
-        !exact ? report.missingCostReason || t('weaving.operationalReports.missingCost') : '',
-        scoped ? t('weaving.operationalReports.periodCostsUnallocated') : '',
-      ].filter(Boolean).join('\n')
-    : '';
-  useWeavingFeedback(costingWarning, null, { type: 'warning', showNonErrors: true });
-  const directCost = exact ? report?.costs?.directStockCost : report?.costs?.knownDirectStockCost;
-  const contribution = exact ? report?.contributionProfit : report?.provisionalGrossProfit;
-  const netProfit = exact ? report?.netProfit : report?.provisionalNetProfit;
+  const directCost = !hasCostingRun || !hasUsefulEstimate ? null : exact ? report?.costs?.directStockCost : report?.costs?.knownDirectStockCost;
+  const contribution = !hasCostingRun || !hasUsefulEstimate ? null : exact ? report?.contributionProfit : report?.provisionalGrossProfit;
+  const netProfit = !hasCostingRun || !hasUsefulEstimate ? null : exact ? report?.netProfit : report?.provisionalNetProfit;
   const netTone = Number(netProfit || 0) < 0 ? 'rose' : 'emerald';
 
   const metrics = scoped
@@ -199,9 +178,6 @@ const WeavingProfitAnalysis = ({ hideTitle = false, mode = 'page' }) => {
             <h2 className="text-lg font-black">{t('weaving.profitAnalysis.title')}</h2>
             <p className="mt-0.5 text-xs font-semibold text-slate-300">{t('weaving.profitAnalysis.subtitle')}</p>
           </div>
-          <button type="button" disabled={recalculating} className="inline-flex h-9 items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-sm font-bold disabled:opacity-50" onClick={recalculate}>
-            <FaSyncAlt className={recalculating ? 'animate-spin' : ''} /> {t('weaving.operationalReports.recalculateCosting')}
-          </button>
           <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-sm font-bold" onClick={() => openOutput('print')}><FaPrint /> {t('weaving.reports.print')}</button>
           <button type="button" className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-500 px-3 text-sm font-black text-slate-950" onClick={() => openOutput('pdf')}><FaDownload /> PDF</button>
         </header>
@@ -234,15 +210,11 @@ const WeavingProfitAnalysis = ({ hideTitle = false, mode = 'page' }) => {
           <button type="button" className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 hover:border-rose-300 hover:text-rose-700" onClick={() => setFilters(EMPTY_FILTERS)}><FaFilter /> {t('weaving.profitAnalysis.clearFilters')}</button>
         </div>
 
-        {loading && <div className="flex h-56 items-center justify-center"><FaSpinner className="animate-spin text-3xl text-teal-600" /></div>}
+        {loading && <div className="flex h-56 flex-col items-center justify-center gap-3"><FaSpinner className="animate-spin text-3xl text-teal-600" /><div className="text-sm font-black text-slate-600">{t('weaving.profitSummary.calculating')}</div></div>}
 
         {!loading && report && (
           <>
-            <div className="text-sm text-slate-600">
-              <div className="font-black">{t(exact ? 'weaving.operationalReports.completeCosting' : 'weaving.operationalReports.partialCosting')}</div>
-              {!exact && <div className="mt-1 font-semibold">{report.missingCostReason || t('weaving.operationalReports.missingCost')}</div>}
-              {scoped && <div className="mt-1 font-semibold">{t('weaving.operationalReports.periodCostsUnallocated')}</div>}
-            </div>
+            {(!exact || scoped) && <div className={`flex items-start gap-3 rounded-md border p-3 text-sm ${!exact ? 'border-amber-200 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><FaExclamationTriangle className={`mt-0.5 flex-shrink-0 ${!exact ? 'text-amber-600' : 'text-slate-500'}`} /><div className="min-w-0 flex-1"><div className="font-black">{t(exact ? 'weaving.operationalReports.completeCosting' : hasCostingRun ? 'weaving.profitSummary.partialCostingTitle' : 'weaving.profitSummary.costingPendingTitle')}</div>{!exact && <div className="mt-1 font-semibold">{hasCostingRun ? report.missingCostReason || t('weaving.profitSummary.partialCostingText') : t('weaving.profitSummary.costingPendingText')}</div>}{scoped && <div className="mt-1 font-semibold">{t('weaving.operationalReports.periodCostsUnallocated')}</div>}</div></div>}
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-7">
               {metrics.map(([key, value, tone, detailType, provisional, format]) => (

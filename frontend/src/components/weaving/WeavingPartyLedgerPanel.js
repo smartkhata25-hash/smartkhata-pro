@@ -33,6 +33,56 @@ const money = (value) =>
     maximumFractionDigits: 2,
   })}`;
 
+const ledgerAmount = (value) =>
+  Number(value || 0).toLocaleString('en-PK', {
+    maximumFractionDigits: 2,
+  });
+
+const ledgerDate = (value) => {
+  const raw = String(value || '').slice(0, 10);
+  const parts = raw.split('-');
+
+  return parts.length === 3 ? `${parts[2]}-${parts[1]}` : raw || '-';
+};
+
+const ledgerType = (value) => {
+  const type = String(value || '');
+
+  const labels = {
+    'weaving.sales': 'Sale',
+    'weaving.receive_payment': 'RCV Payment',
+    'weaving.pay_bill': 'PAY Payment',
+    'weaving.purchase': 'Purchase',
+    'weaving.party.opening': 'Opening',
+    'weaving.sizing': 'Sizing',
+  };
+
+  if (labels[type]) return labels[type];
+
+  return (
+    type
+      .replace(/^weaving\./i, '')
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || '-'
+  );
+};
+
+const ledgerDescription = (row) => {
+  const value = String(row.description || '').trim();
+
+  if (!value) return '-';
+
+  if (row.type === 'weaving.sales' && row.reference && value.includes(row.reference)) {
+    return '-';
+  }
+
+  return value
+    .replace(/^Received against\s+/i, 'Against ')
+    .replace(/^Received from\s+/i, 'From ')
+    .replace(/^Paid against\s+/i, 'Against ')
+    .replace(/^Paid to\s+/i, 'To ');
+};
+
 export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPage = false }) {
   const navigate = useNavigate();
 
@@ -368,15 +418,17 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
         </div>
       ) : ledger ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="bg-teal-50 text-xs uppercase text-slate-700">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead className="bg-slate-900 text-[11px] font-bold uppercase text-white">
               <tr>
                 {['Date', 'Ref', 'Type', 'Description', 'Debit', 'Credit', 'Balance'].map(
                   (heading) => (
                     <th
                       key={heading}
-                      className={`border-y border-r border-teal-100 px-3 py-2.5 text-left ${
-                        ['Debit', 'Credit', 'Running Balance'].includes(heading) ? 'text-right' : ''
+                      className={`border-r border-slate-700 px-3 py-2.5 last:border-r-0 ${
+                        ['Debit', 'Credit', 'Balance'].includes(heading)
+                          ? 'text-center'
+                          : 'text-left'
                       }`}
                     >
                       {heading}
@@ -388,7 +440,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
 
             <tbody>
               {ledger.rows.length ? (
-                ledger.rows.map((row) => (
+                ledger.rows.map((row, index) => (
                   <tr
                     key={row._id}
                     tabIndex={0}
@@ -401,26 +453,38 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
                         openLedgerSource(row);
                       }
                     }}
-                    className="cursor-pointer transition hover:bg-teal-50 focus:bg-teal-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-teal-500"
+                    className={`cursor-pointer border-b border-slate-200 transition hover:bg-teal-50 focus:bg-teal-50 focus:outline-none ${
+                      index % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'
+                    }`}
                   >
-                    <td className="border-b border-r px-3 py-2">{String(row.date).slice(0, 10)}</td>
-
-                    <td className="border-b border-r px-3 py-2">{row.reference || '-'}</td>
-
-                    <td className="border-b border-r px-3 py-2">{row.type || '-'}</td>
-
-                    <td className="border-b border-r px-3 py-2">{row.description || '-'}</td>
-
-                    <td className="border-b border-r px-3 py-2 text-right">
-                      {row.debit ? money(row.debit) : '-'}
+                    <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 text-center">
+                      {ledgerDate(row.date)}
                     </td>
 
-                    <td className="border-b border-r px-3 py-2 text-right">
-                      {row.credit ? money(row.credit) : '-'}
+                    <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 font-semibold text-slate-800">
+                      {row.reference || '-'}
                     </td>
 
-                    <td className="border-b px-3 py-2 text-right font-bold">
-                      {money(row.runningBalance)}
+                    <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2">
+                      <span className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
+                        {ledgerType(row.type)}
+                      </span>
+                    </td>
+
+                    <td className="border-r border-slate-200 px-3 py-2 text-slate-600">
+                      {ledgerDescription(row)}
+                    </td>
+
+                    <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 text-center font-semibold text-slate-800">
+                      {row.debit ? ledgerAmount(row.debit) : '-'}
+                    </td>
+
+                    <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 text-center font-semibold text-emerald-700">
+                      {row.credit ? ledgerAmount(row.credit) : '-'}
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-2 text-center font-bold text-slate-900">
+                      {ledgerAmount(row.runningBalance)}
                     </td>
                   </tr>
                 ))

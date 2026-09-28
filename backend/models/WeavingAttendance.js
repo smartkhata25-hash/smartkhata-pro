@@ -102,6 +102,18 @@ const weavingAttendanceSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // A factory-wide paid holiday is distinct from an employee's personal leave.
+    isFactoryHoliday: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    note: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 200,
+    },
     otHours: {
       type: Number,
       default: 0,

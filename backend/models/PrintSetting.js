@@ -29,6 +29,8 @@ const headerSettingSchema = new mongoose.Schema({
   },
 
   showLogo: { type: Boolean, default: false },
+  showLogoOnPrint: { type: Boolean },
+  showLogoOnPdf: { type: Boolean },
   logoKey: { type: String, default: "" },
 
   // Optional Hide/Show Controls

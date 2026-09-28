@@ -190,10 +190,10 @@ const buildProfitSalesMatch = (userId, query, range, scope) => {
   else if (query.saleType) match.saleNature = query.saleType;
   return match;
 };
-const mapProfitRows = ({ sales = [], costRows = [], hasCostingRun = false }) => {
+const mapProfitRows = ({ sales = [], costRows = [], hasCostingRun = false, costingFresh = true }) => {
   const costsByInvoice = new Map(costRows.map((row) => [id(row.entityId), row]));
   return sales.map((invoice) => {
-    const cost = costsByInvoice.get(id(invoice)); const exact = Boolean(hasCostingRun && cost && COMPLETE_COST_STATUSES.has(cost.costStatus));
+    const cost = costsByInvoice.get(id(invoice)); const exact = Boolean(hasCostingRun && costingFresh && cost && COMPLETE_COST_STATUSES.has(cost.costStatus));
     const revenue = round(Number(invoice.subtotal || 0) - Number(invoice.discountAmount || 0)); const knownDirectCost = round(cost?.components?.total || 0);
     return {
       invoiceId: invoice._id, invoiceNo: invoice.invoiceNo, date: invoice.invoiceDate,
@@ -209,10 +209,11 @@ const mapProfitRows = ({ sales = [], costRows = [], hasCostingRun = false }) => 
       contract: invoice.contractId?.contractNo || "", quantity: Number(invoice.quantity || 0), uom: invoice.uom,
       meter: invoice.uom === "Meter" ? Number(invoice.quantity || 0) : 0, rate: Number(invoice.finalRate || 0),
       grossRevenue: round(invoice.subtotal), discount: round(invoice.discountAmount), revenue,
+      hasKnownCost: Boolean(cost),
       directCost: exact ? knownDirectCost : null, knownDirectCost,
       profit: exact ? round(revenue - knownDirectCost) : null,
       margin: safeMargin(revenue - knownDirectCost, revenue, exact), exact,
-      costStatus: exact ? "complete" : "partial", missingReasons: cost?.missingReasons || (hasCostingRun ? ["Sales COGS snapshot is missing"] : ["Costing has not been calculated"]),
+      costStatus: exact ? "complete" : "partial", missingReasons: !hasCostingRun ? ["Costing has not been calculated"] : !costingFresh ? ["Costing is out of date"] : cost?.missingReasons?.length ? cost.missingReasons : ["Sales COGS snapshot is missing"],
       components: cost?.components || {}, allocationBasis: cost?.allocationBasis || "",
     };
   });
@@ -223,7 +224,7 @@ const summarizeProfitRows = (rows = [], options = {}) => {
   const grossRevenue = round(revenue.fabricSales + revenue.yarnSales + revenue.conversionIncome + revenue.otherSales); const netRevenue = round(grossRevenue - revenue.salesDeductions);
   const exact = rows.every((row) => row.exact) && options.hasCostingRun !== false; const knownDirectStockCost = round(rows.reduce((sum, row) => sum + row.knownDirectCost, 0));
   const components = rows.reduce((sum, row) => { ["material", "warp", "weft", "sizing", "knotting", "processing", "otherDirect"].forEach((key) => { sum[key] = round(sum[key] + Number(row.components?.[key] || 0)); }); return sum; }, { material: 0, warp: 0, weft: 0, sizing: 0, knotting: 0, processing: 0, otherDirect: 0 });
-  return { revenue: { ...revenue, grossRevenue, netRevenue }, exact, knownDirectStockCost, components, invoiceCount: rows.length, meter: round(rows.reduce((sum, row) => sum + row.meter, 0)), missingReasons: [...new Set(rows.flatMap((row) => row.missingReasons || []))] };
+  return { revenue: { ...revenue, grossRevenue, netRevenue }, exact, knownDirectStockCost, knownCostInvoiceCount: rows.filter((row) => row.hasKnownCost).length, components, invoiceCount: rows.length, meter: round(rows.reduce((sum, row) => sum + row.meter, 0)), missingReasons: [...new Set(rows.flatMap((row) => row.missingReasons || []))] };
 };
 const aggregateProfitability = (rows = [], groupBy) => {
   const groups = new Map();
@@ -246,8 +247,9 @@ const loadProfitSales = async (userId, query = {}) => {
     costingService.getSalesCosting(userId, { ...range, scope, partyId: query.partyId, saleType: scope === "conversion" ? "conversion" : query.saleType, fabricQualityId: query.fabricQualityId }),
   ]);
   const invoiceIds = new Set(sales.map((row) => id(row))); const costRows = salesCosting.rows.filter((row) => invoiceIds.has(id(row.entityId)));
-  const rows = mapProfitRows({ sales, costRows, hasCostingRun: Boolean(salesCosting.run) });
-  return { range, scope, rows, run: salesCosting.run, summary: summarizeProfitRows(rows, { hasCostingRun: Boolean(salesCosting.run) }) };
+  const costingFresh = Boolean(salesCosting.run && !costingService.isCostingRunDirty(salesCosting.run));
+  const rows = mapProfitRows({ sales, costRows, hasCostingRun: Boolean(salesCosting.run), costingFresh });
+  return { range, scope, rows, run: salesCosting.run, costingFresh, summary: summarizeProfitRows(rows, { hasCostingRun: costingFresh }) };
 };
 const getProfit = async (userId, query = {}) => {
   const salesData = await loadProfitSales(userId, query); const { range, scope, summary } = salesData;
@@ -261,7 +263,7 @@ const getProfit = async (userId, query = {}) => {
   const provisionalNetProfit = round(provisionalGrossProfit - payrollCost - operatingExpenses);
   const periodCostsUnallocated = scope !== "combined" || Boolean(query.partyId || query.fabricQualityId || query.saleType);
   const exact = summary.exact; const directStockCost = exact ? summary.knownDirectStockCost : null;
-  return { range, scope, costingVersion: salesData.run?.costingVersion || costingService.COSTING_VERSION, calculatedAt: salesData.run?.calculatedAt || null, costCoverage: exact ? "complete" : "partial", isExact: exact, periodCostsUnallocated, missingCostReason: summary.missingReasons.join("; ") || "", missingReasons: summary.missingReasons, revenue: summary.revenue, costs: { directStockCost, knownDirectStockCost: summary.knownDirectStockCost, ...summary.components, payrollCost, periodProductionLabour: payrollCost, productionCost: exact ? round(summary.knownDirectStockCost + payrollCost) : null, operatingExpenses }, invoiceCount: summary.invoiceCount, meter: summary.meter, contributionProfit: exact ? provisionalGrossProfit : null, contributionMargin: safeMargin(provisionalGrossProfit, summary.revenue.netRevenue, exact), grossProfit: exact ? provisionalGrossProfit : null, grossMargin: safeMargin(provisionalGrossProfit, summary.revenue.netRevenue, exact), netProfit: exact && !periodCostsUnallocated ? provisionalNetProfit : null, netMargin: safeMargin(provisionalNetProfit, summary.revenue.netRevenue, exact && !periodCostsUnallocated), provisionalGrossProfit, provisionalNetProfit: periodCostsUnallocated ? null : provisionalNetProfit };
+  return { range, scope, hasCostingRun: Boolean(salesData.run), costingStale: Boolean(salesData.run && !salesData.costingFresh), costingVersion: salesData.run?.costingVersion || costingService.COSTING_VERSION, calculatedAt: salesData.run?.calculatedAt || null, costCoverage: exact ? "complete" : "partial", isExact: exact, periodCostsUnallocated, missingCostReason: summary.missingReasons.join("; ") || "", missingReasons: summary.missingReasons, revenue: summary.revenue, costs: { directStockCost, knownDirectStockCost: summary.knownDirectStockCost, ...summary.components, payrollCost, periodProductionLabour: payrollCost, productionCost: exact ? round(summary.knownDirectStockCost + payrollCost) : null, operatingExpenses }, invoiceCount: summary.invoiceCount, knownCostInvoiceCount: summary.knownCostInvoiceCount, meter: summary.meter, contributionProfit: exact ? provisionalGrossProfit : null, contributionMargin: safeMargin(provisionalGrossProfit, summary.revenue.netRevenue, exact), grossProfit: exact ? provisionalGrossProfit : null, grossMargin: safeMargin(provisionalGrossProfit, summary.revenue.netRevenue, exact), netProfit: exact && !periodCostsUnallocated ? provisionalNetProfit : null, netMargin: safeMargin(provisionalNetProfit, summary.revenue.netRevenue, exact && !periodCostsUnallocated), provisionalGrossProfit, provisionalNetProfit: periodCostsUnallocated ? null : provisionalNetProfit };
 };
 
 const getProfitDetails = async (userId, query = {}) => {
@@ -330,8 +332,8 @@ const getDashboard = async (userId, {
     productionMeters: production?.summary?.meter ?? null,
     canViewProfit,
     netProfit: profit?.isExact ? profit.netProfit : null,
-    profitStatus: profit?.costCoverage || null,
-    provisionalNetProfit: profit?.provisionalNetProfit ?? null,
+    profitStatus: !profit?.hasCostingRun ? "pending" : profit?.costCoverage || null,
+    provisionalNetProfit: profit?.hasCostingRun && (profit?.isExact || Number(profit?.knownCostInvoiceCount || 0) > 0) ? profit?.provisionalNetProfit ?? null : null,
     salesRevenue: sales?.summary?.totalSales ?? null,
     readyToInvoice: canViewReady ? management?.readyCount ?? 0 : null,
     pendingRejectionMeter: canViewRejection

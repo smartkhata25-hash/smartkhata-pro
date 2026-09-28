@@ -3,7 +3,7 @@ import React from 'react';
 import { t } from '../../../i18n/i18n';
 import { weavingToneClasses } from './weavingDashboardConfig';
 
-const WeavingSummaryCard = ({ card, value, onCardClick = null }) => {
+const WeavingSummaryCard = ({ card, value, onCardClick = null, secondaryAction = null }) => {
   const Icon = card.icon;
   const tone = weavingToneClasses[card.tone] || weavingToneClasses.production;
   const isClickable = Boolean(card.route && onCardClick);
@@ -23,14 +23,14 @@ const WeavingSummaryCard = ({ card, value, onCardClick = null }) => {
     }
   };
 
-  return (
+  const content = (
     <article
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       onClick={isClickable ? handleCardClick : undefined}
       onKeyDown={isClickable ? handleCardKeyDown : undefined}
       data-weaving-summary-card={card.key}
-      className={`group relative min-h-[126px] w-full overflow-hidden rounded-lg border ${
+      className={`group relative ${secondaryAction ? 'h-full' : ''} min-h-[126px] w-full overflow-hidden rounded-lg border ${
         tone.borderClass
       } bg-gradient-to-br ${tone.surfaceClass} p-4 text-left shadow-sm transition duration-200 ${
         isClickable
@@ -66,6 +66,12 @@ const WeavingSummaryCard = ({ card, value, onCardClick = null }) => {
       </div>
     </article>
   );
+  return secondaryAction ? <div className="relative h-full">
+    {content}
+    <button type="button" onClick={secondaryAction.onClick} className="absolute bottom-3 right-3 rounded-md border border-cyan-200 bg-white px-2 py-1 text-xs font-bold text-cyan-800 shadow-sm hover:bg-cyan-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-500">
+      {secondaryAction.label}
+    </button>
+  </div> : content;
 };
 
 export default WeavingSummaryCard;

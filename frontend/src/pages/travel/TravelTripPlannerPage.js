@@ -14,6 +14,7 @@ import {
 
 import { t } from '../../i18n/i18n';
 import { buildTravelRouteState } from '../../utils/travelContext';
+import { fetchTravelPrintBranding } from '../../services/travelMasterService';
 import {
   UMRAH_CITY_OPTIONS,
   UMRAH_PRESET_DAY_OPTIONS,
@@ -377,6 +378,7 @@ const TravelTripPlannerPage = () => {
   const [values, setValues] = useState(() => initialPlannerState());
   const [result, setResult] = useState(null);
   const [message, setMessage] = useState('');
+  const [printBranding, setPrintBranding] = useState(null);
 
   const selectedTotalDays = useMemo(() => {
     const days = values.useCustomTotal ? Number(values.customTotalDays) : Number(values.totalDays);
@@ -552,6 +554,34 @@ const TravelTripPlannerPage = () => {
     setMessage('');
   };
 
+  const handlePrint = async () => {
+    try {
+      const branding = await fetchTravelPrintBranding();
+
+      if (branding?.logoEnabled && !branding?.logoUrl) {
+        throw new Error('Travel logo is enabled but could not be loaded.');
+      }
+
+      if (branding?.logoUrl) {
+        const image = new Image();
+        image.src = branding.logoUrl;
+        await (image.decode
+          ? image.decode()
+          : new Promise((resolve, reject) => {
+              image.onload = resolve;
+              image.onerror = reject;
+            }));
+      }
+
+      setPrintBranding(branding || {});
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      window.print();
+    } catch (printError) {
+      console.error('Travel trip planner print failed:', printError);
+      setMessage(printError?.response?.data?.message || printError.message || t('common.error'));
+    }
+  };
+
   const handleSendToCalculator = () => {
     if (!adjustedResult || adjustedResult.error) {
       return;
@@ -615,6 +645,23 @@ const TravelTripPlannerPage = () => {
         </div>
       }
     >
+      <section className="print-only mb-4 border-b border-slate-300 pb-3">
+        <div className="flex items-start gap-3">
+          {printBranding?.logoUrl && (
+            <img
+              src={printBranding.logoUrl}
+              alt="Travel agency logo"
+              className="h-16 w-24 object-contain object-left-top"
+            />
+          )}
+          <div>
+            <h1 className="text-xl font-black">{printBranding?.companyName || ''}</h1>
+            {printBranding?.address && <p>{printBranding.address}</p>}
+            {printBranding?.phone && <p>{printBranding.phone}</p>}
+            {printBranding?.taxNumber && <p>{printBranding.taxNumber}</p>}
+          </div>
+        </div>
+      </section>
       <div className="rounded-3xl bg-gradient-to-br from-cyan-50/70 via-white to-emerald-50/60 p-1">
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
           <section className={panelClass}>
@@ -885,7 +932,7 @@ const TravelTripPlannerPage = () => {
                 <TravelActionButton
                   icon={FaPrint}
                   variant="secondary"
-                  onClick={() => window.print()}
+                  onClick={handlePrint}
                 >
                   {t('common.print')}
                 </TravelActionButton>

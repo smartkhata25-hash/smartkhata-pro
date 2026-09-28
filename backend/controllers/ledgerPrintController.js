@@ -8,7 +8,7 @@ const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService")
 
 const getUserId = (req) => req.user?.id || req.userId;
 
-const buildCustomerLedgerDocument = async (req) => {
+const buildCustomerLedgerDocument = async (req, outputType = "print") => {
   const { customerId } = req.params;
   const { startDate, endDate, lang, moduleScope = "" } = req.query;
 
@@ -19,7 +19,11 @@ const buildCustomerLedgerDocument = async (req) => {
     endDate,
     moduleScope,
   });
-  const header = await getLedgerPrintHeader(getUserId(req), moduleScope);
+  const header = await getLedgerPrintHeader(
+    getUserId(req),
+    moduleScope,
+    outputType,
+  );
 
   const built = buildCustomerLedgerPrint({
     customerName: rawData.customerName,
@@ -28,6 +32,7 @@ const buildCustomerLedgerDocument = async (req) => {
     openingBalance: rawData.openingBalance,
     ledger: rawData.ledger,
     header,
+    showDescription: moduleScope === "travel",
   });
 
   built.lang = lang || "ur";
@@ -37,7 +42,7 @@ const buildCustomerLedgerDocument = async (req) => {
 
 const getCustomerLedgerHtml = async (req, res) => {
   try {
-    const built = await buildCustomerLedgerDocument(req);
+    const built = await buildCustomerLedgerDocument(req, "print");
     const html = generateCustomerLedgerHTML(built, req.query.size || "A5");
 
     res.set({
@@ -54,9 +59,12 @@ const getCustomerLedgerHtml = async (req, res) => {
 
 const generateCustomerLedgerPdf = async (req, res) => {
   try {
-    const built = await buildCustomerLedgerDocument(req);
+    const built = await buildCustomerLedgerDocument(req, "pdf");
     const html = generateCustomerLedgerHTML(built, req.query.size || "A5");
-    const pdfBuffer = await generatePdfFromHtml(html);
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      waitForImages: req.query.moduleScope === "travel",
+      requireImages: req.query.moduleScope === "travel",
+    });
 
     res.set({
       "Content-Type": "application/pdf",

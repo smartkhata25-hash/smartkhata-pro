@@ -18,6 +18,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
+import { sanitizeMoneyInput } from '../utils/money';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -341,9 +342,11 @@ const ReceivePaymentForm = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    const nextValue = name === 'discountAmount' ? sanitizeMoneyInput(value) : value;
+    if (nextValue === null) return;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: nextValue,
     }));
   };
 
@@ -1214,7 +1217,13 @@ const ReceivePaymentForm = () => {
                     onChange={(e) =>
                       setPaymentEntries((prev) =>
                         prev.map((item, i) =>
-                          i === index ? { ...item, amount: e.target.value } : item
+                          i === index
+                            ? {
+                                ...item,
+                                amount:
+                                  sanitizeMoneyInput(e.target.value) ?? item.amount,
+                              }
+                            : item
                         )
                       )
                     }

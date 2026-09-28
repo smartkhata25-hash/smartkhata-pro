@@ -330,6 +330,11 @@ const employeePayrollSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    factoryHolidayDays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     unpaidLeaveDays: {
       type: Number,
       default: 0,
@@ -537,6 +542,8 @@ const employeePayrollSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    isFinalSettlement: { type: Boolean, default: false, index: true },
+    settlementDate: { type: Date, default: null },
     earlyClosed: {
       type: Boolean,
       default: false,

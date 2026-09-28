@@ -4,6 +4,7 @@ const Supplier = require("../models/Supplier");
 const Party = require("../models/Party");
 const JournalEntry = require("../models/JournalEntry");
 const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { roundMoney } = require("../utils/money");
 const { createPaymentEntry } = require("../utils/paymentService");
 const Account = require("../models/Account");
 
@@ -121,18 +122,17 @@ exports.createPayBill = async (req, res) => {
       });
     }
 
-    const totalAmount = payments.reduce(
-      (sum, payment) => sum + Number(payment.amount || 0),
-      0,
+    const totalAmount = roundMoney(
+      payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
     );
 
     const rawDiscount = Array.isArray(discountAmount)
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = Number.isFinite(Number(rawDiscount))
-      ? Number(rawDiscount)
-      : 0;
+    const parsedDiscount = roundMoney(
+      Number.isFinite(Number(rawDiscount)) ? Number(rawDiscount) : 0,
+    );
 
     if (totalAmount <= 0) {
       return res.status(400).json({
@@ -146,7 +146,7 @@ exports.createPayBill = async (req, res) => {
       });
     }
 
-    const finalAmount = totalAmount + parsedDiscount;
+    const finalAmount = roundMoney(totalAmount + parsedDiscount);
     const businessDate = getBusinessDateKey(date, {
       fallback: new Date(),
       label: "pay bill date",
@@ -628,18 +628,17 @@ exports.updatePayBill = async (req, res) => {
       });
     }
 
-    const totalAmount = payments.reduce(
-      (sum, payment) => sum + Number(payment.amount || 0),
-      0,
+    const totalAmount = roundMoney(
+      payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
     );
 
     const rawDiscount = Array.isArray(discountAmount)
       ? discountAmount[0]
       : discountAmount;
 
-    const parsedDiscount = Number.isFinite(Number(rawDiscount))
-      ? Number(rawDiscount)
-      : 0;
+    const parsedDiscount = roundMoney(
+      Number.isFinite(Number(rawDiscount)) ? Number(rawDiscount) : 0,
+    );
 
     if (totalAmount <= 0) {
       return res.status(400).json({
@@ -653,7 +652,7 @@ exports.updatePayBill = async (req, res) => {
       });
     }
 
-    const finalAmount = totalAmount + parsedDiscount;
+    const finalAmount = roundMoney(totalAmount + parsedDiscount);
 
     const userId = req.user?.id || req.userId;
 

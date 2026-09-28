@@ -32,9 +32,11 @@ const renderLedgerBusinessHeader = (header) => {
   if (!header) return "";
 
   const logo = header.logoUrl
-    ? `<img class="business-logo" src="${escapeHtml(header.logoUrl)}" alt="" onerror="this.remove()" />`
+    ? `<img class="business-logo" src="${escapeHtml(header.logoUrl)}" alt=""${
+        header.logoRequired ? "" : ' onerror="this.remove()"'
+      } />`
     : "";
-  const contact = [header.phone, header.address]
+  const contact = [header.phone, header.address, header.taxNumber]
     .filter(Boolean)
     .map((value) => `<div>${escapeHtml(value)}</div>`)
     .join("");

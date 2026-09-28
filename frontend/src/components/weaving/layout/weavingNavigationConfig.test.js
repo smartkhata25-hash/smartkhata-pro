@@ -18,6 +18,18 @@ const menuPaths = (label) => weavingTopMenuConfig
   ?.sections.flatMap((section) => section.items.map((item) => item.path)) || [];
 
 describe('Weaving navigation coverage', () => {
+  test('Sales reuses two sections with existing routes and permissions', () => {
+    expect(weavingSidebarItems.find((item) => item.key === 'weavingSalesSettlement')).toMatchObject({ labelKey: 'sales', to: '/weaving/sales-settlement' });
+    const sales = weavingTopMenuConfig.find((menu) => menu.label === 'sales');
+    expect(sales.permission).toBe('weaving.sales.view');
+    expect(sales.sections.map((section) => section.title)).toEqual(['weaving.salesPro.newSales', 'weaving.salesPro.salesLists']);
+    expect(sales.sections[0].items.map((item) => item.path)).toEqual(['kacchi', 'pakki', 'fabric', 'yarn', 'other'].map((kind) => `/weaving/sales-settlement?new=${kind}`));
+    sales.sections[0].items.forEach((item, index) => {
+      expect(item.allPermissions).toEqual(index === 0 ? ['weaving.sales.view', 'weaving.sales.create'] : ['weaving.sales.view', 'weaving.sales.create', 'weaving.sales.post']);
+    });
+    expect(sales.sections[1].items.map((item) => item.path)).toEqual(['invoices', 'kacchi', 'pakki', 'fabric', 'yarn', 'other'].map((tab) => `/weaving/sales-settlement?tab=${tab}`));
+    sales.sections[1].items.forEach((item) => expect(item.permission).toBe('weaving.sales.view'));
+  });
   test('keeps one primary Dashboard and a compact daily sidebar', () => {
     expect(weavingDashboardItem.to).toBe('/weaving/dashboard');
     expect(weavingSidebarItems).toHaveLength(11);
@@ -31,6 +43,10 @@ describe('Weaving navigation coverage', () => {
       'weaving.nav.parties',
       'weaving.nav.employees',
       'weaving.nav.commercial',
+      'weaving.nav.banking',
+      'weaving.nav.purchase',
+      'sales',
+      'weaving.sidebar.sizing',
       'weaving.nav.production',
       'weaving.nav.masterForms',
       'weaving.nav.finance',
@@ -46,11 +62,12 @@ describe('Weaving navigation coverage', () => {
       '/weaving/payments?tab=receive',
       '/weaving/payments?tab=pay',
       '/weaving/payments?tab=history',
-      '/weaving/sales-settlement?tab=ready',
+      '/weaving/sales-settlement?tab=invoices',
       '/weaving/sales-settlement?tab=kacchi',
       '/weaving/sales-settlement?tab=pakki',
-      '/weaving/sales-settlement?tab=pending',
-      '/weaving/sales-settlement?tab=receipts',
+      '/weaving/sales-settlement?tab=fabric',
+      '/weaving/sales-settlement?tab=yarn',
+      '/weaving/sales-settlement?tab=other',
       '/weaving/reports?tab=profit',
     ]));
     expect(topMenuPaths.some((path) => path.includes('parts-store'))).toBe(false);
@@ -88,10 +105,7 @@ describe('Weaving navigation coverage', () => {
       '/weaving/payments?tab=history',
       '/weaving/sales-settlement?tab=kacchi',
       '/weaving/sales-settlement?tab=pakki',
-      '/weaving/sales-settlement?tab=ready',
       '/weaving/sales-settlement?tab=invoices',
-      '/weaving/sales-settlement?tab=pending',
-      '/weaving/sales-settlement?tab=receipts',
     ]));
   });
 
@@ -134,7 +148,7 @@ describe('Weaving navigation coverage', () => {
       '/weaving/business-value',
     ]));
     expect(menuPaths('weaving.nav.reports')).toEqual(expect.arrayContaining([
-      '/weaving/reports?tab=salary',
+      '/weaving/payroll/salary-closing',
       '/weaving/reports?tab=production',
       '/weaving/reports?tab=looms',
       '/weaving/reports?tab=quality',

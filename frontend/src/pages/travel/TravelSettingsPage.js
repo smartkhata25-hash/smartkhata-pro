@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { FaCoins, FaSave, FaSyncAlt } from 'react-icons/fa';
+import { FaCoins, FaImage, FaSave, FaSyncAlt, FaTrash } from 'react-icons/fa';
 
 import WhatsAppTemplateEditor from '../../components/whatsapp/WhatsAppTemplateEditor';
 import {
   fetchTravelCurrencySettings,
   updateTravelCurrencySettings,
 } from '../../services/travelMasterService';
+import {
+  getPrintSettings,
+  removePrintLogo,
+  updatePrintSettings,
+  uploadPrintLogo,
+} from '../../services/printSettingService';
 
 import { DEFAULT_TRAVEL_CURRENCY, SUPPORTED_TRAVEL_CURRENCIES } from '../../config/travelConfig';
 
@@ -55,6 +61,8 @@ const TravelSettingsPage = () => {
   const [message, setMessage] = useState('');
 
   const [error, setError] = useState('');
+  const [branding, setBranding] = useState(null);
+  const [brandingLoading, setBrandingLoading] = useState(false);
 
   const canManage = hasPermission('travel.settings');
 
@@ -91,7 +99,79 @@ const TravelSettingsPage = () => {
 
   useEffect(() => {
     loadSettings();
+    getPrintSettings()
+      .then((data) => setBranding(data?.travelInvoice || null))
+      .catch((loadError) => {
+        console.error('Travel branding settings load failed:', loadError);
+        setError(t('travel.settings.brandingLoadFailed'));
+      });
   }, []);
+
+  const normalizedBrandingHeader = useMemo(() => {
+    const header = branding?.header || {};
+
+    return {
+      ...header,
+      showLogoOnPrint:
+        typeof header.showLogoOnPrint === 'boolean'
+          ? header.showLogoOnPrint
+          : header.showLogo === true,
+      showLogoOnPdf:
+        typeof header.showLogoOnPdf === 'boolean' ? header.showLogoOnPdf : header.showLogo === true,
+    };
+  }, [branding]);
+
+  const saveBrandingVisibility = async (field, checked) => {
+    if (!canManage || brandingLoading) return;
+
+    try {
+      setBrandingLoading(true);
+      setError('');
+      const header = { ...normalizedBrandingHeader, [field]: checked };
+      const saved = await updatePrintSettings('travelInvoice', { header });
+      setBranding(saved);
+      setMessage(t('travel.settings.brandingSaved'));
+    } catch (saveError) {
+      console.error('Travel branding visibility save failed:', saveError);
+      setError(saveError?.response?.data?.msg || t('travel.settings.brandingSaveFailed'));
+    } finally {
+      setBrandingLoading(false);
+    }
+  };
+
+  const handleLogoUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !canManage || brandingLoading) return;
+
+    try {
+      setBrandingLoading(true);
+      setError('');
+      setBranding(await uploadPrintLogo('travelInvoice', file));
+      setMessage(t('travel.settings.logoUploaded'));
+    } catch (uploadError) {
+      console.error('Travel logo upload failed:', uploadError);
+      setError(uploadError?.response?.data?.msg || t('travel.settings.logoUploadFailed'));
+    } finally {
+      setBrandingLoading(false);
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (!canManage || brandingLoading) return;
+
+    try {
+      setBrandingLoading(true);
+      setError('');
+      setBranding(await removePrintLogo('travelInvoice'));
+      setMessage(t('travel.settings.logoRemoved'));
+    } catch (removeError) {
+      console.error('Travel logo remove failed:', removeError);
+      setError(removeError?.response?.data?.msg || t('travel.settings.logoRemoveFailed'));
+    } finally {
+      setBrandingLoading(false);
+    }
+  };
 
   const handleRateChange = (currency, value) => {
     setRateValues((current) => ({
@@ -160,6 +240,86 @@ const TravelSettingsPage = () => {
       }
     >
       <div className="space-y-4">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-sm">
+              <FaImage />
+            </span>
+            <div>
+              <h2 className="text-base font-extrabold text-slate-950">
+                {t('travel.settings.brandingTitle')}
+              </h2>
+              <p className="text-xs font-semibold text-slate-500">
+                {t('travel.settings.brandingNote')}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-xs font-extrabold text-white shadow-sm">
+              <FaImage />
+              {normalizedBrandingHeader.logoUrl
+                ? t('travel.settings.replaceLogo')
+                : t('travel.settings.uploadLogo')}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={!canManage || brandingLoading}
+                onChange={handleLogoUpload}
+              />
+            </label>
+            {normalizedBrandingHeader.logoUrl && (
+              <button
+                type="button"
+                onClick={handleLogoRemove}
+                disabled={!canManage || brandingLoading}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-extrabold text-rose-700 disabled:opacity-50"
+              >
+                <FaTrash /> {t('travel.settings.removeLogo')}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+          <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
+            {normalizedBrandingHeader.logoUrl ? (
+              <img
+                src={normalizedBrandingHeader.logoUrl}
+                alt={t('travel.settings.currentLogo')}
+                className="max-h-20 max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-xs font-bold text-slate-400">
+                {t('travel.settings.noLogo')}
+              </span>
+            )}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[
+              ['showLogoOnPrint', 'travel.settings.showLogoOnPrint'],
+              ['showLogoOnPdf', 'travel.settings.showLogoOnPdf'],
+            ].map(([field, labelKey]) => (
+              <label
+                key={field}
+                className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={normalizedBrandingHeader[field] === true}
+                  disabled={!canManage || brandingLoading || !normalizedBrandingHeader.logoUrl}
+                  onChange={(event) => saveBrandingVisibility(field, event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                />
+                {t(labelKey)}
+              </label>
+            ))}
+          </div>
+        </div>
+      </section>
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* HEADER / BASE CURRENCY */}
         <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-cyan-50 via-white to-blue-50 p-4 shadow-sm">

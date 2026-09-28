@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import ProductDropdown from './ProductDropdown';
 import { t } from '../i18n/i18n';
+import { roundMoney } from '../utils/money';
 
 const blankRow = () => ({
   search: '',
@@ -426,7 +427,7 @@ const InvoiceTable = ({
                           updated[index].amount = amount;
 
                           if (qty > 0) {
-                            updated[index].rate = amount / qty;
+                            updated[index].rate = roundMoney(amount / qty);
                           } else {
                             updated[index].rate = 0;
                           }

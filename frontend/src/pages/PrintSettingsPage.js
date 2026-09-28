@@ -261,6 +261,7 @@ const PrintSettingsPage = () => {
             onChange={(e) => handleHeaderChange('footerMessage', e.target.value)}
           />
 
+          {selectedType !== 'travelInvoice' ? (
           <div className="space-y-2 border-t pt-3">
             <label className="flex items-center gap-2 text-sm font-medium">
               <input
@@ -305,6 +306,11 @@ const PrintSettingsPage = () => {
               )}
             </div>
           </div>
+          ) : (
+            <p className="border-t pt-3 text-sm text-slate-500">
+              {t('travel.settings.manageLogoHere')}
+            </p>
+          )}
         </div>
 
         {/* Visibility */}

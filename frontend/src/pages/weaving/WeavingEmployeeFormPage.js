@@ -9,9 +9,10 @@ import {
   FaUserCircle,
 } from 'react-icons/fa';
 
-import { t } from '../../i18n/i18n';
+import { t, getCurrentLanguage } from '../../i18n/i18n';
+import { employeeText, selectableMasters, departmentDesignations, shiftHours } from '../../components/weaving/weavingEmployeeMasterUtils';
 import { TravelActionButton, TravelFormModal } from '../../components/travel/master/TravelMasterUI';
-import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import { useWeavingFeedback, showWeavingWarning } from '../../components/weaving/WeavingFeedbackModal';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -26,6 +27,7 @@ import {
   getEmployeeById,
   getEmployeeFormMeta,
   updateEmployee,
+  saveWeavingEmployeePhoto,
 } from '../../services/employeeService';
 
 const MODULE_SCOPE = EMPLOYEE_MODULE_SCOPES.WEAVING;
@@ -298,7 +300,9 @@ const buildDefaultForm = (formMeta = {}, normalizedMeta = EMPTY_META) => ({
   employeeNo: formMeta?.nextEmployeeNo || '',
   listOrder: '',
   joiningDate: todayInput(),
-  shiftId: getDefaultShiftId(normalizedMeta.shifts),
+  unitId: selectableMasters(normalizedMeta.units).length === 1 ? selectableMasters(normalizedMeta.units)[0]._id : '',
+  shiftId: getDefaultShiftId(selectableMasters(normalizedMeta.shifts)),
+  dutyHours: String(shiftHours(selectableMasters(normalizedMeta.shifts).find((row) => row._id === getDefaultShiftId(selectableMasters(normalizedMeta.shifts)))) || ""),
 });
 
 const InputField = ({
@@ -318,7 +322,7 @@ const InputField = ({
 }) => (
   <label className={`block min-w-0 ${className}`}>
     <span className="mb-1 block text-xs font-extrabold text-slate-500">
-      {t(labelKey)}
+      {t(labelKey)}{required && " *"}
     </span>
     <input
       type={type}
@@ -418,6 +422,9 @@ const WeavingEmployeeFormPage = () => {
   const [masterError, setMasterError] = useState('');
   useWeavingFeedback(masterError, setMasterError, { type: 'error' });
   const [photoPreview, setPhotoPreview] = useState('');
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoDirty, setPhotoDirty] = useState(false);
+  const [originalEmployee, setOriginalEmployee] = useState(null);
   const [dutyMode, setDutyMode] = useState('');
   const [cyclePickerOpen, setCyclePickerOpen] = useState(false);
   const [pendingCycleKey, setPendingCycleKey] = useState('');
@@ -452,13 +459,15 @@ const WeavingEmployeeFormPage = () => {
 
           if (!cancelled) {
             const employeeForm = buildEmployeeForm(employee);
+            setOriginalEmployee(employee);
+            setPhotoPreview(employee.photoUrl || '');
             setForm(employeeForm);
             setDutyMode(getDutyMode(employeeForm.dutyHours));
             setListOrderTouched(false);
           }
         } else {
           setForm(buildDefaultForm(formMeta, normalizedMeta));
-          setDutyMode('');
+          setDutyMode(getDutyMode(buildDefaultForm(formMeta, normalizedMeta).dutyHours));
           setListOrderTouched(false);
         }
       } catch (loadError) {
@@ -515,9 +524,9 @@ const WeavingEmployeeFormPage = () => {
     };
   }, [photoPreview]);
 
-  const unitOptions = useMemo(() => toOptions(meta.units, getUnitLabel), [meta.units]);
-  const departmentOptions = useMemo(() => toOptions(meta.departments), [meta.departments]);
-  const designationOptions = useMemo(() => toOptions(meta.designations), [meta.designations]);
+  const unitOptions = useMemo(() => toOptions(selectableMasters(meta.units, originalEmployee?.unitId), getUnitLabel), [meta.units, originalEmployee]);
+  const departmentOptions = useMemo(() => toOptions(selectableMasters(meta.departments, originalEmployee?.departmentId)), [meta.departments, originalEmployee]);
+  const designationOptions = useMemo(() => toOptions(departmentDesignations(meta.designations, form.departmentId, originalEmployee)), [meta.designations, form.departmentId, originalEmployee]);
   const selectedDesignation = useMemo(
     () => meta.designations.find((item) => getRecordId(item) === form.designationId),
     [form.designationId, meta.designations]
@@ -525,7 +534,7 @@ const WeavingEmployeeFormPage = () => {
   const isKnottingWorker = selectedDesignation?.name === 'Beam Knotting Worker';
   const isPieceOnlyKnotting =
     isKnottingWorker && ['per_beam', 'per_set'].includes(form.knottingPaymentMethod);
-  const shiftOptions = useMemo(() => toOptions(meta.shifts), [meta.shifts]);
+  const shiftOptions = useMemo(() => toOptions(selectableMasters(meta.shifts, originalEmployee?.shiftId)), [meta.shifts, originalEmployee]);
   const salaryCycles = useMemo(() => getUpcomingSalaryCycles(todayInput(), 6), []);
   const hasOpeningBalance = Number(form.openingBalanceAmount || 0) > 0;
   const selectedCycleSummary = getSalaryCycleSummary(
@@ -570,6 +579,11 @@ const WeavingEmployeeFormPage = () => {
 
       if (name === 'salaryType') {
         next.salaryType = normalizeSalaryType(nextValue);
+      }
+      if (name === 'departmentId' && !departmentDesignations(meta.designations, nextValue, originalEmployee).some((row) => row._id === current.designationId)) next.designationId = '';
+      if (name === 'shiftId') {
+        const hours = shiftHours(meta.shifts.find((row) => row._id === nextValue));
+        if (hours) { next.dutyHours = String(hours); setDutyMode(getDutyMode(hours)); }
       }
 
       if (name === 'openingBalanceAmount') {
@@ -659,7 +673,8 @@ const WeavingEmployeeFormPage = () => {
 
     setMasterModal(type);
     setMasterError('');
-    setMasterForm({ name: '', unitNo: nextUnitNo || '' });
+    if (type === 'designation' && !form.departmentId) { setMasterModal(null); setError(employeeText('Select Department first.', 'پہلے شعبہ منتخب کریں۔')); return; }
+    setMasterForm({ name: '', unitNo: nextUnitNo || '', startTime: '', endTime: '' });
   };
 
   const closeMasterModal = () => {
@@ -692,7 +707,7 @@ const WeavingEmployeeFormPage = () => {
       const payload =
         masterModal === 'unit'
           ? { unitNo: Number(masterForm.unitNo || 0), name: masterForm.name }
-          : { name: masterForm.name };
+          : { name: masterForm.name, ...(masterModal === 'designation' ? { departmentIds: [form.departmentId] } : {}), ...(masterModal === 'shift' ? { startTime: masterForm.startTime, endTime: masterForm.endTime } : {}) };
       const created = await createMap[masterModal](payload, { moduleScope: MODULE_SCOPE });
       await loadMeta(form.unitId);
 
@@ -700,7 +715,9 @@ const WeavingEmployeeFormPage = () => {
         ...current,
         [fieldMap[masterModal]]: created?._id || current[fieldMap[masterModal]],
         ...(masterModal === 'unit' && !isEdit ? { listOrder: 1 } : {}),
+        ...(masterModal === 'shift' && shiftHours(created) ? { dutyHours: String(shiftHours(created)) } : {}),
       }));
+      if (masterModal === 'shift' && shiftHours(created)) setDutyMode(getDutyMode(shiftHours(created)));
       closeMasterModal();
     } catch (saveError) {
       setMasterError(getErrorMessage(saveError, 'weaving.employees.messages.masterSaveFailed'));
@@ -712,6 +729,9 @@ const WeavingEmployeeFormPage = () => {
   const handlePhotoChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setError(employeeText('Select a JPG, PNG or WEBP photo up to 5MB.', 'پانچ ایم بی تک JPG، PNG یا WEBP تصویر منتخب کریں۔')); return; }
+    setPhotoFile(file);
+    setPhotoDirty(true);
 
     if (photoPreview) {
       URL.revokeObjectURL(photoPreview);
@@ -725,6 +745,8 @@ const WeavingEmployeeFormPage = () => {
       URL.revokeObjectURL(photoPreview);
     }
     setPhotoPreview('');
+    setPhotoFile(null);
+    setPhotoDirty(true);
   };
 
   const resetFormToDefaults = async () => {
@@ -735,9 +757,10 @@ const WeavingEmployeeFormPage = () => {
     try {
       const formMeta = await loadMeta('');
       setForm(buildDefaultForm(formMeta, normalizeMeta(formMeta)));
-      setDutyMode('');
+      setDutyMode(getDutyMode(buildDefaultForm(formMeta, normalizeMeta(formMeta)).dutyHours));
       setListOrderTouched(false);
       removePhoto();
+      setPhotoDirty(false);
     } catch (resetError) {
       setError(getErrorMessage(resetError, 'weaving.employees.messages.loadFailed'));
     } finally {
@@ -764,7 +787,8 @@ const WeavingEmployeeFormPage = () => {
       setForm(employeeForm);
       setDutyMode(getDutyMode(employeeForm.dutyHours));
       setListOrderTouched(false);
-      removePhoto();
+      setPhotoPreview(employee.photoUrl || "");
+      setPhotoFile(null); setPhotoDirty(false); setOriginalEmployee(employee);
     } catch (clearError) {
       setError(getErrorMessage(clearError, 'weaving.employees.messages.loadFailed'));
     } finally {
@@ -815,11 +839,11 @@ const WeavingEmployeeFormPage = () => {
   const validateForm = () => {
     const nextErrors = {};
     const requiredFields = [
-      ['name', 'weaving.employees.messages.nameRequired'],
-      ['fatherName', 'weaving.employees.messages.fatherNameRequired'],
       ['phone', 'weaving.employees.messages.phoneRequired'],
       ['unitId', 'weaving.employees.messages.unitRequired'],
       ['departmentId', 'weaving.employees.messages.departmentRequired'],
+      ['designationId', 'weaving.employees.fields.designation'],
+      ['joiningDate', 'weaving.employees.fields.joiningDate'],
       ['shiftId', 'weaving.employees.messages.shiftRequired'],
     ];
 
@@ -836,7 +860,7 @@ const WeavingEmployeeFormPage = () => {
     const dutyHoursText = String(form.dutyHours ?? '').trim();
     const dutyHours = Number(dutyHoursText);
 
-    if (!isEdit && !dutyHoursText) {
+    if (!dutyHoursText) {
       nextErrors.dutyHours = t('weaving.employees.messages.dutyHoursRequired');
     } else if (
       dutyHoursText &&
@@ -846,6 +870,9 @@ const WeavingEmployeeFormPage = () => {
     }
 
     const paidLeaveAllowanceText = String(form.paidLeaveAllowance ?? '').trim();
+    if (!isPieceOnlyKnotting && !(Number.isFinite(Number(form.baseSalary)) && Number(form.baseSalary) >= 0.01)) nextErrors.baseSalary = employeeText('Salary / Rate must be greater than zero.', 'تنخواہ یا ریٹ صفر سے زیادہ درج کریں۔');
+    if (isKnottingWorker && form.knottingPaymentMethod !== 'monthly' && !(Number.isFinite(Number(form.knottingDefaultRate)) && Number(form.knottingDefaultRate) >= 0.01)) nextErrors.knottingDefaultRate = employeeText('Knotting Rate must be greater than zero.', 'ناٹنگ ریٹ صفر سے زیادہ درج کریں۔');
+    if (form.designationId && !designationOptions.some((row) => row.value === form.designationId)) nextErrors.designationId = employeeText('Select a Designation for this Department.', 'اس شعبے کا عہدہ منتخب کریں۔');
     const paidLeaveAllowance = Number(paidLeaveAllowanceText || 0);
 
     if (
@@ -881,6 +908,7 @@ const WeavingEmployeeFormPage = () => {
   };
 
   const saveEmployee = async ({ saveAndNew = false } = {}) => {
+    if (saving) return false;
     const validationErrors = validateForm();
 
     if (Object.keys(validationErrors).length > 0) {
@@ -915,7 +943,7 @@ const WeavingEmployeeFormPage = () => {
         weeklyOffDays: normalizeWeeklyOffDays(form.weeklyOffDays),
         paidLeaveAllowance: Number(form.paidLeaveAllowance || 0),
         otAllowed: form.otAllowed !== false,
-        joiningDate: form.joiningDate || todayInput(),
+        joiningDate: form.joiningDate,
         openingBalance: {
           amount: openingBalanceAmount,
           type: openingBalanceType,
@@ -927,6 +955,11 @@ const WeavingEmployeeFormPage = () => {
       const savedEmployee = isEdit
         ? await updateEmployee(id, payload, { moduleScope: MODULE_SCOPE })
         : await createEmployee(payload, { moduleScope: MODULE_SCOPE });
+      if (photoDirty) {
+        try { await saveWeavingEmployeePhoto(savedEmployee._id, photoFile); }
+        catch { showWeavingWarning(employeeText('Employee saved, but photo could not be saved. Open Edit to retry.', 'ملازم محفوظ ہو گیا، تصویر محفوظ نہیں ہوئی۔ ترمیم سے دوبارہ کوشش کریں۔')); }
+        setPhotoDirty(false);
+      }
 
       if (saveAndNew && !isEdit) {
         await resetFormToDefaults();
@@ -985,35 +1018,10 @@ const WeavingEmployeeFormPage = () => {
         </div>
       </section>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} dir={getCurrentLanguage() === "ur" ? "rtl" : "ltr"} className="space-y-3">
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:p-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[180px_minmax(0,1fr)]">
-            <div className="flex flex-col items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              {photoPreview ? (
-                <img
-                  src={photoPreview}
-                  alt=""
-                  className="h-28 w-28 rounded-lg object-cover"
-                />
-              ) : (
-                <FaUserCircle className="h-28 w-28 text-cyan-700" aria-hidden="true" />
-              )}
-              <label className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-                {t('weaving.employees.fields.photo')}
-                <input type="file" accept="image/*" className="sr-only" onChange={handlePhotoChange} />
-              </label>
-              {photoPreview && (
-                <button
-                  type="button"
-                  onClick={removePhoto}
-                  title={t('travel.common.delete')}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                >
-                  <FaTimes aria-hidden="true" />
-                </button>
-              )}
-            </div>
-
+<h2 className="mb-3 rounded bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-900">{employeeText("Basic Information","?????? ???????")}</h2>
+          <div className="grid grid-cols-1 gap-4 ">
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <InputField
                 labelKey="weaving.employees.fields.employeeNo"
@@ -1037,7 +1045,6 @@ const WeavingEmployeeFormPage = () => {
                 name="name"
                 value={form.name}
                 onChange={handleChange}
-                required
                 placeholderKey="employees.placeholders.name"
                 error={fieldErrors.name}
               />
@@ -1046,7 +1053,6 @@ const WeavingEmployeeFormPage = () => {
                 name="fatherName"
                 value={form.fatherName}
                 onChange={handleChange}
-                required
                 error={fieldErrors.fatherName}
               />
               <InputField
@@ -1084,6 +1090,8 @@ const WeavingEmployeeFormPage = () => {
               <InputField
                 labelKey="weaving.employees.fields.joiningDate"
                 name="joiningDate"
+                required
+                error={fieldErrors.joiningDate}
                 type="date"
                 value={form.joiningDate}
                 onChange={handleChange}
@@ -1093,6 +1101,7 @@ const WeavingEmployeeFormPage = () => {
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:p-4">
+<h2 className="mb-3 rounded bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-900">{employeeText("Job Setup","?????? ?? ?????")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SelectWithAdd
               labelKey="weaving.employees.fields.unit"
@@ -1121,6 +1130,7 @@ const WeavingEmployeeFormPage = () => {
             <SelectWithAdd
               labelKey="weaving.employees.fields.designation"
               name="designationId"
+              required
               value={form.designationId}
               onChange={handleChange}
               options={designationOptions}
@@ -1145,6 +1155,7 @@ const WeavingEmployeeFormPage = () => {
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:p-4">
+<h2 className="mb-3 rounded bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-900">{employeeText("Salary & Duty","?????? ??? ?????")}</h2>
           <h2 className="mb-3 text-sm font-extrabold text-slate-800">
             {t('weaving.employees.sections.salaryDuty')}
           </h2>
@@ -1198,8 +1209,9 @@ const WeavingEmployeeFormPage = () => {
                   : 'weaving.employees.fields.monthlySalary'
               }
               name="baseSalary"
+              required
               type="number"
-              min="0"
+              min="0.01"
               step="0.01"
               value={form.baseSalary}
               onChange={handleChange}
@@ -1209,7 +1221,7 @@ const WeavingEmployeeFormPage = () => {
             <div className="min-w-0 space-y-2 sm:col-span-2">
               <span className="block text-xs font-extrabold text-slate-500">
                 {t('weaving.employees.fields.dutyHours')}
-                {!isEdit && <span className="text-rose-500"> *</span>}
+                <span className="text-rose-500"> *</span>
               </span>
               <div className="grid grid-cols-3 gap-2">
                 {[
@@ -1300,7 +1312,47 @@ const WeavingEmployeeFormPage = () => {
                 {form.otAllowed !== false ? t('weaving.employees.yes') : t('weaving.employees.no')}
               </span>
             </label>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 sm:col-span-2 xl:col-span-4">
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm font-extrabold text-slate-800 md:px-4"
+          >
+            {t('weaving.employees.moreDetails')}
+            {detailsOpen ? <FaChevronUp aria-hidden="true" /> : <FaChevronDown aria-hidden="true" />}
+          </button>
+          {detailsOpen && (
+            <div className="grid grid-cols-1 gap-3 border-t border-slate-100 p-3 md:p-4 lg:grid-cols-3">
+            <div className="flex flex-col items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {photoPreview ? (
+                <img
+                  src={photoPreview}
+                  alt=""
+                  className="h-28 w-28 rounded-lg object-cover"
+                />
+              ) : (
+                <FaUserCircle className="h-28 w-28 text-cyan-700" aria-hidden="true" />
+              )}
+              <label className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50">
+                {t('weaving.employees.fields.photo')}
+                <input type="file" accept="image/*" className="sr-only" onChange={handlePhotoChange} />
+              </label>
+              {photoPreview && (
+                <button
+                  type="button"
+                  onClick={removePhoto}
+                  title={t('travel.common.delete')}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                >
+                  <FaTimes aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 lg:col-span-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <InputField
                   labelKey="weaving.employees.fields.openingBalanceAmount"
@@ -1386,20 +1438,7 @@ const WeavingEmployeeFormPage = () => {
                   )}
               </div>
             </div>
-          </div>
-        </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <button
-            type="button"
-            onClick={() => setDetailsOpen((open) => !open)}
-            className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm font-extrabold text-slate-800 md:px-4"
-          >
-            {t('weaving.employees.moreDetails')}
-            {detailsOpen ? <FaChevronUp aria-hidden="true" /> : <FaChevronDown aria-hidden="true" />}
-          </button>
-          {detailsOpen && (
-            <div className="grid grid-cols-1 gap-3 border-t border-slate-100 p-3 md:p-4 lg:grid-cols-3">
               <TextAreaField
                 labelKey="weaving.employees.fields.address"
                 name="address"
@@ -1533,6 +1572,7 @@ const WeavingEmployeeFormPage = () => {
                     labelKey: `weaving.employees.fields.${masterModal}`,
                     required: true,
                   },
+                  ...(masterModal === "shift" ? [{ name: "startTime", labelKey: "weaving.employees.fields.startTime", type: "time", required: true }, { name: "endTime", labelKey: "weaving.employees.fields.endTime", type: "time", required: true }] : []),
                 ]
           }
           values={masterForm}

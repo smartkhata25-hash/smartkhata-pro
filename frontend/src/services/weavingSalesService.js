@@ -7,14 +7,18 @@ export const getSalesInvoiceById = async (id) => unwrap(await axios.get(`${URL}/
 export const createKacchiParchi = async (body) => unwrap(await axios.post(`${URL}/kacchi`, body, cfg()));
 export const updateKacchiParchi = async (id, body) => unwrap(await axios.put(`${URL}/kacchi/${id}`, body, cfg()));
 export const voidKacchiParchi = async (id, reason) => unwrap(await axios.post(`${URL}/kacchi/${id}/void`, { reason }, cfg()));
+export const confirmPakkiInvoice = async (body) => unwrap(await axios.post(`${URL}/pakki/confirm`, body, cfg()));
 export const createPakkiSettlement = async (body) => unwrap(await axios.post(`${URL}/pakki`, body, cfg()));
+export const updatePakkiSettlement = async (id, body) => unwrap(await axios.put(`${URL}/pakki/${id}`, body, cfg()));
 export const voidPakkiSettlement = async (id, reason) => unwrap(await axios.post(`${URL}/pakki/${id}/void`, { reason }, cfg()));
 export const createInvoiceFromPakki = async (pakkiId) => unwrap(await axios.post(`${URL}/pakki/${pakkiId}/invoice`, {}, cfg()));
-export const createDirectSaleDraft = async (body) => unwrap(await axios.post(`${URL}/invoices/direct`, body, cfg()));
+export const confirmDirectSale = async (body) => unwrap(await axios.post(`${URL}/invoices/direct`, body, cfg()));
 export const updateSalesInvoiceDraft = async (id, body) => unwrap(await axios.put(`${URL}/invoices/${id}`, body, cfg()));
 export const postSalesInvoice = async (id) => unwrap(await axios.post(`${URL}/invoices/${id}/post`, {}, cfg()));
 export const voidSalesInvoice = async (id, reason) => unwrap(await axios.post(`${URL}/invoices/${id}/void`, { reason }, cfg()));
 export const receiveRejection = async (dueId, body) => unwrap(await axios.post(`${URL}/rejections/${dueId}/receive`, body, cfg()));
 export const reverseRejectionReceipt = async (id, reason) => unwrap(await axios.post(`${URL}/rejection-receipts/${id}/reverse`, { reason }, cfg()));
 export const salesInvoiceOutputUrl = (id, format) => `${URL}/invoices/${id}/${format}?token=${encodeURIComponent(localStorage.getItem('token') || '')}${format === 'print' ? '&print=1' : ''}`;
-export const parchiOutputUrl = (kind, id, format) => `${URL}/${kind}/${id}/${format}?token=${encodeURIComponent(localStorage.getItem('token') || '')}${format === 'print' ? '&print=1' : ''}`;
+export const parchiOutputUrl = (kind, id, format, mode = 'quick') => `${URL}/${kind}/${id}/${format}?token=${encodeURIComponent(localStorage.getItem('token') || '')}${format === 'print' ? '&print=1' : ''}${kind === 'kacchi' ? `&mode=${mode === 'quick' ? 'quick' : 'detailed'}` : ''}`;
+// Compatibility for older callers; the endpoint finalizes atomically.
+export const createDirectSaleDraft = confirmDirectSale;

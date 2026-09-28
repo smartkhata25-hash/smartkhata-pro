@@ -14,12 +14,45 @@ const buildPartyDetailLedgerPrint = require("../services/partyDetailLedgerPrintB
 const generatePartyDetailLedgerHTML = require("../templates/partyDetailLedgerTemplate");
 
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
+const {
+  MODULE_SCOPES,
+  applyModuleScopeFilter,
+  getRequestedModuleScope,
+  normalizeModuleScope,
+} = require("../utils/moduleScope");
+const {
+  TRAVEL_PARTY_OPENING_ORIGIN,
+} = require("../services/travel/travelCounterpartyService");
 const {
   buildBusinessDateRange,
   startOfBusinessDay,
 } = require("../utils/businessDate");
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+
+const TRAVEL_PARTY_LEDGER_ORIGINS = Object.freeze([
+  "travel_invoice",
+  "travel_refund",
+  "travel_receive_payment",
+  "travel_vendor_payment",
+  "travel_vendor_return",
+  TRAVEL_PARTY_OPENING_ORIGIN,
+]);
+
+const getLedgerModuleScope = (query = {}) =>
+  normalizeModuleScope(
+    getRequestedModuleScope(query, MODULE_SCOPES.TRADING),
+    MODULE_SCOPES.TRADING,
+  );
+
+const applyPartyLedgerJournalScope = (match, moduleScope) => {
+  if (moduleScope === MODULE_SCOPES.TRAVEL) {
+    match.originModule = { $in: TRAVEL_PARTY_LEDGER_ORIGINS };
+  }
+
+  return match;
+};
 
 const getStartOfDay = (value) => {
   if (!value) return null;
@@ -72,6 +105,10 @@ const getSourceLabel = (type = "") => {
     manual: "Manual Entry",
     adjustment: "Adjustment",
     expense: "Expense",
+    travel_booking: "Travel Invoice",
+    travel_vendor_cost: "Travel Vendor Cost",
+    travel_refund: "Travel Refund",
+    travel_vendor_return: "Travel Vendor Return",
   };
 
   return map[type] || type || "-";
@@ -111,6 +148,7 @@ const fetchPartyDetailedLedgerData = async ({
   userId,
   startDate,
   endDate,
+  moduleScope = MODULE_SCOPES.TRADING,
 }) => {
   if (!mongoose.Types.ObjectId.isValid(partyId)) {
     throw new Error("Invalid party ID");
@@ -123,11 +161,16 @@ const fetchPartyDetailedLedgerData = async ({
   const partyObjectId = toObjectId(partyId);
   const userObjectId = toObjectId(userId);
 
-  const party = await Party.findOne({
+  const partyQuery = {
     _id: partyObjectId,
     userId: userObjectId,
     isDeleted: false,
-  })
+  };
+  const party = await Party.findOne(
+    moduleScope === MODULE_SCOPES.TRAVEL
+      ? applyModuleScopeFilter(partyQuery, moduleScope)
+      : partyQuery,
+  )
     .populate("account")
     .lean();
 
@@ -155,13 +198,13 @@ const fetchPartyDetailedLedgerData = async ({
   if (start) {
     const openingResult = await JournalEntry.aggregate([
       {
-        $match: {
+        $match: applyPartyLedgerJournalScope({
           createdBy: userObjectId,
           isDeleted: false,
           sourceType: { $ne: "reversal" },
           "lines.account": accountObjectId,
           date: { $lt: start },
-        },
+        }, moduleScope),
       },
       {
         $unwind: "$lines",
@@ -200,12 +243,12 @@ const fetchPartyDetailedLedgerData = async ({
 
   const partyOpeningResult = await JournalEntry.aggregate([
     {
-      $match: {
+      $match: applyPartyLedgerJournalScope({
         createdBy: userObjectId,
         isDeleted: false,
         sourceType: { $in: openingSourceTypes },
         "lines.account": accountObjectId,
-      },
+      }, moduleScope),
     },
     {
       $unwind: "$lines",
@@ -235,12 +278,12 @@ const fetchPartyDetailedLedgerData = async ({
     Number(partyOpeningResult[0]?.balance || 0).toFixed(2),
   );
 
-  const matchFilter = {
+  const matchFilter = applyPartyLedgerJournalScope({
     createdBy: userObjectId,
     isDeleted: false,
     sourceType: { $ne: "reversal" },
     "lines.account": accountObjectId,
-  };
+  }, moduleScope);
 
   if (start || end) {
     matchFilter.date = {};
@@ -551,6 +594,8 @@ const fetchPartyDetailedLedgerData = async ({
 
     closingBalance,
 
+    moduleScope,
+
     ledger,
   };
 };
@@ -561,15 +606,21 @@ const getPartyDetailLedgerHtml = async (req, res) => {
     const { partyId } = req.params;
 
     const { startDate, endDate, size, lang } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     const rawData = await fetchPartyDetailedLedgerData({
       partyId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
+    const header =
+      moduleScope === MODULE_SCOPES.TRAVEL
+        ? await getLedgerPrintHeader(userId, moduleScope, "print")
+        : null;
 
-    const built = buildPartyDetailLedgerPrint(rawData);
+    const built = buildPartyDetailLedgerPrint({ ...rawData, header });
 
     built.lang = lang || "ur";
 
@@ -593,21 +644,30 @@ const generatePartyDetailLedgerPdf = async (req, res) => {
     const { partyId } = req.params;
 
     const { startDate, endDate, size, lang } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     const rawData = await fetchPartyDetailedLedgerData({
       partyId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
+    const header =
+      moduleScope === MODULE_SCOPES.TRAVEL
+        ? await getLedgerPrintHeader(userId, moduleScope, "pdf")
+        : null;
 
-    const built = buildPartyDetailLedgerPrint(rawData);
+    const built = buildPartyDetailLedgerPrint({ ...rawData, header });
 
     built.lang = lang || "ur";
 
     const html = generatePartyDetailLedgerHTML(built, size || "A4");
 
-    const pdfBuffer = await generatePdfFromHtml(html);
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      waitForImages: moduleScope === MODULE_SCOPES.TRAVEL,
+      requireImages: moduleScope === MODULE_SCOPES.TRAVEL,
+    });
 
     const safePartyName =
       String(rawData.partyName || "Party")
@@ -637,12 +697,14 @@ const getPartyDetailedLedgerJson = async (req, res) => {
     const { partyId } = req.params;
 
     const { startDate, endDate } = req.query;
+    const moduleScope = getLedgerModuleScope(req.query);
 
     const data = await fetchPartyDetailedLedgerData({
       partyId,
       userId,
       startDate,
       endDate,
+      moduleScope,
     });
 
     return res.json(data);
@@ -660,4 +722,8 @@ module.exports = {
   getPartyDetailLedgerHtml,
   generatePartyDetailLedgerPdf,
   getPartyDetailedLedgerJson,
+  _test: {
+    applyPartyLedgerJournalScope,
+    getLedgerModuleScope,
+  },
 };

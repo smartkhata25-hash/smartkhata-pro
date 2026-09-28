@@ -1210,6 +1210,26 @@ exports.updateInvoice = async (req, res) => {
       });
     }
 
+    // Converted counterparties retain their original account and historical
+    // journal trail. Do not let an edit replace that trail.
+    const historicalCustomer = existingInvoice.customerId
+      ? await Customer.findOne({ _id: existingInvoice.customerId, createdBy: userId })
+      : null;
+    const historicalParty = existingInvoice.partyId
+      ? await Party.findOne({ _id: existingInvoice.partyId, userId })
+      : null;
+    if (
+      historicalCustomer?.isActive === false ||
+      historicalCustomer?.hiddenReason === "converted" ||
+      historicalParty?.isActive === false ||
+      historicalParty?.hiddenReason === "converted"
+    ) {
+      return res.status(409).json({
+        code: "CONVERTED_HISTORICAL_RECORD",
+        message: "This historical sale invoice belongs to a converted entity and is read-only. It can still be viewed, printed, or exported.",
+      });
+    }
+
     const beforeUpdate = {
       customerName: existingInvoice.customerName,
       customerPhone: existingInvoice.customerPhone,

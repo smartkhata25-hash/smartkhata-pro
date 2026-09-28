@@ -21,6 +21,8 @@ const commercial = require("./weavingCommercialService");
 const foldingStock = require("./weavingFoldingService");
 const yarnStock = require("./weavingYarnStockService");
 const costing = require("./weavingCostingService");
+const thanLocation = require("./weavingThanLocationService");
+const manualStock = require("./weavingManualStockService");
 const { recalculateAccountBalances } = require("../../utils/accountHelper");
 
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -31,7 +33,7 @@ const id = (value) => String(value?._id || value || "");
 const sessionOptions = (session) => (session ? { session } : {});
 const setSession = (query, session) => (session ? query.session(session) : query);
 
-const runAtomic = async (work) => {
+const runAtomic = async (work, requireTransaction = false) => {
   const session = await mongoose.startSession();
   let result;
   try {
@@ -40,6 +42,7 @@ const runAtomic = async (work) => {
   } catch (error) {
     const unsupported = /Transaction numbers are only allowed|replica set member|does not support transactions/i.test(error.message || "");
     if (!unsupported) throw error;
+    if (requireTransaction) throw fail("Sales changes require database transaction support. No changes were saved.", 503);
     return work(null);
   } finally {
     await session.endSession();
@@ -103,9 +106,29 @@ const validateReceiptClassification = (source = {}) => {
 };
 
 const allocateNo = async (userId, type, prefix, width = 5, session = null) => {
+  const sequences = {
+    weaving_sales_invoice: [WeavingSalesInvoice, "invoiceNo", "WS"],
+    weaving_kacchi: [WeavingKacchiParchi, "kacchiNo", "KC"],
+    weaving_pakki: [WeavingPakkiSettlement, "pakkiNo", "PK"],
+    weaving_rejection_receipt: [WeavingRejectionReceipt, "receiptNo", "RR"],
+    weaving_receive_payment: [WeavingMoneyTransaction, "transactionNo", "RCV"],
+  };
+  const [Model, field, expectedPrefix] = sequences[type] || [];
+  if (!Model || prefix !== expectedPrefix) throw fail("Invalid Sales numbering sequence.");
+  // Include void/legacy records: their numbers must never be reused. Compare
+  // numeric suffixes, since string sorting fails when the padded width grows.
+  const rows = await setSession(Model.find({ userId, [field]: { $regex: `^${prefix}-[0-9]+$` } }).select(field).lean(), session);
+  let highest = 0;
+  for (const row of rows) {
+    const value = Number(row[field].slice(prefix.length + 1));
+    if (!Number.isSafeInteger(value) || value >= Number.MAX_SAFE_INTEGER) throw fail("Sales numbering sequence exceeds the supported range.");
+    highest = Math.max(highest, value);
+  }
+  // Reconcile and increment in ONE atomic counter write, using the same
+  // transaction as the document. Never lower a healthy or concurrently advanced counter.
   const counter = await Counter.findOneAndUpdate(
     { userId, type },
-    { $inc: { seq: 1 }, $setOnInsert: { userId, type } },
+    [{ $set: { seq: { $add: [{ $max: [{ $ifNull: ["$seq", 0] }, highest] }, 1] } } }],
     { new: true, upsert: true, setDefaultsOnInsert: false, ...sessionOptions(session) },
   );
   return `${prefix}-${String(counter.seq).padStart(width, "0")}`;
@@ -118,8 +141,8 @@ const previewNo = async (userId, type, prefix, width = 5) => {
 
 const qualitySnapshot = (quality) => ({ name: quality.name, code: quality.code, warpCount: quality.warpCount, weftCount: quality.weftCount, construction: quality.construction, width: quality.width, brand: quality.brand });
 
-const getFabricBalances = async ({ userId, fabricQualityId, godownId, category = "normal", ownershipType = "own", ownerPartyId = null, session = null }) => {
-  const match = { userId, fabricQualityId, status: "posted", ...(godownId ? { godownId } : {}), ownershipType };
+const getFabricBalances = async ({ userId, fabricQualityId, godownId, category = "normal", ownershipType = "own", ownerPartyId = null, session = null, exactSource = false }) => {
+  const match = { userId, fabricQualityId, status: "posted", ...(godownId || exactSource ? { godownId: godownId || null } : {}), ownershipType };
   if (ownershipType === "party") match.ownerPartyId = ownerPartyId;
   const entries = await setSession(WeavingFoldingEntry.find(match).select("meter weightKg goodMeter bGradeMeter rejectedMeter").lean(), session);
   const gradeField = category === "normal" ? "goodMeter" : category === "b" ? "bGradeMeter" : category === "rejected" ? "rejectedMeter" : null;
@@ -131,7 +154,7 @@ const getFabricBalances = async ({ userId, fabricQualityId, godownId, category =
     total.thanCount += ratio;
     return total;
   }, { meter: 0, weightKg: 0, thanCount: 0, pieceCount: 0 });
-  const movementMatch = { userId, fabricQualityId, category, isVoided: false, ...(godownId ? { godownId } : {}), ownershipType };
+  const movementMatch = { userId, fabricQualityId, category, isVoided: false, ...(godownId || exactSource ? { godownId: godownId || null } : {}), ownershipType };
   if (ownershipType === "party") movementMatch.ownerPartyId = ownerPartyId;
   const movements = await setSession(WeavingFabricMovement.find(movementMatch).select("direction meter weightKg thanCount pieceCount").lean(), session);
   movements.forEach((movement) => {
@@ -153,28 +176,90 @@ const withStockLock = async (userId, key, work) => {
   try { return await work(); } finally { await WeavingStockLock.deleteOne({ userId, key }); }
 };
 
+const fabricLockKey = (row) => ["fabric", row.fabricQualityId, row.godownId, row.category || "normal", row.ownershipType || "own", row.ownerPartyId || "own"].map(id).join(":");
+const withFabricLocks = async (userId, buckets, work) => {
+  const keys = [...new Set(buckets.map(fabricLockKey))].sort();
+  const acquire = (index) => index === keys.length ? work() : withStockLock(userId, keys[index], () => acquire(index + 1));
+  return acquire(0);
+};
+const validateSource = async (userId, godownId, session) => {
+  if (godownId === null) return null;
+  if (!mongoose.isValidObjectId(godownId)) throw fail("Select a valid Source Location for the selected stock.");
+  const godown = await setSession(WeavingGodown.findOne({ _id: godownId, userId, isActive: true }), session);
+  if (!godown) throw fail("Select a valid Source Location for the selected stock.");
+  return godown;
+};
+const assertManualStock = async (userId, bucket, values, session) => {
+  const rows = await manualStock.getManualStock(userId, session);
+  const pool = rows.find((row) => manualStock.key(row) === manualStock.key(bucket)) || {};
+  const aggregate = await getFabricBalances({ userId, ...bucket, session, exactSource: true });
+  const tracked = (await thanLocation.resolveCurrentThans(userId, { session })).filter((row) => row.locationState === "known" && thanLocation.matchesBucket(row, bucket));
+  const reserved = tracked.reduce((total, row) => ({ meter: qty(total.meter + row.meter), weightKg: qty(total.weightKg + row.weightKg), thanCount: total.thanCount + 1 }), { meter: 0, weightKg: 0, thanCount: 0 });
+  const available = Object.fromEntries(["meter", "weightKg", "thanCount", "pieceCount"].map((field) => [field, Math.max(0, qty(Math.min(Number(pool[field] || 0), aggregate[field] - Number(reserved[field] || 0))))]));
+  if (values.meter <= 0 || Object.values(values).some((value) => !Number.isFinite(Number(value)) || Number(value) < 0)) throw fail("Enter a valid Meter quantity and non-negative KG / Than count.");
+  if (Object.keys(available).some((field) => Number(values[field] || 0) > available[field] + 0.000001)) throw fail(`Only ${available.meter} M meter-based Fabric Stock is available (KG: ${available.weightKg}, Than: ${available.thanCount}). Use Than Wise for tracked Thans.`, 409);
+  return available;
+};
+const kacchiBucket = async (userId, payload) => {
+  if (!mongoose.isValidObjectId(payload.contractId)) throw fail("Select a valid Contract.");
+  const contract = await WeavingContract.findOne({ _id: payload.contractId, userId });
+  return { fabricQualityId: payload.fabricQualityId, godownId: payload.godownId, category: "normal", ownershipType: contract?.contractType === "conversion" ? "party" : "own", ownerPartyId: contract?.contractType === "conversion" ? contract.partyId : null };
+};
+const saveManualKacchi = async (userId, payload, session, current = null) => {
+  if (!mongoose.isValidObjectId(payload.contractId) || !mongoose.isValidObjectId(payload.partyId) || !mongoose.isValidObjectId(payload.fabricQualityId)) throw fail("Select a valid Contract, Party and Quality.");
+  const contract = await setSession(WeavingContract.findOne({ _id: payload.contractId, userId, type: "sales", status: "active" }), session);
+  const party = await setSession(WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } }), session);
+  const quality = await setSession(WeavingFabricQuality.findOne({ _id: payload.fabricQualityId, userId, isActive: true }), session);
+  await validateSource(userId, payload.godownId, session);
+  if (!contract || !party || !quality || id(contract.partyId) !== id(party) || id(contract.itemId) !== id(quality)) throw fail("Kacchi details do not match the selected Contract.");
+  const bucket = { fabricQualityId: quality._id, godownId: payload.godownId, category: "normal", ownershipType: contract.contractType === "conversion" ? "party" : "own", ownerPartyId: contract.contractType === "conversion" ? party._id : null };
+  if (current) await WeavingFabricMovement.updateMany({ userId, kacchiId: current._id, isVoided: false }, { $set: { isVoided: true } }, sessionOptions(session));
+  const values = { meter: qty(payload.totalMeter), weightKg: qty(payload.totalKg), thanCount: qty(payload.totalThan) };
+  await assertManualStock(userId, bucket, values, session);
+  const document = { ...bucket, entryMode: "manual", dispatchDate: clean(payload.dispatchDate), partyId: party._id, contractId: contract._id, qualitySnapshot: qualitySnapshot(quality), lines: [], totalMeter: values.meter, totalKg: values.weightKg, totalThan: values.thanCount, totalLbs: qty(values.weightKg * 2.2046226218), notes: clean(payload.notes) };
+  let kacchi = current;
+  if (kacchi) { Object.assign(kacchi, document); await kacchi.save(sessionOptions(session)); }
+  else kacchi = await createOne(WeavingKacchiParchi, { userId, requestKey: clean(payload.requestKey), kacchiNo: await allocateNo(userId, "weaving_kacchi", "KC", 5, session), ...document }, session);
+  await createOne(WeavingFabricMovement, { userId, ...bucket, ...values, date: kacchi.dispatchDate, movementType: "kacchi_out", direction: "out", stockIdentity: "untracked", kacchiId: kacchi._id, notes: kacchi.kacchiNo }, session);
+  return kacchi;
+};
+
 const buildKacchiContext = async (userId, payload, session, currentKacchiId = null) => {
-  const sourceIds = [...new Set((payload.foldingEntryIds || payload.selectedThanIds || []).map(id).filter(Boolean))];
+  const sourceMessage = "Select a valid Source Location for the selected Thans.";
+  if (!mongoose.isValidObjectId(payload.contractId)) throw fail("Select a valid Contract.");
+  if (!mongoose.isValidObjectId(payload.partyId) || !mongoose.isValidObjectId(payload.fabricQualityId)) throw fail("Select a valid Party and Fabric Quality for the Contract.");
+  // Null explicitly selects Folding / Unassigned; an omitted or empty source is not a selection.
+  const godownId = payload.godownId;
+  if (godownId !== null && (typeof godownId !== "string" || !mongoose.isValidObjectId(godownId))) throw fail(sourceMessage);
+  const suppliedIds = payload.foldingEntryIds || payload.selectedThanIds || [];
+  if (!Array.isArray(suppliedIds) || suppliedIds.some((value) => !mongoose.isValidObjectId(value))) throw fail("Select valid available Thans.");
+  const sourceIds = [...new Set(suppliedIds.map(id).filter(Boolean))];
   if (!sourceIds.length) throw fail("Select at least one available Than");
   const [contract, party, quality, godown] = await Promise.all([
     setSession(WeavingContract.findOne({ _id: payload.contractId, userId, type: "sales", status: "active" }), session),
     setSession(WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } }), session),
     setSession(WeavingFabricQuality.findOne({ _id: payload.fabricQualityId, userId, isActive: true }), session),
-    setSession(WeavingGodown.findOne({ _id: payload.godownId, userId, isActive: true }), session),
+    godownId === null ? null : setSession(WeavingGodown.findOne({ _id: godownId, userId, isActive: true }), session),
   ]);
-  if (!contract || !party || !quality || !godown) throw fail("Valid Contract, Party, Fabric Quality and Godown are required");
+  if (godownId !== null && !godown) throw fail(sourceMessage);
+  if (!contract || !party || !quality) throw fail("Valid Contract, Party and Fabric Quality are required");
   if (id(contract.partyId) !== id(party._id) || id(contract.itemId) !== id(quality._id)) throw fail("Kacchi details do not match the selected Contract", 409);
   const ownershipType = contract.contractType === "conversion" ? "party" : "own";
-  const entries = await setSession(WeavingFoldingEntry.find({ _id: { $in: sourceIds }, userId, status: "posted", grade: "a", activeKacchiId: { $in: [null, currentKacchiId] } }), session);
+  const originals = await setSession(WeavingFoldingEntry.find({ _id: { $in: sourceIds }, userId, status: "posted", grade: "a", activeSalesInvoiceId: null, activeKacchiId: { $in: [null, currentKacchiId] } }), session);
+  const locations = await thanLocation.resolveCurrentThans(userId, { session, includeDispatched: true });
+  const entries = originals.map((entry) => locations.find((row) => id(row) === id(entry))).filter(Boolean);
   if (entries.length !== sourceIds.length) throw fail("One or more selected Thans are unavailable or already dispatched", 409);
   entries.forEach((entry) => {
-    if (id(entry.fabricQualityId) !== id(quality._id) || id(entry.godownId) !== id(godown._id) || entry.ownershipType !== ownershipType || (ownershipType === "party" && id(entry.ownerPartyId) !== id(party._id)) || (entry.contractId && id(entry.contractId) !== id(contract._id))) throw fail(`Than ${entry.thanNo} does not match the selected Party, Contract, Quality or Godown`, 409);
+    if (entry.activeSalesInvoiceId || (entry.dispatched && id(entry.activeKacchiId) !== id(currentKacchiId))) throw fail("Selected Than is no longer available at this location.", 409);
+    if (entry.locationState !== "known") throw fail(`Than ${entry.thanNo}: ${entry.locationReason}`, 409);
+    if (id(entry.godownId) !== id(godownId)) throw fail(`Than ${entry.thanNo} is currently available at ${entry.godownName}. Select that Source Location.`, 409);
+    if (id(entry.fabricQualityId) !== id(quality._id) || entry.ownershipType !== ownershipType || (ownershipType === "party" && id(entry.ownerPartyId) !== id(party._id)) || (entry.contractId && id(entry.contractId) !== id(contract._id))) throw fail(`Than ${entry.thanNo} does not match the selected Party, Contract or Quality`, 409);
   });
-  const lines = entries.map((entry) => ({ foldingEntryId: entry._id, thanNo: entry.thanNo, fabricQualityId: quality._id, qualitySnapshot: qualitySnapshot(quality), grade: "a", category: "normal", meter: qty(entry.meter), weightKg: qty(entry.weightKg), weightLbs: qty(entry.weightLbs), thanCount: 1, godownId: godown._id, ownershipType, ownerPartyId: ownershipType === "party" ? party._id : null, contractId: contract._id }));
+  const lines = entries.map((entry) => ({ foldingEntryId: entry._id, thanNo: entry.thanNo, fabricQualityId: quality._id, qualitySnapshot: qualitySnapshot(quality), grade: "a", category: "normal", meter: qty(entry.meter), weightKg: qty(entry.weightKg), weightLbs: qty(entry.weightLbs), thanCount: 1, godownId: godown?._id || null, ownershipType, ownerPartyId: ownershipType === "party" ? party._id : null, contractId: contract._id }));
   const selectedTotals = { meter: qty(lines.reduce((sum, line) => sum + line.meter, 0)), weightKg: qty(lines.reduce((sum, line) => sum + line.weightKg, 0)), thanCount: qty(lines.reduce((sum, line) => sum + line.thanCount, 0)) };
-  const available = await getFabricBalances({ userId, fabricQualityId: quality._id, godownId: godown._id, category: "normal", ownershipType, ownerPartyId: ownershipType === "party" ? party._id : null, session });
+  const available = await getFabricBalances({ userId, fabricQualityId: quality._id, godownId: godown?._id || null, category: "normal", ownershipType, ownerPartyId: ownershipType === "party" ? party._id : null, session, exactSource: true });
   if (currentKacchiId) {
-    const currentMovements = await setSession(WeavingFabricMovement.find({ userId, kacchiId: currentKacchiId, movementType: "kacchi_out", isVoided: false }).select("meter weightKg thanCount").lean(), session);
+    const currentMovements = await setSession(WeavingFabricMovement.find({ userId, kacchiId: currentKacchiId, movementType: "kacchi_out", isVoided: false, fabricQualityId: quality._id, godownId: godown?._id || null, ownershipType, ownerPartyId: ownershipType === "party" ? party._id : null }).select("meter weightKg thanCount").lean(), session);
     currentMovements.forEach((movement) => { available.meter = qty(available.meter + movement.meter); available.weightKg = qty(available.weightKg + movement.weightKg); available.thanCount = qty(available.thanCount + movement.thanCount); });
   }
   if (selectedTotals.meter > available.meter || selectedTotals.weightKg > available.weightKg || selectedTotals.thanCount > available.thanCount) throw fail("Selected Thans exceed currently available Fabric Stock", 409);
@@ -188,28 +273,36 @@ const createKacchi = async (userId, payload) => {
   if (!requestKey) throw fail("Request key is required");
   const existing = await WeavingKacchiParchi.findOne({ userId, requestKey });
   if (existing) return existing;
-  return runAtomic(async (session) => {
+  return withFabricLocks(userId, [await kacchiBucket(userId, payload)], () => runAtomic(async (session) => {
+    const duplicate = await setSession(WeavingKacchiParchi.findOne({ userId, requestKey }), session);
+    if (duplicate) return duplicate;
+    if (payload.entryMode === "manual") return saveManualKacchi(userId, payload, session);
     const context = await buildKacchiContext(userId, payload, session);
-    const kacchi = await createOne(WeavingKacchiParchi, { userId, requestKey, kacchiNo: await allocateNo(userId, "weaving_kacchi", "KC", 5, session), dispatchDate: clean(payload.dispatchDate), partyId: context.party._id, contractId: context.contract._id, fabricQualityId: context.quality._id, qualitySnapshot: qualitySnapshot(context.quality), godownId: context.godown._id, ownershipType: context.ownershipType, ownerPartyId: context.ownershipType === "party" ? context.party._id : null, lines: context.lines, ...context.totals, notes: clean(payload.notes) }, session);
+    const kacchi = await createOne(WeavingKacchiParchi, { userId, requestKey, kacchiNo: await allocateNo(userId, "weaving_kacchi", "KC", 5, session), dispatchDate: clean(payload.dispatchDate), partyId: context.party._id, contractId: context.contract._id, fabricQualityId: context.quality._id, qualitySnapshot: qualitySnapshot(context.quality), godownId: context.godown?._id || null, ownershipType: context.ownershipType, ownerPartyId: context.ownershipType === "party" ? context.party._id : null, lines: context.lines, ...context.totals, notes: clean(payload.notes) }, session);
     for (const entry of context.entries) {
-      const claimed = await WeavingFoldingEntry.findOneAndUpdate({ _id: entry._id, userId, status: "posted", grade: "a", activeKacchiId: null }, { $set: { activeKacchiId: kacchi._id, dispatchStatus: "kacchi_out" } }, { new: true, ...sessionOptions(session) });
+      const claimed = await WeavingFoldingEntry.findOneAndUpdate({ _id: entry._id, userId, status: "posted", grade: "a", activeKacchiId: null, activeSalesInvoiceId: null, ...thanLocation.revisionFilter(entry) }, { $set: { activeKacchiId: kacchi._id, dispatchStatus: "kacchi_out" }, $inc: { stockRevision: 1 } }, { new: true, ...sessionOptions(session) });
       if (!claimed) throw fail(`Than ${entry.thanNo} was dispatched by another request`, 409);
     }
     await WeavingFabricMovement.insertMany(context.lines.map((line) => ({ userId, date: kacchi.dispatchDate, movementType: "kacchi_out", category: line.category, direction: "out", fabricQualityId: line.fabricQualityId, godownId: line.godownId, ownershipType: line.ownershipType, ownerPartyId: line.ownerPartyId, meter: line.meter, weightKg: line.weightKg, thanCount: line.thanCount, kacchiId: kacchi._id, sourceFoldingEntryId: line.foldingEntryId, notes: `Kacchi ${kacchi.kacchiNo} / ${line.thanNo}` })), sessionOptions(session));
     return kacchi;
-  });
+  }, true));
 };
 
-const updateKacchi = async (userId, kacchiId, payload) => runAtomic(async (session) => {
+const updateKacchi = async (userId, kacchiId, payload) => {
+  const current = await WeavingKacchiParchi.findOne({ _id: kacchiId, userId });
+  return withFabricLocks(userId, [await kacchiBucket(userId, payload), ...(current ? [current] : [])], () => runAtomic(async (session) => {
   const kacchi = await setSession(WeavingKacchiParchi.findOne({ _id: kacchiId, userId, status: "confirmed", pakkiId: null }), session);
   if (!kacchi) throw fail("Only an unfinalized Kacchi can be edited", 409);
+  if ((payload.entryMode || "than") !== (kacchi.entryMode || "than")) throw fail("Keep the existing entry mode when editing. Void and create a new dispatch to change modes.");
+  if (kacchi.entryMode === "manual") return saveManualKacchi(userId, payload, session, kacchi);
   const context = await buildKacchiContext(userId, payload, session, kacchi._id);
   const oldIds = new Set(kacchi.lines.map((line) => id(line.foldingEntryId)));
   const newIds = new Set(context.lines.map((line) => id(line.foldingEntryId)));
   const removed = kacchi.lines.filter((line) => !newIds.has(id(line.foldingEntryId)));
   const added = context.lines.filter((line) => !oldIds.has(id(line.foldingEntryId)));
   for (const line of added) {
-    const claimed = await WeavingFoldingEntry.findOneAndUpdate({ _id: line.foldingEntryId, userId, status: "posted", activeKacchiId: null }, { $set: { activeKacchiId: kacchi._id, dispatchStatus: "kacchi_out" } }, { new: true, ...sessionOptions(session) });
+    const entry = context.entries.find((row) => id(row) === id(line.foldingEntryId));
+    const claimed = await WeavingFoldingEntry.findOneAndUpdate({ _id: line.foldingEntryId, userId, status: "posted", activeKacchiId: null, activeSalesInvoiceId: null, ...thanLocation.revisionFilter(entry) }, { $set: { activeKacchiId: kacchi._id, dispatchStatus: "kacchi_out" }, $inc: { stockRevision: 1 } }, { new: true, ...sessionOptions(session) });
     if (!claimed) throw fail(`Than ${line.thanNo} is no longer available`, 409);
   }
   if (removed.length) {
@@ -218,10 +311,11 @@ const updateKacchi = async (userId, kacchiId, payload) => runAtomic(async (sessi
     await WeavingFoldingEntry.updateMany({ userId, _id: { $in: removedIds }, activeKacchiId: kacchi._id }, { $set: { activeKacchiId: null, dispatchStatus: "available" } }, sessionOptions(session));
   }
   if (added.length) await WeavingFabricMovement.insertMany(added.map((line) => ({ userId, date: clean(payload.dispatchDate), movementType: "kacchi_out", category: line.category, direction: "out", fabricQualityId: line.fabricQualityId, godownId: line.godownId, ownershipType: line.ownershipType, ownerPartyId: line.ownerPartyId, meter: line.meter, weightKg: line.weightKg, thanCount: line.thanCount, kacchiId: kacchi._id, sourceFoldingEntryId: line.foldingEntryId, notes: `Kacchi ${kacchi.kacchiNo} / ${line.thanNo}` })), sessionOptions(session));
-  Object.assign(kacchi, { dispatchDate: clean(payload.dispatchDate), partyId: context.party._id, contractId: context.contract._id, fabricQualityId: context.quality._id, qualitySnapshot: qualitySnapshot(context.quality), godownId: context.godown._id, ownershipType: context.ownershipType, ownerPartyId: context.ownershipType === "party" ? context.party._id : null, lines: context.lines, ...context.totals, notes: clean(payload.notes) });
+  Object.assign(kacchi, { dispatchDate: clean(payload.dispatchDate), partyId: context.party._id, contractId: context.contract._id, fabricQualityId: context.quality._id, qualitySnapshot: qualitySnapshot(context.quality), godownId: context.godown?._id || null, ownershipType: context.ownershipType, ownerPartyId: context.ownershipType === "party" ? context.party._id : null, lines: context.lines, ...context.totals, notes: clean(payload.notes) });
   await kacchi.save(sessionOptions(session));
   return kacchi;
-});
+}, true));
+};
 
 const voidKacchi = async (userId, kacchiId, actorId, reason) => runAtomic(async (session) => {
   const kacchi = await setSession(WeavingKacchiParchi.findOne({ _id: kacchiId, userId, status: "confirmed", pakkiId: null }), session);
@@ -231,9 +325,9 @@ const voidKacchi = async (userId, kacchiId, actorId, reason) => runAtomic(async 
   kacchi.status = "void"; kacchi.voidedAt = new Date(); kacchi.voidedBy = actorId; kacchi.voidReason = clean(reason);
   await kacchi.save(sessionOptions(session));
   return kacchi;
-});
+}, true);
 
-const createPakki = async (userId, payload) => runAtomic(async (session) => {
+const createPakkiInSession = async (userId, payload, session) => {
   const kacchi = await setSession(WeavingKacchiParchi.findOne({ _id: payload.kacchiId, userId, status: "confirmed", pakkiId: null }), session);
   if (!kacchi) {
     const existing = await setSession(WeavingPakkiSettlement.findOne({ userId, kacchiId: payload.kacchiId }), session);
@@ -251,7 +345,8 @@ const createPakki = async (userId, payload) => runAtomic(async (session) => {
   if (settlement.rejectionMeter > 0) await createOne(WeavingRejectionDue, { userId, pakkiId: pakki._id, partyId: kacchi.partyId, contractId: kacchi.contractId, fabricQualityId: kacchi.fabricQualityId, qualitySnapshot: kacchi.qualitySnapshot, ownershipType: kacchi.ownershipType, ownerPartyId: kacchi.ownerPartyId, godownId: kacchi.godownId, pakkiDate, originalRejectionMeter: settlement.rejectionMeter, pendingMeter: settlement.rejectionMeter, notes: clean(payload.commercialRemarks) }, session);
   kacchi.pakkiId = pakki._id; kacchi.status = "pakki_finalized"; await kacchi.save(sessionOptions(session));
   return pakki;
-});
+};
+const createPakki = (userId, payload) => runAtomic((session) => createPakkiInSession(userId, payload, session), true);
 
 const voidPakki = async (userId, pakkiId, actorId, reason) => runAtomic(async (session) => {
   const voidReason = clean(reason);
@@ -272,60 +367,122 @@ const voidPakki = async (userId, pakkiId, actorId, reason) => runAtomic(async (s
   return pakki;
 });
 
-const draftFromPakki = async (userId, pakkiId) => {
-  const pakki = await WeavingPakkiSettlement.findOne({ _id: pakkiId, userId, status: "finalized" });
+const draftFromPakki = async (userId, pakkiId, session = null) => {
+  const pakki = await setSession(WeavingPakkiSettlement.findOne({ _id: pakkiId, userId, status: "finalized" }), session);
   if (!pakki) throw fail("Finalized Pakki not found", 404);
-  const existing = await WeavingSalesInvoice.findOne({ userId, activeForPakki: true, status: { $ne: "void" }, $or: [{ sourcePakkiId: pakki._id }, { pakkiId: pakki._id }] });
+  const existing = await setSession(WeavingSalesInvoice.findOne({ userId, activeForPakki: true, status: { $ne: "void" }, $or: [{ sourcePakkiId: pakki._id }, { pakkiId: pakki._id }] }), session);
   if (existing) return existing;
-  const historical = await WeavingSalesInvoice.findOne({ userId, $or: [{ sourcePakkiId: pakki._id }, { pakkiId: pakki._id }] }).sort({ createdAt: -1 });
-  const [party, contract] = await Promise.all([WeavingParty.findOne({ _id: pakki.partyId, userId, isActive: true, isHidden: false }), WeavingContract.findOne({ _id: pakki.contractId, userId })]);
+  const historical = await setSession(WeavingSalesInvoice.findOne({ userId, $or: [{ sourcePakkiId: pakki._id }, { pakkiId: pakki._id }] }).sort({ createdAt: -1 }), session);
+  const [party, contract] = await Promise.all([setSession(WeavingParty.findOne({ _id: pakki.partyId, userId, isActive: true, isHidden: false }), session), setSession(WeavingContract.findOne({ _id: pakki.contractId, userId }), session)]);
   if (!party || !contract) throw fail("Pakki Party or Contract is unavailable");
   const totals = calculateInvoiceTotals({ quantity: pakki.billableMeter, rate: pakki.rate, discountAmount: pakki.amountDeduction });
-  const invoice = await WeavingSalesInvoice.create({ userId, invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS"), invoiceDate: pakki.pakkiDate, partyId: party._id, partyName: party.name, saleSource: "pakki", saleNature: pakki.contractType === "conversion" ? "conversion" : "fabric", pakkiId: historical ? null : pakki._id, sourcePakkiId: pakki._id, replacesInvoiceId: historical?._id || null, activeForPakki: true, contractId: contract._id, fabricQualityId: pakki.fabricQualityId, godownId: pakki.godownId, ownershipType: pakki.ownershipType, description: pakki.contractType === "conversion" ? "Conversion / Job Work" : pakki.qualitySnapshot?.name || "Fabric Sale", qualitySnapshot: pakki.qualitySnapshot, quantity: pakki.billableMeter, weightKg: pakki.grossKg, thanCount: pakki.thanCount, uom: "Meter", originalRate: pakki.rate, finalRate: pakki.rate, ...totals, creditDays: pakki.creditDays, dueDate: pakki.dueDate, balanceDue: totals.grandTotal, notes: pakki.commercialRemarks });
-  pakki.invoiceId = invoice._id; await pakki.save(); return invoice;
+  const invoice = await createOne(WeavingSalesInvoice, { userId, invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS", 5, session), invoiceDate: pakki.pakkiDate, partyId: party._id, partyName: party.name, saleSource: "pakki", saleNature: pakki.contractType === "conversion" ? "conversion" : "fabric", pakkiId: historical ? null : pakki._id, sourcePakkiId: pakki._id, replacesInvoiceId: historical?._id || null, activeForPakki: true, contractId: contract._id, fabricQualityId: pakki.fabricQualityId, godownId: pakki.godownId, ownershipType: pakki.ownershipType, description: pakki.contractType === "conversion" ? "Conversion / Job Work" : pakki.qualitySnapshot?.name || "Fabric Sale", qualitySnapshot: pakki.qualitySnapshot, quantity: pakki.billableMeter, weightKg: pakki.grossKg, thanCount: pakki.thanCount, uom: "Meter", originalRate: pakki.rate, finalRate: pakki.rate, ...totals, creditDays: pakki.creditDays, dueDate: pakki.dueDate, balanceDue: totals.grandTotal, notes: pakki.commercialRemarks }, session);
+  pakki.invoiceId = invoice._id; await pakki.save(sessionOptions(session)); return invoice;
 };
 
+const chequeDetails = (method, payload) => {
+  if (method !== "cheque") return {};
+  if (!clean(payload.chequeNo) || !clean(payload.chequeBank) || !/^\d{4}-\d{2}-\d{2}$/.test(payload.chequeDate || "") || !/^\d{4}-\d{2}-\d{2}$/.test(payload.chequeDueDate || "")) throw fail("Enter Cheque No., Bank, Cheque Date and Due Date.");
+  return { chequeNo: clean(payload.chequeNo), chequeBank: clean(payload.chequeBank), chequeDate: payload.chequeDate, chequeDueDate: payload.chequeDueDate, chequeStatus: "pending" };
+};
+
+const paymentAmounts = (total, received) => {
+  const paidAmount = round(Math.min(total, received));
+  return { paidAmount, balanceDue: round(Math.max(0, total - paidAmount)), paymentStatus: paidAmount <= 0 ? "unpaid" : paidAmount >= total ? "paid" : "partial" };
+};
 const normalizeSaleTerms = (payload, grandTotal) => {
-  const saleTerms = ["credit", "paid", "partial"].includes(payload.saleTerms) ? payload.saleTerms : "credit";
-  const receivedNowRequested = saleTerms === "paid" ? grandTotal : saleTerms === "partial" ? round(payload.receivedNow) : 0;
-  if (receivedNowRequested < 0 || receivedNowRequested > grandTotal || (saleTerms === "partial" && receivedNowRequested <= 0)) throw fail("Invalid Received Now amount");
+  // Explicit received amount is authoritative. Terms remain only for legacy callers.
+  const raw = payload.receivedNow !== undefined ? payload.receivedNow : payload.saleTerms === "paid" ? grandTotal : 0;
+  const receivedNowRequested = round(raw);
+  if (!Number.isFinite(Number(raw || 0)) || Number(raw || 0) < 0) throw fail("Enter a valid non-negative Received Amount.");
   if (receivedNowRequested > 0 && !payload.paymentAccountId) throw fail("Payment Account is required");
-  return { saleTerms, receivedNowRequested };
+  if (receivedNowRequested > 0 && !["cash", "bank", "online", "cheque"].includes(payload.paymentMethod)) throw fail("Select a Payment Method.");
+  return { saleTerms: receivedNowRequested <= 0 ? "credit" : receivedNowRequested >= grandTotal ? "paid" : "partial", receivedNowRequested };
 };
 
-const createDirectDraft = async (userId, payload, actorId) => {
-  const party = await WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } });
+// Run outside the sale transaction; retain Pakki protection before removing the
+// legacy index that incorrectly treats every Direct Sale as the same null Pakki.
+let salesInvoiceIndexReady;
+const ensureSalesInvoiceIndex = () => {
+  if (!salesInvoiceIndexReady) salesInvoiceIndexReady = (async () => {
+    const collection = WeavingSalesInvoice.collection;
+    await collection.createIndex({ userId: 1, sourcePakkiId: 1, activeForPakki: 1 }, { unique: true, partialFilterExpression: { sourcePakkiId: { $type: "objectId" }, activeForPakki: true } });
+    const indexes = await collection.indexes();
+    const obsolete = indexes.find((index) => index.name === "userId_1_pakkiId_1" && index.unique && JSON.stringify(index.key) === JSON.stringify({ userId: 1, pakkiId: 1 }));
+    if (obsolete) {
+      try { await collection.dropIndex(obsolete.name); } catch (error) { if (error.code !== 27) throw error; }
+    }
+  })().catch((error) => { salesInvoiceIndexReady = null; throw error; });
+  return salesInvoiceIndexReady;
+};
+// Replace only the old one-movement-per-invoice index, after its stricter
+// per-source replacement exists. No documents or unrelated indexes are changed.
+let salesSourceIndexReady;
+const ensureSalesSourceIndex = () => {
+  if (!salesSourceIndexReady) salesSourceIndexReady = (async () => {
+    const collection = WeavingFabricMovement.collection;
+    await collection.createIndex({ userId: 1, salesInvoiceId: 1, sourceFoldingEntryId: 1, movementType: 1, editRevision: 1 }, { name: "sales_invoice_source_revision_unique", unique: true, partialFilterExpression: { salesInvoiceId: { $type: "objectId" } } });
+    const indexes = await collection.indexes();
+    for (const index of indexes) {
+      if (index.name === "sales_invoice_source_unique" && index.unique && JSON.stringify(index.key) === JSON.stringify({ userId: 1, salesInvoiceId: 1, sourceFoldingEntryId: 1, movementType: 1 })) {
+        try { await collection.dropIndex(index.name); } catch (error) { if (error.code !== 27) throw error; }
+      }
+      if (index.unique && JSON.stringify(index.key) === JSON.stringify({ userId: 1, salesInvoiceId: 1 }) && index.partialFilterExpression?.salesInvoiceId?.$type === "objectId" && index.partialFilterExpression?.movementType === "sale_out") {
+        try { await collection.dropIndex(index.name); } catch (error) { if (error.code !== 27) throw error; }
+      }
+    }
+  })().catch((error) => { salesSourceIndexReady = null; throw error; });
+  return salesSourceIndexReady;
+};
+const normalizeOtherLines = (rows) => {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  return rows.map((row) => {
+    const description = clean(row.description); const quantity = qty(row.quantity); const rate = round(row.rate);
+    if (!description || quantity <= 0 || rate <= 0 || !["Meter", "KG", "Piece", "Nos", "Job", "Other"].includes(row.uom)) throw fail("Enter Description, UOM, Quantity and Rate for each sale row.");
+    return { description, uom: row.uom, quantity, rate, amount: round(quantity * rate) };
+  });
+};
+const exactSaleThans = async (userId, payload, session) => {
+  const ids = payload.foldingEntryIds;
+  if (!Array.isArray(ids) || !ids.length || ids.some((value) => !mongoose.isValidObjectId(value)) || new Set(ids.map(id)).size !== ids.length) throw fail("Select valid available Thans.");
+  const rows = (await thanLocation.resolveCurrentThans(userId, { session })).filter((row) => ids.map(id).includes(id(row)));
+  const bucket = { fabricQualityId: payload.fabricQualityId, godownId: payload.godownId, category: payload.fabricCategory || "normal", ownershipType: "own", ownerPartyId: null };
+  if (rows.length !== ids.length || rows.some((row) => row.locationState !== "known" || !thanLocation.matchesBucket(row, bucket))) throw fail("Selected Than is no longer available at this location.", 409);
+  const totals = rows.reduce((sum, row) => ({ meter: qty(sum.meter + row.meter), weightKg: qty(sum.weightKg + row.weightKg), thanCount: sum.thanCount + 1 }), { meter: 0, weightKg: 0, thanCount: 0 });
+  const available = await getFabricBalances({ userId, ...bucket, session, exactSource: true });
+  if (Object.keys(totals).some((field) => totals[field] > available[field] + 0.000001)) throw fail("Selected Thans exceed available Fabric Stock.", 409);
+  return { rows, totals };
+};
+
+const createDirectDraft = async (userId, payload, actorId, session = null) => {
+  if (!mongoose.isValidObjectId(payload.partyId)) throw fail("Select a Customer / Party.");
+  const party = await setSession(WeavingParty.findOne({ _id: payload.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } }), session);
   if (!party) throw fail("Customer / Party is required");
   const saleNature = ["fabric", "yarn", "other"].includes(payload.saleNature) ? payload.saleNature : "fabric";
   const otherSubtype = saleNature === "other" && ["rejected", "cut_piece", "waste", "other"].includes(payload.otherSubtype) ? payload.otherSubtype : "";
-  const quantity = qty(payload.quantity || (otherSubtype === "other" ? 1 : 0)); const finalRate = round(payload.finalRate || (otherSubtype === "other" ? payload.amount : 0));
+  const accountingOnly = saleNature === "other" && payload.accountingOnly === true;
+  const lines = accountingOnly ? normalizeOtherLines(payload.lines) : [];
+  const entryMode = saleNature === "fabric" ? (payload.entryMode === "than" ? "than" : "manual") : "legacy";
+  let quantity = qty(payload.quantity || (accountingOnly || otherSubtype === "other" ? 1 : 0));
+  let finalRate = round(payload.finalRate || (accountingOnly || otherSubtype === "other" ? payload.amount : 0));
+  if (lines.length) { quantity = 1; finalRate = round(lines.reduce((sum, row) => sum + row.amount, 0)); }
+  if (entryMode === "than") { const exact = await exactSaleThans(userId, payload, session); quantity = exact.totals.meter; payload = { ...payload, weightKg: exact.totals.weightKg, thanCount: exact.totals.thanCount }; }
   if (quantity <= 0 || finalRate <= 0) throw fail("Valid quantity and rate are required");
   let quality = null; let yarn = null; let godown = null; let description = clean(payload.description); let uom = clean(payload.uom);
-  const stockBackedFabric = saleNature === "fabric" || (saleNature === "other" && otherSubtype !== "other");
-  if (saleNature === "yarn") { yarn = await WeavingYarn.findOne({ _id: payload.yarnId, userId, isActive: true }); if (!yarn) throw fail("Yarn is required"); description ||= [yarn.name, yarn.count, yarn.millBrand].filter(Boolean).join(" / "); uom = "KG"; }
-  else if (stockBackedFabric) { quality = await WeavingFabricQuality.findOne({ _id: payload.fabricQualityId, userId, isActive: true }); if (!quality) throw fail("Fabric Quality is required"); description ||= quality.name; uom = "Meter"; }
+  const stockBackedFabric = saleNature === "fabric" || (saleNature === "other" && !accountingOnly && otherSubtype !== "other");
+  if (saleNature === "yarn") { yarn = await setSession(WeavingYarn.findOne({ _id: payload.yarnId, userId, isActive: true }), session); if (!yarn) throw fail("Yarn is required"); description ||= [yarn.name, yarn.count, yarn.millBrand].filter(Boolean).join(" / "); uom = "KG"; }
+  else if (stockBackedFabric) { quality = await setSession(WeavingFabricQuality.findOne({ _id: payload.fabricQualityId, userId, isActive: true }), session); if (!quality) throw fail("Fabric Quality is required"); description ||= quality.name; uom = "Meter"; }
   else { if (!description) throw fail("Description is required for General / Other Sale"); uom = ["Meter", "KG", "Piece", "Nos", "Job", "Other"].includes(uom) ? uom : "Job"; }
-  if (saleNature === "yarn" || stockBackedFabric) { godown = await WeavingGodown.findOne({ _id: payload.godownId, userId, isActive: true }); if (!godown) throw fail("Godown is required"); }
+  if (saleNature === "yarn" || stockBackedFabric) { godown = await validateSource(userId, payload.godownId, session); if (saleNature === "yarn" && !godown) throw fail("Select a Yarn Godown."); }
   const originalRate = round(payload.originalRate ?? finalRate); if (originalRate !== finalRate && !clean(payload.rateOverrideReason)) throw fail("Rate override reason is required");
   const totals = calculateInvoiceTotals({ quantity, rate: finalRate, discountAmount: payload.discountAmount, taxAmount: payload.taxAmount });
   const creditDays = Math.max(0, Math.trunc(Number(payload.creditDays) || 0)); const invoiceDate = clean(payload.invoiceDate); const terms = normalizeSaleTerms(payload, totals.grandTotal);
-  return WeavingSalesInvoice.create({ userId, invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS"), invoiceDate, partyId: party._id, partyName: party.name, saleSource: "direct", saleNature, fabricCategory: payload.fabricCategory === "b" ? "b" : "normal", otherSubtype, fabricQualityId: quality?._id || null, yarnId: yarn?._id || null, godownId: godown?._id || null, ownershipType: "own", description, qualitySnapshot: quality ? qualitySnapshot(quality) : { name: yarn?.name, count: yarn?.count, brand: yarn?.millBrand }, quantity, weightKg: qty(payload.weightKg), thanCount: qty(payload.thanCount), pieceCount: qty(payload.pieceCount), uom, originalRate, finalRate, rateOverrideReason: clean(payload.rateOverrideReason), rateChangedBy: originalRate !== finalRate ? actorId : null, rateChangedAt: originalRate !== finalRate ? new Date() : null, ...totals, ...terms, paymentAccountId: terms.receivedNowRequested > 0 ? payload.paymentAccountId : null, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || "cash") : "", receiptRequestKey: terms.receivedNowRequested > 0 ? clean(payload.receiptRequestKey) || `sale:${Date.now()}:${Math.random()}` : "", creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), balanceDue: totals.grandTotal, notes: clean(payload.notes) });
+  return createOne(WeavingSalesInvoice, { userId, requestKey: clean(payload.requestKey) || null, accountingOnly, lines, entryMode, foldingEntryIds: entryMode === "than" ? payload.foldingEntryIds : [], invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS", 5, session), invoiceDate, partyId: party._id, partyName: party.name, saleSource: "direct", saleNature, fabricCategory: payload.fabricCategory === "b" ? "b" : "normal", otherSubtype, fabricQualityId: quality?._id || null, yarnId: yarn?._id || null, godownId: godown?._id || null, ownershipType: "own", description, qualitySnapshot: quality ? qualitySnapshot(quality) : { name: yarn?.name, count: yarn?.count, brand: yarn?.millBrand }, quantity, weightKg: qty(payload.weightKg), thanCount: qty(payload.thanCount), pieceCount: qty(payload.pieceCount), uom, originalRate, finalRate, rateOverrideReason: clean(payload.rateOverrideReason), rateChangedBy: originalRate !== finalRate ? actorId : null, rateChangedAt: originalRate !== finalRate ? new Date() : null, ...totals, ...terms, paymentAccountId: terms.receivedNowRequested > 0 ? payload.paymentAccountId : null, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || "cash") : "", receiptRequestKey: terms.receivedNowRequested > 0 ? clean(payload.receiptRequestKey) || `sale:${Date.now()}:${Math.random()}` : "", creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), balanceDue: totals.grandTotal, notes: clean(payload.notes) }, session);
 };
 
-const stockCategory = (invoice) => invoice.saleNature === "fabric" ? (invoice.fabricCategory || "normal") : invoice.otherSubtype === "other" ? null : invoice.otherSubtype;
+const stockCategory = (invoice) => invoice.accountingOnly ? null : invoice.saleNature === "fabric" ? (invoice.fabricCategory || "normal") : invoice.otherSubtype === "other" ? null : invoice.otherSubtype;
 
-const postInvoice = async (userId, invoiceId, actorId) => {
-  const seed = await WeavingSalesInvoice.findOne({ _id: invoiceId, userId });
-  if (!seed) throw fail("Invoice not found", 404);
-  if (seed.status === "posted") return seed;
-  if (!["draft", "posting"].includes(seed.status)) throw fail("Only a Draft Invoice can be posted", 409);
-  const stockBacked = seed.saleSource === "direct" && (seed.saleNature === "yarn" || stockCategory(seed));
-  const lockKey = seed.saleNature === "yarn"
-    ? ["yarn", seed.yarnId, seed.godownId, "own"].join(":")
-    : ["fabric", seed.fabricQualityId, seed.godownId, stockCategory(seed), "own"].join(":");
-  const execute = async () => {
-    const touchedAccountIds = [];
-    const invoice = await runAtomic(async (session) => {
+const postInvoiceInSession = async (userId, invoiceId, actorId, session, touchedAccountIds, payment = {}) => {
       const locked = await setSession(WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: { $in: ["draft", "posting"] } }), session);
       if (!locked) {
         const existing = await setSession(WeavingSalesInvoice.findOne({ _id: invoiceId, userId }), session);
@@ -334,18 +491,30 @@ const postInvoice = async (userId, invoiceId, actorId) => {
       }
       locked.status = "posting";
       await locked.save(sessionOptions(session));
+      const stockBacked = locked.saleSource === "direct" && (locked.saleNature === "yarn" || stockCategory(locked));
       if (stockBacked) {
         if (locked.saleNature === "yarn") {
           let movement = await setSession(WeavingYarnMovement.findOne({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }), session);
           if (!movement) { const balance = await yarnStock.getGodownBalance({ userId, yarnId: locked.yarnId, godownId: locked.godownId, ownershipType: "own", session }); if (locked.quantity > balance.kg) throw fail(`Only ${balance.kg} KG Own Yarn is available`, 409); movement = await WeavingYarnMovement.findOneAndUpdate({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }, { $setOnInsert: { userId, yarnId: locked.yarnId, date: locked.invoiceDate, movementType: "sale_out", ownershipType: "own", salesInvoiceId: locked._id, quantityKg: locked.quantity, sourceGodownId: locked.godownId, rate: locked.finalRate, notes: locked.invoiceNo } }, { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOptions(session) }); }
           locked.stockMovementId = movement._id; locked.stockMovementModel = "WeavingYarnMovement";
+        } else if (locked.entryMode === "than") {
+          const exact = await exactSaleThans(userId, locked, session);
+          if (qty(exact.totals.meter) !== qty(locked.quantity)) throw fail("Selected Than quantities changed. Refresh and retry.", 409);
+          for (const row of exact.rows) {
+            const claimed = await WeavingFoldingEntry.updateOne({ _id: row._id, userId, status: "posted", activeKacchiId: null, activeSalesInvoiceId: null, ...thanLocation.revisionFilter(row) }, { $set: { activeSalesInvoiceId: locked._id }, $inc: { stockRevision: 1 } }, sessionOptions(session));
+            if (claimed.modifiedCount !== 1) throw fail("Selected Than is no longer available at this location.", 409);
+            const movement = await createOne(WeavingFabricMovement, { userId, date: locked.invoiceDate, movementType: "sale_out", category: stockCategory(locked), direction: "out", fabricQualityId: locked.fabricQualityId, godownId: locked.godownId, ownershipType: "own", meter: row.meter, weightKg: row.weightKg, thanCount: 1, sourceFoldingEntryId: row._id, salesInvoiceId: locked._id, notes: locked.invoiceNo }, session);
+            locked.stockMovementId ||= movement._id;
+          }
+          locked.stockMovementModel = "WeavingFabricMovement";
         } else {
           let movement = await setSession(WeavingFabricMovement.findOne({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }), session);
           if (!movement) {
-            const available = await getFabricBalances({ userId, fabricQualityId: locked.fabricQualityId, godownId: locked.godownId, category: stockCategory(locked), ownershipType: "own", session });
+            const bucket = { fabricQualityId: locked.fabricQualityId, godownId: locked.godownId, category: stockCategory(locked), ownershipType: "own", ownerPartyId: null };
+            const available = await assertManualStock(userId, bucket, { meter: locked.quantity, weightKg: locked.weightKg, thanCount: locked.thanCount, pieceCount: locked.pieceCount }, session);
             if (locked.quantity > available.meter || locked.weightKg > available.weightKg || locked.thanCount > available.thanCount || locked.pieceCount > available.pieceCount) throw fail("Sale quantity exceeds available Fabric Stock", 409);
             const ratio = available.meter > 0 ? locked.quantity / available.meter : 0; const weightKg = locked.weightKg || qty(available.weightKg * ratio); const thanCount = locked.thanCount || qty(available.thanCount * ratio);
-            movement = await WeavingFabricMovement.findOneAndUpdate({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }, { $setOnInsert: { userId, date: locked.invoiceDate, movementType: "sale_out", category: stockCategory(locked), direction: "out", fabricQualityId: locked.fabricQualityId, godownId: locked.godownId, ownershipType: "own", meter: locked.quantity, weightKg, thanCount, pieceCount: locked.pieceCount, salesInvoiceId: locked._id, notes: locked.invoiceNo } }, { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOptions(session) });
+            movement = await WeavingFabricMovement.findOneAndUpdate({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }, { $setOnInsert: { userId, date: locked.invoiceDate, movementType: "sale_out", stockIdentity: "untracked", category: stockCategory(locked), direction: "out", fabricQualityId: locked.fabricQualityId, godownId: locked.godownId, ownershipType: "own", meter: locked.quantity, weightKg, thanCount, pieceCount: locked.pieceCount, salesInvoiceId: locked._id, notes: locked.invoiceNo } }, { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOptions(session) });
             locked.weightKg = weightKg; locked.thanCount = thanCount;
           }
           locked.stockMovementId = movement._id; locked.stockMovementModel = "WeavingFabricMovement";
@@ -364,17 +533,33 @@ const postInvoice = async (userId, invoiceId, actorId) => {
       let receipt = await setSession(WeavingMoneyTransaction.findOne({ userId, requestKey: locked.receiptRequestKey }), session);
       if (!receipt) {
         const receiptJournal = await createOne(JournalEntry, { date: new Date(`${locked.invoiceDate}T00:00:00.000Z`), description: `Received against ${locked.invoiceNo}`, createdBy: userId, sourceType: "receive_payment", originModule: "weaving.receive_payment", moduleScope: "weaving", referenceId: locked._id, lines: [{ account: paymentAccount._id, type: "debit", amount: locked.receivedNowRequested }, { account: partyAccount._id, type: "credit", amount: locked.receivedNowRequested }] }, session);
-        receipt = await createOne(WeavingMoneyTransaction, { userId, requestKey: locked.receiptRequestKey, transactionNo: await allocateNo(userId, "weaving_receive_payment", "RCV", 5, session), type: "receive", date: locked.invoiceDate, partyId: locked.partyId, salesInvoiceId: locked._id, amount: locked.receivedNowRequested, paymentAccountId: paymentAccount._id, paymentMethod: locked.paymentMethod || paymentAccount.category, description: `Received against ${locked.invoiceNo}`, journalEntryId: receiptJournal._id }, session);
+        receipt = await createOne(WeavingMoneyTransaction, { userId, requestKey: locked.receiptRequestKey, transactionNo: await allocateNo(userId, "weaving_receive_payment", "RCV", 5, session), type: "receive", date: locked.invoiceDate, partyId: locked.partyId, salesInvoiceId: locked._id, amount: locked.receivedNowRequested, paymentAccountId: paymentAccount._id, paymentMethod: locked.paymentMethod || paymentAccount.category, ...chequeDetails(locked.paymentMethod || paymentAccount.category, payment), description: `Received against ${locked.invoiceNo}`, journalEntryId: receiptJournal._id }, session);
         touchedAccountIds.push(...receiptJournal.lines.map((line) => line.account));
       }
-      locked.paidAmount = round(receipt.amount);
-      locked.balanceDue = round(Math.max(0, locked.grandTotal - locked.paidAmount));
-      locked.paymentStatus = locked.balanceDue <= 0 ? "paid" : "partial";
+      if (id(receipt.salesInvoiceId) !== id(locked._id) || receipt.status !== "posted" || round(receipt.amount) !== locked.receivedNowRequested) throw fail("Payment reference is already used by another receipt.", 409);
+      Object.assign(locked, paymentAmounts(locked.grandTotal, receipt.amount));
     }
     locked.status = "posted"; locked.postedAt = new Date(); locked.postedBy = actorId; await locked.save(sessionOptions(session));
+    await recalculateAccountBalances([...new Set(touchedAccountIds.map(String))], session);
     return locked;
-    });
-    await recalculateAccountBalances(touchedAccountIds);
+
+};
+
+const postInvoice = async (userId, invoiceId, actorId) => {
+  const seed = await WeavingSalesInvoice.findOne({ _id: invoiceId, userId });
+  if (!seed) throw fail("Invoice not found", 404);
+  if (seed.status === "posted") return seed;
+  if (seed.entryMode === "than") await ensureSalesSourceIndex();
+  if (!["draft", "posting"].includes(seed.status)) throw fail("Only a Draft Invoice can be posted", 409);
+  const stockBacked = seed.saleSource === "direct" && (seed.saleNature === "yarn" || stockCategory(seed));
+  const lockKey = seed.saleNature === "yarn"
+    ? ["yarn", seed.yarnId, seed.godownId, "own", "own"].join(":")
+    : fabricLockKey({ ...seed.toObject(), category: stockCategory(seed) });
+  const execute = async () => {
+    const touchedAccountIds = [];
+    const invoice = await runAtomic(async (session) => {
+      return postInvoiceInSession(userId, invoiceId, actorId, session, touchedAccountIds);
+    }, true);
     return WeavingSalesInvoice.findById(invoice._id);
   };
   const posted = await (stockBacked ? withStockLock(userId, lockKey, execute) : execute());
@@ -382,13 +567,40 @@ const postInvoice = async (userId, invoiceId, actorId) => {
 };
 
 const createDirectInvoice = async (userId, payload, actorId) => {
-  const invoice = await createDirectDraft(userId, payload, actorId);
-  try {
-    return await postInvoice(userId, invoice._id, actorId);
-  } catch (error) {
-    await WeavingSalesInvoice.deleteOne({ _id: invoice._id, userId, status: "draft" });
-    throw error;
-  }
+  const requestKey = clean(payload.requestKey);
+  if (!requestKey) throw fail("Please reopen the sale form and retry.");
+  await ensureSalesInvoiceIndex();
+  const existing = await WeavingSalesInvoice.findOne({ userId, requestKey });
+  if (existing?.status === "posted") return existing;
+  if (payload.entryMode === "than") await ensureSalesSourceIndex();
+  const touched = [];
+  const execute = () => runAtomic(async (session) => {
+    touched.length = 0;
+    const duplicate = await setSession(WeavingSalesInvoice.findOne({ userId, requestKey }), session);
+    if (duplicate?.status === "posted") return duplicate;
+    const invoice = duplicate || await createDirectDraft(userId, payload, actorId, session);
+    return postInvoiceInSession(userId, invoice._id, actorId, session, touched, payload);
+  }, true);
+  const stockBacked = payload.saleNature !== "other" || !payload.accountingOnly;
+  const lockKey = payload.saleNature === "yarn" ? ["yarn", payload.yarnId, payload.godownId, "own", "own"].join(":") : fabricLockKey({ ...payload, category: payload.saleNature === "other" ? payload.otherSubtype : payload.fabricCategory });
+  const invoice = await (stockBacked ? withStockLock(userId, lockKey, execute) : execute());
+  return invoice;
+};
+
+const confirmPakkiInvoice = async (userId, payload, actorId) => {
+  if (!mongoose.isValidObjectId(payload.kacchiId)) throw fail("Select a pending Kacchi.");
+  const touched = [];
+  const invoice = await runAtomic(async (session) => {
+    touched.length = 0;
+    const pakki = await createPakkiInSession(userId, payload, session);
+    const draft = await draftFromPakki(userId, pakki._id, session);
+    if (draft.status === "posted") return draft;
+    const terms = normalizeSaleTerms(payload, draft.grandTotal);
+    Object.assign(draft, terms, { paymentAccountId: terms.receivedNowRequested > 0 ? payload.paymentAccountId : null, paymentMethod: terms.receivedNowRequested > 0 ? payload.paymentMethod || "cash" : "", receiptRequestKey: `sale:${draft._id}` });
+    await draft.save(sessionOptions(session));
+    return postInvoiceInSession(userId, draft._id, actorId, session, touched, payload);
+  }, true);
+  return invoice;
 };
 
 const createInvoiceFromPakki = async (userId, pakkiId, actorId) => {
@@ -462,23 +674,32 @@ const getManagementMetrics = async (userId) => {
 
 const getWorkspace = async (userId, query = {}) => {
   const invoiceFilter = { userId }; if (query.from || query.to) invoiceFilter.invoiceDate = { ...(query.from ? { $gte: query.from } : {}), ...(query.to ? { $lte: query.to } : {}) };
-  const [kacchis, pakkis, ready, invoices, pending, receipts, parties, contracts, qualities, yarns, godowns, paymentAccounts, availableThans, invoicePreview, fabricStock, yarnSummary] = await Promise.all([
-    WeavingKacchiParchi.find({ userId }).populate("partyId", "name").populate("fabricQualityId", "name code").populate("godownId", "name").sort({ dispatchDate: -1, createdAt: -1 }).limit(250).lean(),
-    WeavingPakkiSettlement.find({ userId }).populate("partyId", "name").sort({ pakkiDate: -1, createdAt: -1 }).limit(250).lean(),
+  const [kacchis, pakkis, ready, invoices, pending, receipts, parties, contracts, qualities, yarns, godowns, paymentAccounts, availableThans, invoicePreview, fabricStock, yarnSummary, manualStockRows] = await Promise.all([
+    WeavingKacchiParchi.find({ userId }).populate("contractId", "contractNo rate creditDays").populate("partyId", "name").populate("fabricQualityId", "name code").populate("godownId", "name").sort({ dispatchDate: -1, createdAt: -1 }).limit(250).lean(),
+    WeavingPakkiSettlement.find({ userId }).populate("godownId", "name").populate("invoiceId", "invoiceNo grandTotal paidAmount balanceDue paymentStatus status").populate("contractId", "contractNo").populate("partyId", "name").sort({ pakkiDate: -1, createdAt: -1 }).limit(250).lean(),
     WeavingPakkiSettlement.find({ userId, status: "finalized", invoiceId: null }).populate("partyId", "name").sort({ pakkiDate: -1 }).lean(),
     WeavingSalesInvoice.find(invoiceFilter).populate("partyId", "name").sort({ invoiceDate: -1, createdAt: -1 }).limit(250).lean(),
     WeavingRejectionDue.find({ userId, status: { $in: ["pending", "partial"] } }).populate("partyId", "name").sort({ pakkiDate: 1 }).lean(),
-    WeavingRejectionReceipt.find({ userId }).populate("partyId", "name").populate("fabricQualityId", "name code").sort({ receiptDate: -1, createdAt: -1 }).limit(250).lean(),
+    WeavingRejectionReceipt.find({ userId }).populate("godownId", "name").populate("partyId", "name").populate("fabricQualityId", "name code").sort({ receiptDate: -1, createdAt: -1 }).limit(250).lean(),
     WeavingParty.find({ userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } }).select("name role").sort({ name: 1 }).lean(),
     WeavingContract.find({ userId, type: "sales", status: "active" }).select("contractNo contractType partyId itemId rate creditDays").sort({ contractDate: -1 }).lean(),
     WeavingFabricQuality.find({ userId, isActive: true }).select("name code construction width warpCount weftCount brand").sort({ name: 1 }).lean(),
     WeavingYarn.find({ userId, isActive: true }).select("name count millBrand quality").sort({ name: 1 }).lean(),
     WeavingGodown.find({ userId, isActive: true }).select("name").sort({ name: 1 }).lean(),
     Account.find({ userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } }).select("name code category").sort({ name: 1 }).lean(),
-    WeavingFoldingEntry.find({ userId, status: "posted", grade: "a", activeKacchiId: null }).select("thanNo date contractId fabricQualityId godownId ownershipType ownerPartyId meter weightKg weightLbs qualitySnapshot").sort({ date: 1, thanNo: 1 }).lean(),
-    previewNo(userId, "weaving_sales_invoice", "WS"), foldingStock.stockSummary(userId), yarnStock.getSummary(userId),
+    thanLocation.resolveCurrentThans(userId),
+    previewNo(userId, "weaving_sales_invoice", "WS"), foldingStock.stockSummary(userId), yarnStock.getSummary(userId), manualStock.getManualStock(userId),
   ]);
-  return { kacchis, pakkis, ready, invoices, pending, receipts, meta: { parties, contracts, qualities, yarns, godowns, paymentAccounts, availableThans, nextInvoiceNo: invoicePreview, fabricStock: fabricStock.rows.filter((row) => row.ownershipType === "own" && (row.meter > 0 || row.kg > 0)), yarnStock: yarnSummary.items }, metrics: buildManagementMetrics({ readyCount: ready.length, pending, invoices, receipts }) };
+  const pendingKacchis = await WeavingKacchiParchi.find({ userId, $or: [{ status: "confirmed" }, { _id: { $in: ready.map((row) => row.kacchiId || row.sourceKacchiId).filter(Boolean) } }] }).populate("partyId", "name").populate("contractId", "contractNo rate creditDays").sort({ dispatchDate: 1 }).lean();
+  const safeManualStock = manualStockRows.map((pool) => {
+    const aggregate = fabricStock.rows.find((row) => manualStock.key(row) === manualStock.key(pool));
+    const tracked = availableThans.filter((row) => row.locationState === "known" && thanLocation.matchesBucket(row, pool));
+    return { ...pool, ...Object.fromEntries([["meter", "meter"], ["weightKg", "kg"], ["thanCount", "than"], ["pieceCount", "pieceCount"]].map(([field, aggregateField]) => {
+      const reserved = tracked.reduce((sum, row) => sum + (field === "thanCount" ? 1 : Number(row[field] || 0)), 0);
+      return [field, Math.max(0, qty(Math.min(pool[field], Number(aggregate?.[aggregateField] || 0) - reserved)))];
+    })) };
+  });
+  return { kacchis, pakkis, ready, invoices, pending, receipts, meta: { parties, contracts, qualities, yarns, godowns, paymentAccounts, pendingKacchis, availableThans: availableThans.filter((row) => row.locationState === "known"), unknownThans: availableThans.filter((row) => row.locationState !== "known"), nextInvoiceNo: invoicePreview, fabricStock: fabricStock.rows.filter((row) => row.ownershipType === "own" && (row.meter > 0 || row.kg > 0)), yarnStock: yarnSummary.stockRows, manualStock: safeManualStock }, metrics: buildManagementMetrics({ readyCount: ready.length, pending, invoices, receipts }) };
 };
 
 const reverseJournalInSession = async ({ userId, journalId, date, reason, session }) => {
@@ -491,52 +712,89 @@ const reverseJournalInSession = async ({ userId, journalId, date, reason, sessio
   return reversal;
 };
 
-const updatePostedInvoice = async (userId, invoiceId, payload, actorId) => {
-  const seed = await WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "posted" });
+const updatePostedInvoice = async (userId, invoiceId, payload, actorId, outerSession = null) => {
+  const seed = await setSession(WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "posted" }), outerSession);
   if (!seed) throw fail("Posted Invoice not found", 404);
-  const activeReceipts = await WeavingMoneyTransaction.find({ userId, salesInvoiceId: seed._id, type: "receive", status: "posted" });
+  if (payload.editRequestKey && seed.lastEditRequestKey === payload.editRequestKey) return seed;
+  if (seed.saleSource === "pakki" && !outerSession) throw fail("Use Edit on the linked Pakki to keep settlement and rejection records consistent.", 409);
+  const detailedLines = seed.accountingOnly && Array.isArray(payload.lines) ? normalizeOtherLines(payload.lines) : seed.lines || [];
+  if (detailedLines.length) payload = { ...payload, quantity: 1, finalRate: round(detailedLines.reduce((sum, row) => sum + row.amount, 0)) };
+  const activeReceipts = await setSession(WeavingMoneyTransaction.find({ userId, salesInvoiceId: seed._id, type: "receive", status: "posted" }), outerSession);
   if (activeReceipts.some((row) => !seed.receiptRequestKey || row.requestKey !== seed.receiptRequestKey)) throw fail("Reverse later receipts linked to this Invoice before editing it", 409);
-  const party = await WeavingParty.findOne({ _id: payload.partyId || seed.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } });
+  const party = await setSession(WeavingParty.findOne({ _id: payload.partyId || seed.partyId, userId, isActive: true, isHidden: false, serviceTypes: { $ne: "sizing" }, role: { $in: ["customer", "both"] } }), outerSession);
   if (!party) throw fail("Customer / Party is required");
   const invoiceDate = clean(payload.invoiceDate) || seed.invoiceDate;
-  const quantity = qty(payload.quantity ?? seed.quantity);
+  let quantity = qty(payload.quantity ?? seed.quantity);
   const finalRate = round(payload.finalRate ?? seed.finalRate);
+  if (!seed.accountingOnly && finalRate !== seed.originalRate && !clean(payload.rateOverrideReason || seed.rateOverrideReason)) throw fail("Rate override reason is required.");
   if (quantity <= 0 || finalRate <= 0) throw fail("Valid quantity and rate are required");
   const totals = calculateInvoiceTotals({ quantity, rate: finalRate, discountAmount: payload.discountAmount ?? seed.discountAmount, taxAmount: payload.taxAmount ?? seed.taxAmount });
-  const terms = normalizeSaleTerms(payload.saleTerms ? payload : { saleTerms: seed.saleTerms, receivedNow: seed.receivedNowRequested, paymentAccountId: seed.paymentAccountId }, totals.grandTotal);
+  const terms = normalizeSaleTerms({ receivedNow: seed.receivedNowRequested, paymentAccountId: seed.paymentAccountId, paymentMethod: seed.paymentMethod, ...payload }, totals.grandTotal);
   const paymentAccountId = terms.receivedNowRequested > 0 ? (payload.paymentAccountId || seed.paymentAccountId) : null;
-  const paymentAccount = paymentAccountId ? await Account.findOne({ _id: paymentAccountId, userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } }) : null;
+  const paymentAccount = paymentAccountId ? await setSession(Account.findOne({ _id: paymentAccountId, userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } }), outerSession) : null;
   if (terms.receivedNowRequested > 0 && !paymentAccount) throw fail("Valid payment account is required");
   const stockBacked = seed.saleSource === "direct" && (seed.saleNature === "yarn" || stockCategory(seed));
   if (payload.saleNature && payload.saleNature !== seed.saleNature) throw fail("Sale Type cannot be changed after posting", 409);
-  const targetGodownId = payload.godownId || seed.godownId;
+  const targetGodownId = payload.godownId !== undefined ? payload.godownId : seed.godownId;
   const targetYarnId = payload.yarnId || seed.yarnId;
   const targetQualityId = payload.fabricQualityId || seed.fabricQualityId;
   const targetCategory = seed.saleNature === "fabric" ? (payload.fabricCategory === "b" ? "b" : payload.fabricCategory === "normal" ? "normal" : seed.fabricCategory) : (payload.otherSubtype || seed.otherSubtype);
   const targetGodown = stockBacked ? await WeavingGodown.findOne({ _id: targetGodownId, userId, isActive: true }) : null;
-  if (stockBacked && !targetGodown) throw fail("Godown is required");
+  if (stockBacked && (seed.saleNature === "yarn" || targetGodownId) && !targetGodown) throw fail("Select a valid Source Location.");
   if (seed.saleNature === "yarn" && !await WeavingYarn.exists({ _id: targetYarnId, userId, isActive: true })) throw fail("Yarn is required");
   if (stockBacked && seed.saleNature !== "yarn" && !await WeavingFabricQuality.exists({ _id: targetQualityId, userId, isActive: true })) throw fail("Fabric Quality is required");
-  const lockKey = seed.saleNature === "yarn" ? ["yarn", targetYarnId, targetGodownId, "own"].join(":") : ["fabric", targetQualityId, targetGodownId, targetCategory, "own"].join(":");
+  const lockKey = seed.saleNature === "yarn" ? ["yarn", targetYarnId, targetGodownId, "own", "own"].join(":") : fabricLockKey({ fabricQualityId: targetQualityId, godownId: targetGodownId, category: targetCategory });
   const execute = async () => {
     const touched = [];
-    const result = await runAtomic(async (session) => {
+    const work = async (session) => {
       const invoice = await setSession(WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "posted" }), session);
       if (!invoice) throw fail("Invoice changed before it could be edited", 409);
+      if (payload.editRequestKey && invoice.lastEditRequestKey === payload.editRequestKey) return invoice;
+      if (payload.expectedUpdatedAt && new Date(payload.expectedUpdatedAt).getTime() !== new Date(invoice.updatedAt).getTime()) throw fail("This sale changed after you opened it. Reopen Edit and retry.", 409);
+      const { editHistory, ...before } = invoice.toObject();
+      invoice.editHistory.push({ at: new Date(), actorId, invoice: before });
+      invoice.lastEditRequestKey = clean(payload.editRequestKey);
+      if (invoice.accountingOnly) invoice.lines = detailedLines;
       const receipts = await setSession(WeavingMoneyTransaction.find({ userId, salesInvoiceId: invoice._id, type: "receive", status: "posted" }), session);
       if (receipts.some((row) => !invoice.receiptRequestKey || row.requestKey !== invoice.receiptRequestKey)) throw fail("Reverse later receipts linked to this Invoice before editing it", 409);
       if (stockBacked && invoice.saleNature === "yarn") {
         const movement = await setSession(WeavingYarnMovement.findOne({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: { $ne: true } }), session);
         if (!movement) throw fail("Linked Yarn movement was not found", 409);
+        invoice.editHistory[invoice.editHistory.length - 1].movement = movement.toObject();
         const balance = await yarnStock.getGodownBalance({ userId, yarnId: targetYarnId, godownId: targetGodownId, ownershipType: "own", session });
         const reusable = String(movement.yarnId) === String(targetYarnId) && String(movement.sourceGodownId) === String(targetGodownId) ? movement.quantityKg : 0;
         if (quantity > round(balance.kg + reusable)) throw fail(`Only ${round(balance.kg + reusable)} KG Own Yarn is available`, 409);
         Object.assign(movement, { yarnId: targetYarnId, date: invoiceDate, quantityKg: quantity, sourceGodownId: targetGodownId, rate: finalRate });
         await movement.save(sessionOptions(session));
+      } else if (stockBacked && invoice.entryMode === "than") {
+        const oldMovements = await setSession(WeavingFabricMovement.find({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: false }), session);
+        if (!oldMovements.length) throw fail("Linked Than movements are unavailable. Review the sale before editing.", 409);
+        for (const movement of oldMovements) {
+          const released = await WeavingFoldingEntry.updateOne({ _id: movement.sourceFoldingEntryId, userId, activeSalesInvoiceId: invoice._id, activeKacchiId: null }, { $set: { activeSalesInvoiceId: null }, $inc: { stockRevision: 1 } }, sessionOptions(session));
+          if (released.modifiedCount !== 1) throw fail("A sold Than changed. Refresh the sale before editing.", 409);
+          movement.isVoided = true; await movement.save(sessionOptions(session));
+        }
+        const selection = { fabricQualityId: targetQualityId, godownId: targetGodownId, fabricCategory: targetCategory, foldingEntryIds: payload.foldingEntryIds || invoice.foldingEntryIds };
+        const exact = await exactSaleThans(userId, selection, session);
+        if (quantity !== exact.totals.meter) throw fail("Selected Than totals changed. Refresh and select them again.", 409);
+        invoice.stockRevision = Number(invoice.stockRevision || 0) + 1;
+        for (const row of exact.rows) {
+          const claimed = await WeavingFoldingEntry.updateOne({ _id: row._id, userId, activeKacchiId: null, activeSalesInvoiceId: null, ...thanLocation.revisionFilter(row) }, { $set: { activeSalesInvoiceId: invoice._id }, $inc: { stockRevision: 1 } }, sessionOptions(session));
+          if (claimed.modifiedCount !== 1) throw fail("Selected Than is no longer available.", 409);
+          const movement = await createOne(WeavingFabricMovement, { userId, date: invoiceDate, movementType: "sale_out", direction: "out", category: targetCategory, fabricQualityId: targetQualityId, godownId: targetGodownId, ownershipType: "own", sourceFoldingEntryId: row._id, salesInvoiceId: invoice._id, meter: row.meter, weightKg: row.weightKg, thanCount: 1, editRevision: invoice.stockRevision, notes: `Edit ${invoice.invoiceNo}` }, session);
+          invoice.stockMovementId = movement._id;
+        }
+        invoice.foldingEntryIds = selection.foldingEntryIds; invoice.weightKg = exact.totals.weightKg; invoice.thanCount = exact.totals.thanCount;
       } else if (stockBacked) {
         const movement = await setSession(WeavingFabricMovement.findOne({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: { $ne: true } }), session);
         if (!movement) throw fail("Linked Fabric movement was not found", 409);
-        const available = await getFabricBalances({ userId, fabricQualityId: targetQualityId, godownId: targetGodownId, category: targetCategory, ownershipType: "own", session });
+        invoice.editHistory[invoice.editHistory.length - 1].movement = movement.toObject();
+        if (invoice.entryMode === "manual") {
+          movement.isVoided = true; await movement.save(sessionOptions(session));
+          await assertManualStock(userId, { fabricQualityId: targetQualityId, godownId: targetGodownId || null, category: targetCategory, ownershipType: "own", ownerPartyId: null }, { meter: quantity, weightKg: qty(payload.weightKg ?? invoice.weightKg), thanCount: qty(payload.thanCount ?? invoice.thanCount), pieceCount: qty(payload.pieceCount ?? invoice.pieceCount) }, session);
+          movement.isVoided = false;
+        }
+        const available = await getFabricBalances({ userId, fabricQualityId: targetQualityId, godownId: targetGodownId, category: targetCategory, ownershipType: "own", session, exactSource: true });
         const sameStock = String(movement.fabricQualityId) === String(targetQualityId) && String(movement.godownId) === String(targetGodownId) && movement.category === targetCategory;
         const weightKg = qty(payload.weightKg ?? invoice.weightKg); const thanCount = qty(payload.thanCount ?? invoice.thanCount); const pieceCount = qty(payload.pieceCount ?? invoice.pieceCount);
         if (quantity > qty(available.meter + (sameStock ? movement.meter : 0)) || weightKg > qty(available.weightKg + (sameStock ? movement.weightKg : 0)) || thanCount > qty(available.thanCount + (sameStock ? movement.thanCount : 0)) || pieceCount > qty(available.pieceCount + (sameStock ? movement.pieceCount : 0))) throw fail("Sale quantity exceeds available Fabric Stock", 409);
@@ -560,19 +818,54 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId) => {
       if (terms.receivedNowRequested > 0) {
         receiptRequestKey = `sale:${invoice._id}:edit:${Date.now()}`;
         const receiptJournal = await createOne(JournalEntry, { date: new Date(`${invoiceDate}T00:00:00.000Z`), description: `Received against ${invoice.invoiceNo}`, createdBy: userId, sourceType: "receive_payment", originModule: "weaving.receive_payment", moduleScope: "weaving", referenceId: invoice._id, lines: [{ account: paymentAccount._id, type: "debit", amount: terms.receivedNowRequested }, { account: partyAccount._id, type: "credit", amount: terms.receivedNowRequested }] }, session);
-        await createOne(WeavingMoneyTransaction, { userId, requestKey: receiptRequestKey, transactionNo: await allocateNo(userId, "weaving_receive_payment", "RCV", 5, session), type: "receive", date: invoiceDate, partyId: party._id, salesInvoiceId: invoice._id, amount: terms.receivedNowRequested, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || invoice.paymentMethod || paymentAccount.category, description: `Received against ${invoice.invoiceNo}`, journalEntryId: receiptJournal._id }, session);
-        touched.push(...receiptJournal.lines.map((line) => line.account)); paidAmount = terms.receivedNowRequested;
+        await createOne(WeavingMoneyTransaction, { userId, requestKey: receiptRequestKey, transactionNo: await allocateNo(userId, "weaving_receive_payment", "RCV", 5, session), type: "receive", date: invoiceDate, partyId: party._id, salesInvoiceId: invoice._id, amount: terms.receivedNowRequested, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || invoice.paymentMethod || paymentAccount.category, ...chequeDetails(payload.paymentMethod || invoice.paymentMethod || paymentAccount.category, { ...(receipts[0]?.toObject() || {}), ...payload }), description: `Received against ${invoice.invoiceNo}`, journalEntryId: receiptJournal._id }, session);
+        touched.push(...receiptJournal.lines.map((line) => line.account)); paidAmount = Math.min(totals.grandTotal, terms.receivedNowRequested);
       }
       const creditDays = Math.max(0, Math.trunc(Number(payload.creditDays ?? invoice.creditDays) || 0));
-      Object.assign(invoice, totals, terms, { partyId: party._id, partyName: party.name, invoiceDate, quantity, finalRate, fabricCategory: targetCategory === "b" ? "b" : invoice.fabricCategory, otherSubtype: invoice.saleNature === "other" ? targetCategory : invoice.otherSubtype, yarnId: targetYarnId || null, fabricQualityId: targetQualityId || null, godownId: targetGodownId || null, description: clean(payload.description) || invoice.description, paymentAccountId, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || invoice.paymentMethod || paymentAccount.category) : "", receiptRequestKey, paidAmount, balanceDue: round(totals.grandTotal - paidAmount), paymentStatus: paidAmount >= totals.grandTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid", journalEntryId: journal._id, creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), notes: clean(payload.notes), rateOverrideReason: clean(payload.rateOverrideReason || invoice.rateOverrideReason), rateChangedBy: finalRate !== invoice.originalRate ? actorId : null, rateChangedAt: finalRate !== invoice.originalRate ? new Date() : null });
+      Object.assign(invoice, totals, terms, { partyId: party._id, partyName: party.name, invoiceDate, quantity, finalRate, fabricCategory: invoice.saleNature === "fabric" ? targetCategory : invoice.fabricCategory, otherSubtype: invoice.saleNature === "other" ? targetCategory : invoice.otherSubtype, yarnId: targetYarnId || null, fabricQualityId: targetQualityId || null, godownId: targetGodownId || null, description: clean(payload.description) || invoice.description, paymentAccountId, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || invoice.paymentMethod || paymentAccount.category) : "", receiptRequestKey, paidAmount, balanceDue: round(totals.grandTotal - paidAmount), paymentStatus: paidAmount >= totals.grandTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid", journalEntryId: journal._id, creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), notes: clean(payload.notes), rateOverrideReason: clean(payload.rateOverrideReason || invoice.rateOverrideReason), rateChangedBy: finalRate !== invoice.originalRate ? actorId : null, rateChangedAt: finalRate !== invoice.originalRate ? new Date() : null });
+      invoice.markModified("editHistory");
       await invoice.save(sessionOptions(session));
+      await recalculateAccountBalances([...new Set(touched.map(String))], session);
       return invoice;
-    });
-    await recalculateAccountBalances([...new Set(touched.map(String))]);
-    return result;
+    };
+    return outerSession ? work(outerSession) : runAtomic(work, true);
   };
-  return stockBacked ? withStockLock(userId, lockKey, execute) : execute();
+  if (seed.entryMode === "than") await ensureSalesSourceIndex();
+  return stockBacked && !outerSession ? withStockLock(userId, lockKey, execute) : execute();
 };
+
+const updatePakki = async (userId, pakkiId, payload, actorId) => runAtomic(async (session) => {
+  const pakki = await setSession(WeavingPakkiSettlement.findOne({ _id: pakkiId, userId, status: "finalized" }), session);
+  if (!pakki || !pakki.invoiceId) throw fail("Final Pakki Invoice not found.", 404);
+  const linked = await setSession(WeavingSalesInvoice.findOne({ _id: pakki.invoiceId, userId, status: "posted" }), session);
+  if (!linked) throw fail("The linked invoice is unavailable.", 409);
+  if (payload.editRequestKey && linked.lastEditRequestKey === payload.editRequestKey) return linked;
+  const values = calculateSettlement({ ...pakki.toObject(), ...payload, grossMeter: pakki.grossMeter });
+  const amountDeduction = round(payload.amountDeduction ?? pakki.amountDeduction);
+  const subtotal = round(values.billableMeter * pakki.rate);
+  if (values.billableMeter <= 0 || amountDeduction < 0 || amountDeduction > subtotal) throw fail("Review Billable Meter and Amount Deduction.");
+  let due = await setSession(WeavingRejectionDue.findOne({ userId, pakkiId: pakki._id }), session);
+  if (due && values.rejectionMeter < due.receivedMeter) throw fail("Rejection cannot be reduced below the quantity already physically received. Reverse the affected rejection receipt first.", 409);
+  const previousPakki = pakki.toObject(); const previousDue = due?.toObject() || null;
+  const invoice = await updatePostedInvoice(userId, linked._id, { ...payload, partyId: pakki.partyId, notes: payload.commercialRemarks ?? pakki.commercialRemarks, invoiceDate: payload.pakkiDate || pakki.pakkiDate, quantity: values.billableMeter, finalRate: pakki.rate, discountAmount: amountDeduction, taxAmount: linked.taxAmount, rateOverrideReason: linked.rateOverrideReason }, actorId, session);
+  const revision = invoice.editHistory[invoice.editHistory.length - 1];
+  revision.pakki = previousPakki; revision.rejectionDue = previousDue;
+  invoice.markModified("editHistory"); await invoice.save(sessionOptions(session));
+  Object.assign(pakki, values, { pakkiDate: invoice.invoiceDate, amountDeduction, subtotal, settlementAmount: invoice.grandTotal, creditDays: invoice.creditDays, dueDate: invoice.dueDate, commercialRemarks: clean(payload.commercialRemarks ?? pakki.commercialRemarks) });
+  await pakki.save(sessionOptions(session));
+  if (due) {
+    due.originalRejectionMeter = values.rejectionMeter;
+    due.pendingMeter = qty(values.rejectionMeter - due.receivedMeter);
+    due.status = due.pendingMeter > 0 ? due.receivedMeter > 0 ? "partial" : "pending" : "received";
+    due.pakkiDate = pakki.pakkiDate;
+    await due.save(sessionOptions(session));
+  } else if (values.rejectionMeter > 0) {
+    const kacchi = await setSession(WeavingKacchiParchi.findOne({ _id: pakki.sourceKacchiId || pakki.kacchiId, userId }), session);
+    if (!kacchi) throw fail("Source Kacchi is unavailable.", 409);
+    due = await createOne(WeavingRejectionDue, { userId, pakkiId: pakki._id, partyId: pakki.partyId, contractId: pakki.contractId, fabricQualityId: pakki.fabricQualityId, qualitySnapshot: pakki.qualitySnapshot, ownershipType: pakki.ownershipType, ownerPartyId: kacchi.ownerPartyId, godownId: pakki.godownId, pakkiDate: pakki.pakkiDate, originalRejectionMeter: values.rejectionMeter, pendingMeter: values.rejectionMeter }, session);
+  }
+  return invoice;
+}, true);
 
 const updateDraft = async (userId, invoiceId, payload, actorId) => {
   const posted = await WeavingSalesInvoice.exists({ _id: invoiceId, userId, status: "posted" });
@@ -580,25 +873,46 @@ const updateDraft = async (userId, invoiceId, payload, actorId) => {
   const invoice = await WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "draft" }); if (!invoice) throw fail("Only a Draft Invoice can be edited", 409);
   const finalRate = round(payload.finalRate ?? invoice.finalRate); if (finalRate !== invoice.originalRate && !clean(payload.rateOverrideReason || invoice.rateOverrideReason)) throw fail("Rate override reason is required"); if (finalRate <= 0) throw fail("Rate must be greater than zero");
   const totals = calculateInvoiceTotals({ quantity: invoice.quantity, rate: finalRate, discountAmount: payload.discountAmount ?? invoice.discountAmount, taxAmount: payload.taxAmount ?? invoice.taxAmount });
-  const terms = normalizeSaleTerms(payload.saleTerms ? payload : { saleTerms: invoice.saleTerms, receivedNow: invoice.receivedNowRequested, paymentAccountId: invoice.paymentAccountId }, totals.grandTotal);
+  const terms = normalizeSaleTerms({ receivedNow: invoice.receivedNowRequested, paymentAccountId: invoice.paymentAccountId, paymentMethod: invoice.paymentMethod, ...payload }, totals.grandTotal);
   Object.assign(invoice, totals, terms, { finalRate, paymentAccountId: terms.receivedNowRequested > 0 ? (payload.paymentAccountId || invoice.paymentAccountId) : null, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || invoice.paymentMethod || "cash") : "", receiptRequestKey: terms.receivedNowRequested > 0 ? (invoice.receiptRequestKey || clean(payload.receiptRequestKey) || `sale:${invoice._id}`) : "", rateOverrideReason: clean(payload.rateOverrideReason), rateChangedBy: finalRate !== invoice.originalRate ? actorId : null, rateChangedAt: finalRate !== invoice.originalRate ? new Date() : null, invoiceDate: clean(payload.invoiceDate) || invoice.invoiceDate, creditDays: Math.max(0, Math.trunc(Number(payload.creditDays ?? invoice.creditDays) || 0)), notes: clean(payload.notes) });
   invoice.dueDate = clean(payload.dueDate) || dueDateFromCreditDays(invoice.invoiceDate, invoice.creditDays); invoice.balanceDue = invoice.grandTotal; return invoice.save();
 };
 
 const voidInvoice = async (userId, invoiceId, actorId, reason) => {
-  const invoice = await WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "posted" }); if (!invoice) throw fail("Posted Invoice not found", 404);
-  if (invoice.paidAmount > 0) throw fail("Reverse linked receipts before voiding this Invoice", 409);
-  const reversal = await commercial.reverseJournal(userId, invoice.journalEntryId, new Date().toISOString().slice(0, 10), `Void ${invoice.invoiceNo}: ${clean(reason)}`);
-  if (invoice.saleSource === "direct" && invoice.stockMovementId) {
-    if (invoice.stockMovementModel === "WeavingYarnMovement") await WeavingYarnMovement.create({ userId, yarnId: invoice.yarnId, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", ownershipType: "own", salesInvoiceId: invoice._id, quantityKg: invoice.quantity, godownId: invoice.godownId, rate: invoice.finalRate, notes: `Void ${invoice.invoiceNo}` });
-    else await WeavingFabricMovement.create({ userId, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", category: stockCategory(invoice), direction: "in", fabricQualityId: invoice.fabricQualityId, godownId: invoice.godownId, ownershipType: "own", meter: invoice.quantity, weightKg: invoice.weightKg, thanCount: invoice.thanCount, pieceCount: invoice.pieceCount, salesInvoiceId: invoice._id, notes: `Void ${invoice.invoiceNo}` });
-  }
-  invoice.status = "void"; invoice.activeForPakki = false; invoice.voidedAt = new Date(); invoice.voidedBy = actorId; invoice.voidReason = clean(reason); invoice.reversalJournalId = reversal?._id || null; await invoice.save();
-  const sourcePakkiId = invoice.sourcePakkiId || invoice.pakkiId; if (sourcePakkiId) await WeavingPakkiSettlement.updateOne({ _id: sourcePakkiId, userId, invoiceId: invoice._id }, { $set: { invoiceId: null } });
-  return invoice;
+  const touched = [];
+  const result = await runAtomic(async (session) => {
+    const invoice = await setSession(WeavingSalesInvoice.findOne({ _id: invoiceId, userId, status: "posted" }), session);
+    if (!invoice) throw fail("Posted Invoice not found", 404);
+    const paid = await setSession(WeavingMoneyTransaction.exists({ userId, salesInvoiceId: invoice._id, status: "posted", type: "receive" }), session);
+    if (invoice.paidAmount > 0 || paid) throw fail("Reverse linked receipts before voiding this Invoice", 409);
+    const reversal = await reverseJournalInSession({ userId, journalId: invoice.journalEntryId, date: new Date().toISOString().slice(0, 10), reason: `Void ${invoice.invoiceNo}: ${clean(reason)}`, session });
+    if (reversal) touched.push(...reversal.lines.map((line) => line.account));
+    if (invoice.saleSource === "direct" && invoice.stockMovementId) {
+      if (invoice.stockMovementModel === "WeavingYarnMovement") await createOne(WeavingYarnMovement, { userId, yarnId: invoice.yarnId, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", ownershipType: "own", salesInvoiceId: invoice._id, quantityKg: invoice.quantity, godownId: invoice.godownId, rate: invoice.finalRate, notes: `Void ${invoice.invoiceNo}` }, session);
+      else {
+        const movements = await setSession(WeavingFabricMovement.find({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: false }).lean(), session);
+        for (const movement of movements) {
+          if (movement.sourceFoldingEntryId) {
+            const released = await WeavingFoldingEntry.updateOne({ _id: movement.sourceFoldingEntryId, userId, activeSalesInvoiceId: invoice._id, activeKacchiId: null }, { $set: { activeSalesInvoiceId: null }, $inc: { stockRevision: 1 } }, sessionOptions(session));
+            if (released.modifiedCount !== 1) throw fail("A sold Than changed. Review its stock history before voiding.", 409);
+          }
+          const { _id, createdAt, updatedAt, __v, ...values } = movement;
+          await createOne(WeavingFabricMovement, { ...values, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", direction: "in", notes: `Void ${invoice.invoiceNo}` }, session);
+        }
+      }
+    }
+    invoice.status = "void"; invoice.activeForPakki = false; invoice.voidedAt = new Date(); invoice.voidedBy = actorId; invoice.voidReason = clean(reason); invoice.reversalJournalId = reversal?._id || null;
+    await invoice.save(sessionOptions(session));
+    const sourcePakkiId = invoice.sourcePakkiId || invoice.pakkiId;
+    if (sourcePakkiId) await WeavingPakkiSettlement.updateOne({ _id: sourcePakkiId, userId, invoiceId: invoice._id }, { $set: { invoiceId: null } }, sessionOptions(session));
+    await recalculateAccountBalances([...new Set(touched.map(String))], session);
+    return invoice;
+  }, true);
+  return result;
 };
 
 module.exports = {
+  confirmPakkiInvoice: costing.withCostingInvalidation(confirmPakkiInvoice, "sale"),
   calculateSettlement,
   calculateInvoiceTotals,
   dueDateFromCreditDays,
@@ -618,8 +932,9 @@ module.exports = {
   getManagementMetrics,
   updateDraft,
   updatePostedInvoice,
+  updatePakki: costing.withCostingInvalidation(updatePakki, "sale"),
   voidInvoice: costing.withCostingInvalidation(voidInvoice, "sale"),
   getFabricBalance,
   getFabricBalances,
-  _test: { buildManagementMetrics, calculateSettlement, calculateInvoiceTotals, dueDateFromCreditDays, validateReceiptClassification, stockCategory, normalizeSaleTerms },
+  _test: { paymentAmounts, normalizeOtherLines, chequeDetails, buildManagementMetrics, calculateSettlement, calculateInvoiceTotals, dueDateFromCreditDays, validateReceiptClassification, stockCategory, normalizeSaleTerms },
 };

@@ -3,8 +3,12 @@ import { createPortal } from 'react-dom';
 import {
   FaBan,
   FaCalendarCheck,
+  FaCalendarDay,
+  FaChevronLeft,
   FaCheck,
   FaChevronDown,
+  FaChevronRight,
+  FaList,
   FaLock,
   FaLockOpen,
   FaSave,
@@ -16,12 +20,18 @@ import {
 import { t } from '../../i18n/i18n';
 import {
   getWeavingAttendanceMeta,
+  getWeavingAttendanceHistory,
   getWeavingAttendanceSession,
+  getWeavingWorkPeriodState,
   saveWeavingAttendanceSession,
+  startWeavingWorkPeriod,
 } from '../../services/weavingAttendanceService';
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
-import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import {
+  requestWeavingConfirmation,
+  useWeavingFeedback,
+} from '../../components/weaving/WeavingFeedbackModal';
 
 const EMPTY_LOCK = {
   locked: false,
@@ -111,6 +121,15 @@ const buildSummary = (rows = []) =>
     }
   );
 
+const shiftDate = (date, days) => {
+  const value = new Date(`${date}T12:00:00`);
+  value.setDate(value.getDate() + days);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const StatChip = ({ labelKey, value, tone = 'slate' }) => {
   const tones = {
     slate: 'border-slate-200 bg-white text-slate-700',
@@ -186,17 +205,6 @@ const DutyBadge = ({ row }) => {
   return <span className="text-slate-300">—</span>;
 };
 
-/*
- * Floating replacement selector.
- *
- * IMPORTANT:
- * The options panel is rendered into document.body through a portal.
- * Therefore:
- * - it is not clipped by the table
- * - it can overlap the next employee row
- * - it can extend below/outside the table
- * - table overflow does not control the dropdown
- */
 const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disabled, onChange }) => {
   const wrapperRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -464,7 +472,203 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
   );
 };
 
+const AttendanceHistory = ({ meta, filterClass }) => {
+  const today = getBusinessDateInputValue();
+  const [filters, setFilters] = useState({
+    dateFrom: shiftDate(today, -30),
+    dateTo: today,
+    employeeId: '',
+    departmentId: '',
+    shiftId: '',
+    status: '',
+  });
+  const [result, setResult] = useState({ rows: [], pagination: { page: 1, pages: 1, total: 0 } });
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
+  const loadHistory = useCallback(
+    async (page = 1) => {
+      try {
+        setLoading(true);
+        setLoadError('');
+        setResult(await getWeavingAttendanceHistory({ ...filters, page, limit: 25 }));
+      } catch (error) {
+        setLoadError(getErrorMessage(error, 'weaving.attendance.messages.historyFailed'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filters]
+  );
+
+  useEffect(() => {
+    loadHistory(1);
+  }, [loadHistory]);
+  const patch = (field, value) => setFilters((current) => ({ ...current, [field]: value }));
+  const duty = (row) =>
+    row.dutyType === 'replacement' || row.dutyType === 'double_replacement'
+      ? t('weaving.attendance.replacement')
+      : row.isDoubleDuty
+        ? t('weaving.attendance.doubleDuty')
+        : '—';
+
+  return (
+    <div className="space-y-3 border-t border-slate-100 pt-3">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+        <input
+          aria-label={t('weaving.attendance.fromDate')}
+          type="date"
+          className={filterClass}
+          value={filters.dateFrom}
+          onChange={(event) => patch('dateFrom', event.target.value)}
+        />
+        <input
+          aria-label={t('weaving.attendance.toDate')}
+          type="date"
+          className={filterClass}
+          value={filters.dateTo}
+          onChange={(event) => patch('dateTo', event.target.value)}
+        />
+        <select
+          aria-label={t('weaving.attendance.employee')}
+          className={filterClass}
+          value={filters.employeeId}
+          onChange={(event) => patch('employeeId', event.target.value)}
+        >
+          <option value="">{t('weaving.attendance.allEmployees')}</option>
+          {meta.employees.map((row) => (
+            <option key={row._id} value={row._id}>
+              {row.name}
+              {row.employeeNo ? ` - ${row.employeeNo}` : ''}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label={t('weaving.attendance.department')}
+          className={filterClass}
+          value={filters.departmentId}
+          onChange={(event) => patch('departmentId', event.target.value)}
+        >
+          <option value="">{t('weaving.attendance.allDepartments')}</option>
+          {meta.departments.map((row) => (
+            <option key={row._id} value={row._id}>
+              {row.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label={t('weaving.attendance.shift')}
+          className={filterClass}
+          value={filters.shiftId}
+          onChange={(event) => patch('shiftId', event.target.value)}
+        >
+          <option value="">{t('weaving.attendance.allShifts')}</option>
+          {meta.shifts.map((row) => (
+            <option key={row._id} value={row._id}>
+              {row.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label={t('weaving.attendance.status')}
+          className={filterClass}
+          value={filters.status}
+          onChange={(event) => patch('status', event.target.value)}
+        >
+          <option value="">{t('weaving.attendance.allStatuses')}</option>
+          {['present', 'absent', 'leave'].map((status) => (
+            <option key={status} value={status}>
+              {t(`weaving.attendance.${status}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {loadError && (
+        <p className="rounded-lg bg-rose-50 p-3 text-sm font-bold text-rose-700">{loadError}</p>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <table className="min-w-[900px] w-full text-xs">
+          <thead className="bg-slate-900 text-white">
+            <tr>
+              {[
+                'date',
+                'employee',
+                'employeeNo',
+                'department',
+                'shift',
+                'status',
+                'otHoursShort',
+                'duty',
+                'note',
+              ].map((key) => (
+                <th key={key} className="px-3 py-2.5 text-left">
+                  {t(`weaving.attendance.${key}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y font-bold text-slate-700">
+            {!loading &&
+              result.rows.map((row) => (
+                <tr key={row._id} className="even:bg-slate-50">
+                  <td className="px-3 py-2">{row.attendanceDate}</td>
+                  <td className="px-3 py-2 font-bold">{row.employeeName}</td>
+                  <td className="px-3 py-2">{row.employeeNo || '—'}</td>
+                  <td className="px-3 py-2">{row.departmentName || '—'}</td>
+                  <td className="px-3 py-2">{row.shiftName || '—'}</td>
+                  <td className="px-3 py-2 font-bold capitalize">
+                    {t(`weaving.attendance.${row.status}`)}
+                  </td>
+                  <td className="px-3 py-2">{row.otHours || '—'}</td>
+                  <td className="px-3 py-2">{duty(row)}</td>
+                  <td className="px-3 py-2">{row.note || '—'}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+        {loading && (
+          <div className="p-8 text-center text-sm font-bold text-slate-500">
+            {t('common.loading')}
+          </div>
+        )}
+        {!loading && !result.rows.length && (
+          <div className="p-8 text-center text-sm font-bold text-slate-500">
+            {t('weaving.attendance.messages.emptyHistory')}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+        <span>
+          {result.pagination.total} {t('weaving.attendance.records')}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={loading || result.pagination.page <= 1}
+            onClick={() => loadHistory(result.pagination.page - 1)}
+            className="h-8 rounded-lg border bg-white px-3 disabled:opacity-40"
+          >
+            {t('weaving.attendance.previous')}
+          </button>
+          <span>
+            {result.pagination.page} / {result.pagination.pages}
+          </span>
+          <button
+            type="button"
+            disabled={loading || result.pagination.page >= result.pagination.pages}
+            onClick={() => loadHistory(result.pagination.page + 1)}
+            className="h-8 rounded-lg border bg-white px-3 disabled:opacity-40"
+          >
+            {t('weaving.attendance.next')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const WeavingAttendancePage = () => {
+  const [view, setView] = useState('mark');
   const [date, setDate] = useState(getBusinessDateInputValue());
 
   const [unitId, setUnitId] = useState('');
@@ -476,6 +680,7 @@ const WeavingAttendancePage = () => {
     units: [],
     departments: [],
     shifts: [],
+    employees: [],
   });
 
   const [rows, setRows] = useState([]);
@@ -489,6 +694,7 @@ const WeavingAttendancePage = () => {
   const [loadingRows, setLoadingRows] = useState(false);
 
   const [saving, setSaving] = useState(false);
+  const [workPeriod, setWorkPeriod] = useState(null);
 
   const [error, setError] = useState('');
   useWeavingFeedback(error, setError, { type: 'error' });
@@ -499,6 +705,26 @@ const WeavingAttendancePage = () => {
   const canEdit = lock.canEdit && localCanManage && !saving && !loadingRows;
 
   const hasSelection = Boolean(date && unitId && shiftId);
+
+  useEffect(() => {
+    let cancelled = false;
+    getWeavingWorkPeriodState(date)
+      .then((result) => { if (!cancelled) setWorkPeriod(result); })
+      .catch(() => { if (!cancelled) setWorkPeriod(null); });
+    return () => { cancelled = true; };
+  }, [date]);
+
+  const startAttendancePeriod = async () => {
+    setSaving(true);
+    try {
+      await startWeavingWorkPeriod({ startDate: date });
+      setWorkPeriod(await getWeavingWorkPeriodState(date));
+    } catch (startError) {
+      setError(getErrorMessage(startError, 'weaving.attendance.messages.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -516,6 +742,7 @@ const WeavingAttendancePage = () => {
           units: Array.isArray(result?.units) ? result.units : [],
           departments: Array.isArray(result?.departments) ? result.departments : [],
           shifts: Array.isArray(result?.shifts) ? result.shifts : [],
+          employees: Array.isArray(result?.employees) ? result.employees : [],
         });
 
         if (result?.date) {
@@ -605,6 +832,10 @@ const WeavingAttendancePage = () => {
   );
 
   const summary = useMemo(() => buildSummary(visibleRows), [visibleRows]);
+  const pending = useMemo(
+    () => rows.filter((row) => !row.generatedByReplacement && !row.status).length,
+    [rows]
+  );
 
   const assignedReplacementIds = useMemo(
     () => new Set(rows.map((row) => row.replacementEmployeeId).filter(Boolean)),
@@ -621,13 +852,14 @@ const WeavingAttendancePage = () => {
         return updater(row);
       })
     );
-
   };
 
   const setRowStatus = (row, status) => {
     updateRow(row.employeeId, (current) => ({
       ...current,
       status,
+      note: '',
+      isFactoryHoliday: false,
       otHours: status === 'present' ? current.otHours : '',
       replacementEmployeeId: status === 'absent' ? current.replacementEmployeeId : '',
     }));
@@ -653,6 +885,7 @@ const WeavingAttendancePage = () => {
       ...current,
       replacementEmployeeId,
       status: replacementEmployeeId ? 'absent' : current.status,
+      isFactoryHoliday: false,
       otHours: replacementEmployeeId ? '' : current.otHours,
     }));
   };
@@ -680,7 +913,6 @@ const WeavingAttendancePage = () => {
         };
       })
     );
-
   };
 
   const overwriteVisible = async (status) => {
@@ -689,7 +921,7 @@ const WeavingAttendancePage = () => {
         ? 'weaving.attendance.messages.confirmAllAbsent'
         : 'weaving.attendance.messages.confirmAllLeave';
 
-    if (!await requestWeavingConfirmation({ message: t(messageKey) })) {
+    if (!(await requestWeavingConfirmation({ message: t(messageKey) }))) {
       return;
     }
 
@@ -713,12 +945,36 @@ const WeavingAttendancePage = () => {
           return {
             ...row,
             status,
+            note: '',
             otHours: '',
             replacementEmployeeId: '',
           };
         })
     );
+  };
 
+  const markHoliday = async () => {
+    const hasExisting = rows.some(
+      (row) =>
+        row.status || Number(row.otHours || 0) > 0 || row.replacementEmployeeId || row.isDoubleDuty
+    );
+    const message = hasExisting
+      ? t('weaving.attendance.messages.confirmHolidayReplace')
+      : t('weaving.attendance.messages.confirmHoliday');
+    if (!(await requestWeavingConfirmation({ message }))) return;
+
+    setRows((current) =>
+      current
+        .filter((row) => !row.generatedByReplacement)
+        .map((row) => ({
+          ...row,
+          status: 'leave',
+          note: t('weaving.attendance.holidayNote'),
+          isFactoryHoliday: true,
+          otHours: '',
+          replacementEmployeeId: '',
+        }))
+    );
   };
 
   const buildPayloadRows = () =>
@@ -727,6 +983,8 @@ const WeavingAttendancePage = () => {
       status: row.status,
       otHours: row.otHours || 0,
       replacementEmployeeId: row.replacementEmployeeId || '',
+      note: row.note || '',
+      isFactoryHoliday: row.isFactoryHoliday === true,
       generatedByReplacement: row.generatedByReplacement,
       replacementForEmployeeId: row.replacementForEmployeeId || '',
     }));
@@ -765,7 +1023,6 @@ const WeavingAttendancePage = () => {
       );
 
       setLock(result?.lock || EMPTY_LOCK);
-
     } catch (saveError) {
       setError(getErrorMessage(saveError, 'weaving.attendance.messages.saveFailed'));
     } finally {
@@ -792,10 +1049,23 @@ const WeavingAttendancePage = () => {
                 <h1 className="truncate text-xl font-black leading-none text-slate-950 md:text-2xl">
                   {t('weaving.attendance.title')}
                 </h1>
-
-                <p className="mt-1 truncate text-xs font-semibold text-slate-500 md:text-sm">
-                  {t('weaving.attendance.subtitle')}
-                </p>
+              </div>
+              <div className="flex rounded-lg bg-slate-100 p-1 text-xs font-black">
+                <button
+                  type="button"
+                  onClick={() => setView('mark')}
+                  className={`rounded-md px-2.5 py-1.5 ${view === 'mark' ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}
+                >
+                  {t('weaving.attendance.markAttendance')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView('list')}
+                  className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}
+                >
+                  <FaList className="mr-1 inline" />
+                  {t('weaving.attendance.attendanceList')}
+                </button>
               </div>
             </div>
 
@@ -827,142 +1097,208 @@ const WeavingAttendancePage = () => {
                 value={summary.double}
                 tone="indigo"
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-[145px_165px_165px_185px_minmax(220px,1fr)]">
-            <input
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              className={filterClass}
-            />
-
-            <select
-              value={unitId}
-              onChange={(event) => setUnitId(event.target.value)}
-              className={filterClass}
-              disabled={loadingMeta}
-            >
-              <option value="">{t('weaving.attendance.selectUnit')}</option>
-
-              {meta.units.map((unit) => (
-                <option key={unit._id} value={unit._id}>
-                  {getUnitLabel(unit)}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={shiftId}
-              onChange={(event) => setShiftId(event.target.value)}
-              className={filterClass}
-              disabled={loadingMeta}
-            >
-              <option value="">{t('weaving.attendance.selectShift')}</option>
-
-              {meta.shifts.map((shift) => (
-                <option key={shift._id} value={shift._id}>
-                  {shift.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={departmentId}
-              onChange={(event) => setDepartmentId(event.target.value)}
-              className={filterClass}
-              disabled={loadingMeta}
-            >
-              <option value="">{t('weaving.attendance.allDepartments')}</option>
-
-              {meta.departments.map((department) => (
-                <option key={department._id} value={department._id}>
-                  {department.name}
-                </option>
-              ))}
-            </select>
-
-            <div className="col-span-2 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 shadow-sm transition focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100 md:col-span-1 md:h-10">
-              <FaSearch className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
-
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('weaving.attendance.search')}
-                className="min-w-0 flex-1 border-0 bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400 md:text-sm"
+              <StatChip
+                labelKey={
+                  pending === 0 && rows.length
+                    ? 'weaving.attendance.complete'
+                    : 'weaving.attendance.pending'
+                }
+                value={pending === 0 && rows.length ? '' : pending}
+                tone={pending === 0 && rows.length ? 'green' : 'amber'}
               />
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={markBlankVisiblePresent}
-                disabled={!canEdit || visibleRows.length === 0}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-40 md:text-sm"
-              >
-                <FaCheck />
-                {t('weaving.attendance.allPresent')}
-              </button>
+          {view === 'list' ? (
+            <AttendanceHistory meta={meta} filterClass={filterClass} />
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-[220px_165px_165px_190px_300px] md:justify-start">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    title={t('weaving.attendance.previousDay')}
+                    onClick={() => setDate(shiftDate(date, -1))}
+                    className="h-9 rounded-lg border bg-white px-2 text-slate-600"
+                  >
+                    <FaChevronLeft />
+                  </button>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(event) => setDate(event.target.value)}
+                    className={`${filterClass} min-w-0 flex-1`}
+                  />
+                  <button
+                    type="button"
+                    title={t('weaving.attendance.nextDay')}
+                    onClick={() => setDate(shiftDate(date, 1))}
+                    className="h-9 rounded-lg border bg-white px-2 text-slate-600"
+                  >
+                    <FaChevronRight />
+                  </button>
+                </div>
 
-              <button
-                type="button"
-                onClick={() => overwriteVisible('absent')}
-                disabled={!canEdit || visibleRows.length === 0}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-40 md:text-sm"
-              >
-                <FaTimes />
-                {t('weaving.attendance.allAbsent')}
-              </button>
+                {workPeriod?.needsStart && localCanManage ? (
+                  <button
+                    type="button"
+                    disabled={!date || saving}
+                    onClick={startAttendancePeriod}
+                    className="h-10 rounded-lg bg-cyan-700 px-3 text-xs font-black text-white disabled:opacity-50"
+                  >
+                    Start / Continue Attendance
+                  </button>
+                ) : null}
 
-              <button
-                type="button"
-                onClick={() => overwriteVisible('leave')}
-                disabled={!canEdit || visibleRows.length === 0}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:opacity-40 md:text-sm"
-              >
-                <FaBan />
-                {t('weaving.attendance.allLeave')}
-              </button>
-            </div>
+                <select
+                  value={unitId}
+                  onChange={(event) => setUnitId(event.target.value)}
+                  className={filterClass}
+                  disabled={loadingMeta}
+                >
+                  <option value="">{t('weaving.attendance.selectUnit')}</option>
 
-            <div className="flex items-center gap-2">
-              <span
-                className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black shadow-sm md:text-sm ${
-                  lock.locked
-                    ? 'border-rose-200 bg-rose-50 text-rose-700'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                }`}
-              >
-                {lock.locked ? <FaLock /> : <FaLockOpen />}
+                  {meta.units.map((unit) => (
+                    <option key={unit._id} value={unit._id}>
+                      {getUnitLabel(unit)}
+                    </option>
+                  ))}
+                </select>
 
-                {lock.locked ? t('weaving.attendance.locked') : t('weaving.attendance.open')}
-              </span>
+                <select
+                  value={shiftId}
+                  onChange={(event) => setShiftId(event.target.value)}
+                  className={filterClass}
+                  disabled={loadingMeta}
+                >
+                  <option value="">{t('weaving.attendance.selectShift')}</option>
 
-              <button
-                type="button"
-                onClick={loadSession}
-                disabled={!hasSelection || loadingRows || saving}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-              >
-                <FaSync className={loadingRows ? 'animate-spin' : ''} />
-              </button>
+                  {meta.shifts.map((shift) => (
+                    <option key={shift._id} value={shift._id}>
+                      {shift.name}
+                    </option>
+                  ))}
+                </select>
 
-              <button
-                type="button"
-                onClick={saveAttendance}
-                disabled={!canEdit || !hasSelection || rows.length === 0}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-slate-900 to-cyan-800 px-3.5 text-xs font-black text-white shadow-md transition hover:from-slate-800 hover:to-cyan-700 disabled:opacity-40 md:text-sm"
-              >
-                <FaSave />
+                <select
+                  value={departmentId}
+                  onChange={(event) => setDepartmentId(event.target.value)}
+                  className={filterClass}
+                  disabled={loadingMeta}
+                >
+                  <option value="">{t('weaving.attendance.allDepartments')}</option>
 
-                {saving ? t('common.saving') : t('weaving.attendance.save')}
-              </button>
-            </div>
-          </div>
+                  {meta.departments.map((department) => (
+                    <option key={department._id} value={department._id}>
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="col-span-2 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 shadow-sm transition focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100 md:col-span-1 md:h-10">
+                  <FaSearch className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t('weaving.attendance.search')}
+                    className="min-w-0 flex-1 border-0 bg-transparent text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400 md:text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={markBlankVisiblePresent}
+                    disabled={!canEdit || visibleRows.length === 0}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-40 md:text-sm"
+                  >
+                    <FaCheck />
+                    {t('weaving.attendance.allPresent')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => overwriteVisible('absent')}
+                    disabled={!canEdit || visibleRows.length === 0}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:opacity-40 md:text-sm"
+                  >
+                    <FaTimes />
+                    {t('weaving.attendance.allAbsent')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => overwriteVisible('leave')}
+                    disabled={!canEdit || visibleRows.length === 0}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:opacity-40 md:text-sm"
+                  >
+                    <FaBan />
+                    {t('weaving.attendance.allLeave')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={markHoliday}
+                    disabled={!canEdit || rows.length === 0}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 text-xs font-black text-orange-800 shadow-sm transition hover:bg-orange-100 disabled:opacity-40 md:text-sm"
+                  >
+                    <FaCalendarDay />
+                    {t('weaving.attendance.hDay')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDate(getBusinessDateInputValue())}
+                    className="inline-flex h-9 items-center rounded-lg border bg-white px-3 text-xs font-black text-slate-600"
+                  >
+                    {t('weaving.attendance.today')}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black shadow-sm md:text-sm ${
+                      lock.canEdit
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : lock.locked
+                          ? 'border-rose-200 bg-rose-50 text-rose-700'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    }`}
+                  >
+                    {lock.canEdit ? <FaLockOpen /> : lock.locked ? <FaLock /> : <FaLockOpen />}
+
+                    {lock.canEdit
+                      ? t('weaving.attendance.editable')
+                      : lock.locked
+                        ? t('weaving.attendance.locked')
+                        : t('weaving.attendance.open')}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={loadSession}
+                    disabled={!hasSelection || loadingRows || saving}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <FaSync className={loadingRows ? 'animate-spin' : ''} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={saveAttendance}
+                    disabled={!canEdit || !hasSelection || rows.length === 0}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-slate-900 to-cyan-800 px-3.5 text-xs font-black text-white shadow-md transition hover:from-slate-800 hover:to-cyan-700 disabled:opacity-40 md:text-sm"
+                  >
+                    <FaSave />
+
+                    {saving ? t('common.saving') : t('weaving.attendance.save')}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -972,161 +1308,163 @@ const WeavingAttendancePage = () => {
         There is deliberately NO vertical max-height / overflow-y-auto
         wrapper, so the scrollbar is not attached to the table header.
       */}
-      <section className="relative rounded-xl border border-slate-200 bg-white shadow-md">
-        <div className="w-full overflow-x-auto overflow-y-hidden">
-          <table className="w-full min-w-[760px] border-collapse text-[10px] sm:text-[11px] md:min-w-[1000px] md:text-sm">
-            <thead className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 text-white">
-              <tr>
-                <th className="w-10 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:text-sm">
-                  #
-                </th>
-
-                <th className="min-w-[155px] border-r border-white/10 px-3 py-3 text-left text-xs font-black md:min-w-[215px] md:text-sm">
-                  {t('weaving.attendance.employee')}
-                </th>
-
-                <th className="hidden min-w-[140px] border-r border-white/10 px-3 py-3 text-left text-sm font-black md:table-cell">
-                  {t('weaving.attendance.department')}
-                </th>
-
-                <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-28 md:text-sm">
-                  <span className="md:hidden">OT</span>
-
-                  <span className="hidden md:inline">Overtime</span>
-                </th>
-
-                <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-32 md:text-sm">
-                  {t('weaving.attendance.duty')}
-                </th>
-
-                <th className="min-w-[150px] border-r border-white/10 px-2 py-3 text-left text-xs font-black md:min-w-[235px] md:px-3 md:text-sm">
-                  {t('weaving.attendance.replacement')}
-                </th>
-
-                <th className="min-w-[120px] px-2 py-3 text-center text-xs font-black md:min-w-[150px] md:text-sm">
-                  {t('weaving.attendance.attendance')}
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100">
-              {!hasSelection && (
+      {view === 'mark' && (
+        <section className="relative rounded-xl border border-slate-200 bg-white shadow-md">
+          <div className="w-full overflow-x-auto overflow-y-hidden">
+            <table className="w-full min-w-[760px] border-collapse text-[10px] sm:text-[11px] md:min-w-[1000px] md:text-sm">
+              <thead className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 text-white">
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm font-bold text-slate-500"
-                  >
-                    {t('weaving.attendance.messages.selectRequired')}
-                  </td>
+                  <th className="w-10 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:text-sm">
+                    #
+                  </th>
+
+                  <th className="min-w-[155px] border-r border-white/10 px-3 py-3 text-left text-xs font-black md:min-w-[215px] md:text-sm">
+                    {t('weaving.attendance.employee')}
+                  </th>
+
+                  <th className="hidden min-w-[140px] border-r border-white/10 px-3 py-3 text-left text-sm font-black md:table-cell">
+                    {t('weaving.attendance.department')}
+                  </th>
+
+                  <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-28 md:text-sm">
+                    <span className="md:hidden">OT</span>
+
+                    <span className="hidden md:inline">Overtime</span>
+                  </th>
+
+                  <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-32 md:text-sm">
+                    {t('weaving.attendance.duty')}
+                  </th>
+
+                  <th className="min-w-[150px] border-r border-white/10 px-2 py-3 text-left text-xs font-black md:min-w-[235px] md:px-3 md:text-sm">
+                    {t('weaving.attendance.replacement')}
+                  </th>
+
+                  <th className="min-w-[120px] px-2 py-3 text-center text-xs font-black md:min-w-[150px] md:text-sm">
+                    {t('weaving.attendance.attendance')}
+                  </th>
                 </tr>
-              )}
+              </thead>
 
-              {hasSelection && loadingRows && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm font-bold text-slate-500"
-                  >
-                    {t('common.loading')}
-                  </td>
-                </tr>
-              )}
-
-              {hasSelection && !loadingRows && visibleRows.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-sm font-bold text-slate-500"
-                  >
-                    {t('weaving.attendance.messages.empty')}
-                  </td>
-                </tr>
-              )}
-
-              {hasSelection &&
-                !loadingRows &&
-                visibleRows.map((row, index) => {
-                  const rowLocked = !canEdit;
-
-                  const otDisabled =
-                    rowLocked ||
-                    row.generatedByReplacement ||
-                    row.status === 'absent' ||
-                    row.status === 'leave';
-
-                  return (
-                    <tr
-                      key={`${row.employeeId}-${row.attendanceId || 'draft'}`}
-                      className="bg-white transition-colors even:bg-slate-50/50 hover:bg-cyan-50/60"
+              <tbody className="divide-y divide-slate-100">
+                {!hasSelection && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
                     >
-                      <td className="border-r border-slate-100 px-2 py-2.5 text-center align-middle text-xs font-black text-slate-500 md:text-sm">
-                        {index + 1}
-                      </td>
+                      {t('weaving.attendance.messages.selectRequired')}
+                    </td>
+                  </tr>
+                )}
 
-                      <td className="border-r border-slate-100 px-2.5 py-2.5 align-middle md:px-3">
-                        <div className="max-w-[155px] md:max-w-none">
-                          <div className="truncate text-xs font-black leading-tight text-slate-950 md:text-base">
-                            {row.employeeName || '—'}
+                {hasSelection && loadingRows && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
+                    >
+                      {t('common.loading')}
+                    </td>
+                  </tr>
+                )}
+
+                {hasSelection && !loadingRows && visibleRows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
+                    >
+                      {t('weaving.attendance.messages.empty')}
+                    </td>
+                  </tr>
+                )}
+
+                {hasSelection &&
+                  !loadingRows &&
+                  visibleRows.map((row, index) => {
+                    const rowLocked = !canEdit;
+
+                    const otDisabled =
+                      rowLocked ||
+                      row.generatedByReplacement ||
+                      row.status === 'absent' ||
+                      row.status === 'leave';
+
+                    return (
+                      <tr
+                        key={`${row.employeeId}-${row.attendanceId || 'draft'}`}
+                        className="bg-white transition-colors even:bg-slate-50/50 hover:bg-cyan-50/60"
+                      >
+                        <td className="border-r border-slate-100 px-2 py-2.5 text-center align-middle text-xs font-black text-slate-500 md:text-sm">
+                          {index + 1}
+                        </td>
+
+                        <td className="border-r border-slate-100 px-2.5 py-2.5 align-middle md:px-3">
+                          <div className="max-w-[155px] md:max-w-none">
+                            <div className="truncate text-xs font-black leading-tight text-slate-950 md:text-base">
+                              {row.employeeName || '—'}
+                            </div>
+
+                            <div className="mt-0.5 truncate text-[9px] font-bold text-slate-500 sm:text-[10px] md:text-xs">
+                              {[row.employeeNo, row.departmentName].filter(Boolean).join(' • ')}
+                            </div>
                           </div>
+                        </td>
 
-                          <div className="mt-0.5 truncate text-[9px] font-bold text-slate-500 sm:text-[10px] md:text-xs">
-                            {[row.employeeNo, row.departmentName].filter(Boolean).join(' • ')}
+                        <td className="hidden border-r border-slate-100 px-3 py-2.5 align-middle text-sm font-bold text-slate-700 md:table-cell">
+                          {row.departmentName || '—'}
+                        </td>
+
+                        <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.otHours}
+                            onChange={(event) => setRowOt(row, event.target.value)}
+                            disabled={otDisabled}
+                            placeholder="0"
+                            title="Overtime Hours"
+                            className="h-8 w-12 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-black text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100 disabled:text-slate-400 md:h-9 md:w-16 md:text-sm"
+                          />
+                        </td>
+
+                        <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
+                          <DutyBadge row={row} />
+                        </td>
+
+                        <td className="border-r border-slate-100 px-1.5 py-2.5 align-middle md:px-3">
+                          <ReplacementSelect
+                            row={row}
+                            options={replacementOptions}
+                            assignedIds={assignedReplacementIds}
+                            selectedShiftId={selectedShift?._id || shiftId}
+                            disabled={rowLocked}
+                            onChange={(value) => setRowReplacement(row, value)}
+                          />
+                        </td>
+
+                        <td className="px-2 py-2.5 text-center align-middle">
+                          <div className="inline-flex items-center gap-1 md:gap-1.5">
+                            {['present', 'absent', 'leave'].map((status) => (
+                              <StatusButton
+                                key={status}
+                                status={status}
+                                selected={row.status === status}
+                                disabled={rowLocked || row.generatedByReplacement}
+                                onClick={() => setRowStatus(row, status)}
+                              />
+                            ))}
                           </div>
-                        </div>
-                      </td>
-
-                      <td className="hidden border-r border-slate-100 px-3 py-2.5 align-middle text-sm font-bold text-slate-700 md:table-cell">
-                        {row.departmentName || '—'}
-                      </td>
-
-                      <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={row.otHours}
-                          onChange={(event) => setRowOt(row, event.target.value)}
-                          disabled={otDisabled}
-                          placeholder="0"
-                          title="Overtime Hours"
-                          className="h-8 w-12 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-black text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100 disabled:text-slate-400 md:h-9 md:w-16 md:text-sm"
-                        />
-                      </td>
-
-                      <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
-                        <DutyBadge row={row} />
-                      </td>
-
-                      <td className="border-r border-slate-100 px-1.5 py-2.5 align-middle md:px-3">
-                        <ReplacementSelect
-                          row={row}
-                          options={replacementOptions}
-                          assignedIds={assignedReplacementIds}
-                          selectedShiftId={selectedShift?._id || shiftId}
-                          disabled={rowLocked}
-                          onChange={(value) => setRowReplacement(row, value)}
-                        />
-                      </td>
-
-                      <td className="px-2 py-2.5 text-center align-middle">
-                        <div className="inline-flex items-center gap-1 md:gap-1.5">
-                          {['present', 'absent', 'leave'].map((status) => (
-                            <StatusButton
-                              key={status}
-                              status={status}
-                              selected={row.status === status}
-                              disabled={rowLocked || row.generatedByReplacement}
-                              onClick={() => setRowStatus(row, status)}
-                            />
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 };

@@ -6,6 +6,7 @@ const {
   generateTravelRefundPdf,
   generateTravelVendorPaymentReceiptPdf,
   generateTravelVendorReturnPdf,
+  getTravelBranding,
   previewTravelBookingInvoice,
   previewTravelReceivePaymentReceipt,
   previewTravelRefund,
@@ -25,6 +26,12 @@ const { MODULE_KEYS } = require("../utils/moduleConfig");
 const router = express.Router();
 
 router.use(protect, requireModule(MODULE_KEYS.TRAVEL));
+
+router.get(
+  "/branding",
+  requirePermission("travel.bookings.view", "travel.settings"),
+  getTravelBranding,
+);
 
 router.get(
   "/bookings/:id/preview",

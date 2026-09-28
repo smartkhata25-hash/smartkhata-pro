@@ -5,6 +5,7 @@ const EmployeeAdvanceLoan = require("../../models/EmployeeAdvanceLoan");
 const EmployeePayroll = require("../../models/EmployeePayroll");
 const WeavingAttendance = require("../../models/WeavingAttendance");
 const WeavingKnottingJob = require("../../models/WeavingKnottingJob");
+const WeavingWorkPeriod = require("../../models/WeavingWorkPeriod");
 const {
   applyPayrollRecoveries,
   createHttpError,
@@ -344,22 +345,16 @@ const resolvePayrollCycle = (cycleKey = "") => {
 
 const getCycleOptions = (baseCycleKey = "") => {
   const cycle = resolvePayrollCycle(baseCycleKey);
-  let cursorYear = cycle.year;
-  let cursorMonth = cycle.month;
-  let cursorHalf = cycle.half;
   const options = [];
+  const baseIndex = getCycleIndex(cycle);
 
-  for (let index = 0; index < 8; index += 1) {
-    options.push(resolvePayrollCycle(`${cursorYear}-${pad2(cursorMonth)}-${cursorHalf}`));
-
-    if (cursorHalf === "H1") {
-      cursorHalf = "H2";
-    } else {
-      const next = getNextMonth(cursorYear, cursorMonth);
-      cursorYear = next.year;
-      cursorMonth = next.month;
-      cursorHalf = "H1";
-    }
+  for (let offset = -12; offset <= 8; offset += 1) {
+    const absoluteIndex = baseIndex + offset;
+    const year = Math.floor(absoluteIndex / 24);
+    const withinYear = absoluteIndex - year * 24;
+    const month = Math.floor(withinYear / 2) + 1;
+    const half = withinYear % 2 === 0 ? "H1" : "H2";
+    options.push(resolvePayrollCycle(`${year}-${pad2(month)}-${half}`));
   }
 
   return options;
@@ -656,6 +651,7 @@ const aggregateAttendanceByEmployeeDate = (attendanceRows = []) => {
         dateKey,
         hasPresent: false,
         hasLeave: false,
+        hasFactoryHoliday: false,
         hasAbsent: false,
         otHours: 0,
         doubleDutyCount: 0,
@@ -672,6 +668,8 @@ const aggregateAttendanceByEmployeeDate = (attendanceRows = []) => {
       if (row.isDoubleDuty || dutyType === "double" || dutyType === "double_replacement") {
         current.doubleDutyCount += 1;
       }
+    } else if (row.isFactoryHoliday || (row.status === "leave" && /holiday/i.test(row.note || ""))) {
+      current.hasFactoryHoliday = true;
     } else if (row.status === "leave") {
       current.hasLeave = true;
     } else if (row.status === "absent") {
@@ -690,7 +688,8 @@ const getAttendanceForDate = (attendanceMap, employeeId, dateKey) =>
 const getEmployeeStartKey = (employee = {}) => getDateKeyFromValue(employee.joiningDate);
 
 const getEmployeeEndKey = (employee = {}) =>
-  employee.isDeleted && employee.deletedAt ? getDateKeyFromValue(employee.deletedAt) : "";
+  getDateKeyFromValue(employee.employmentEndDate) ||
+  (employee.isDeleted && employee.deletedAt ? getDateKeyFromValue(employee.deletedAt) : "");
 
 const collectHistoricalPayrollEmployeeIds = ({
   attendanceRows = [],
@@ -777,6 +776,7 @@ const calculateEmployeePayroll = ({
   attendanceMap,
   periodDateKeys,
   monthDateKeys,
+  attendanceFound = true,
   manualAdditions = [],
   manualDeductions = [],
   openingAlreadyApplied = false,
@@ -805,6 +805,7 @@ const calculateEmployeePayroll = ({
     absentDays: 0,
     leaveDays: 0,
     paidLeaveDays: 0,
+    factoryHolidayDays: 0,
     unpaidLeaveDays: 0,
     weeklyOffDaysInPeriod: 0,
     offDayWorkedDays: 0,
@@ -813,6 +814,10 @@ const calculateEmployeePayroll = ({
     missingAttendanceDates: [],
     finalizeBlockedReasons: [],
   };
+
+  if ((!periodDateKeys.length || !attendanceFound) && !pieceOnlyKnotting) {
+    totals.finalizeBlockedReasons.push("Attendance Not Found");
+  }
 
   periodDateKeys.forEach((dateKey) => {
     if (!isEmployeeActiveOnDate(employee, dateKey)) return;
@@ -828,6 +833,11 @@ const calculateEmployeePayroll = ({
       if (!weeklyOff) {
         totals.missingAttendanceDates.push(dateKey);
       }
+      return;
+    }
+
+    if (attendance.hasFactoryHoliday) {
+      totals.factoryHolidayDays += 1;
       return;
     }
 
@@ -878,7 +888,7 @@ const calculateEmployeePayroll = ({
             ? fullHalfSalary
             : (totals.eligibleDays / cycle.halfDays) * fullHalfSalary,
         )
-      : roundMoney((totals.presentDays + totals.paidLeaveDays) * dailyRate);
+      : roundMoney((totals.presentDays + totals.paidLeaveDays + totals.factoryHolidayDays) * dailyRate);
   const proratedBaseSalary =
     salaryType === "monthly" && totals.eligibleDays < cycle.halfDays ? baseSalaryAmount : 0;
   const absentDeductionAmount =
@@ -936,9 +946,9 @@ const calculateEmployeePayroll = ({
       openingReceivableAmount,
   );
   const netSalary = Math.max(0, roundMoney(grossSalary - totalDeductions));
-  const attendanceIncomplete = totals.missingAttendanceDates.length > 0;
+  const attendanceIncomplete = !attendanceFound || totals.missingAttendanceDates.length > 0;
 
-  if (attendanceIncomplete && !pieceOnlyKnotting) {
+  if (attendanceFound && totals.missingAttendanceDates.length > 0 && !pieceOnlyKnotting) {
     totals.finalizeBlockedReasons.push("Attendance Incomplete");
   }
 
@@ -1038,6 +1048,7 @@ const applyCalculationToPayroll = ({
   payroll.absentDays = calculation.absentDays;
   payroll.leaveDays = calculation.leaveDays;
   payroll.paidLeaveDays = calculation.paidLeaveDays;
+  payroll.factoryHolidayDays = calculation.factoryHolidayDays;
   payroll.unpaidLeaveDays = calculation.unpaidLeaveDays;
   payroll.weeklyOffDaysInPeriod = calculation.weeklyOffDaysInPeriod;
   payroll.offDayWorkedDays = calculation.offDayWorkedDays;
@@ -1068,6 +1079,21 @@ const applyCalculationToPayroll = ({
   payroll.paymentAccountId = null;
   payroll.paymentType = "";
   payroll.status = "draft";
+
+  if (calculation.attendanceIncomplete) {
+    payroll.baseSalary = 0;
+    payroll.proratedBaseSalary = 0;
+    payroll.offDayWorkedAmount = 0;
+    payroll.otAmount = 0;
+    payroll.doubleDutyAmount = 0;
+    payroll.totalAdditions = 0;
+    payroll.totalDeductions = 0;
+    payroll.recoveryApplications = [];
+    payroll.recoveryAmount = 0;
+    payroll.grossSalary = 0;
+    payroll.netSalary = 0;
+    payroll.remainingDue = 0;
+  }
 };
 
 const getOpeningAppliedMap = async ({ userId, session }) => {
@@ -1310,13 +1336,15 @@ const buildPayrollContext = async ({
   session,
 }) => {
   const cycle = resolvePayrollCycle(getPayrollBaseCycleKey(cycleKey));
-  const runtime = assertCycleCanGenerate(cycle);
+  // Future attendance is intentional; validation is attendance-based, not date-based.
+  const runtime = getCycleRuntime(cycle);
   const normalizedSegmentNo =
     Number.parseInt(segmentNo, 10) || getPayrollSegmentNo(cycleKey) || 1;
   const storageKey = buildSegmentStorageKey(cycle.key, normalizedSegmentNo);
   const selectedSegmentStart = normalizeText(segmentStart) || cycle.periodStart;
-  const maxThroughDate =
-    runtime.calculationThroughDate > cycle.periodEnd
+  const maxThroughDate = runtime.isFuture
+    ? cycle.periodEnd
+    : runtime.calculationThroughDate > cycle.periodEnd
       ? cycle.periodEnd
       : runtime.calculationThroughDate;
   const selectedCalculationThroughDate =
@@ -1333,9 +1361,22 @@ const buildPayrollContext = async ({
   }
 
   const monthDateKeys = listDateKeys(cycle.monthStart, cycle.monthEnd);
-  const periodDateKeys = listDateKeys(
+  const calendarPeriodDateKeys = listDateKeys(
     selectedSegmentStart,
     selectedCalculationThroughDate,
+  );
+  const workPeriods = await getSessionQuery(
+    WeavingWorkPeriod.find({
+      userId,
+      moduleScope: WEAVING_SCOPE,
+      startDate: { $lte: selectedCalculationThroughDate },
+      $or: [{ endDate: "" }, { endDate: { $gte: selectedSegmentStart } }],
+    }).select("startDate endDate").lean(),
+    session,
+  );
+  // Closed factory gaps are outside the attendance/payroll obligation.
+  const periodDateKeys = calendarPeriodDateKeys.filter((dateKey) =>
+    workPeriods.some((period) => period.startDate <= dateKey && (!period.endDate || period.endDate >= dateKey)),
   );
   const attendanceRows = await getSessionQuery(
     WeavingAttendance.find({
@@ -1451,6 +1492,9 @@ const buildPayrollContext = async ({
     },
     monthDateKeys,
     periodDateKeys,
+    attendanceFound: attendanceRows.some((row) =>
+      periodDateKeys.includes(normalizeText(row.attendanceDate)),
+    ),
     attendanceMap: aggregateAttendanceByEmployeeDate(attendanceRows),
     employees,
     existingPayrolls,
@@ -1482,6 +1526,7 @@ const calculateForEmployee = ({ employee, payroll, context }) => {
     attendanceMap: context.attendanceMap,
     periodDateKeys: context.periodDateKeys,
     monthDateKeys: context.monthDateKeys,
+    attendanceFound: context.attendanceFound,
     manualAdditions: payroll?.additions || [],
     manualDeductions: payroll?.deductions || [],
     openingAlreadyApplied,
@@ -1499,7 +1544,20 @@ const loadPayrollsForBaseCycle = async ({ userId, cycleKey, recordState = "activ
   return EmployeePayroll.find({
     userId,
     moduleScope: WEAVING_SCOPE,
-    $and: [stateFilter, buildBaseCyclePayrollQuery(cycle.key)],
+    $and: [
+      stateFilter,
+      {
+        $or: [
+          ...buildBaseCyclePayrollQuery(cycle.key).$or,
+          {
+            $and: [
+              { $or: [{ segmentStart: { $lte: cycle.periodEnd } }, { periodStart: { $lte: cycle.periodEnd } }] },
+              { $or: [{ calculationThroughDate: { $gte: cycle.periodStart } }, { segmentEnd: { $gte: cycle.periodStart } }, { periodEnd: { $gte: cycle.periodStart } }] },
+            ],
+          },
+        ],
+      },
+    ],
   })
     .populate("employeeId", "name employeeNo phone unitNo unitName departmentName designationName")
     .populate("paymentAccountId", "name code category")
@@ -1719,6 +1777,99 @@ const generateWeavingPayrollCycle = async ({ userId, cycleKey, segmentNo }) => {
     cycleKey: cycle.key,
     segmentNo: selectedSegmentNo,
   });
+};
+
+const getCycleKeyForDate = (value) => {
+  const [year, month, day] = getBusinessDateKey(value).split("-").map(Number);
+  return `${year}-${String(month).padStart(2, "0")}-H${day <= 15 ? 1 : 2}`;
+};
+
+const assertPayrollRange = ({ fromDate, toDate }) => {
+  const from = getBusinessDateKey(fromDate);
+  const to = getBusinessDateKey(toDate);
+  if (from > to) throw createHttpError("From Date cannot be after To Date.", 400);
+  const cycle = resolvePayrollCycle(getCycleKeyForDate(from));
+  if (to > cycle.periodEnd) throw createHttpError("Payroll range must stay inside one standard payroll cycle.", 400);
+  return { from, to, cycle };
+};
+
+const getFinalizedRangeEmployeeIds = async ({ userId, from, to, employeeId = "", session }) => {
+  const rows = await getSessionQuery(EmployeePayroll.find({ userId, moduleScope: WEAVING_SCOPE, isDeleted: false, status: { $in: ["posted", "finalized", "partially_paid", "paid"] }, ...(employeeId ? { employeeId } : {}) }).select("employeeId segmentStart periodStart calculationThroughDate segmentEnd periodEnd").lean(), session);
+  return new Set(rows.filter((row) => (row.segmentStart || row.periodStart) <= to && (row.calculationThroughDate || row.segmentEnd || row.periodEnd) >= from).map((row) => idOf(row.employeeId)));
+};
+
+const calculatePayrollRange = async ({ userId, fromDate, toDate, employeeId = "", finalSettlement = false, session }) => {
+  const { from, to, cycle } = assertPayrollRange({ fromDate, toDate });
+  const coveredEmployeeIds = await getFinalizedRangeEmployeeIds({ userId, from, to, employeeId, session });
+  if (employeeId && coveredEmployeeIds.size) throw createHttpError("Selected payroll dates overlap an already finalized payroll for this employee.", 409);
+  const previous = await getSessionQuery(EmployeePayroll.find({ userId, moduleScope: WEAVING_SCOPE, ...buildBaseCyclePayrollQuery(cycle.key) }).select("segmentNo").lean(), session);
+  const sourceDrafts = await getSessionQuery(EmployeePayroll.find({ userId, moduleScope: WEAVING_SCOPE, isDeleted: false, status: "draft", ...buildBaseCyclePayrollQuery(cycle.key) }), session);
+  const sourceDraftByEmployee = new Map(sourceDrafts.map((row) => [idOf(row.employeeId), row]));
+  const segmentNo = Math.max(0, ...previous.map((row) => Number(row.segmentNo || 1))) + 1;
+  const context = await buildPayrollContext({ userId, cycleKey: cycle.key, segmentNo, segmentStart: from, calculationThroughDate: to, session });
+  const rows = [];
+  const employees = (employeeId ? context.employees.filter((employee) => idOf(employee._id) === idOf(employeeId)) : context.employees).filter((employee) => !coveredEmployeeIds.has(idOf(employee._id)));
+  if (employeeId && employees.length === 0) throw createHttpError("Employee is not eligible for this payroll range.", 404);
+  if (!employeeId && employees.length === 0) throw createHttpError("Selected payroll dates are already finalized.", 409);
+  for (const employee of employees) {
+    const sourceDraft = sourceDraftByEmployee.get(idOf(employee._id));
+    const payroll = new EmployeePayroll({ userId, moduleScope: WEAVING_SCOPE, employeeId: employee._id, additions: sourceDraft?.additions || [], deductions: sourceDraft?.deductions || [] });
+    const calculation = calculateForEmployee({ employee, payroll, context });
+    let recoveryApplications;
+    if (finalSettlement) {
+      const finances = await getSessionQuery(EmployeeAdvanceLoan.find({ userId, moduleScope: WEAVING_SCOPE, employeeId: employee._id, isDeleted: false, status: "active", outstandingAmount: { $gt: 0 } }).sort({ kind: 1, date: 1 }).lean(), session);
+      let available = Math.max(0, Number(calculation.netSalary || 0));
+      recoveryApplications = finances.map((finance) => { const amount = roundMoney(Math.min(available, Number(finance.outstandingAmount || 0))); available = roundMoney(available - amount); return { advanceLoanId: finance._id, kind: finance.kind, amount, description: finance.kind === "loan" ? "Final settlement loan recovery" : "Final settlement Kharcha / Advance recovery" }; }).filter((entry) => entry.amount > 0);
+    } else {
+      recoveryApplications = await loadFinanceRecoveriesForEmployee({ userId, employee, cycle, payroll, availableSalary: calculation.netSalary, activeDraftRecoveryIds: new Set(), baseCycleRecoveryIds: context.baseCycleRecoveryIdsByEmployee.get(idOf(employee._id)) || new Set(), session });
+    }
+    applyCalculationToPayroll({ payroll, employee, cycle, segment: { segmentNo, storageKey: buildSegmentStorageKey(cycle.key, segmentNo), segmentStart: from, segmentEnd: to }, calculation, recoveryApplications });
+    rows.push({ employee, payroll, sourceDraftId: sourceDraft?._id || null });
+  }
+  const blocked = rows.filter(({ payroll }) => payroll.attendanceIncomplete || payroll.finalizeBlockedReasons?.length);
+  const totals = rows.reduce((sum, { payroll }) => {
+    sum.grossSalary = roundMoney(sum.grossSalary + Number(payroll.grossSalary || 0));
+    sum.netPayable = roundMoney(sum.netPayable + Number(payroll.netSalary || 0));
+    (payroll.recoveryApplications || []).forEach((recovery) => { const key = recovery.kind === "loan" ? "loanRecovery" : "advanceRecovery"; sum[key] = roundMoney(sum[key] + Number(recovery.amount || 0)); });
+    return sum;
+  }, { grossSalary: 0, netPayable: 0, loanRecovery: 0, advanceRecovery: 0 });
+  return { from, to, cycle, segmentNo, rows, blocked, totals };
+};
+
+const precheckWeavingPayrollRange = ({ userId, fromDate, toDate, employeeId = "", finalSettlement = false }) => withTransaction(async (session) => {
+  const result = await calculatePayrollRange({ userId, fromDate, toDate, employeeId, finalSettlement, session });
+  const attendanceNotFound = result.blocked.length > 0 && result.blocked.every(({ payroll }) =>
+    payroll.finalizeBlockedReasons?.includes("Attendance Not Found"),
+  );
+  return { period: { fromDate: result.from, toDate: result.to, cycleKey: result.cycle.key }, employees: result.rows.length, ...result.totals, ready: result.blocked.length === 0, attendanceState: attendanceNotFound ? "not_found" : result.blocked.length ? "incomplete" : "complete", message: attendanceNotFound ? "No attendance exists for the selected payroll period. Enter attendance first." : result.blocked.length ? "Attendance Required" : "", blockedEmployees: result.blocked.map(({ employee, payroll }) => ({ employeeId: idOf(employee._id), name: employee.name, employeeNo: employee.employeeNo, missingDates: payroll.missingAttendanceDates || [], reasons: payroll.finalizeBlockedReasons || [] })) };
+});
+
+const finalizeWeavingPayrollRange = async ({ userId, fromDate, toDate, note = "", employeeId = "", finalSettlement = false, markInactive = false, actorId }) => {
+  let touchedAccountIds = [];
+  const result = await withTransaction(async (session) => {
+    const calculated = await calculatePayrollRange({ userId, fromDate, toDate, employeeId, finalSettlement, session });
+    if (calculated.blocked.length) throw createHttpError(`${calculated.blocked.length} employees need attention.`, 409);
+    const staleDraftIds = calculated.rows.map((row) => row.sourceDraftId).filter(Boolean);
+    if (staleDraftIds.length) await EmployeePayroll.deleteMany({ _id: { $in: staleDraftIds }, status: "draft", isDeleted: false }).session(session);
+    for (const { payroll } of calculated.rows) {
+      payroll.notes = normalizeText(note);
+      payroll.salaryDate = parseBusinessDate(calculated.to);
+      payroll.status = "draft";
+      payroll.isFinalSettlement = finalSettlement;
+      payroll.settlementDate = finalSettlement ? parseBusinessDate(calculated.to) : null;
+      await payroll.save({ session });
+      touchedAccountIds.push(...await finalizePayrollDocument({ userId, payroll, actorId, session, allowEarlyClose: true, earlyCloseMeta: { throughDate: calculated.to, reason: normalizeText(note), closedAt: new Date(), closedBy: actorId || userId } }));
+    }
+    if (finalSettlement && markInactive && employeeId) await Employee.updateOne({ _id: employeeId, userId, moduleScope: WEAVING_SCOPE }, { $set: { status: "inactive", isDeleted: true, employmentEndDate: parseBusinessDate(calculated.to), deletedAt: new Date(), deletedBy: actorId || userId } }, { session });
+    // Final Pay is employee-specific; only a factory payroll close ends the
+    // shared attendance work period.
+    if (!finalSettlement) {
+      await WeavingWorkPeriod.updateMany({ userId, moduleScope: WEAVING_SCOPE, status: "active", startDate: { $lte: calculated.to } }, { $set: { status: "closed", endDate: calculated.to, closedAt: new Date(), closedBy: actorId || userId } }, { session });
+    }
+    return { fromDate: calculated.from, toDate: calculated.to, cycleKey: calculated.cycle.key, segmentNo: calculated.segmentNo, employees: calculated.rows.length, payrolls: calculated.rows.map(({ payroll }) => ({ payrollId: idOf(payroll._id), amount: roundMoney(payroll.remainingDue) })), ...calculated.totals };
+  });
+  await recalculateTouchedAccounts(touchedAccountIds);
+  return result;
 };
 
 const loadSingleDraftContext = async ({ userId, payroll, session }) => {
@@ -1992,7 +2143,7 @@ const finalizePayrollDocument = async ({
   }
 
   const { businessDate, businessTime } = parseEntryDateTime({
-    date: payroll.dueDate || payroll.salaryDate,
+    date: payroll.calculationThroughDate || payroll.salaryDate || payroll.dueDate,
     time: payroll.salaryTime || "",
     label: "payroll date",
   });
@@ -2099,6 +2250,25 @@ const finalizeWeavingPayrollCycle = async ({ userId, cycleKey, segmentNo, actorI
       }),
       session,
     );
+
+    const blockedPayrolls = payrolls
+      .filter((payroll) => payroll.status === "draft" && (payroll.attendanceIncomplete || payroll.finalizeBlockedReasons?.length))
+      .map((payroll) => ({
+        employeeId: idOf(payroll.employeeId),
+        missingAttendanceDates: payroll.missingAttendanceDates || [],
+        reasons: payroll.finalizeBlockedReasons || [],
+      }));
+    if (blockedPayrolls.length) {
+      const error = createHttpError("Some employees need attention before payroll can be finalized.", 409);
+      error.details = {
+        readyCount: payrolls.filter((payroll) => payroll.status === "draft").length - blockedPayrolls.length,
+        blockedCount: blockedPayrolls.length,
+        blockedEmployees: blockedPayrolls,
+        periodStart: cycle.periodStart,
+        periodEnd: cycle.periodEnd,
+      };
+      throw error;
+    }
 
     for (const payroll of payrolls) {
       if (payroll.status !== "draft") {
@@ -2691,6 +2861,8 @@ module.exports = {
   getWeavingPayrollSummary,
   finalizeWeavingPayroll,
   finalizeWeavingPayrollCycle,
+  finalizeWeavingPayrollRange,
+  precheckWeavingPayrollRange,
   payWeavingPayroll,
   restoreWeavingPayroll,
   resumeWeavingPayrollCycle,
@@ -2718,5 +2890,6 @@ module.exports = {
     resolvePayrollCycle,
     serializePayroll,
     validateEarlyCloseEligibility,
+    assertPayrollRange,
   },
 };

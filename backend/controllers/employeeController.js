@@ -10,6 +10,11 @@ const WeavingUnit = require("../models/WeavingUnit");
 const JournalEntry = require("../models/JournalEntry");
 const { logActivity } = require("../utils/activityLogger");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("../templates/ledgerBusinessHeader");
 const { clearUserDashboardCache } = require("../services/dashboardCacheService");
 const {
   clearTravelReportCache,
@@ -47,10 +52,12 @@ const {
   earlyCloseWeavingPayrollCycle,
   finalizeWeavingPayroll,
   finalizeWeavingPayrollCycle,
+  finalizeWeavingPayrollRange,
   generateWeavingPayrollCycle,
   getWeavingPayrollById,
   getWeavingPayrollCycle,
   getWeavingPayrollSummary,
+  precheckWeavingPayrollRange,
   payWeavingPayroll,
   restoreWeavingPayroll,
   resumeWeavingPayrollCycle,
@@ -69,38 +76,8 @@ const DEFAULT_DESIGNATIONS = [
   "Office Assistant",
 ];
 
-const DEFAULT_WEAVING_DEPARTMENTS = [
-  "Weaving",
-  "Folding",
-  "Electrical",
-  "Mechanical / Maintenance",
-  "Store",
-  "Godown",
-  "Beam / Loading",
-  "Security",
-  "Administration",
-  "Cleaning / General Labour",
-];
-
-const DEFAULT_WEAVING_DESIGNATIONS = [
-  "Master",
-  "Foreman",
-  "Mechanic",
-  "Cleaner",
-  "Weaver",
-  "Electrician",
-  "Electrician Helper",
-  "Security Guard",
-  "Helper",
-  "Oil Man",
-  "Winder",
-  "Carpenter",
-  "Beam Loader",
-  "Beam Knotting Worker",
-];
-
-const DEFAULT_WEAVING_SHIFTS = ["General Shift", "Night Shift"];
 const WEAVING_SCOPE = "weaving";
+const weavingEmployeeMaster = require("../services/employee/weavingEmployeeMasterService");
 const WEEKDAY_KEYS = [
   "monday",
   "tuesday",
@@ -118,6 +95,7 @@ const sendError = (res, error, fallback = "Request failed") => {
   console.error(fallback, error);
   return res.status(error.statusCode || 500).json({
     message: error.message || fallback,
+    ...(error.details ? { details: error.details } : {}),
   });
 };
 
@@ -216,6 +194,12 @@ const deriveSalaryCycleTarget = (cycleKey = "") => {
 const getCycleHalfFromKey = (cycleKey = "") =>
   normalizeText(cycleKey).endsWith("H2") ? "H2" : "H1";
 
+const getBusinessDateKey = (value) => {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+};
+
 const normalizeRecoveryFrequency = (kind, value = "") => {
   const frequency = normalizeText(value).toLowerCase();
 
@@ -230,7 +214,7 @@ const normalizeRecoveryFrequency = (kind, value = "") => {
   return frequency === "one_time" ? "one_time" : "carry_forward";
 };
 
-const buildWeavingRecoveryPlan = ({ kind, payload = {} }) => {
+const buildWeavingRecoveryPlan = ({ kind, payload = {}, transactionDate }) => {
   const source = payload.recoveryPlan || {};
 
   if (kind === "loan") {
@@ -250,6 +234,9 @@ const buildWeavingRecoveryPlan = ({ kind, payload = {} }) => {
       source.frequency ?? payload.recoveryFrequency ?? payload.frequency,
     );
 
+    if (transactionDate && firstCycle.targetPayDate < new Date(`${getBusinessDateKey(transactionDate)}T00:00:00.000Z`)) {
+      throw createHttpError("Recovery Start must be on or after the finance date.", 400);
+    }
     return {
       frequency,
       installmentAmount,
@@ -263,6 +250,9 @@ const buildWeavingRecoveryPlan = ({ kind, payload = {} }) => {
     source.targetCycleKey ?? payload.targetCycleKey ?? payload.firstCycleKey,
   );
 
+  if (transactionDate && target.targetPayDate < new Date(`${getBusinessDateKey(transactionDate)}T00:00:00.000Z`)) {
+    throw createHttpError("Recovery Start must be on or after the finance date.", 400);
+  }
   return {
     frequency: normalizeRecoveryFrequency(
       kind,
@@ -494,49 +484,7 @@ const clearModuleCaches = (userId, moduleScope) => {
   }
 };
 
-const ensureDefaultWeavingRecords = async ({ Model, userId, names }) => {
-  await Promise.all(
-    names.map((name) =>
-      Model.findOneAndUpdate(
-        {
-          userId,
-          moduleScope: WEAVING_SCOPE,
-          normalizedName: name.toLowerCase(),
-          isDeleted: false,
-        },
-        {
-          $setOnInsert: {
-            userId,
-            moduleScope: WEAVING_SCOPE,
-            name,
-            normalizedName: name.toLowerCase(),
-            isActive: true,
-          },
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true,
-        },
-      ),
-    ),
-  );
-};
-
-const ensureDefaultWeavingMasters = async (userId) => {
-  await Promise.all([
-    ensureDefaultWeavingRecords({
-      Model: WeavingDepartment,
-      userId,
-      names: DEFAULT_WEAVING_DEPARTMENTS,
-    }),
-    ensureDefaultWeavingRecords({
-      Model: WeavingShift,
-      userId,
-      names: DEFAULT_WEAVING_SHIFTS,
-    }),
-  ]);
-};
+const ensureDefaultWeavingMasters = (userId) => weavingEmployeeMaster.seed(userId);
 
 const buildNameMasterPayload = (payload = {}, label = "Name") => {
   const name = normalizeText(payload.name);
@@ -554,16 +502,18 @@ const buildNameMasterPayload = (payload = {}, label = "Name") => {
 
 const normalizeShiftTime = (value = "") => {
   const time = normalizeText(value);
+  if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw createHttpError("Enter a valid Shift time (HH:MM).", 400);
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : "";
 };
 
-const buildShiftPayload = (payload = {}) => ({
-  ...buildNameMasterPayload(payload, "Shift"),
-  startTime: normalizeShiftTime(payload.startTime),
-  endTime: normalizeShiftTime(payload.endTime),
-});
+const buildShiftPayload = (payload = {}) => {
+  const startTime = normalizeShiftTime(payload.startTime);
+  const endTime = normalizeShiftTime(payload.endTime);
+  if (Boolean(startTime) !== Boolean(endTime)) throw createHttpError("Enter both Shift Start Time and End Time.", 400);
+  return { ...buildNameMasterPayload(payload, "Shift"), startTime, endTime };
+};
 
-const getWeavingMaster = async ({ Model, userId, id, label, session }) => {
+const getWeavingMaster = async ({ Model, userId, id, label, session, currentId }) => {
   if (!id) {
     throw createHttpError(`${label} is required`, 400);
   }
@@ -573,7 +523,7 @@ const getWeavingMaster = async ({ Model, userId, id, label, session }) => {
       _id: id,
       userId,
       moduleScope: WEAVING_SCOPE,
-      isDeleted: false,
+      ...(String(currentId || "") === String(id) ? {} : { isDeleted: false, isActive: true }),
     }),
     session,
   );
@@ -627,11 +577,7 @@ const buildDesignationPayload = (payload = {}) => {
 
 const ensureDefaultDesignations = async ({ userId, moduleScope }) => {
   if (isWeavingScope(moduleScope)) {
-    await ensureDefaultWeavingRecords({
-      Model: EmployeeDesignation,
-      userId,
-      names: DEFAULT_WEAVING_DESIGNATIONS,
-    });
+    await weavingEmployeeMaster.seed(userId);
     return;
   }
 
@@ -663,6 +609,7 @@ const getDesignation = async ({
   moduleScope,
   designationId,
   session,
+  currentId,
 }) => {
   if (!designationId) return null;
 
@@ -671,7 +618,7 @@ const getDesignation = async ({
       _id: designationId,
       userId,
       moduleScope,
-      isDeleted: false,
+      ...(isWeavingScope(moduleScope) ? (String(currentId || "") === String(designationId) ? {} : { isDeleted: false, isActive: true }) : { isDeleted: false }),
     }),
     session,
   );
@@ -689,10 +636,11 @@ const buildEmployeePayload = async ({
   payload = {},
   session,
   employeeId = null,
+  existing = null,
 }) => {
   const name = normalizeText(payload.name);
 
-  if (!name) {
+  if (!name && !isWeavingScope(moduleScope)) {
     throw createHttpError("Employee name is required", 400);
   }
 
@@ -701,6 +649,7 @@ const buildEmployeePayload = async ({
     moduleScope,
     designationId: payload.designationId,
     session,
+    currentId: existing?.designationId,
   });
 
   const basePayload = {
@@ -727,10 +676,6 @@ const buildEmployeePayload = async ({
   const cnic = normalizeCnic(payload.cnic);
   assertValidCnic(cnic);
 
-  if (!fatherName) {
-    throw createHttpError("Father Name is required", 400);
-  }
-
   if (!phone) {
     throw createHttpError("Phone is required", 400);
   }
@@ -742,6 +687,7 @@ const buildEmployeePayload = async ({
       id: payload.unitId,
       label: "Unit",
       session,
+      currentId: existing?.unitId,
     }),
     getWeavingMaster({
       Model: WeavingDepartment,
@@ -749,6 +695,7 @@ const buildEmployeePayload = async ({
       id: payload.departmentId,
       label: "Department",
       session,
+      currentId: existing?.departmentId,
     }),
     getWeavingMaster({
       Model: WeavingShift,
@@ -756,11 +703,12 @@ const buildEmployeePayload = async ({
       id: payload.shiftId,
       label: "Shift",
       session,
+      currentId: existing?.shiftId,
     }),
   ]);
 
   const employeeNo =
-    normalizeText(payload.employeeNo) ||
+    existing?.employeeNo ||
     (await getNextEmployeeNo({ userId, moduleScope, session }));
   const listOrder =
     normalizeListOrder(payload.listOrder) ||
@@ -780,9 +728,10 @@ const buildEmployeePayload = async ({
     session,
   });
 
+  weavingEmployeeMaster.validateEmployee(payload, designation, department, existing);
   const weavingSalaryType = normalizeWeavingSalaryType(payload.salaryType);
   const isKnottingWorker =
-    (normalizeText(payload.designationName) || designation?.name || "") ===
+    (designation?.name || "") ===
     "Beam Knotting Worker";
   const knottingPaymentMethod = isKnottingWorker
     ? normalizeKnottingPaymentMethod(payload.knottingPaymentMethod)
@@ -798,6 +747,8 @@ const buildEmployeePayload = async ({
   return {
     ...basePayload,
     employeeNo,
+    name: name || employeeNo,
+    employmentType: payload.employmentType === "temporary" ? "temporary" : existing?.employmentType || "regular",
     listOrder,
     fatherName,
     phone,
@@ -810,11 +761,10 @@ const buildEmployeePayload = async ({
     departmentId: department._id,
     departmentName: department.name,
     designationId: designation?._id || null,
-    designationName:
-      normalizeText(payload.designationName) || designation?.name || "",
+    designationName: designation.name,
     shiftId: shift._id,
     shiftName: shift.name,
-    joiningDate: payload.joiningDate || new Date(),
+    joiningDate: payload.joiningDate,
     salaryType: weavingSalaryType,
     baseSalary: pieceOnlyKnotting ? 0 : roundMoney(payload.baseSalary),
     knottingPaymentMethod,
@@ -852,6 +802,7 @@ const buildDocumentHtml = ({
   subtitle = "",
   rows = [],
   summary = [],
+  header = null,
 }) => {
   const summaryHtml = summary
     .filter((item) => item && item.label)
@@ -874,6 +825,7 @@ const buildDocumentHtml = ({
   <meta charset="utf-8" />
   <title>${title}</title>
   <style>
+    ${ledgerBusinessHeaderStyles}
     body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
     h1 { font-size: 22px; margin: 0 0 4px; }
     .subtitle { color: #6b7280; margin-bottom: 18px; }
@@ -885,6 +837,7 @@ const buildDocumentHtml = ({
   </style>
 </head>
 <body>
+  ${renderLedgerBusinessHeader(header)}
   <h1>${title}</h1>
   ${subtitle ? `<div class="subtitle">${subtitle}</div>` : ""}
   ${summaryHtml ? `<div class="summary">${summaryHtml}</div>` : ""}
@@ -897,8 +850,10 @@ const buildDocumentHtml = ({
 </html>`;
 };
 
-const sendPdf = async (res, html, filename) => {
-  const pdfBuffer = await generatePdfFromHtml(html);
+exports._test = { buildDocumentHtml };
+
+const sendPdf = async (res, html, filename, options = {}) => {
+  const pdfBuffer = await generatePdfFromHtml(html, options);
 
   res.set({
     "Content-Type": "application/pdf",
@@ -1087,7 +1042,7 @@ exports.createDesignation = async (req, res) => {
   try {
     const userId = getUserId(req);
     const moduleScope = getModuleScopeFromRequest(req);
-    const payload = buildDesignationPayload(req.body);
+    const payload = { ...buildDesignationPayload(req.body), ...(isWeavingScope(moduleScope) ? await weavingEmployeeMaster.designationPayload(userId, req.body) : {}) };
 
     const designation = await EmployeeDesignation.create({
       ...payload,
@@ -1119,18 +1074,19 @@ exports.updateDesignation = async (req, res) => {
   try {
     const userId = getUserId(req);
     const moduleScope = getModuleScopeFromRequest(req);
-    const payload = buildDesignationPayload(req.body);
+    const payload = { ...buildDesignationPayload(req.body), ...(isWeavingScope(moduleScope) ? await weavingEmployeeMaster.designationPayload(userId, req.body) : {}) };
 
     const designation = await EmployeeDesignation.findOneAndUpdate(
       {
         _id: req.params.id,
         userId,
         moduleScope,
-        isDeleted: false,
+        ...(isWeavingScope(moduleScope) ? {} : { isDeleted: false }),
       },
       {
         $set: {
           ...payload,
+          ...(isWeavingScope(moduleScope) && req.body.isActive === true ? { isDeleted: false } : {}),
           isActive: req.body.isActive !== false,
         },
       },
@@ -1225,22 +1181,22 @@ exports.getEmployeeFormMeta = async (req, res) => {
       WeavingUnit.find({
         userId,
         moduleScope,
-        isDeleted: false,
+
       }).sort({ unitNo: 1, name: 1 }),
       WeavingDepartment.find({
         userId,
         moduleScope,
-        isDeleted: false,
+
       }).sort({ name: 1 }),
       EmployeeDesignation.find({
         userId,
         moduleScope,
-        isDeleted: false,
+
       }).sort({ name: 1 }),
       WeavingShift.find({
         userId,
         moduleScope,
-        isDeleted: false,
+
       }).sort({ name: 1 }),
       getNextEmployeeNo({ userId, moduleScope }),
       getNextListOrder({
@@ -1316,9 +1272,9 @@ exports.updateUnit = async (req, res) => {
         _id: req.params.id,
         userId,
         moduleScope,
-        isDeleted: false,
+
       },
-      { $set: buildUnitPayload(req.body) },
+      { $set: { ...buildUnitPayload(req.body), ...(req.body.isActive === true ? { isDeleted: false } : {}) } },
       { new: true },
     );
 
@@ -1443,9 +1399,9 @@ exports.updateDepartment = async (req, res) => {
         _id: req.params.id,
         userId,
         moduleScope,
-        isDeleted: false,
+
       },
-      { $set: buildNameMasterPayload(req.body, "Department") },
+      { $set: { ...buildNameMasterPayload(req.body, "Department"), ...(req.body.isActive === true ? { isDeleted: false } : {}) } },
       { new: true },
     );
 
@@ -1565,9 +1521,9 @@ exports.updateShift = async (req, res) => {
         _id: req.params.id,
         userId,
         moduleScope,
-        isDeleted: false,
+
       },
-      { $set: buildShiftPayload(req.body) },
+      { $set: { ...buildShiftPayload(req.body), ...(req.body.isActive === true ? { isDeleted: false } : {}) } },
       { new: true },
     );
 
@@ -1811,6 +1767,7 @@ exports.updateEmployee = async (req, res) => {
         payload: req.body,
         session,
         employeeId: employee._id,
+        existing: employee,
       });
 
       Object.assign(employee, payload);
@@ -2380,6 +2337,31 @@ exports.finalizePayrollCycle = async (req, res) => {
   }
 };
 
+exports.precheckPayrollRange = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getModuleScopeFromRequest(req);
+    if (!isWeavingScope(moduleScope)) throw createHttpError("Payroll range is only available for Weaving.", 404);
+    const data = await precheckWeavingPayrollRange({ userId, fromDate: req.body.fromDate, toDate: req.body.toDate, employeeId: req.body.employeeId, finalSettlement: req.body.finalSettlement === true });
+    return res.json({ data });
+  } catch (error) {
+    return sendError(res, error, "Failed to calculate payroll range");
+  }
+};
+
+exports.finalizePayrollRange = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const moduleScope = getModuleScopeFromRequest(req);
+    if (!isWeavingScope(moduleScope)) throw createHttpError("Payroll range is only available for Weaving.", 404);
+    const data = await finalizeWeavingPayrollRange({ userId, fromDate: req.body.fromDate, toDate: req.body.toDate, note: req.body.note, employeeId: req.body.employeeId, finalSettlement: req.body.finalSettlement === true, markInactive: req.body.markInactive === true, actorId: req.actorId || userId });
+    clearModuleCaches(userId, moduleScope);
+    return res.json({ data });
+  } catch (error) {
+    return sendError(res, error, "Failed to finalize payroll range");
+  }
+};
+
 exports.earlyClosePayrollCycle = async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -2876,20 +2858,50 @@ exports.getAdvanceLoans = async (req, res) => {
     const query = {
       userId,
       moduleScope,
-      isDeleted: false,
     };
 
     if (req.query.employeeId) query.employeeId = req.query.employeeId;
-    if (req.query.kind)
-      query.kind = req.query.kind === "loan" ? "loan" : "advance";
+    const requestedKind = normalizeText(req.query.kind).toLowerCase();
+    if (["loan", "advance"].includes(requestedKind)) query.kind = requestedKind;
     if (req.query.status) query.status = req.query.status;
 
-    const entries = await EmployeeAdvanceLoan.find(query)
+    const requestedStatus = normalizeText(req.query.status);
+    if (requestedStatus === "void") {
+      query.status = "void";
+    } else if (requestedStatus !== "all") {
+      query.isDeleted = false;
+      if (requestedStatus) query.status = requestedStatus;
+    }
+    const search = normalizeText(req.query.search);
+    if (search) {
+      const safeSearch = escapeRegex(search);
+      const employees = await Employee.find({ userId, moduleScope, isDeleted: false, $or: [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { employeeNo: { $regex: safeSearch, $options: "i" } },
+      ] }).select("_id").lean();
+      query.$or = [
+        { employeeId: { $in: employees.map((employee) => employee._id) } },
+        { description: { $regex: safeSearch, $options: "i" } },
+        { kind: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
+    if (req.query.fromDate || req.query.toDate) {
+      query.date = {};
+      if (req.query.fromDate) query.date.$gte = new Date(`${req.query.fromDate}T00:00:00.000Z`);
+      if (req.query.toDate) query.date.$lte = new Date(`${req.query.toDate}T23:59:59.999Z`);
+    }
+    const requestedPage = Number.parseInt(req.query.page, 10);
+    const paginated = Number.isInteger(requestedPage) && requestedPage > 0;
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 25, 1), 100);
+    const total = paginated ? await EmployeeAdvanceLoan.countDocuments(query) : 0;
+    let entriesQuery = EmployeeAdvanceLoan.find(query)
       .populate("employeeId", "name phone designationName account")
       .populate("paymentAccountId", "name code category")
       .sort({ date: -1, createdAt: -1 });
+    if (paginated) entriesQuery = entriesQuery.skip((requestedPage - 1) * limit).limit(limit);
+    const entries = await entriesQuery;
 
-    return res.json({ data: entries });
+    return res.json(paginated ? { data: entries, pagination: { page: requestedPage, limit, total, totalPages: Math.ceil(total / limit) } } : { data: entries });
   } catch (error) {
     return sendError(res, error, "Failed to load employee advances/loans");
   }
@@ -2921,14 +2933,14 @@ exports.createAdvanceLoan = async (req, res) => {
       }
 
       const kind = req.body.kind === "loan" ? "loan" : "advance";
-      const recoveryPlan = isWeavingScope(moduleScope)
-        ? buildWeavingRecoveryPlan({ kind, payload: req.body })
-        : undefined;
       const { businessDate, businessTime } = parseEntryDateTime({
         date: req.body.date || new Date(),
         time: req.body.time || "",
         label: "advance/loan date",
       });
+      const recoveryPlan = isWeavingScope(moduleScope)
+        ? buildWeavingRecoveryPlan({ kind, payload: req.body, transactionDate: businessDate })
+        : undefined;
       const advanceLoan = new EmployeeAdvanceLoan({
         userId,
         moduleScope,
@@ -3029,6 +3041,7 @@ exports.updateAdvanceLoan = async (req, res) => {
         ? buildWeavingRecoveryPlan({
             kind: advanceLoan.kind,
             payload: req.body,
+            transactionDate: req.body.date || advanceLoan.date,
           })
         : advanceLoan.recoveryPlan;
 
@@ -3209,6 +3222,7 @@ exports.recoverAdvanceLoan = async (req, res) => {
         employeeId: advanceLoan.employeeId,
         moduleScope,
         session,
+        includeInactive: true,
       });
       const paymentAccount = await validatePaymentAccount({
         userId,
@@ -3360,9 +3374,15 @@ exports.printEmployeeLedger = async (req, res) => {
       startDate: req.query.startDate,
       endDate: req.query.endDate,
     });
+    const outputType = req.path.endsWith("/pdf") ? "pdf" : "print";
+    const header =
+      moduleScope === "travel"
+        ? await getLedgerPrintHeader(userId, moduleScope, outputType)
+        : null;
     const html = buildDocumentHtml({
       title: "Employee Ledger",
       subtitle: ledger.employee.name,
+      header,
       summary: [
         { label: "Debit", value: ledger.totals.debit },
         { label: "Credit", value: ledger.totals.credit },
@@ -3381,7 +3401,10 @@ exports.printEmployeeLedger = async (req, res) => {
     });
 
     if (req.path.endsWith("/pdf")) {
-      return sendPdf(res, html, "Employee-Ledger.pdf");
+      return sendPdf(res, html, "Employee-Ledger.pdf", {
+        waitForImages: moduleScope === "travel",
+        requireImages: moduleScope === "travel",
+      });
     }
 
     return res.send(html);
@@ -3408,9 +3431,16 @@ exports.printPayroll = async (req, res) => {
       return res.status(404).json({ message: "Payroll not found" });
     }
 
+    const outputType = req.path.endsWith("/pdf") ? "pdf" : "print";
+    const header =
+      moduleScope === "travel"
+        ? await getLedgerPrintHeader(userId, moduleScope, outputType)
+        : null;
+
     const html = buildDocumentHtml({
       title: "Salary Slip",
       subtitle: `${payroll.employeeId?.name || "Employee"} - ${payroll.periodKey}`,
+      header,
       summary: [
         { label: "Base Salary", value: payroll.baseSalary },
         { label: "Additions", value: payroll.totalAdditions },
@@ -3441,7 +3471,10 @@ exports.printPayroll = async (req, res) => {
     });
 
     if (req.path.endsWith("/pdf")) {
-      return sendPdf(res, html, `Salary-Slip-${payroll.periodKey}.pdf`);
+      return sendPdf(res, html, `Salary-Slip-${payroll.periodKey}.pdf`, {
+        waitForImages: moduleScope === "travel",
+        requireImages: moduleScope === "travel",
+      });
     }
 
     return res.send(html);
@@ -3471,9 +3504,15 @@ exports.printPayment = async (req, res) => {
       (max, line) => Math.max(max, Number(line.amount || 0)),
       0,
     );
+    const outputType = req.path.endsWith("/pdf") ? "pdf" : "print";
+    const header =
+      moduleScope === "travel"
+        ? await getLedgerPrintHeader(userId, moduleScope, outputType)
+        : null;
     const html = buildDocumentHtml({
       title: "Employee Payment Voucher",
       subtitle: journal.employeeId?.name || "Employee",
+      header,
       summary: [
         { label: "Date", value: formatDateSafe(journal.date) },
         { label: "Amount", value: amount },
@@ -3482,7 +3521,10 @@ exports.printPayment = async (req, res) => {
     });
 
     if (req.path.endsWith("/pdf")) {
-      return sendPdf(res, html, "Employee-Payment-Voucher.pdf");
+      return sendPdf(res, html, "Employee-Payment-Voucher.pdf", {
+        waitForImages: moduleScope === "travel",
+        requireImages: moduleScope === "travel",
+      });
     }
 
     return res.send(html);

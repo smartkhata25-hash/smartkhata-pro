@@ -1,3 +1,4 @@
+const { attachLoomRuns, contractProgress, assertContractIdentityEdit } = require("../services/weaving/weavingProductionContextService");
 const mongoose = require("mongoose");
 
 const WeavingContract = require("../models/WeavingContract");
@@ -211,7 +212,7 @@ const loomPayload = (body) => {
   brand: clean(body.brand), model: clean(body.model), loomType: clean(body.loomType),
   reedSpace: clean(body.reedSpace), notes: clean(body.notes), isActive: body.isActive !== false,
 }; };
-exports.listLooms = async (req, res) => { try { const q = { userId: userId(req) }; if (req.query.search) q.name = { $regex: clean(req.query.search), $options: "i" }; return res.json({ data: await WeavingLoom.find(q).collation({ locale: "en", numericOrdering: true }).sort({ loomNumber: 1, _id: 1 }) }); } catch (e) { return fail(res, e, "Failed to load Looms"); } };
+exports.listLooms = async (req, res) => { try { const q = { userId: userId(req) }; if (req.query.search) q.name = { $regex: clean(req.query.search), $options: "i" }; return res.json({ data: await attachLoomRuns(userId(req), await WeavingLoom.find(q).collation({ locale: "en", numericOrdering: true }).sort({ loomNumber: 1, _id: 1 }).lean()) }); } catch (e) { return fail(res, e, "Failed to load Looms"); } };
 exports.createLoom = async (req, res) => { try { const row = await WeavingLoom.create({ ...loomPayload(req.body), userId: userId(req) }); await logActivity({ req, action: "create", module: "weaving.loom", moduleScope: "weaving", entityType: "WeavingLoom", entityId: row._id, title: row.name }); return res.status(201).json({ data: row }); } catch (e) { return fail(res, e, "Failed to create Loom"); } };
 exports.updateLoom = async (req, res) => { try { const row = await WeavingLoom.findOneAndUpdate({ _id: req.params.id, userId: userId(req) }, { $set: loomPayload(req.body) }, { new: true }); if (!row) return res.status(404).json({ message: "Loom not found" }); await logActivity({ req, action: "update", module: "weaving.loom", moduleScope: "weaving", entityType: "WeavingLoom", entityId: row._id, title: row.name }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Loom"); } };
 exports.bulkCreateLooms = async (req, res) => { try {
@@ -246,18 +247,40 @@ const nextContractNo = async (ownerId, type) => {
   return `${prefix}-${String(next).padStart(5, "0")}`;
 };
 exports.contractMeta = async (req, res) => { try { const ownerId = userId(req); const [yarns, fabrics, parties, salesNo, purchaseNo] = await Promise.all([WeavingYarn.find({ userId: ownerId, isActive: true }).select("name millBrand quality count lotReference"), WeavingFabricQuality.find({ userId: ownerId, isActive: true }).select("name code construction width weave primaryUnit"), WeavingParty.find({ userId: ownerId, isActive: true, isHidden: false }).sort({ name: 1 }), nextContractNo(ownerId, "sales"), nextContractNo(ownerId, "purchase")]); return res.json({ data: { yarns, fabrics, parties, nextNumbers: { sales: salesNo, purchase: purchaseNo } } }); } catch (e) { return fail(res, e, "Failed to load Contract setup"); } };
-exports.listContracts = async (req, res) => { try { const q = { userId: userId(req) }; if (["sales", "purchase"].includes(req.query.type)) q.type = req.query.type; if (req.query.search) q.$or = ["contractNo", "partyName", "itemName"].map((field) => ({ [field]: { $regex: clean(req.query.search), $options: "i" } })); if (req.query.startDate || req.query.endDate) q.contractDate = { ...(req.query.startDate ? { $gte: req.query.startDate } : {}), ...(req.query.endDate ? { $lte: req.query.endDate } : {}) }; return res.json({ data: await WeavingContract.find(q).sort({ contractDate: -1, createdAt: -1 }) }); } catch (e) { return fail(res, e, "Failed to load Contracts"); } };
+exports.listContracts = async (req, res) => { try { const q = { userId: userId(req) }; if (["sales", "purchase"].includes(req.query.type)) q.type = req.query.type; if (req.query.search) q.$or = ["contractNo", "partyName", "itemName"].map((field) => ({ [field]: { $regex: clean(req.query.search), $options: "i" } })); if (req.query.startDate || req.query.endDate) q.contractDate = { ...(req.query.startDate ? { $gte: req.query.startDate } : {}), ...(req.query.endDate ? { $lte: req.query.endDate } : {}) }; return res.json({ data: await contractProgress(userId(req), await WeavingContract.find(q).sort({ contractDate: -1, createdAt: -1 }).lean()) }); } catch (e) { return fail(res, e, "Failed to load Contracts"); } };
 const contractPayload = async (ownerId, body) => {
   const type = body.type === "purchase" ? "purchase" : "sales";
-  const Model = type === "sales" ? WeavingFabricQuality : WeavingYarn;
+  const purchaseItemType = body.purchaseItemType === "fabric" ? "fabric" : "yarn";
+  const fabric = type === "sales" || purchaseItemType === "fabric";
+  const Model = fabric ? WeavingFabricQuality : WeavingYarn;
   const item = await Model.findOne({ _id: body.itemId, userId: ownerId, isActive: true });
-  if (!item) { const e = new Error(type === "sales" ? "Fabric Quality is required" : "Yarn is required"); e.statusCode = 400; throw e; }
-  const unit = ["KG", "Meter", "Yard"].includes(body.unit) ? body.unit : type === "purchase" ? "KG" : item.primaryUnit;
+  if (!item) { const e = new Error(fabric ? "Fabric Quality is required" : "Yarn is required"); e.statusCode = 400; throw e; }
+  const unit = fabric ? (["KG", "Meter", "Yard"].includes(body.unit) ? body.unit : item.primaryUnit || "Meter") : "KG";
   const quantity = unit === "KG" ? canonicalQuantity(body, "KG") : number(body.quantity, "Quantity", { positive: true });
   if (quantity <= 0) { const e = new Error("Quantity must be greater than zero"); e.statusCode = 400; throw e; }
   const party = await WeavingParty.findOne({ _id: body.partyId, userId: ownerId, isActive: true, isHidden: false, role: { $in: [type === "sales" ? "customer" : "supplier", "both"] } });
   if (!party) { const e = new Error(type === "sales" ? "Party / Customer is required" : "Supplier / Party is required"); e.statusCode = 400; throw e; }
-  return { type, contractType: type === "sales" && body.contractType === "conversion" ? "conversion" : "fabric_sale", contractNo: required(await nextContractNo(ownerId, type), "Contract No"), contractDate: required(body.contractDate, "Contract Date"), partyId: party._id, partyName: party.name, itemId: item._id, itemName: item.name, quantity, unit, rate: number(body.rate, "Rate"), sourceEntryUnit: unit === "KG" && body.sourceEntryUnit === "LBS" ? "LBS" : unit, deliveryDate: clean(body.deliveryDate), brokerName: clean(body.brokerName), commissionPercent: number(body.commissionPercent, "Commission"), creditDays: Math.trunc(number(body.creditDays, "Credit Days")), paymentTerms: clean(body.paymentTerms), packingTerms: clean(body.packingTerms), deliveryTerms: clean(body.deliveryTerms), expiryDate: clean(body.expiryDate), status: ["active", "complete", "expired"].includes(body.status) ? body.status : "active", notes: clean(body.notes) };
+  return { type, purchaseItemType, contractType: type === "sales" && body.contractType === "conversion" ? "conversion" : "fabric_sale", contractNo: required(await nextContractNo(ownerId, type), "Contract No"), contractDate: required(body.contractDate, "Contract Date"), partyId: party._id, partyName: party.name, itemId: item._id, itemName: item.name, quantity, unit, rate: number(body.rate, "Rate"), sourceEntryUnit: unit === "KG" && body.sourceEntryUnit === "LBS" ? "LBS" : unit, deliveryDate: clean(body.deliveryDate), brokerName: clean(body.brokerName), commissionPercent: number(body.commissionPercent, "Commission"), creditDays: Math.trunc(number(body.creditDays, "Credit Days")), paymentTerms: clean(body.paymentTerms), packingTerms: clean(body.packingTerms), deliveryTerms: clean(body.deliveryTerms), expiryDate: clean(body.expiryDate), status: ["active", "complete", "expired"].includes(body.status) ? body.status : "active", notes: clean(body.notes) };
 };
-exports.createContract = async (req, res) => { try { const payload = await contractPayload(userId(req), req.body); const row = await WeavingContract.create({ ...payload, userId: userId(req) }); await logActivity({ req, action: "create", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo }); return res.status(201).json({ data: row }); } catch (e) { return fail(res, e, "Failed to create Contract"); } };
-exports.updateContract = async (req, res) => { try { const existing = await WeavingContract.findOne({ _id: req.params.id, userId: userId(req) }); if (!existing) return res.status(404).json({ message: "Contract not found" }); const payload = await contractPayload(userId(req), { ...req.body, type: existing.type }); payload.contractNo = existing.contractNo; const row = await WeavingContract.findByIdAndUpdate(existing._id, { $set: payload }, { new: true }); await logActivity({ req, action: "update", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Contract"); } };
+exports.createContract = async (req, res) => {
+  try {
+    const ownerId = userId(req);
+    const requestKey = clean(req.body.requestKey);
+    if (requestKey) {
+      const existing = await WeavingContract.findOne({ userId: ownerId, requestKey });
+      if (existing) return res.json({ data: existing });
+    }
+
+    const payload = await contractPayload(ownerId, req.body);
+    const row = await WeavingContract.create({ ...payload, ...(requestKey ? { requestKey } : {}), userId: ownerId });
+    res.status(201).json({ data: row });
+    void logActivity({ req, action: "create", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo });
+  } catch (e) {
+    if (e?.code === 11000 && clean(req.body.requestKey)) {
+      const existing = await WeavingContract.findOne({ userId: userId(req), requestKey: clean(req.body.requestKey) });
+      if (existing) return res.json({ data: existing });
+    }
+    return fail(res, e, "Failed to create Contract");
+  }
+};
+exports.updateContract = async (req, res) => { try { const existing = await WeavingContract.findOne({ _id: req.params.id, userId: userId(req) }); if (!existing) return res.status(404).json({ message: "Contract not found" }); if (req.body.type && req.body.type !== existing.type) throw Object.assign(new Error("Contract nature cannot be changed"), { statusCode: 400 }); const payload = await contractPayload(userId(req), { ...req.body, type: existing.type }); payload.contractNo = existing.contractNo; await assertContractIdentityEdit(userId(req), existing, payload); const row = await WeavingContract.findByIdAndUpdate(existing._id, { $set: payload }, { new: true }); await logActivity({ req, action: "update", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Contract"); } };

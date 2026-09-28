@@ -1,10 +1,7 @@
 const { formatBusinessDate } = require("../../utils/businessDate");
-const { getFileUrl } = require("../r2FileService");
 
 const getLogoUrl = (header = {}) =>
-  header.showLogo && (header.logoUrl || header.logoKey)
-    ? header.logoUrl || getFileUrl(header.logoKey)
-    : "";
+  header.showLogo === true && header.logoUrl ? header.logoUrl : "";
 
 const formatDate = (date) => formatBusinessDate(date) || "";
 
@@ -50,6 +47,30 @@ const getAccountLabel = (account) => {
   return joinValues(account.name, account.code);
 };
 
+const buildTravelHeader = (settings = {}, headerSettings = {}) => {
+  const logoUrl = getLogoUrl(headerSettings);
+  const showBusinessDetails = settings.showHeader !== false;
+
+  if (!showBusinessDetails && !logoUrl) return null;
+
+  return {
+    companyName: showBusinessDetails ? headerSettings.companyName || "" : "",
+    address:
+      showBusinessDetails && headerSettings.showCompanyAddress
+        ? headerSettings.address || ""
+        : "",
+    phone:
+      showBusinessDetails && headerSettings.showCompanyPhone
+        ? headerSettings.phone || ""
+        : "",
+    taxNumber:
+      showBusinessDetails && headerSettings.showTaxNumber
+        ? headerSettings.taxNumber || ""
+        : "",
+    logoUrl,
+  };
+};
+
 const buildSharedTravelPrintShell = (printSetting) => {
   if (!printSetting?.travelInvoice) {
     throw new Error("Travel print settings missing");
@@ -61,22 +82,7 @@ const buildSharedTravelPrintShell = (printSetting) => {
   const layout = doc.layout || {};
 
   return {
-    header:
-      settings.showHeader === false
-        ? null
-        : {
-            companyName: headerSettings.companyName || "",
-            address: headerSettings.showCompanyAddress
-              ? headerSettings.address || ""
-              : "",
-            phone: headerSettings.showCompanyPhone
-              ? headerSettings.phone || ""
-              : "",
-            taxNumber: headerSettings.showTaxNumber
-              ? headerSettings.taxNumber || ""
-              : "",
-            logoUrl: getLogoUrl(headerSettings),
-          },
+    header: buildTravelHeader(settings, headerSettings),
     footer:
       settings.showFooter === false
         ? null
@@ -246,22 +252,7 @@ const buildTravelInvoicePrint = (booking, printSetting) => {
 
   return {
     documentTitle: "Travel Invoice",
-    header:
-      settings.showHeader === false
-        ? null
-        : {
-            companyName: headerSettings.companyName || "",
-            address: headerSettings.showCompanyAddress
-              ? headerSettings.address || ""
-              : "",
-            phone: headerSettings.showCompanyPhone
-              ? headerSettings.phone || ""
-              : "",
-            taxNumber: headerSettings.showTaxNumber
-              ? headerSettings.taxNumber || ""
-              : "",
-            logoUrl: getLogoUrl(headerSettings),
-          },
+    header: buildTravelHeader(settings, headerSettings),
     documentInfo: {
       invoiceNumber: booking.invoiceNumber || booking.bookingNumber || "",
       bookingNumber: booking.bookingNumber || "",
@@ -289,6 +280,7 @@ const buildTravelInvoicePrint = (booking, printSetting) => {
         item.estimatedSellingBase !== undefined ? currency : item.sellingCurrency || currency,
       ),
     })),
+    ledgerDescription: String(booking.ledgerDescription || "").trim(),
     totals: {
       sale: formatMoney(booking.sellingTotal, currency),
       discount:

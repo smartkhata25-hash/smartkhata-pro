@@ -209,6 +209,7 @@ const applyPurchaseStockBatch = async ({
   userId,
   updated = false,
   entryDate = null,
+  session = null,
 }) => {
   if (!Array.isArray(items) || items.length === 0) {
     return;
@@ -255,6 +256,7 @@ const applyPurchaseStockBatch = async ({
   if (productOperations.length > 0) {
     await Product.bulkWrite(productOperations, {
       ordered: false,
+      ...(session ? { session } : {}),
     });
   }
 
@@ -272,6 +274,7 @@ const applyPurchaseStockBatch = async ({
 
   await InventoryTransaction.insertMany(inventoryRows, {
     ordered: false,
+    ...(session ? { session } : {}),
   });
 };
 
@@ -746,6 +749,8 @@ const getPurchaseInvoiceById = asyncHandler(async (req, res) => {
 // ✅ UPDATE PURCHASE INVOICE (SAFE PRO VERSION)
 const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.userId;
+  const session = await mongoose.startSession();
+  try {
 
   const invoice = await PurchaseInvoice.findOne({
     _id: req.params.id,
@@ -756,6 +761,31 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   if (!invoice) {
     res.status(404);
     throw new Error("Invoice not found");
+  }
+
+  // A converted source identity is historical accounting.  Its original
+  // account remains the ledger key, so replacing its journals/stock would
+  // alter the balance transferred at conversion.  Fail before files, stock,
+  // journals, or the document itself can be changed.
+  const historicalSupplier = invoice.supplier
+    ? await Supplier.findOne({ _id: invoice.supplier, userId })
+    : null;
+  const historicalParty = invoice.partyId
+    ? await Party.findOne({ _id: invoice.partyId, userId })
+    : null;
+
+  const sourceWasConverted =
+    historicalSupplier?.hiddenReason === "converted" ||
+    historicalSupplier?.isDeleted === true ||
+    historicalParty?.hiddenReason === "converted" ||
+    historicalParty?.isActive === false;
+
+  if (sourceWasConverted) {
+    return res.status(409).json({
+      code: "CONVERTED_HISTORICAL_RECORD",
+      message:
+        "This historical purchase invoice belongs to a converted entity and is read-only. It can still be viewed, printed, or exported.",
+    });
   }
 
   const beforeUpdate = {
@@ -840,6 +870,59 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
   const oldPaymentAccount = invoice.accountId || null;
 
+  // Resolve the requested active counterparty before any destructive work.
+  // This is intentionally before attachment, journal, and stock operations.
+  let supplier = null;
+  let party = null;
+  let counterPartyAccountId = null;
+
+  if (partyId) {
+    party = await Party.findOne({
+      _id: partyId,
+      userId,
+      isDeleted: false,
+      isActive: true,
+    });
+
+    if (!party || !party.account) {
+      throw new Error("Party account not found");
+    }
+
+    counterPartyAccountId = party.account;
+  } else {
+    supplier = await Supplier.findOne({
+      name: { $regex: new RegExp(`^${supplierName.trim()}$`, "i") },
+      userId,
+      isDeleted: false,
+    });
+
+    if (!supplier || !supplier.account) {
+      throw new Error("Supplier or supplier account not found");
+    }
+
+    counterPartyAccountId = supplier.account;
+  }
+
+  const openingPurchase = isOpening === true || isOpening === "true";
+  if (paidAmount > 0 && !mongoose.Types.ObjectId.isValid(String(accountId))) {
+    throw new Error("Payment account not found");
+  }
+
+  const [inventoryAccountPreflight, openingBalanceAccountPreflight, paymentAccount] =
+    await Promise.all([
+      openingPurchase ? Promise.resolve(null) : Account.findOne({ code: "INVENTORY", userId }),
+      openingPurchase ? Account.findOne({ code: "OPENING_BALANCE", userId }) : Promise.resolve(null),
+      paidAmount > 0 && accountId ? Account.findOne({ _id: accountId, userId }) : Promise.resolve(null),
+    ]);
+
+  if ((!openingPurchase && !inventoryAccountPreflight) || (openingPurchase && !openingBalanceAccountPreflight)) {
+    throw new Error(openingPurchase ? "Opening Balance account not found" : "Inventory account not found");
+  }
+
+  if (paidAmount > 0 && !paymentAccount) {
+    throw new Error("Payment account not found");
+  }
+
   // ATTACHMENT HANDLING
 
   let attachments = formatPurchaseAttachments(invoice).map((att) => ({
@@ -860,10 +943,6 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   const removedAttachments = attachments.filter(
     (att) => !keepAttachmentKeys.includes(att.key),
   );
-
-  for (const att of removedAttachments) {
-    await deletePurchaseAttachment(att);
-  }
 
   attachments = attachments.filter((att) =>
     keepAttachmentKeys.includes(att.key),
@@ -886,12 +965,15 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   const attachmentPath = attachments[0]?.key || "";
   const attachmentType = attachments[0]?.type || "";
 
+  // Database replacement is atomic. External attachments are deleted only
+  // after this transaction commits successfully.
+  await session.withTransaction(async () => {
   // REMOVE OLD STOCK
-
   await deleteTransactionsByReference({
     referenceId: invoice._id,
     invoiceModel: "PurchaseInvoice",
     userId,
+    session,
   });
 
   //SOFT DELETE OLD JOURNALS
@@ -914,40 +996,8 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
         isDeleted: true,
       },
     },
+    { session },
   );
-
-  let supplier = null;
-  let party = null;
-  let counterPartyAccountId = null;
-
-  if (partyId) {
-    party = await Party.findOne({
-      _id: partyId,
-      userId,
-      isDeleted: false,
-      isActive: true,
-    });
-
-    if (!party || !party.account) {
-      throw new Error("Party account not found");
-    }
-
-    counterPartyAccountId = party.account;
-  } else {
-    supplier = await Supplier.findOne({
-      name: {
-        $regex: new RegExp(`^${supplierName.trim()}$`, "i"),
-      },
-      userId,
-      isDeleted: false,
-    });
-
-    if (!supplier || !supplier.account) {
-      throw new Error("Supplier or supplier account not found");
-    }
-
-    counterPartyAccountId = supplier.account;
-  }
 
   // STATUS CALCULATION
 
@@ -984,14 +1034,14 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     isOpening: isOpening === true || isOpening === "true",
   });
 
-  await invoice.save();
+  await invoice.save({ session });
 
   //INVENTORY ACCOUNT
 
   const inventoryAccount = await Account.findOne({
     code: "INVENTORY",
     userId,
-  });
+  }).session(session);
 
   if (!inventoryAccount) {
     throw new Error("Inventory account not found");
@@ -1002,7 +1052,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
   const openingBalanceAccount = await Account.findOne({
     code: "OPENING_BALANCE",
     userId,
-  });
+  }).session(session);
 
   const lines =
     isOpening === true || isOpening === "true"
@@ -1031,7 +1081,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
           },
         ];
 
-  await JournalEntry.create({
+  await JournalEntry.create([{
     date: parsedInvoiceDate,
     time: resolvedInvoiceTime || "",
     billNo,
@@ -1049,7 +1099,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     lines,
     attachmentUrl: attachmentPath,
     attachmentType,
-  });
+  }], { session });
 
   //CREATE DISCOUNT ENTRY
 
@@ -1079,6 +1129,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
+      session,
     });
   }
 
@@ -1101,6 +1152,7 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
 
       supplierId: supplier?._id || null,
       partyId: party?._id || null,
+      session,
     });
   }
 
@@ -1112,8 +1164,14 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
       userId,
       updated: true,
       entryDate: parsedInvoiceDate,
+      session,
     });
   }
+  });
+
+  // Files are deliberately outside MongoDB, but are only removed after the
+  // accounting transaction has committed.
+  await Promise.allSettled(removedAttachments.map(deletePurchaseAttachment));
 
   await recalculateAccountBalance(counterPartyAccountId);
 
@@ -1183,6 +1241,9 @@ const updatePurchaseInvoice = asyncHandler(async (req, res) => {
     message: "Purchase invoice updated successfully.",
     data: invoice,
   });
+  } finally {
+    await session.endSession();
+  }
 });
 
 // ✅ Delete invoice

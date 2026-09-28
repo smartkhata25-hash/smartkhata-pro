@@ -29,6 +29,7 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
     summary = {},
     rows = [],
     header = null,
+    showDescription = false,
   } = data || {};
 
   const safePageSize = pageSize === "A4" ? "A4" : "A5";
@@ -131,6 +132,15 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
       background: #f9fafb;
     }
 
+    .source-description {
+      margin-top: 2px;
+      color: #6b7280;
+      font-size: 10px;
+      font-weight: 400;
+      line-height: 1.35;
+      white-space: pre-line;
+    }
+
     @media print {
       body {
         -webkit-print-color-adjust: exact;
@@ -190,7 +200,14 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
                     <tr>
                       <td>${escapeHtml(row.date || "-")}</td>
                       <td>${escapeHtml(row.billNo || "-")}</td>
-                      <td>${escapeHtml(row.source || "-")}</td>
+                      <td>
+                        ${escapeHtml(row.source || "-")}
+                        ${
+                          showDescription && String(row.description ?? "").trim()
+                            ? `<div class="source-description">${escapeHtml(String(row.description).trim())}</div>`
+                            : ""
+                        }
+                      </td>
                       <td>${moneyIn}</td>
                       <td>${moneyOut}</td>
                       <td>${balance}</td>

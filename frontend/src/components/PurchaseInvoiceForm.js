@@ -12,6 +12,12 @@ import AttachmentViewerModal from './AttachmentViewerModal';
 import { useNavigate } from 'react-router-dom';
 
 import { hasPermission } from '../utils/permissionHelper';
+import {
+  getInvoiceItemMoney,
+  moneyNumber,
+  roundMoney,
+  sanitizeMoneyInput,
+} from '../utils/money';
 import { downloadBackendPdf, openBackendPrintWindow } from '../utils/backendPrintDocument';
 import {
   formatBusinessDateForDisplay,
@@ -161,7 +167,7 @@ const PurchaseInvoiceForm = () => {
       }
     }
 
-    if (paidAmount === 0) {
+    if (moneyNumber(paidAmount) === 0) {
       setSelectedAccountId('');
     }
   }, [paidAmount, paymentType, accounts]);
@@ -411,12 +417,13 @@ const PurchaseInvoiceForm = () => {
   const finalDiscount = isOpeningPurchase
     ? 0
     : discountPercent > 0
-      ? (totalAmount * discountPercent) / 100
-      : discountAmount;
+      ? roundMoney((totalAmount * discountPercent) / 100)
+      : moneyNumber(discountAmount);
 
   const grandTotal = isOpeningPurchase
-    ? Number(openingPurchaseAmount || 0)
-    : totalAmount - finalDiscount;
+    ? moneyNumber(openingPurchaseAmount)
+    : roundMoney(totalAmount - finalDiscount);
+  const numericPaidAmount = moneyNumber(paidAmount);
   const formState = {
     supplierName,
     supplierPhone,
@@ -591,9 +598,8 @@ const PurchaseInvoiceForm = () => {
           .map((i) => ({
             productId: i.productId,
             quantity: i.quantity,
-            price: i.rate,
+            ...getInvoiceItemMoney(i),
             salePrice: i.cost,
-            total: i.amount || i.quantity * i.rate,
           }));
 
     const journalEntries = [];
@@ -602,14 +608,14 @@ const PurchaseInvoiceForm = () => {
       journalEntries.push({
         type: 'debit',
         accountId: selectedAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Paid to supplier ${supplierName}`,
       });
 
       journalEntries.push({
         type: 'credit',
         accountId: supplierAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Payment for purchase invoice #${billNo}`,
       });
     }
@@ -626,11 +632,11 @@ const PurchaseInvoiceForm = () => {
     } else {
       formData.append('supplierId', selectedSupplier?._id || selectedSupplierId || '');
     }
-    formData.append('totalAmount', totalAmount);
+    formData.append('totalAmount', moneyNumber(totalAmount));
     formData.append('discountPercent', discountPercent);
-    formData.append('discountAmount', discountAmount);
-    formData.append('grandTotal', grandTotal);
-    formData.append('paidAmount', paidAmount);
+    formData.append('discountAmount', moneyNumber(discountAmount));
+    formData.append('grandTotal', moneyNumber(grandTotal));
+    formData.append('paidAmount', numericPaidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
     attachments.forEach((file) => {
@@ -829,14 +835,14 @@ const PurchaseInvoiceForm = () => {
       journalEntries.push({
         type: 'debit',
         accountId: selectedAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Paid to supplier ${supplierName}`,
       });
 
       journalEntries.push({
         type: 'credit',
         accountId: supplierAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Payment for purchase invoice #${billNo}`,
       });
     }
@@ -859,7 +865,7 @@ const PurchaseInvoiceForm = () => {
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);
     formData.append('grandTotal', grandTotal);
-    formData.append('paidAmount', paidAmount);
+    formData.append('paidAmount', numericPaidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
 
@@ -1070,14 +1076,14 @@ const PurchaseInvoiceForm = () => {
       journalEntries.push({
         type: 'debit',
         accountId: selectedAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Paid to supplier ${supplierName}`,
       });
 
       journalEntries.push({
         type: 'credit',
         accountId: supplierAccountId,
-        amount: paidAmount,
+        amount: numericPaidAmount,
         narration: `Payment for purchase invoice #${billNo}`,
       });
     }
@@ -1097,7 +1103,7 @@ const PurchaseInvoiceForm = () => {
     formData.append('discountPercent', discountPercent);
     formData.append('discountAmount', discountAmount);
     formData.append('grandTotal', grandTotal);
-    formData.append('paidAmount', paidAmount);
+    formData.append('paidAmount', numericPaidAmount);
     formData.append('paymentType', paymentType);
     formData.append('accountId', selectedAccountId);
     attachments.forEach((file) => {
@@ -1170,7 +1176,7 @@ const PurchaseInvoiceForm = () => {
       discountPercent,
       discountAmount: finalDiscount,
       grandTotal,
-      paidAmount,
+      paidAmount: numericPaidAmount,
       paymentType,
       status,
     };
@@ -1474,8 +1480,11 @@ const PurchaseInvoiceForm = () => {
                         placeholder={t('discountRS')}
                         value={discountAmount === 0 ? '' : discountAmount}
                         onChange={(e) => {
-                          setDiscountAmount(+e.target.value || 0);
-                          setDiscountPercent(0);
+                          const value = sanitizeMoneyInput(e.target.value);
+                          if (value !== null) {
+                            setDiscountAmount(value);
+                            setDiscountPercent(0);
+                          }
                         }}
                         className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
                       />
@@ -1487,7 +1496,10 @@ const PurchaseInvoiceForm = () => {
                             inputMode="decimal"
                             placeholder={t('paid')}
                             value={paidAmount === 0 ? '' : paidAmount}
-                            onChange={(e) => setPaidAmount(+e.target.value || 0)}
+                            onChange={(e) => {
+                              const value = sanitizeMoneyInput(e.target.value);
+                              if (value !== null) setPaidAmount(value);
+                            }}
                             className="border px-2 py-0 text-sm h-8 w-24 appearance-none"
                           />
 
@@ -1511,7 +1523,7 @@ const PurchaseInvoiceForm = () => {
                                 setAccountError('');
                               }
                             }}
-                            disabled={paidAmount === 0}
+                            disabled={moneyNumber(paidAmount) === 0}
                             className={`px-2 py-1 h-8 w-28 text-sm cursor-pointer border ${
                               accountError ? 'border-red-500 bg-red-50' : 'border-gray-300'
                             }`}
@@ -1740,10 +1752,10 @@ const PurchaseInvoiceForm = () => {
                       {t('netTotal')}: Rs. {grandTotal.toFixed(2)}
                     </p>
                     <p>
-                      {t('paid')}: Rs. {paidAmount.toFixed(2)}
+                      {t('paid')}: Rs. {numericPaidAmount.toFixed(2)}
                     </p>
                     <p className="text-red-600 font-semibold">
-                      {t('remaining')}: Rs. {(grandTotal - paidAmount).toFixed(2)}
+                      {t('remaining')}: Rs. {(grandTotal - numericPaidAmount).toFixed(2)}
                     </p>
                   </div>
                 </div>

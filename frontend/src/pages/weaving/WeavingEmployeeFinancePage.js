@@ -34,8 +34,10 @@ import {
 import { hasPermission } from '../../utils/permissionHelper';
 import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 import {
-  formatWeavingPayrollCycleLabel,
-  getWeavingPayrollCycleOptions,
+  deriveWeavingPayrollCycle,
+  getFirstValidWeavingRecoveryCycle,
+  getNextWeavingPayrollCycleKey,
+  getPreviousWeavingPayrollCycleKey,
 } from '../../utils/weavingPayrollCycle';
 
 const MODULE_SCOPE = EMPLOYEE_MODULE_SCOPES.WEAVING;
@@ -84,29 +86,28 @@ const getAccountLabel = (account = {}) =>
 const isRecovered = (entry) =>
   Number(entry?.recoveredAmount || 0) > 0 || (entry?.recoveryHistory || []).length > 0;
 
-const getPlanLabel = (entry, cycleOptions) => {
+const getPlanLabel = (entry) => {
   const plan = entry.recoveryPlan || {};
-  const findCycle = (key) => cycleOptions.find((cycle) => cycle.key === key);
 
   if (entry.kind === 'loan') {
-    const cycle = findCycle(plan.firstCycleKey);
+    const cycle = plan.firstCycleKey ? deriveWeavingPayrollCycle(plan.firstCycleKey) : null;
     return [
       plan.frequency === 'monthly'
         ? t('weaving.employeeFinance.monthly')
         : t('weaving.employeeFinance.everyCycle'),
       money(plan.installmentAmount),
-      cycle?.label || plan.firstCycleKey,
+      cycle ? formatBusinessDateForDisplay(cycle.dueDate) : plan.firstCycleKey,
     ]
       .filter(Boolean)
       .join(' | ');
   }
 
-  const cycle = findCycle(plan.targetCycleKey);
+  const cycle = plan.targetCycleKey ? deriveWeavingPayrollCycle(plan.targetCycleKey) : null;
   return [
     plan.frequency === 'one_time'
       ? t('weaving.employeeFinance.oneTime')
       : t('weaving.employeeFinance.carryForward'),
-    cycle?.label || plan.targetCycleKey,
+    cycle ? formatBusinessDateForDisplay(cycle.dueDate) : plan.targetCycleKey,
   ]
     .filter(Boolean)
     .join(' | ');
@@ -143,11 +144,31 @@ const Field = ({ label, children }) => (
 const baseInputClass =
   'h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500';
 
+const RecoveryStartSelector = ({ value, minimumDate, onChange }) => {
+  const minimum = getFirstValidWeavingRecoveryCycle(minimumDate);
+  const selected = deriveWeavingPayrollCycle(value || minimum.key);
+  const canPrevious = selected.dueDate > minimum.dueDate;
+  const options = Array.from({ length: 8 }, (_, index) => {
+    let cycle = selected;
+    for (let step = 0; step < index; step += 1) cycle = deriveWeavingPayrollCycle(getNextWeavingPayrollCycleKey(cycle));
+    return cycle;
+  });
+  return <Field label={t('weaving.employeeFinance.recoveryStart')}>
+    <div className="flex items-center gap-2">
+      <button type="button" disabled={!canPrevious} onClick={() => onChange(getPreviousWeavingPayrollCycleKey(selected))} className="h-10 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 disabled:opacity-40">{t('common.previous')}</button>
+      <div className="min-w-0 flex-1 rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-center text-sm font-black text-cyan-800">{formatBusinessDateForDisplay(selected.dueDate)}</div>
+      <button type="button" onClick={() => onChange(getNextWeavingPayrollCycleKey(selected))} className="h-10 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700">{t('common.next')}</button>
+    </div>
+    <select value={selected.key} onChange={(event) => onChange(event.target.value)} className={`${baseInputClass} mt-2`}>
+      {options.map((cycle) => <option key={cycle.key} value={cycle.key}>{formatBusinessDateForDisplay(cycle.dueDate)}</option>)}
+    </select>
+  </Field>;
+};
+
 const FinanceModal = ({
   entry,
   employees,
   accounts,
-  cycleOptions,
   defaultAccountId,
   saving,
   error,
@@ -163,7 +184,7 @@ const FinanceModal = ({
 
   const resetForm = useCallback(() => {
     const plan = entry?.recoveryPlan || {};
-    const nextCycle = cycleOptions[2] || cycleOptions[0] || {};
+    const nextCycle = getFirstValidWeavingRecoveryCycle(entry?.date || EMPTY_FORM.date);
 
     setForm({
       ...EMPTY_FORM,
@@ -181,7 +202,7 @@ const FinanceModal = ({
       firstCycleKey: plan.firstCycleKey || nextCycle.key || '',
     });
     setLocalError('');
-  }, [cycleOptions, defaultAccountId, entry]);
+  }, [defaultAccountId, entry]);
 
   useEffect(() => {
     resetForm();
@@ -257,16 +278,13 @@ const FinanceModal = ({
         paymentAccountId: defaultAccountId || '',
         date: getBusinessDateInputValue(),
         time: getBusinessTimeInputValue(),
-        targetCycleKey: cycleOptions[2]?.key || cycleOptions[0]?.key || '',
-        firstCycleKey: cycleOptions[2]?.key || cycleOptions[0]?.key || '',
+        targetCycleKey: getFirstValidWeavingRecoveryCycle().key,
+        firstCycleKey: getFirstValidWeavingRecoveryCycle().key,
       });
     }
   };
 
-  const selectedCycle =
-    form.kind === 'loan'
-      ? cycleOptions.find((cycle) => cycle.key === form.firstCycleKey)
-      : cycleOptions.find((cycle) => cycle.key === form.targetCycleKey);
+  const selectedCycle = deriveWeavingPayrollCycle(form.kind === 'loan' ? form.firstCycleKey : form.targetCycleKey);
   const estimatedInstallments =
     form.kind === 'loan' && Number(form.installmentAmount || 0) > 0
       ? Math.ceil(Number(form.amount || 0) / Number(form.installmentAmount || 1))
@@ -421,19 +439,7 @@ const FinanceModal = ({
                     </select>
                   </Field>
 
-                  <Field label={t('weaving.employeeFinance.firstDeduction')}>
-                    <select
-                      value={form.firstCycleKey}
-                      onChange={(event) => updateField('firstCycleKey', event.target.value)}
-                      className={baseInputClass}
-                    >
-                      {cycleOptions.map((cycle) => (
-                        <option key={cycle.key} value={cycle.key}>
-                          {cycle.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                  <RecoveryStartSelector value={form.firstCycleKey} minimumDate={form.date} onChange={(value) => updateField('firstCycleKey', value)} />
 
                   <div className="rounded-lg border border-white bg-white/80 p-3 text-sm font-bold text-slate-600">
                     <p>
@@ -451,41 +457,7 @@ const FinanceModal = ({
                 </>
               ) : (
                 <>
-                  <Field label={t('weaving.employeeFinance.advanceFrequency')}>
-                    <select
-                      value={form.recoveryFrequency}
-                      onChange={(event) => updateField('recoveryFrequency', event.target.value)}
-                      className={baseInputClass}
-                    >
-                      <option value="carry_forward">
-                        {t('weaving.employeeFinance.carryForward')}
-                      </option>
-                      <option value="one_time">{t('weaving.employeeFinance.oneTime')}</option>
-                    </select>
-                  </Field>
-
-                  <Field label={t('weaving.employeeFinance.targetCycle')}>
-                    <select
-                      value={form.targetCycleKey}
-                      onChange={(event) => updateField('targetCycleKey', event.target.value)}
-                      className={baseInputClass}
-                    >
-                      {cycleOptions.map((cycle) => (
-                        <option key={cycle.key} value={cycle.key}>
-                          {cycle.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  <div className="md:col-span-2 rounded-lg border border-white bg-white/80 p-3 text-sm font-bold text-slate-600">
-                    {selectedCycle
-                      ? `${t('weaving.employeeFinance.deductFrom')}: ${formatWeavingPayrollCycleLabel(
-                          selectedCycle,
-                          t('weaving.employeeFinance.pay')
-                        )}`
-                      : t('weaving.employeeFinance.chooseCycle')}
-                  </div>
+                  <RecoveryStartSelector value={form.targetCycleKey} minimumDate={form.date} onChange={(value) => updateField('targetCycleKey', value)} />
                 </>
               )}
             </div>
@@ -717,16 +689,16 @@ const ManualRecoveryModal = ({
 const WeavingEmployeeFinancePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const cycleOptions = useMemo(
-    () => getWeavingPayrollCycleOptions({ payText: t('weaving.employeeFinance.pay') }),
-    []
-  );
   const [entries, setEntries] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [search, setSearch] = useState('');
   const [kindFilter, setKindFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('active');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -748,11 +720,12 @@ const WeavingEmployeeFinancePage = () => {
 
     try {
       const [entryData, employeeData, accountData] = await Promise.all([
-        getAdvanceLoans({ moduleScope: MODULE_SCOPE }),
-        getEmployees({ moduleScope: MODULE_SCOPE }),
+        getAdvanceLoans({ moduleScope: MODULE_SCOPE, page, limit: 25, search, kind: kindFilter === 'all' ? '' : kindFilter, status: statusFilter, fromDate, toDate }),
+        getEmployees({ moduleScope: MODULE_SCOPE, status: 'all' }),
         getValidPaymentAccounts({ moduleScope: MODULE_SCOPE }),
       ]);
-      setEntries(Array.isArray(entryData) ? entryData : []);
+      setEntries(Array.isArray(entryData?.data) ? entryData.data : []);
+      setPagination(entryData?.pagination || { page: 1, totalPages: 1, total: 0 });
       setEmployees(Array.isArray(employeeData) ? employeeData : []);
       setAccounts(Array.isArray(accountData) ? accountData : []);
     } catch (loadError) {
@@ -760,7 +733,7 @@ const WeavingEmployeeFinancePage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fromDate, kindFilter, page, search, statusFilter, toDate]);
 
   useEffect(() => {
     loadData();
@@ -796,23 +769,6 @@ const WeavingEmployeeFinancePage = () => {
 
     return getId(preferred || accounts[0]);
   }, [accounts]);
-
-  const filteredEntries = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return entries.filter((entry) => {
-      const employee = getEntryEmployee(entry);
-      const searchable = [employee.name, employee.employeeNo, entry.description, entry.kind]
-        .join(' ')
-        .toLowerCase();
-
-      if (kindFilter !== 'all' && entry.kind !== kindFilter) return false;
-      if (statusFilter !== 'all' && entry.status !== statusFilter) return false;
-      if (query && !searchable.includes(query)) return false;
-
-      return true;
-    });
-  }, [entries, kindFilter, search, statusFilter]);
 
   const summary = useMemo(
     () =>
@@ -891,7 +847,12 @@ const WeavingEmployeeFinancePage = () => {
   };
 
   const voidEntry = async (entry) => {
-    if (!await requestWeavingConfirmation({ message: t('weaving.employeeFinance.confirmVoid') })) return;
+    const reason = await requestWeavingConfirmation({
+      message: t('weaving.employeeFinance.confirmVoid'),
+      inputLabel: t('weaving.employeeFinance.voidReasonLabel'),
+      inputPlaceholder: t('weaving.employeeFinance.voidReasonPlaceholder'),
+    });
+    if (reason === false) return;
 
     setSaving(true);
     setError('');
@@ -899,7 +860,7 @@ const WeavingEmployeeFinancePage = () => {
     try {
       await voidAdvanceLoan(entry._id, {
         moduleScope: MODULE_SCOPE,
-        data: { reason: t('weaving.employeeFinance.voidReason') },
+        data: { reason: typeof reason === 'string' ? reason : '' },
       });
       await loadData();
     } catch (voidError) {
@@ -992,7 +953,7 @@ const WeavingEmployeeFinancePage = () => {
       </section>
 
       <section className="mb-1 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_160px]">
+        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_150px_150px_150px_150px]">
           <div className="relative">
             <FaSearch
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -1000,7 +961,7 @@ const WeavingEmployeeFinancePage = () => {
             />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => { setSearch(event.target.value); setPage(1); }}
               placeholder={t('weaving.employeeFinance.search')}
               className={`${baseInputClass} pl-9`}
             />
@@ -1008,7 +969,7 @@ const WeavingEmployeeFinancePage = () => {
 
           <select
             value={kindFilter}
-            onChange={(event) => setKindFilter(event.target.value)}
+            onChange={(event) => { setKindFilter(event.target.value); setPage(1); }}
             className={baseInputClass}
           >
             <option value="all">{t('weaving.employeeFinance.filters.allTypes')}</option>
@@ -1018,13 +979,16 @@ const WeavingEmployeeFinancePage = () => {
 
           <select
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}
             className={baseInputClass}
           >
             <option value="active">{t('weaving.employeeFinance.status.active')}</option>
             <option value="closed">{t('weaving.employeeFinance.status.closed')}</option>
+            <option value="void">{t('weaving.employeeFinance.status.void')}</option>
             <option value="all">{t('weaving.employeeFinance.filters.allStatuses')}</option>
           </select>
+          <input type="date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(1); }} className={baseInputClass} aria-label="From Date" />
+          <input type="date" value={toDate} onChange={(event) => { setToDate(event.target.value); setPage(1); }} className={baseInputClass} aria-label="To Date" />
         </div>
       </section>
 
@@ -1078,8 +1042,8 @@ const WeavingEmployeeFinancePage = () => {
                     {t('travel.common.loading')}
                   </td>
                 </tr>
-              ) : filteredEntries.length ? (
-                filteredEntries.map((entry) => {
+              ) : entries.length ? (
+                entries.map((entry) => {
                   const employee = getEntryEmployee(entry);
                   const account = getEntryAccount(entry);
                   const active = entry.status === 'active';
@@ -1122,7 +1086,7 @@ const WeavingEmployeeFinancePage = () => {
                         {money(entry.outstandingAmount)}
                       </td>
                       <td className="border-x border-slate-200 px-3 py-2.5 text-xs font-bold text-slate-600">
-                        {getPlanLabel(entry, cycleOptions) || '-'}
+                        {getPlanLabel(entry) || '-'}
                       </td>
                       <td className="border-x border-slate-200 px-3 py-2.5">
                         <StatusBadge status={entry.status} />
@@ -1196,13 +1160,18 @@ const WeavingEmployeeFinancePage = () => {
           </table>
         </div>
       </section>
+      <div className="mt-3 flex items-center justify-end gap-3 text-sm font-bold text-slate-600">
+        <span>{pagination.total || 0}</span>
+        <button type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)} className="rounded border border-slate-200 px-3 py-1.5 disabled:opacity-40">{t('common.previous')}</button>
+        <span>{page} / {Math.max(1, pagination.totalPages || 1)}</span>
+        <button type="button" disabled={page >= (pagination.totalPages || 1)} onClick={() => setPage((current) => current + 1)} className="rounded border border-slate-200 px-3 py-1.5 disabled:opacity-40">{t('common.next')}</button>
+      </div>
 
       {financeModalOpen && (
         <FinanceModal
           entry={editingEntry}
           employees={employees}
           accounts={accounts}
-          cycleOptions={cycleOptions}
           defaultAccountId={defaultAccountId}
           saving={saving}
           error={modalError}

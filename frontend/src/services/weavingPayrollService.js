@@ -90,6 +90,17 @@ export const finalizeWeavingPayrollCycle = async ({ cycleKey, segmentNo } = {}) 
   return unwrap(response);
 };
 
+export const precheckWeavingPayrollRange = async (data = {}) => {
+  const response = await axios.post(`${API_URL}/range/precheck`, data, getConfig());
+  return unwrap(response);
+};
+
+export const finalizeWeavingPayrollRange = async (data = {}) => {
+  const response = await axios.post(`${API_URL}/range/finalize`, data, getConfig());
+  clearAccountsCache();
+  return unwrap(response);
+};
+
 export const earlyCloseWeavingPayrollCycle = async ({ cycleKey, segmentNo, reason } = {}) => {
   const response = await axios.post(
     `${API_URL}/early-close`,
@@ -156,9 +167,11 @@ const weavingPayrollService = {
   earlyCloseWeavingPayrollCycle,
   finalizeWeavingPayroll,
   finalizeWeavingPayrollCycle,
+  finalizeWeavingPayrollRange,
   generateWeavingPayrollCycle,
   getWeavingPayrollCycle,
   getWeavingPayrollSummary,
+  precheckWeavingPayrollRange,
   payWeavingPayroll,
   resumeWeavingPayrollCycle,
   restoreWeavingPayroll,

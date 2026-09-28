@@ -142,6 +142,7 @@ const buildPartyDetailLedgerPrint = ({
   closingBalance,
 
   ledger = [],
+  header = null,
 }) => {
   const opening = round2(openingBalance);
 
@@ -260,6 +261,7 @@ const buildPartyDetailLedgerPrint = ({
 
   return {
     documentTitle: "Party Detail Ledger",
+    header,
 
     party: {
       id: partyId || "",

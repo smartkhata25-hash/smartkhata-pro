@@ -7,6 +7,8 @@ const bucketSchema = new mongoose.Schema({
   category: { type: String, enum: ["normal", "b", "rejected", "cut_piece", "waste", "other", ""], default: "" },
   ownershipType: { type: String, enum: ["own", "party"], default: "own" },
   ownerPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", default: null },
+  itemName: { type: String, default: "" },
+  godownName: { type: String, default: "" },
 }, { _id: false });
 
 const schema = new mongoose.Schema({
@@ -37,6 +39,14 @@ const schema = new mongoose.Schema({
   reason: { type: String, trim: true, default: "" },
   status: { type: String, enum: ["posted", "reversed"], default: "posted" },
   movementIds: [{ type: mongoose.Schema.Types.ObjectId }],
+  thanDetails: [{
+    _id: false,
+    foldingEntryId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingFoldingEntry", required: true },
+    thanNo: String,
+    contractId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingContract", default: null },
+    meter: Number, weightKg: Number, weightLbs: Number,
+  }],
+  affectedThanIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "WeavingFoldingEntry" }],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   reversedAt: { type: Date, default: null },
   reversedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

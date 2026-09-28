@@ -45,7 +45,7 @@ export const weavingSidebarItems = Object.freeze([
   { key: 'weavingParties', to: '/weaving/parties', labelKey: 'weaving.sidebar.parties', icon: FaUsers, module: MODULE_KEYS.WEAVING, permission: 'weaving.counterparties.view', implemented: true },
   { key: 'weavingPurchase', to: '/weaving/purchase', labelKey: 'weaving.sidebar.purchase', icon: FaShoppingCart, module: MODULE_KEYS.WEAVING, permission: 'weaving.purchases.view', implemented: true },
   { key: 'weavingPayments', to: '/weaving/payments', labelKey: 'weaving.sidebar.payments', icon: FaWallet, module: MODULE_KEYS.WEAVING, permission: 'weaving.payments.view', implemented: true },
-  { key: 'weavingSalesSettlement', to: '/weaving/sales-settlement', labelKey: 'weaving.sidebar.salesSettlement', icon: FaFileInvoiceDollar, module: MODULE_KEYS.WEAVING, permission: 'weaving.sales.view', implemented: true },
+  { key: 'weavingSalesSettlement', to: '/weaving/sales-settlement', labelKey: 'sales', icon: FaFileInvoiceDollar, module: MODULE_KEYS.WEAVING, permission: 'weaving.sales.view', implemented: true },
   { key: 'weavingYarnStock', to: '/weaving/yarn-stock', labelKey: 'weaving.sidebar.yarnStock', icon: FaCubes, module: MODULE_KEYS.WEAVING, permission: 'weaving.yarn_stock.view', implemented: true },
   { key: 'weavingSizing', to: '/weaving/sizing', labelKey: 'weaving.sidebar.sizing', icon: FaRulerCombined, module: MODULE_KEYS.WEAVING, permission: 'weaving.sizing.view', implemented: true },
   { key: 'weavingBeams', to: '/weaving/beams', labelKey: 'weaving.sidebar.beams', icon: FaProjectDiagram, module: MODULE_KEYS.WEAVING, permission: 'weaving.beams.view', implemented: true },
@@ -171,59 +171,7 @@ export const weavingTopMenuConfig = Object.freeze([
       {
         title: 'weaving.nav.reports',
         items: [
-          { label: 'weaving.operationalReports.salaryClosingSheet', path: '/weaving/reports?tab=salary', permission: 'payroll.view' },
-        ],
-      },
-    ],
-  },
-  {
-    label: 'weaving.nav.commercial',
-    module: MODULE_KEYS.WEAVING,
-    sections: [
-      {
-        title: 'weaving.nav.purchase',
-        items: [
-          { label: 'weaving.sidebar.purchase', path: '/weaving/purchase', permission: 'weaving.purchases.view' },
-          { label: 'weaving.nav.yarnPurchase', path: '/weaving/purchase?tab=yarn', permission: 'weaving.purchases.view' },
-          { label: 'weaving.nav.fabricPurchase', path: '/weaving/purchase?tab=fabric', permission: 'weaving.purchases.view' },
-          { label: 'weaving.nav.generalPurchase', path: '/weaving/purchase?tab=general', permission: 'weaving.purchases.view' },
-        ],
-      },
-      {
-        title: 'weaving.nav.sales',
-        items: [
-          { label: 'weaving.sidebar.salesSettlement', path: '/weaving/sales-settlement', permission: 'weaving.sales.view' },
-          { label: 'weaving.sales.kacchi', path: '/weaving/sales-settlement?tab=kacchi', permission: 'weaving.sales.view' },
-          { label: 'weaving.sales.pakki', path: '/weaving/sales-settlement?tab=pakki', permission: 'weaving.sales.view' },
-          { label: 'weaving.nav.readyToInvoice', path: '/weaving/sales-settlement?tab=ready', permission: 'weaving.sales.view' },
-          { label: 'weaving.nav.directSale', path: '/weaving/sales-settlement?tab=invoices&new=direct', allPermissions: ['weaving.sales.view', 'weaving.sales.create'] },
-          { label: 'weaving.nav.salesHistory', path: '/weaving/sales-settlement?tab=invoices', permission: 'weaving.sales.view' },
-          { label: 'weaving.sales.pending', path: '/weaving/sales-settlement?tab=pending', permission: 'weaving.sales.view' },
-          { label: 'weaving.sales.receipts', path: '/weaving/sales-settlement?tab=receipts', permission: 'weaving.sales.view' },
-        ],
-      },
-      {
-        title: 'weaving.nav.payments',
-        items: [
-          { label: 'weaving.nav.receivePayment', path: '/weaving/payments?tab=receive', allPermissions: [paymentView, 'weaving.payments.create'] },
-          { label: 'weaving.nav.payBill', path: '/weaving/payments?tab=pay', allPermissions: [paymentView, 'weaving.payments.create'] },
-          { label: 'weaving.nav.paymentHistory', path: '/weaving/payments?tab=history', permission: paymentView },
-        ],
-      },
-    ],
-  },
-  {
-    label: 'weaving.nav.banking',
-    module: MODULE_KEYS.WEAVING,
-    permission: paymentView,
-    sections: [
-      {
-        title: 'weaving.nav.banking',
-        items: [
-          { label: 'weaving.nav.receivePayment', path: '/weaving/payments?tab=receive', allPermissions: [paymentView, 'weaving.payments.create'] },
-          { label: 'weaving.nav.payBill', path: '/weaving/payments?tab=pay', allPermissions: [paymentView, 'weaving.payments.create'] },
-          { label: 'weaving.nav.receivePaymentList', path: '/weaving/payments?tab=history&type=receive', permission: paymentView },
-          { label: 'weaving.nav.payBillList', path: '/weaving/payments?tab=history&type=pay', permission: paymentView },
+          { label: 'weaving.operationalReports.salaryClosingSheet', path: '/weaving/payroll/salary-closing', permission: 'payroll.view' },
         ],
       },
     ],
@@ -248,6 +196,34 @@ export const weavingTopMenuConfig = Object.freeze([
           { label: 'weaving.nav.yarnPurchaseList', path: '/weaving/purchase?view=list&type=yarn', permission: 'weaving.purchases.view' },
           { label: 'weaving.nav.fabricPurchaseList', path: '/weaving/purchase?view=list&type=fabric', permission: 'weaving.purchases.view' },
           { label: 'weaving.nav.generalPurchaseList', path: '/weaving/purchase?view=list&type=general', permission: 'weaving.purchases.view' },
+        ],
+      },
+    ],
+  },
+  {
+    label: 'sales',
+    module: MODULE_KEYS.WEAVING,
+    permission: 'weaving.sales.view',
+    sections: [
+      {
+        title: 'weaving.salesPro.newSales',
+        items: [
+          { label: 'weaving.sales.kacchi', path: '/weaving/sales-settlement?new=kacchi', allPermissions: ['weaving.sales.view', 'weaving.sales.create'] },
+          { label: 'weaving.salesPro.pakkiFinal', path: '/weaving/sales-settlement?new=pakki', allPermissions: ['weaving.sales.view', 'weaving.sales.create', 'weaving.sales.post'] },
+          { label: 'weaving.sales.fabricSale', path: '/weaving/sales-settlement?new=fabric', allPermissions: ['weaving.sales.view', 'weaving.sales.create', 'weaving.sales.post'] },
+          { label: 'weaving.sales.yarnSale', path: '/weaving/sales-settlement?new=yarn', allPermissions: ['weaving.sales.view', 'weaving.sales.create', 'weaving.sales.post'] },
+          { label: 'weaving.sales.otherSale', path: '/weaving/sales-settlement?new=other', allPermissions: ['weaving.sales.view', 'weaving.sales.create', 'weaving.sales.post'] },
+        ],
+      },
+      {
+        title: 'weaving.salesPro.salesLists',
+        items: [
+          { label: 'weaving.salesPro.allSales', path: '/weaving/sales-settlement?tab=invoices', permission: 'weaving.sales.view' },
+          { label: 'weaving.salesPro.kacchiList', path: '/weaving/sales-settlement?tab=kacchi', permission: 'weaving.sales.view' },
+          { label: 'weaving.salesPro.pakkiList', path: '/weaving/sales-settlement?tab=pakki', permission: 'weaving.sales.view' },
+          { label: 'weaving.salesPro.fabricList', path: '/weaving/sales-settlement?tab=fabric', permission: 'weaving.sales.view' },
+          { label: 'weaving.salesPro.yarnList', path: '/weaving/sales-settlement?tab=yarn', permission: 'weaving.sales.view' },
+          { label: 'weaving.salesPro.otherList', path: '/weaving/sales-settlement?tab=other', permission: 'weaving.sales.view' },
         ],
       },
     ],
@@ -312,7 +288,7 @@ export const weavingTopMenuConfig = Object.freeze([
     ],
   },
   {
-    label: 'weaving.nav.masterForms',
+    label: 'Forms',
     module: MODULE_KEYS.WEAVING,
     anyPermissions: [mastersView, contractsView],
     sections: [
@@ -340,29 +316,32 @@ export const weavingTopMenuConfig = Object.freeze([
     ],
   },
   {
-    label: 'weaving.nav.finance',
+    label: 'Expense',
     module: MODULE_KEYS.WEAVING,
+    permission: 'expenses.view',
     sections: [
       {
-        title: 'weaving.nav.accounts',
+        title: 'Expense',
         items: [
-          { label: 'weaving.sidebar.accounts', path: '/weaving/accounts', permission: 'accounts.view' },
-          { label: 'weaving.nav.handCash', path: '/weaving/accounts/cash', permission: 'accounts.view_transactions' },
-          { label: 'weaving.nav.bank', path: '/weaving/accounts/bank', permission: 'accounts.view_transactions' },
+          { label: 'Add Expense', path: '/weaving/expenses/new', permission: 'expenses.create' },
+          { label: 'Expense List', path: '/weaving/expenses', permission: 'expenses.view' },
         ],
       },
+    ],
+  },
+  {
+    label: 'weaving.nav.banking',
+    module: MODULE_KEYS.WEAVING,
+    anyPermissions: [paymentView, ...payrollPermissions],
+    sections: [
       {
-        title: 'weaving.nav.accounting',
+        title: 'weaving.nav.banking',
         items: [
-          { label: 'weaving.sidebar.expenses', path: '/weaving/expenses', permission: 'expenses.view' },
-          { label: 'weaving.sidebar.journalEntries', path: '/weaving/journal-entries', permission: 'journal.view' },
-          { label: 'weaving.sidebar.generalLedger', path: '/weaving/general-ledger', permission: 'reports.general_ledger' },
-        ],
-      },
-      {
-        title: 'weaving.nav.business',
-        items: [
-          { label: 'businessValue.menuLabel', path: '/weaving/business-value', permission: 'business_value.view' },
+          { label: 'weaving.nav.receivePayment', path: '/weaving/payments?tab=receive', allPermissions: [paymentView, 'weaving.payments.create'] },
+          { label: 'weaving.nav.payBill', path: '/weaving/payments?tab=pay', allPermissions: [paymentView, 'weaving.payments.create'] },
+          { label: 'weaving.nav.receivePaymentList', path: '/weaving/payments?tab=history&type=receive', permission: paymentView },
+          { label: 'weaving.nav.payBillList', path: '/weaving/payments?tab=history&type=pay', permission: paymentView },
+          { label: 'weaving.sidebar.employeeFinance', path: '/weaving/employee-finance', anyPermissions: payrollPermissions },
         ],
       },
     ],
@@ -375,7 +354,9 @@ export const weavingTopMenuConfig = Object.freeze([
       {
         title: 'weaving.nav.reports',
         items: [
-          { label: 'weaving.operationalReports.salaryClosingSheet', path: '/weaving/reports?tab=salary', permission: 'payroll.view' },
+          { label: 'weaving.sidebar.generalLedger', path: '/weaving/general-ledger', permission: 'reports.general_ledger' },
+          { label: 'businessValue.menuLabel', path: '/weaving/business-value', permission: 'business_value.view' },
+          { label: 'weaving.operationalReports.salaryClosingSheet', path: '/weaving/payroll/salary-closing', permission: 'payroll.view' },
           { label: 'weaving.operationalReports.productionReport', path: '/weaving/reports?tab=production', anyPermissions: ['weaving.reports.view', 'weaving.reports.production'] },
           { label: 'weaving.operationalReports.loomPerformance', path: '/weaving/reports?tab=looms', anyPermissions: ['weaving.reports.view', 'weaving.looms.view_performance'] },
           { label: 'weaving.operationalReports.qualityProduction', path: '/weaving/reports?tab=quality', anyPermissions: ['weaving.reports.view', 'weaving.reports.production'] },

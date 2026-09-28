@@ -97,6 +97,22 @@ export const saveWeavingAttendanceSession = async ({ date, unitId, shiftId, rows
   return unwrap(response);
 };
 
+export const getWeavingAttendanceHistory = async (params = {}) => {
+  const response = await axios.get(`${API_URL}/history`, getConfig(params));
+  return unwrap(response);
+};
+
+export const getWeavingWorkPeriodState = async (dateOrParams) => {
+  const params = typeof dateOrParams === 'string' ? { date: dateOrParams } : (dateOrParams || {});
+  const response = await axios.get(`${API_URL}/work-period`, getConfig(params));
+  return unwrap(response);
+};
+
+export const startWeavingWorkPeriod = async ({ startDate, note = '' }) => {
+  const response = await axios.post(`${API_URL}/work-period/start`, { startDate, note }, getConfig());
+  return unwrap(response);
+};
+
 /**
  * Load dashboard attendance summary.
  *
@@ -122,6 +138,9 @@ const weavingAttendanceService = {
   getWeavingAttendanceMeta,
   getWeavingAttendanceSession,
   getWeavingAttendanceSummary,
+  getWeavingAttendanceHistory,
+  getWeavingWorkPeriodState,
+  startWeavingWorkPeriod,
   saveWeavingAttendanceSession,
 };
 

@@ -1,6 +1,10 @@
 // 📁 templates/partyDetailLedgerTemplate.js
 
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -274,6 +278,7 @@ const generatePartyDetailLedgerHTML = (data, pageSize = "A4") => {
     summary = {},
     blocks = [],
     meta = {},
+    header = null,
   } = data || {};
 
   const title =
@@ -291,6 +296,8 @@ const generatePartyDetailLedgerHTML = (data, pageSize = "A4") => {
 <title>${title}</title>
 
 <style>
+
+${ledgerBusinessHeaderStyles}
 
 @page {
   size: ${safePageSize};
@@ -485,6 +492,8 @@ td {
 <body>
 
 <div class="container">
+
+  ${renderLedgerBusinessHeader(header)}
 
   <div class="header">
 

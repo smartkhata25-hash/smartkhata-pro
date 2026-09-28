@@ -5,10 +5,11 @@ const {
 const buildCustomerDetailLedgerPrint = require("../services/customerDetailLedgerPrintBuilder");
 const generateCustomerDetailLedgerHTML = require("../templates/customerDetailLedgerTemplate");
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 
 const getUserId = (req) => req.user?.id || req.userId;
 
-const buildCustomerDetailLedgerDocument = async (req) => {
+const buildCustomerDetailLedgerDocument = async (req, outputType = "print") => {
   const { customerId } = req.params;
   const { startDate, endDate, lang, moduleScope = "" } = req.query;
 
@@ -23,6 +24,10 @@ const buildCustomerDetailLedgerDocument = async (req) => {
     ledger: rawData.ledger,
     userId: getUserId(req),
   });
+  const header =
+    moduleScope === "travel"
+      ? await getLedgerPrintHeader(getUserId(req), moduleScope, outputType)
+      : null;
 
   const built = buildCustomerDetailLedgerPrint({
     customerName: rawData.customerName,
@@ -30,6 +35,8 @@ const buildCustomerDetailLedgerDocument = async (req) => {
     endDate,
     openingBalance: rawData.openingBalance,
     ledger,
+    header,
+    showDescription: moduleScope === "travel",
   });
 
   built.lang = lang || "ur";
@@ -39,7 +46,7 @@ const buildCustomerDetailLedgerDocument = async (req) => {
 
 const getCustomerDetailLedgerHtml = async (req, res) => {
   try {
-    const built = await buildCustomerDetailLedgerDocument(req);
+    const built = await buildCustomerDetailLedgerDocument(req, "print");
     const html = generateCustomerDetailLedgerHTML(built, req.query.size || "A4");
 
     res.set({
@@ -58,9 +65,12 @@ const getCustomerDetailLedgerHtml = async (req, res) => {
 
 const generateCustomerDetailLedgerPdf = async (req, res) => {
   try {
-    const built = await buildCustomerDetailLedgerDocument(req);
+    const built = await buildCustomerDetailLedgerDocument(req, "pdf");
     const html = generateCustomerDetailLedgerHTML(built, req.query.size || "A4");
-    const pdfBuffer = await generatePdfFromHtml(html);
+    const pdfBuffer = await generatePdfFromHtml(html, {
+      waitForImages: req.query.moduleScope === "travel",
+      requireImages: req.query.moduleScope === "travel",
+    });
 
     res.set({
       "Content-Type": "application/pdf",

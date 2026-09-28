@@ -103,6 +103,7 @@ const WeavingAttendancePage = lazy(() => import('./pages/weaving/WeavingAttendan
 const WeavingEmployeeFinancePage = lazy(() => import('./pages/weaving/WeavingEmployeeFinancePage'));
 const WeavingEmployeeLedgersPage = lazy(() => import('./pages/weaving/WeavingEmployeeLedgersPage'));
 const WeavingPayrollPage = lazy(() => import('./pages/weaving/WeavingPayrollPage'));
+const WeavingSalaryClosingPage = lazy(() => import('./pages/weaving/WeavingSalaryClosingPage'));
 const WeavingReportsHubPage = lazy(() => import('./pages/weaving/WeavingReportsHubPage'));
 const WeavingLoomsPage = lazy(() => import('./pages/weaving/WeavingLoomsPage'));
 const WeavingProductionPage = lazy(() => import('./pages/weaving/WeavingProductionPage'));
@@ -548,6 +549,15 @@ function App() {
               element={
                 <PermissionRoute permission="employees.view_ledger" moduleKey={MODULE_KEYS.WEAVING}>
                   <WeavingEmployeeLedgersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/payroll/salary-closing"
+              element={
+                <PermissionRoute permission="payroll.view" moduleKey={MODULE_KEYS.WEAVING}>
+                  <WeavingSalaryClosingPage />
                 </PermissionRoute>
               }
             />

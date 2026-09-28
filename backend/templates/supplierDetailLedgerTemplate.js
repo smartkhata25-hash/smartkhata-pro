@@ -1,4 +1,8 @@
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 
 /**
  * Supplier Detailed Ledger HTML Template
@@ -16,6 +20,14 @@ const safeText = (value, fallback = "-") => {
   const text = String(value ?? "").trim();
   return text || fallback;
 };
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 
 const getSourceLabel = (sourceType, fallback, lang) => {
   switch (sourceType) {
@@ -51,7 +63,15 @@ const getSourceLabel = (sourceType, fallback, lang) => {
 
 const generateSupplierDetailLedgerHTML = (data, pageSize = "A4") => {
   const lang = data?.lang || "ur";
-  const { documentTitle, supplier, period, summary, blocks } = data;
+  const {
+    documentTitle,
+    supplier,
+    period,
+    summary,
+    blocks,
+    header = null,
+    showDescription = false,
+  } = data;
 
   const title =
     documentTitle && documentTitle !== "Supplier Detailed Ledger"
@@ -66,6 +86,7 @@ const generateSupplierDetailLedgerHTML = (data, pageSize = "A4") => {
 <title>${title}</title>
 
 <style>
+${ledgerBusinessHeaderStyles}
 @page {
   size: ${pageSize};
   margin: 6mm;
@@ -122,6 +143,15 @@ body {
   font-size: ${pageSize === "A5" ? "12px" : "14px"};
 }
 
+.description {
+  margin: 0 0 6px;
+  color: #666;
+  font-size: ${pageSize === "A5" ? "10px" : "12px"};
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-line;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -169,6 +199,7 @@ td.right {
 
 <body>
 <div class="container">
+${renderLedgerBusinessHeader(header)}
 
 <div class="header">
   <h2>${title}</h2>
@@ -196,6 +227,12 @@ ${getSourceLabel(blk.sourceType, blk.sourceLabel, lang)} #${safeText(blk.billNo)
 &nbsp;&nbsp; | &nbsp;&nbsp;
 ${t("date", lang)}: ${safeText(blk.date)}
 </div>
+
+${
+  showDescription && String(blk.description ?? "").trim()
+    ? `<div class="description"><strong>${escapeHtml(t("common.description", lang))}</strong>: ${escapeHtml(String(blk.description).trim())}</div>`
+    : ""
+}
 
 ${
   blk.items && blk.items.length > 0

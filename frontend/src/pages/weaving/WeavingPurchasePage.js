@@ -1,11 +1,13 @@
+import { t } from '../../i18n/i18n';
+import WeavingProductionContext, { contractIsOpen, ContractProgress } from '../../components/weaving/WeavingProductionContext';
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FaChevronDown, FaChevronUp, FaEdit, FaEye, FaFile, FaPaperclip, FaPrint, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaChevronDown, FaChevronUp, FaEdit, FaEye, FaFile, FaPaperclip, FaPlus, FaPrint, FaTimes, FaTrash } from 'react-icons/fa';
 
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
 import WeightKgLbsInput from '../../components/weaving/WeightKgLbsInput';
-import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import { requestWeavingConfirmation, showWeavingFeedback, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 
 import {
   createPurchase,
@@ -37,7 +39,7 @@ const yarnRow = () => ({
   lbs: '',
   rateBasis: 'kg',
   rate: '',
-  contractId: '',
+  purchaseContractId: '', productionContractId: '', productionFabricQualityId: '',
   destinationType: 'godown',
   godownId: '',
   sizingPartyId: '',
@@ -56,6 +58,7 @@ const itemRow = () => ({
 });
 
 const fabricRow = () => ({
+  purchaseContractId: '', fulfillmentContractId: '', unit: 'Meter',
   fabricQualityId: '',
   fabricGrade: 'normal',
   godownId: '',
@@ -179,7 +182,7 @@ export default function WeavingPurchasePage() {
   }, [form, kind]);
 
   useEffect(() => {
-    getCommercialMeta()
+    getCommercialMeta({ force: true })
       .then((data) => {
         setMeta(data);
 
@@ -231,6 +234,13 @@ export default function WeavingPurchasePage() {
     setPurchaseDetail(null);
   };
 
+  const contractLinks = (line) => {
+    const legacy = meta.contracts.find((contract) => String(contract._id) === String(line.contractId?._id || line.contractId));
+    return { purchaseContractId: line.purchaseContractId || (legacy?.type === 'purchase' ? legacy._id : ''),
+      productionContractId: line.productionContractId || (line.itemKind === 'yarn' && legacy?.type === 'sales' ? legacy._id : ''),
+      fulfillmentContractId: line.fulfillmentContractId || (line.itemKind === 'fabric' && legacy?.type === 'sales' && legacy.contractType === 'fabric_sale' ? legacy._id : ''),
+      contractId: legacy ? '' : line.contractId || '' };
+  };
   const purchaseForm = (row) => {
     const nextKind = row.purchaseType === 'yarn' ? 'yarn' : row.purchaseType === 'fabric' ? 'fabric' : 'general';
     const activePayment = [...(row.paymentTransactionIds || [])].reverse().find((payment) => payment?.status !== 'void');
@@ -244,10 +254,10 @@ export default function WeavingPurchasePage() {
       attachments: row.attachments || [],
       lines: (row.lines || []).map((line) => row.purchaseType === 'yarn' ? {
         ...yarnRow(), ...line, yarnId: line.yarnId?._id || line.yarnId, kg: line.quantity,
-        lbs: line.quantityLbs, contractId: line.contractId?._id || line.contractId || '',
+        lbs: line.quantityLbs, ...contractLinks(line),
         godownId: line.godownId?._id || line.godownId || '', sizingPartyId: line.sizingPartyId?._id || line.sizingPartyId || '',
       } : row.purchaseType === 'fabric' ? {
-        ...fabricRow(), ...line, fabricQualityId: line.fabricQualityId?._id || line.fabricQualityId,
+        ...fabricRow(), ...line, ...contractLinks(line), quantity: line.sourceEntryUnit === 'KG' ? line.quantity : line.sourceQuantity ?? line.quantity, rate: line.sourceRate ?? line.rate, unit: line.sourceEntryUnit || line.unit || 'Meter', fabricQualityId: line.fabricQualityId?._id || line.fabricQualityId,
         godownId: line.godownId?._id || line.godownId || '',
       } : { ...itemRow(), ...line, itemId: line.itemId?._id || line.itemId, loomId: line.loomId?._id || line.loomId || '' }),
     };
@@ -320,15 +330,14 @@ export default function WeavingPurchasePage() {
 
       const lines = value.lines.map((row, i) => (i === index ? merged : row));
 
-      /*
-       * Always keep one clean trailing blank row.
-       */
-      if (started(lines.at(-1), kind)) {
-        lines.push(kind === 'yarn' ? yarnRow() : kind === 'fabric' ? fabricRow() : itemRow());
-      }
+      if (kind !== 'yarn') {
+        if (started(lines.at(-1), kind)) {
+          lines.push(kind === 'fabric' ? fabricRow() : itemRow());
+        }
 
-      while (lines.length > 1 && !started(lines.at(-1), kind) && !started(lines.at(-2), kind)) {
-        lines.pop();
+        while (lines.length > 1 && !started(lines.at(-1), kind) && !started(lines.at(-2), kind)) {
+          lines.pop();
+        }
       }
 
       return {
@@ -338,11 +347,39 @@ export default function WeavingPurchasePage() {
     });
   };
 
+  const chooseContract = (index, field, contractId) => {
+    const contract = meta.contracts.find((row) => String(row._id) === String(contractId));
+    const supplierLink = field === 'purchaseContractId' || (field === 'productionContractId' && form.yarnSource === 'party');
+    if (contract && supplierLink && form.lines.some((line, position) => {
+      if (position === index) return false;
+      const linked = meta.contracts.find((row) => String(row._id) === String(line.purchaseContractId || (form.yarnSource === 'party' ? line.productionContractId : '')));
+      return linked && String(linked.partyId) !== String(contract.partyId);
+    })) { setNotice(t('weaving.production.sameInvoiceParty')); return; }
+    if (contract && supplierLink) patch({ partyId: contract.partyId, creditDays: contract.creditDays || 0, dueDate: dueFrom(form.purchaseDate, contract.creditDays) });
+    const next = { [field]: contractId, contractId: '' };
+    if (contract && field === 'purchaseContractId') Object.assign(next, { [kind === 'yarn' ? 'yarnId' : 'fabricQualityId']: contract.itemId, rate: contract.rate, unit: contract.unit, rateBasis: 'kg' });
+    if (contract && field === 'productionContractId') next.productionFabricQualityId = contract.productionContext?.fabricQualityId || '';
+    if (contract && field === 'fulfillmentContractId') next.fabricQualityId = contract.itemId;
+    linePatch(index, next);
+  };
+  const purchaseContractOptions = (row) => meta.contracts.filter((contract) => contract.type === 'purchase' &&
+    (contract.purchaseItemType || 'yarn') === kind && (contractIsOpen(contract) || String(contract._id) === String(row.purchaseContractId)));
+  const productionOptions = (row) => meta.contracts.filter((contract) => contract.type === 'sales' &&
+    (form.yarnSource === 'party' ? contract.contractType === 'conversion' : contract.contractType === 'fabric_sale') &&
+    (contractIsOpen(contract) || String(contract._id) === String(row.productionContractId)));
+  const contractSelect = (row, index, field, label, options) => <label className="min-w-0 text-sm font-medium xl:col-span-3">
+    {label}<select className={control} value={row[field] || ''} onChange={(event) => chooseContract(index, field, event.target.value)}>
+      <option value="">{t('weaving.production.noContract')}</option>
+      {options.map((contract) => <option key={contract._id} value={contract._id}>{contract.contractNo} - {contract.partyName} - {contract.itemName}</option>)}
+    </select>
+  </label>;
+
   const removeLine = (index) => {
     setForm((value) => {
+      if (kind === 'yarn' && index === 0) return value;
       const lines = value.lines.filter((_, i) => i !== index);
 
-      if (!lines.length || started(lines.at(-1), kind)) {
+      if (!lines.length || (kind !== 'yarn' && started(lines.at(-1), kind))) {
         lines.push(kind === 'yarn' ? yarnRow() : kind === 'fabric' ? fabricRow() : itemRow());
       }
 
@@ -359,6 +396,10 @@ export default function WeavingPurchasePage() {
     });
   };
 
+  const addYarnLine = () => {
+    setForm((value) => ({ ...value, lines: [...value.lines, yarnRow()] }));
+  };
+
   const activeLines = form.lines.filter((row) => started(row, kind));
 
   const lineAmount = (row) => {
@@ -368,7 +409,7 @@ export default function WeavingPurchasePage() {
       return quantity * Number(row.rate || 0);
     }
 
-    return Number(row.quantity || 0) * Number(row.rate || 0);
+    return Number(kind === 'fabric' && row.unit === 'KG' ? row.weightKg || 0 : row.quantity || 0) * Number(row.rate || 0);
   };
 
   const total =
@@ -504,6 +545,9 @@ export default function WeavingPurchasePage() {
       setEditingId(null);
       const freshMeta = await getCommercialMeta({ force: true });
       setMeta(freshMeta);
+      const savedContracts = new Set(activeLines.map((line) => line.purchaseContractId).filter(Boolean));
+      const reached = freshMeta.contracts.filter((contract) => savedContracts.has(contract._id) && contract.progress?.targetReached);
+      if (reached.length) showWeavingFeedback({ type: 'info', message: t('weaving.production.targetReached') + ': ' + reached.map((contract) => contract.contractNo).join(', ') });
       setForm((current) => ({ ...current, purchaseNo: freshMeta.nextPurchaseNo || '' }));
 
       listPurchases({
@@ -632,6 +676,7 @@ export default function WeavingPurchasePage() {
               />
             )}
 
+            <fieldset disabled={form.lines.some((line) => line.purchaseContractId || (form.yarnSource === 'party' && line.productionContractId))}>
             <SearchableCreatableSelect
               label={
                 kind === 'yarn' && form.yarnSource === 'party'
@@ -654,6 +699,8 @@ export default function WeavingPurchasePage() {
               }
             />
 
+            </fieldset>
+
             {field(
               'Supplier Invoice No.',
               <input
@@ -674,6 +721,7 @@ export default function WeavingPurchasePage() {
                 <select
                   className={control}
                   value={form.yarnSource}
+                  disabled={form.lines.some((line) => line.purchaseContractId || line.productionContractId)}
                   onChange={(e) =>
                     patch({
                       yarnSource: e.target.value,
@@ -1065,7 +1113,11 @@ export default function WeavingPurchasePage() {
                     </button>
                   </div>
                   <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-12">
-                    <div className="xl:col-span-3">
+                    {contractSelect(row, index, 'purchaseContractId', t('weaving.production.fabricPurchaseContract'), purchaseContractOptions(row))}
+                    {contractSelect(row, index, 'fulfillmentContractId', t('weaving.production.againstSale'), meta.contracts.filter((contract) => contract.type === 'sales' && contract.contractType === 'fabric_sale' &&
+                      (contractIsOpen(contract) || String(contract._id) === String(row.fulfillmentContractId)) && (!row.fabricQualityId || String(contract.itemId) === String(row.fabricQualityId))))}
+                    <ContractProgress contract={meta.contracts.find((contract) => contract._id === row.purchaseContractId)} currentQuantity={row.unit === 'KG' ? row.weightKg : row.quantity} />
+                    <fieldset disabled={Boolean(row.purchaseContractId || row.fulfillmentContractId)} className="xl:col-span-3">
                       <SearchableCreatableSelect
                         label="Fabric Quality *"
                         placeholder="Search Fabric Quality"
@@ -1074,7 +1126,7 @@ export default function WeavingPurchasePage() {
                         required
                         onChange={(fabricQualityId) => linePatch(index, { fabricQualityId })}
                       />
-                    </div>
+                    </fieldset>
                     {field(
                       'Grade',
                       <select
@@ -1107,7 +1159,7 @@ export default function WeavingPurchasePage() {
                       'xl:col-span-2'
                     )}
                     {field(
-                      'Meter *',
+                      `${row.unit === 'KG' ? 'Meter' : row.unit || 'Meter'} *`,
                       <input
                         type="number"
                         min="0"
@@ -1143,13 +1195,14 @@ export default function WeavingPurchasePage() {
                       'xl:col-span-1'
                     )}
                     {field(
-                      'Rate / M *',
+                      `${t('weaving.production.rate')} / ${row.unit || 'Meter'}`,
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         className={control}
                         value={row.rate}
+                        readOnly={Boolean(row.purchaseContractId)}
                         onChange={(event) => linePatch(index, { rate: event.target.value })}
                       />,
                       'xl:col-span-1'
@@ -1214,7 +1267,7 @@ export default function WeavingPurchasePage() {
                         type="button"
                         title="Delete Yarn Row"
                         aria-label="Delete Yarn Row"
-                        disabled={!started(row, kind)}
+                        disabled={index === 0}
                         onClick={() => removeLine(index)}
                         className="flex h-8 w-8 items-center justify-center rounded-md text-rose-500 transition hover:bg-rose-50 disabled:opacity-20"
                       >
@@ -1225,7 +1278,14 @@ export default function WeavingPurchasePage() {
 
                   {/* ROW 1 */}
                   <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-12">
-                    <div className="xl:col-span-3">
+                    {form.yarnSource !== 'party' && contractSelect(row, index, 'purchaseContractId', t('weaving.production.yarnPurchaseContract'), purchaseContractOptions(row))}
+                    {(row.destinationType === 'direct_sizing' || form.yarnSource === 'party' || row.productionContractId) && <>
+                      {contractSelect(row, index, 'productionContractId', t('weaving.production.contract'), productionOptions(row))}
+                      {!row.productionContractId && <div className="xl:col-span-3"><SearchableCreatableSelect label={t('weaving.production.productionQuality')} options={meta.fabrics} value={row.productionFabricQualityId || ''} onChange={(productionFabricQualityId) => linePatch(index, { productionFabricQualityId })} /></div>}
+                      <WeavingProductionContext context={row.productionContractId ? meta.contracts.find((contract) => contract._id === row.productionContractId)?.productionContext : { fabricQualityId: row.productionFabricQualityId, ownershipType: form.yarnSource === 'party' ? 'party' : 'own', ownerPartyId: form.yarnSource === 'party' ? form.partyId : '' }} fabrics={meta.fabrics} parties={meta.parties} />
+                    </>}
+                    <ContractProgress contract={meta.contracts.find((contract) => contract._id === row.purchaseContractId)} currentQuantity={row.kg} />
+                    <fieldset disabled={Boolean(row.purchaseContractId)} className="xl:col-span-3">
                       <SearchableCreatableSelect
                         label="Yarn *"
                         placeholder="Search yarn"
@@ -1240,7 +1300,7 @@ export default function WeavingPurchasePage() {
                         onQuickAdd={(name) => quickAddYarn(name, index)}
                         onAddDetails={(name) => openYarnDetails(name, index)}
                       />
-                    </div>
+                    </fieldset>
 
                     {field(
                       packageLabel(row),
@@ -1273,6 +1333,7 @@ export default function WeavingPurchasePage() {
                       <select
                         className={control}
                         value={row.rateBasis}
+                        disabled={Boolean(row.purchaseContractId)}
                         onChange={(e) =>
                           linePatch(index, {
                             rateBasis: e.target.value,
@@ -1295,6 +1356,7 @@ export default function WeavingPurchasePage() {
                         className={control}
                         placeholder="e.g. 850"
                         value={row.rate}
+                        readOnly={Boolean(row.purchaseContractId)}
                         onChange={(e) =>
                           linePatch(index, {
                             rate: e.target.value,
@@ -1315,28 +1377,6 @@ export default function WeavingPurchasePage() {
                     </div>
 
                     {/* ROW 2 */}
-
-                    {field(
-                      'Contract',
-                      <select
-                        className={control}
-                        value={row.contractId}
-                        onChange={(e) =>
-                          linePatch(index, {
-                            contractId: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="">No Contract / Direct Purchase</option>
-
-                        {meta.contracts.map((contract) => (
-                          <option key={contract._id} value={contract._id}>
-                            {contract.contractNo}
-                          </option>
-                        ))}
-                      </select>,
-                      'xl:col-span-3'
-                    )}
 
                     {field(
                       'Destination',
@@ -1525,6 +1565,13 @@ export default function WeavingPurchasePage() {
                 </div>
               );
             })}
+            <button
+              type="button"
+              onClick={addYarnLine}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-teal-300 bg-white px-4 text-sm font-semibold text-teal-700 transition hover:bg-teal-50"
+            >
+              <FaPlus /> Add Another Yarn / Contract
+            </button>
           </section>
         )}
 

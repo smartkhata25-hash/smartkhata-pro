@@ -13,7 +13,12 @@ const getAuthHeaders = () => ({
 });
 
 // ✅ Get Party Detailed Ledger JSON
-export const getPartyDetailedLedger = async (partyId, startDate = '', endDate = '') => {
+export const getPartyDetailedLedger = async (
+  partyId,
+  startDate = '',
+  endDate = '',
+  options = {}
+) => {
   if (!partyId) {
     throw new Error('Party ID is required');
   }
@@ -22,6 +27,7 @@ export const getPartyDetailedLedger = async (partyId, startDate = '', endDate = 
 
   if (startDate) params.startDate = startDate;
   if (endDate) params.endDate = endDate;
+  if (options.moduleScope) params.moduleScope = options.moduleScope;
 
   const res = await axios.get(`${API}/api/party-ledger/${partyId}/detailed-ledger`, {
     ...getAuthHeaders(),

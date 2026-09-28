@@ -379,9 +379,10 @@ const withCostingInvalidation = (
   }
   return result;
 };
-const ensureFreshRun = async (userId) => {
+const ensureFreshRun = async (userId, { rebuildMissing = false } = {}) => {
   const run = await currentRun(userId);
-  if (!isCostingRunDirty(run)) return run;
+  if (run && !isCostingRunDirty(run)) return run;
+  if (!run && !rebuildMissing) return null;
 
   const key = id(userId);
   if (!rebuildPromises.has(key)) {
@@ -405,7 +406,7 @@ const getInventoryValuation = async (userId) => {
 };
 
 const getSalesCosting = async (userId, query = {}) => {
-  const run = await ensureFreshRun(userId); if (!run) return { run: null, rows: [] };
+  const run = await ensureFreshRun(userId, { rebuildMissing: true }); if (!run) return { run: null, rows: [] };
   const match = { userId, runToken: run.runToken, entityType: "sales_invoice" };
   if (query.from || query.to) match.date = { ...(query.from ? { $gte: query.from } : {}), ...(query.to ? { $lte: query.to } : {}) };
   if (["own", "conversion"].includes(query.scope)) match.scope = query.scope;
@@ -417,6 +418,6 @@ const getSalesCosting = async (userId, query = {}) => {
 };
 
 module.exports = {
-  COSTING_VERSION, getInventoryValuation, getSalesCosting, markWeavingCostingDirty, rebuildCosting, withCostingInvalidation,
+  COSTING_VERSION, getInventoryValuation, getSalesCosting, isCostingRunDirty, markWeavingCostingDirty, rebuildCosting, withCostingInvalidation,
   _test: { addComponents, addToBucket, buildBeamAndFoldingCosts, buildSalesCosts, consumeFromBucket, createBucket, fabricBucketKey, isCostingRunDirty, makeSnapshot, normalizePurchaseCostPerKg, replayFabric, replayYarn, scaleComponents, sumComponents, yarnBucketKey },
 };

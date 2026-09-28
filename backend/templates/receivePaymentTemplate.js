@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 
 const generateReceivePaymentHTML = (data = {}) => {
   const lang = data?.lang || "ur";
@@ -303,7 +304,7 @@ ${header.taxNumber ? `<p>${t("business.taxOptional", lang)}: ${header.taxNumber}
 
 <td class="center">-</td>
 
-<td class="right">${previousBalance}</td>
+<td class="right">${formatMoney(previousBalance)}</td>
 
 </tr>
 
@@ -320,7 +321,7 @@ ${
 
 <td class="center">${p.paymentType || "-"}</td>
 
-<td class="right">${p.amount || ""}</td>
+<td class="right">${formatMoney(p.amount)}</td>
 
 </tr>
 `,
@@ -340,7 +341,7 @@ ${
 
 <td class="center">-</td>
 
-<td class="right">${discountAmount}</td>
+<td class="right">${formatMoney(discountAmount)}</td>
 
 </tr>
 `
@@ -355,7 +356,7 @@ ${
 
 <div class="summary-row total">
 <span>${t("customerRemainingBalance", lang)}</span>
-<span>${remainingBalance}</span>
+<span>${formatMoney(remainingBalance)}</span>
 </div>
 
 </div>

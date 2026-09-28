@@ -19,7 +19,8 @@ export const createWeavingGodown = async (payload) => data(await axios.post(`${A
 export const updateWeavingGodown = async (id, payload) => data(await axios.put(`${API_URL}/godowns/${id}`, payload, config()));
 export const listWeavingParties = async (params = {}) => data(await axios.get(`${API_URL}/parties`, config(params)));
 export const createWeavingParty = async (payload) => data(await axios.post(`${COMMERCIAL_URL}/parties`, payload, config()));
-export const getWeavingContractMeta = async () => data(await axios.get(`${API_URL}/contracts/meta`, config()));
-export const listWeavingContracts = async (params = {}) => data(await axios.get(`${API_URL}/contracts`, config(params)));
-export const createWeavingContract = async (payload) => data(await axios.post(`${API_URL}/contracts`, payload, config()));
+const contractConfig = () => ({ ...config(), timeout: 30000 });
+export const getWeavingContractMeta = async () => data(await axios.get(`${API_URL}/contracts/meta`, contractConfig()));
+export const listWeavingContracts = async (params = {}) => data(await axios.get(`${API_URL}/contracts`, { ...contractConfig(), params }));
+export const createWeavingContract = async (payload) => data(await axios.post(`${API_URL}/contracts`, payload, contractConfig()));
 export const updateWeavingContract = async (id, payload) => data(await axios.put(`${API_URL}/contracts/${id}`, payload, config()));

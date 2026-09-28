@@ -54,6 +54,8 @@ const buildSupplierDetailLedgerPrint = ({
   endDate,
   openingBalance = 0,
   ledger = [],
+  header = null,
+  showDescription = false,
 }) => {
   const openingInvoiceBalance = Array.isArray(ledger)
     ? ledger
@@ -100,6 +102,8 @@ const buildSupplierDetailLedgerPrint = ({
 
         sourceLabel: entry.sourceLabel || resolveSourceLabel(entry.sourceType),
 
+        description: entry.description || "",
+
         items: normalizeItems(entry.items),
 
         debit: debit > 0 ? debit : null,
@@ -118,6 +122,8 @@ const buildSupplierDetailLedgerPrint = ({
 
   return {
     documentTitle: "Supplier Detailed Ledger",
+    header,
+    showDescription,
 
     supplier: {
       name: supplierName || "-",

@@ -32,6 +32,9 @@ router.get(
   ctrl.getAttendanceSession,
 );
 
+router.get("/work-period", requirePermission(PERMISSIONS.WEAVING_ATTENDANCE.VIEW, PERMISSIONS.WEAVING_ATTENDANCE.MANAGE, PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE), ctrl.getWorkPeriodState);
+router.post("/work-period/start", requirePermission(PERMISSIONS.WEAVING_ATTENDANCE.MANAGE, PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE), ctrl.startWorkPeriod);
+
 router.post(
   "/session",
   requirePermission(
@@ -49,6 +52,16 @@ router.get(
     PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE,
   ),
   ctrl.getAttendanceDashboardSummary,
+);
+
+router.get(
+  "/history",
+  requirePermission(
+    PERMISSIONS.WEAVING_ATTENDANCE.VIEW,
+    PERMISSIONS.WEAVING_ATTENDANCE.MANAGE,
+    PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE,
+  ),
+  ctrl.getAttendanceHistory,
 );
 
 module.exports = router;

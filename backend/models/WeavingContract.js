@@ -4,8 +4,10 @@ const schema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     type: { type: String, enum: ["sales", "purchase"], required: true },
+    purchaseItemType: { type: String, enum: ["yarn", "fabric"], default: "yarn" },
     contractType: { type: String, enum: ["fabric_sale", "conversion"], default: "fabric_sale" },
     contractNo: { type: String, required: true, trim: true },
+    requestKey: { type: String, trim: true },
     contractDate: { type: String, required: true },
     partyName: { type: String, required: true, trim: true },
     partyId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingParty", required: true },
@@ -30,6 +32,7 @@ const schema = new mongoose.Schema(
 );
 
 schema.index({ userId: 1, type: 1, contractNo: 1 }, { unique: true });
+schema.index({ userId: 1, requestKey: 1 }, { unique: true, sparse: true });
 schema.index({ userId: 1, type: 1, contractDate: -1 });
 schema.index({ userId: 1, partyName: 1, itemId: 1 });
 module.exports = mongoose.model("WeavingContract", schema);

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { ContractProgress } from '../../components/weaving/WeavingProductionContext';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { FaEdit, FaFileContract, FaPlus, FaSearch, FaTimes } from 'react-icons/fa';
 
@@ -45,9 +46,12 @@ const input = `
   disabled:text-slate-500
 `;
 
+const createRequestKey = () => window.crypto?.randomUUID?.() || `contract-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 const fresh = (type, number = '') => ({
   type,
   contractType: 'fabric_sale',
+  purchaseItemType: 'yarn',
   contractNo: number,
   contractDate: getBusinessDateInputValue(),
   partyId: '',
@@ -69,6 +73,7 @@ const fresh = (type, number = '') => ({
   expiryDate: '',
   status: 'active',
   notes: '',
+  requestKey: createRequestKey(),
 });
 
 const itemLabel = (item) => item.displayLabel || item.name;
@@ -99,6 +104,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
   const [search, setSearch] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
 
   const [notice, setNotice] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -167,7 +173,8 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
     (row) => row.role === 'both' || row.role === (tab === 'sales' ? 'customer' : 'supplier')
   );
 
-  const items = tab === 'sales' ? meta.fabrics : meta.yarns;
+  const fabricContract = tab === 'sales' || form.purchaseItemType === 'fabric';
+  const items = fabricContract ? meta.fabrics : meta.yarns;
 
   const reset = () => {
     setEditingId('');
@@ -175,29 +182,30 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
     setForm(fresh(tab, meta.nextNumbers?.[tab]));
   };
 
-  const save = async (close) => {
+  const save = async () => {
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
     setSaving(true);
     setNotice(null);
 
     try {
+      let saved;
       if (editingId) {
-        await updateWeavingContract(editingId, form);
+        saved = await updateWeavingContract(editingId, form);
       } else {
-        await createWeavingContract(form);
+        saved = await createWeavingContract(form);
       }
 
+      setRows((current) => editingId
+        ? current.map((row) => row._id === saved._id ? saved : row)
+        : [saved, ...current.filter((row) => row._id !== saved._id)]);
       setNotice({
         text: t('weaving.operations.saved'),
       });
 
-      reset();
-      await load();
-
-      if (close) {
-        setNotice({
-          text: t('weaving.operations.saved'),
-        });
-      }
+      setEditingId('');
+      setForm(fresh(tab));
+      void load();
     } catch (error) {
       setNotice({
         error: true,
@@ -206,6 +214,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
       });
     } finally {
       setSaving(false);
+      saveInFlight.current = false;
     }
   };
 
@@ -268,7 +277,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                       : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700'
                   }`}
                 >
-                  {label(`${key}Contract`)}
+                  {key === 'sales' ? t('weaving.production.customerContracts') : label(`${key}Contract`)}
                 </button>
               ))}
             </div>
@@ -295,6 +304,12 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
               />
             </Field>
 
+            {tab === 'purchase' && <Field label={t('weaving.production.purchaseSubtype')}>
+              <select className={input} value={form.purchaseItemType || 'yarn'} onChange={(event) => setForm({ ...form, purchaseItemType: event.target.value, itemId: '', unit: event.target.value === 'fabric' ? 'Meter' : 'KG', quantity: '', kg: '', lbs: '' })}>
+                <option value="yarn">{t('weaving.production.yarnPurchaseContract')}</option>
+                <option value="fabric">{t('weaving.production.fabricPurchaseContract')}</option>
+              </select>
+            </Field>}
             {tab === 'sales' && (
               <Field label={`${t('weaving.sales.contractType')} *`}>
                 <select
@@ -325,7 +340,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
             />
 
             <SearchableCreatableSelect
-              label={tab === 'sales' ? label('fabricQuality') : label('yarnMaster')}
+              label={fabricContract ? label('fabricQuality') : label('yarnMaster')}
               placeholder="Search Item"
               options={items}
               value={form.itemId}
@@ -336,7 +351,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                   ...form,
                   itemId,
 
-                  ...(tab === 'sales' && row
+                  ...(fabricContract && row
                     ? {
                         unit: row.primaryUnit,
                       }
@@ -350,11 +365,10 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                 className={input}
                 value={form.unit}
                 onChange={patch('unit')}
-                disabled={tab === 'purchase'}
+                disabled={!fabricContract}
               >
                 <option>KG</option>
-                <option>Meter</option>
-                <option>Yard</option>
+                {fabricContract && <><option>Meter</option><option>Yard</option></>}
               </select>
             </Field>
 
@@ -488,8 +502,8 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
               <WeavingFormActions
                 editing={!!editingId}
                 saving={saving}
-                onSaveClose={() => save(true)}
-                onSaveNew={() => save(false)}
+                onSaveClose={save}
+                onSaveNew={save}
                 onClear={reset}
                 onCancel={reset}
               />
@@ -500,7 +514,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
         {/* LIST */}
         <section className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-            <h2 className="font-bold text-slate-900">{label(`${tab}Contract`)}</h2>
+            <h2 className="font-bold text-slate-900">{tab === 'sales' ? t('weaving.production.customerContracts') : label(`${tab}Contract`)}</h2>
 
             <div className="flex w-full items-center gap-2 sm:w-auto">
               {listMode && <button type="button" onClick={onNew} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-teal-600 px-3 text-sm font-semibold text-white hover:bg-teal-700"><FaPlus /> {label('newContract')}</button>}
@@ -543,6 +557,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                     <td className="px-4 py-2.5 font-semibold text-slate-900">
                       {row.contractNo}
 
+                      {row.type === 'purchase' && <div className="text-xs font-normal text-teal-700">{t(row.purchaseItemType === 'fabric' ? 'weaving.production.fabricPurchaseContract' : 'weaving.production.yarnPurchaseContract')}</div>}
                       {row.type === 'sales' && (
                         <div className="text-xs font-normal text-teal-700">
                           {row.contractType === 'conversion'
@@ -560,6 +575,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
 
                     <td className="px-4 py-2.5">
                       {row.quantity} {row.unit}
+                      <ContractProgress contract={row} />
                     </td>
 
                     <td className="px-4 py-2.5">{row.rate}</td>
@@ -593,9 +609,10 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
           <div className="fixed inset-0 z-[300] flex justify-end bg-slate-950/40" onClick={() => setDetail(null)}>
             <aside className="h-full w-full max-w-lg overflow-y-auto bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
               <header className="sticky top-0 flex items-start gap-3 border-b bg-white p-5">
-                <div className="mr-auto"><h2 className="text-xl font-bold text-slate-900">{detail.contractNo}</h2><p className="text-sm text-slate-500">{detail.type === 'sales' ? label('salesContract') : label('purchaseContract')}</p></div>
+                <div className="mr-auto"><h2 className="text-xl font-bold text-slate-900">{detail.contractNo}</h2><p className="text-sm text-slate-500">{detail.type === 'sales' ? t('weaving.production.customerContracts') : label('purchaseContract')}</p></div>
                 <button type="button" onClick={() => setDetail(null)} className="grid h-9 w-9 place-items-center rounded-md border text-slate-600 hover:bg-slate-50"><FaTimes /></button>
               </header>
+              <ContractProgress contract={detail} />
               <dl className="grid grid-cols-2 gap-x-4 gap-y-5 p-5 text-sm">
                 {[
                   [label('contractDate'), detail.contractDate],

@@ -1,6 +1,7 @@
 const assert = require("assert");
 
 const {
+  getCycleOptions,
   _test: {
     aggregateAttendanceByEmployeeDate,
     assertCycleCanFinalize,
@@ -79,6 +80,7 @@ const calc = ({
   openingAlreadyApplied = false,
   periodDateKeys = null,
   monthDateKeys = null,
+  attendanceFound = true,
 } = {}) => {
   const cycle = resolvePayrollCycle(cycleKey);
 
@@ -88,6 +90,7 @@ const calc = ({
     attendanceMap: aggregateAttendanceByEmployeeDate(rows),
     periodDateKeys: periodDateKeys || listDateKeys(cycle.periodStart, cycle.periodEnd),
     monthDateKeys: monthDateKeys || listDateKeys(cycle.monthStart, cycle.monthEnd),
+    attendanceFound,
     manualAdditions: additions,
     manualDeductions: deductions,
     openingAlreadyApplied,
@@ -783,6 +786,25 @@ const scheduledRecoveries = ({
   });
   assert.strictEqual(cutoffCycle.eligibleDays, 10);
   assert.strictEqual(cutoffCycle.netSalary, 10000);
+})();
+
+(() => {
+  const noAttendance = calc({ rows: [], attendanceFound: false });
+  assert.strictEqual(noAttendance.attendanceIncomplete, true);
+  assert.ok(noAttendance.finalizeBlockedReasons.includes("Attendance Not Found"));
+  assert.ok(!noAttendance.finalizeBlockedReasons.includes("Attendance Incomplete"));
+
+  const partialAttendance = calc({ rows: [row("2026-09-01")] });
+  assert.strictEqual(partialAttendance.attendanceIncomplete, true);
+  assert.ok(partialAttendance.finalizeBlockedReasons.includes("Attendance Incomplete"));
+  assert.ok(!partialAttendance.finalizeBlockedReasons.includes("Attendance Not Found"));
+})();
+
+(() => {
+  const keys = getCycleOptions("2026-09-H2").map((cycle) => cycle.key);
+  assert.ok(keys.includes("2026-08-H1"), "historical August cycles remain selectable");
+  assert.ok(keys.includes("2026-09-H2"), "selected cycle remains available");
+  assert.ok(keys.includes("2026-10-H1"), "future cycles remain selectable");
 })();
 
 console.log("weaving payroll calculation tests passed");

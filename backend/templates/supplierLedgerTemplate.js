@@ -1,4 +1,8 @@
 const { t } = require("../i18n/i18n");
+const {
+  ledgerBusinessHeaderStyles,
+  renderLedgerBusinessHeader,
+} = require("./ledgerBusinessHeader");
 
 /**
  * Supplier Ledger HTML Template
@@ -7,9 +11,25 @@ const { t } = require("../i18n/i18n");
  * Supports A4 + A5
  */
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 const generateSupplierLedgerHTML = (data, pageSize = "A5") => {
   const lang = data?.lang || "ur";
-  const { documentTitle, supplier, period, summary, rows } = data;
+  const {
+    documentTitle,
+    supplier,
+    period,
+    summary,
+    rows,
+    header = null,
+    showDescription = false,
+  } = data;
 
   return `
 <!DOCTYPE html>
@@ -19,6 +39,7 @@ const generateSupplierLedgerHTML = (data, pageSize = "A5") => {
 <title>${documentTitle}</title>
 
 <style>
+${ledgerBusinessHeaderStyles}
 @page {
   size: ${pageSize};
   margin: 5mm 5mm 5mm 5mm;
@@ -105,6 +126,15 @@ td.left {
   border-top: 3px solid #000;
 }
 
+.source-description {
+  margin-top: 2px;
+  color: #666;
+  font-size: ${pageSize === "A5" ? "10px" : "12px"};
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
 .footer {
   margin-top: ${pageSize === "A5" ? "8px" : "14px"};
   text-align: center;
@@ -117,6 +147,7 @@ td.left {
 
 <body>
 <div class="container">
+  ${renderLedgerBusinessHeader(header)}
 
   <div class="header">
     <h2>${t("ledger.supplierLedger", lang)}</h2>
@@ -160,7 +191,14 @@ td.left {
         <tr>
           <td>${row.date || "-"}</td>
           <td>${row.billNo || "-"}</td>
-          <td>${row.source || "-"}</td>
+          <td>
+            ${row.source || "-"}
+            ${
+              showDescription && String(row.description ?? "").trim()
+                ? `<div class="source-description">${escapeHtml(String(row.description).trim())}</div>`
+                : ""
+            }
+          </td>
           <td>${row.debit !== null ? row.debit.toFixed(2) : "-"}</td>
           <td>${row.credit !== null ? row.credit.toFixed(2) : "-"}</td>
           <td>${row.balance.toFixed(2)}</td>

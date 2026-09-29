@@ -240,7 +240,7 @@ exports.createExpense = async (req, res) => {
       const titleQuery = {
         _id: titleId,
         userId,
-        isDeleted: false,
+        isDeleted: { $ne: true },
       };
 
       applyExpenseTitleScopeFilter(titleQuery, normalizedModuleScope);
@@ -429,7 +429,7 @@ exports.updateExpense = async (req, res) => {
       const titleQuery = {
         _id: titleId,
         userId,
-        isDeleted: false,
+        isDeleted: { $ne: true },
       };
 
       applyExpenseTitleScopeFilter(titleQuery, requestedScope);

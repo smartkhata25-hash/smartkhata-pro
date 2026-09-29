@@ -1,15 +1,8 @@
 const ExpenseTitle = require("../models/ExpenseTitle");
-const { MODULE_SCOPES } = require("./moduleScope");
+const repairExpenseTitles = require("./fixLegacyExpenseTitles");
 
 const SCOPED_TITLE_INDEX_NAME = "expense_title_scope_normalized_unique";
 let ensurePromise = null;
-const EXPENSE_TITLE_SCOPE_VALUES = Object.freeze([
-  MODULE_SCOPES.TRADING,
-  MODULE_SCOPES.TRAVEL,
-  MODULE_SCOPES.WEAVING,
-  MODULE_SCOPES.BOTH,
-]);
-
 const normalizeExpenseTitleName = (name = "") =>
   String(name || "").trim().toLowerCase();
 
@@ -25,54 +18,14 @@ const hasExactIndexKey = (index, keySpec) => {
   return expectedEntries.every(([key, value]) => indexKey[key] === value);
 };
 
-const backfillTitleScopeFields = async () => {
-  const titles = await ExpenseTitle.find({
-    $or: [
-      { moduleScope: { $exists: false } },
-      { moduleScope: null },
-      { moduleScope: "" },
-      { normalizedName: { $exists: false } },
-      { normalizedName: null },
-      { normalizedName: "" },
-    ],
-  })
-    .select("_id name moduleScope normalizedName")
-    .lean();
-
-  if (titles.length === 0) {
-    return;
-  }
-
-  await ExpenseTitle.bulkWrite(
-    titles.map((title) => {
-      const moduleScope = String(title.moduleScope || "").trim().toLowerCase();
-      const safeModuleScope = EXPENSE_TITLE_SCOPE_VALUES.includes(moduleScope)
-        ? moduleScope
-        : MODULE_SCOPES.BOTH;
-
-      return {
-        updateOne: {
-          filter: { _id: title._id },
-          update: {
-            $set: {
-              moduleScope: safeModuleScope,
-              normalizedName: normalizeExpenseTitleName(title.name),
-            },
-          },
-        },
-      };
-    }),
-    { ordered: false },
-  );
-};
-
 const ensureExpenseTitleScopeIndex = async () => {
   if (ensurePromise) {
     return ensurePromise;
   }
 
   ensurePromise = (async () => {
-    await backfillTitleScopeFields();
+    // Clean legacy records before indexing; never collapse all legacy titles into "both".
+    await repairExpenseTitles();
 
     await ExpenseTitle.collection.createIndex(
       { userId: 1, moduleScope: 1, normalizedName: 1 },

@@ -85,6 +85,84 @@ const sendError = (res, error, fallbackMessage) => {
   });
 };
 
+const reactivateRetiredExpenseTitle = async ({
+  userId,
+  moduleScope,
+  normalizedName,
+  name,
+  categoryId,
+}) => {
+  const retiredTitles = await ExpenseTitle.find({
+    userId,
+    moduleScope,
+    isDeleted: true,
+    $or: [
+      { normalizedName },
+      { name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } },
+    ],
+  })
+    .select("name normalizedName categoryId moduleScope isDeleted")
+    .populate("categoryId", "type moduleScope isActive")
+    .lean();
+
+  if (retiredTitles.length === 0) {
+    return null;
+  }
+
+  retiredTitles.sort((left, right) => {
+    const leftCategoryIsValid =
+      left.categoryId?.type === "Expense" &&
+      left.categoryId?.isActive !== false &&
+      left.categoryId?.moduleScope === moduleScope;
+    const rightCategoryIsValid =
+      right.categoryId?.type === "Expense" &&
+      right.categoryId?.isActive !== false &&
+      right.categoryId?.moduleScope === moduleScope;
+
+    if (leftCategoryIsValid !== rightCategoryIsValid) {
+      return leftCategoryIsValid ? -1 : 1;
+    }
+
+    return String(left._id).localeCompare(String(right._id));
+  });
+
+  const canonical = retiredTitles[0];
+  const blockingCopies = retiredTitles.filter(
+    (title) =>
+      String(title._id) !== String(canonical._id) &&
+      title.normalizedName === normalizedName,
+  );
+
+  if (blockingCopies.length > 0) {
+    await ExpenseTitle.bulkWrite(
+      blockingCopies.map((title) => ({
+        updateOne: {
+          filter: { _id: title._id, isDeleted: true },
+          update: {
+            $set: {
+              normalizedName: `${normalizedName}__retired__${title._id}`,
+            },
+          },
+        },
+      })),
+      { ordered: true },
+    );
+  }
+
+  return ExpenseTitle.findOneAndUpdate(
+    { _id: canonical._id, userId, moduleScope, isDeleted: true },
+    {
+      $set: {
+        name,
+        normalizedName,
+        categoryId,
+        isDeleted: false,
+      },
+    },
+    { new: true, runValidators: true },
+  ).populate("categoryId", "name code type category moduleScope");
+};
+
 exports.getExpenseTitles = async (req, res) => {
   try {
     const userId = req.user?.id || req.userId;
@@ -95,7 +173,7 @@ exports.getExpenseTitles = async (req, res) => {
     const search = String(req.query.search || "").trim();
     const query = {
       userId,
-      isDeleted: false,
+      isDeleted: { $ne: true },
     };
 
     applyExpenseTitleScopeFilter(query, moduleScope);
@@ -162,13 +240,13 @@ exports.createExpenseTitle = async (req, res) => {
     }
 
     const trimmedName = name.trim();
+    const normalizedName = normalizeExpenseTitleName(trimmedName);
     const existingQuery = {
       userId,
-      isDeleted: false,
-      normalizedName: normalizeExpenseTitleName(trimmedName),
+      isDeleted: { $ne: true },
+      moduleScope,
+      normalizedName,
     };
-
-    applyExpenseTitleScopeFilter(existingQuery, moduleScope);
 
     const existing = await ExpenseTitle.findOne(existingQuery).lean();
 
@@ -176,6 +254,18 @@ exports.createExpenseTitle = async (req, res) => {
       return res.status(400).json({
         error: "Title already exists",
       });
+    }
+
+    const reactivatedTitle = await reactivateRetiredExpenseTitle({
+      userId,
+      moduleScope,
+      normalizedName,
+      name: trimmedName,
+      categoryId,
+    });
+
+    if (reactivatedTitle) {
+      return res.status(200).json(reactivatedTitle);
     }
 
     const newTitle = new ExpenseTitle({
@@ -220,7 +310,7 @@ exports.deleteExpenseTitle = async (req, res) => {
     const titleQuery = {
       _id: id,
       userId,
-      isDeleted: false,
+      isDeleted: { $ne: true },
     };
 
     applyExpenseTitleScopeFilter(titleQuery, moduleScope);
@@ -287,7 +377,7 @@ exports.updateExpenseTitle = async (req, res) => {
     const titleQuery = {
       _id: id,
       userId,
-      isDeleted: false,
+      isDeleted: { $ne: true },
     };
 
     applyExpenseTitleScopeFilter(titleQuery, moduleScope);
@@ -310,7 +400,7 @@ exports.updateExpenseTitle = async (req, res) => {
     const existingQuery = {
       userId,
       _id: { $ne: id },
-      isDeleted: false,
+      isDeleted: { $ne: true },
       normalizedName: normalizeExpenseTitleName(trimmedName),
     };
 

@@ -196,24 +196,36 @@ const loginUser = async (req, res) => {
 
       const moduleConfig = normalizeModuleConfig(businessOwner);
 
-      setTimeout(async () => {
-        try {
-          await createBaseAccountsForUser(businessOwnerId, {
-            includeWeaving: moduleConfig.enabledModules.weaving === true,
+      try {
+        await createBaseAccountsForUser(businessOwnerId, {
+          includeWeaving: moduleConfig.enabledModules.weaving === true,
+        });
+        await fixLegacyExpenseTitles(businessOwnerId);
+        await createDefaultExpenseTitlesForUser(businessOwnerId, {
+          moduleScope: "trading",
+        });
+        if (moduleConfig.enabledModules.travel === true) {
+          await createDefaultExpenseTitlesForUser(businessOwnerId, {
+            moduleScope: "travel",
           });
-          if (moduleConfig.enabledModules.weaving === true) {
-            await createDefaultExpenseTitlesForUser(businessOwnerId, {
-              moduleScope: "weaving",
-            });
-          }
-          await fixLegacyExpenseTitles(businessOwnerId);
-        } catch (backgroundError) {
-          console.error(
-            "Login Background Task Error:",
-            backgroundError.message,
-          );
         }
-      }, 0);
+        if (moduleConfig.enabledModules.weaving === true) {
+          await createDefaultExpenseTitlesForUser(businessOwnerId, {
+            moduleScope: "weaving",
+          });
+        }
+      } catch (provisioningError) {
+        console.error("Login account/title provisioning failed:", {
+          businessOwnerId: businessOwnerId.toString(),
+          error: provisioningError.message,
+          stack: provisioningError.stack,
+        });
+
+        return res.status(500).json({
+          msg: "Account setup failed. Please try logging in again.",
+        });
+      }
+
       // Every user can have separate devices
       let installation = await Installation.findOne({
         userId: user._id,

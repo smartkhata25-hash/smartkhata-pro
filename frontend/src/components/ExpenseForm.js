@@ -3,14 +3,17 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
 import { getExpenseTitles, createExpenseTitle } from '../services/expenseTitleService';
-import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
+import {
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import jsPDF from 'jspdf';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
-import {
-  getBusinessDateInputValue,
-  getBusinessTimeInputValue,
-} from '../utils/localDateTime';
+import { getBusinessDateInputValue, getBusinessTimeInputValue } from '../utils/localDateTime';
 
 const ExpenseForm = () => {
   const [accounts, setAccounts] = useState([]);
@@ -19,8 +22,14 @@ const ExpenseForm = () => {
   const [search, setSearch] = useState('');
   const dropdownRef = useRef(null);
 
+  const titleSearchTimerRef = useRef(null);
+  const titleSearchRequestRef = useRef(0);
+  const [isSearchingTitles, setIsSearchingTitles] = useState(false);
+
   const [showModal, setShowModal] = useState(false);
   const [newAccount, setNewAccount] = useState({ name: '', category: '' });
+  const [titleSaveError, setTitleSaveError] = useState('');
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -52,8 +61,8 @@ const ExpenseForm = () => {
     isWeavingExpenseRoute || queryModuleScope === 'weaving'
       ? 'weaving'
       : isTravelExpenseRoute || queryModuleScope === 'travel'
-      ? 'travel'
-      : 'trading';
+        ? 'travel'
+        : 'trading';
   const isTravelExpenseView = requestedModuleScope === 'travel';
   const isWeavingExpenseView = requestedModuleScope === 'weaving';
   const canViewExpenses = hasPermission('expenses.view');
@@ -104,9 +113,7 @@ const ExpenseForm = () => {
         const [aData, titleData, existing] = await Promise.all([
           getAccounts(true, { moduleScope: requestedModuleScope }),
 
-          canViewExpenses
-            ? getExpenseTitles('', scopedExpenseOptions)
-            : Promise.resolve([]),
+          canViewExpenses ? getExpenseTitles('', scopedExpenseOptions) : Promise.resolve([]),
 
           id ? getExpenseById(id, scopedExpenseOptions) : Promise.resolve(null),
         ]);
@@ -185,28 +192,55 @@ const ExpenseForm = () => {
     setFormData((prev) => ({ ...prev, attachment: file }));
     setShowPreview(false);
   };
-  const filterTitlesLocal = (value = '') => {
+  const searchExpenseTitles = (value = '') => {
     if (!canViewExpenses) {
       setTitles([]);
+      setIsSearchingTitles(false);
       return;
     }
 
-    const query = String(value || '')
-      .trim()
-      .toLowerCase();
+    const query = String(value || '').trim();
 
-    const filtered = allTitles
-      .filter((item) => {
-        const name = String(item?.name || '').toLowerCase();
+    if (titleSearchTimerRef.current) {
+      clearTimeout(titleSearchTimerRef.current);
+    }
 
-        return !query || name.includes(query);
-      })
-      .slice(0, 50);
+    const requestId = ++titleSearchRequestRef.current;
 
-    setTitles(filtered);
+    if (!query) {
+      setTitles(allTitles.slice(0, 50));
+      setIsSearchingTitles(false);
+      return;
+    }
+
+    setTitles([]);
+    setIsSearchingTitles(true);
+
+    titleSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const result = await getExpenseTitles(query, scopedExpenseOptions);
+
+        if (requestId !== titleSearchRequestRef.current) {
+          return;
+        }
+
+        setTitles(Array.isArray(result) ? result : []);
+      } catch (error) {
+        if (requestId !== titleSearchRequestRef.current) {
+          return;
+        }
+
+        console.error('Expense title search failed:', error);
+        setTitles([]);
+      } finally {
+        if (requestId === titleSearchRequestRef.current) {
+          setIsSearchingTitles(false);
+        }
+      }
+    }, 250);
   };
 
-  const hasExactTitleMatch = allTitles.some(
+  const hasExactTitleMatch = titles.some(
     (item) =>
       String(item?.name || '')
         .trim()
@@ -408,10 +442,10 @@ const ExpenseForm = () => {
                 category: '',
               }));
 
-              filterTitlesLocal(value);
+              searchExpenseTitles(value);
             }}
             onFocus={() => {
-              filterTitlesLocal(search);
+              searchExpenseTitles(search);
             }}
             placeholder={t('expense.searchPlaceholder')}
             className="w-full border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -440,21 +474,25 @@ const ExpenseForm = () => {
                 </div>
               ))}
 
-              {canManageExpenseTitles && search.trim() && !hasExactTitleMatch && (
-                <div
-                  onClick={() => {
-                    setNewAccount((prev) => ({
-                      ...prev,
-                      name: search,
-                    }));
+              {canManageExpenseTitles &&
+                search.trim() &&
+                !isSearchingTitles &&
+                !hasExactTitleMatch && (
+                  <div
+                    onClick={() => {
+                      setTitleSaveError('');
+                      setNewAccount((prev) => ({
+                        ...prev,
+                        name: search,
+                      }));
 
-                    setShowModal(true);
-                  }}
-                  className="p-3 text-blue-600 font-semibold cursor-pointer hover:bg-gray-100"
-                >
-                  + {t('expense.addNewTitle')} "{search}"
-                </div>
-              )}
+                      setShowModal(true);
+                    }}
+                    className="p-3 text-blue-600 font-semibold cursor-pointer hover:bg-gray-100"
+                  >
+                    + {t('expense.addNewTitle')} "{search}"
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -706,61 +744,74 @@ const ExpenseForm = () => {
               ))}
             </select>
 
+            {titleSaveError && <p className="mb-3 text-sm text-red-600">{titleSaveError}</p>}
+
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setTitleSaveError('');
+                  setShowModal(false);
+                }}
+                disabled={isSavingTitle}
                 className="px-4 py-2 bg-gray-300 rounded-lg"
               >
                 {t('cancel')}
               </button>
 
               <button
+                disabled={isSavingTitle}
                 onClick={async () => {
                   if (!canManageExpenseTitles) {
                     alert('You do not have permission to manage expense titles');
                     return;
                   }
-
-                  const res = await createExpenseTitle({
-                    name: newAccount.name,
-                    categoryId: newAccount.category,
-                    ...(requestedModuleScope === 'trading'
-                      ? {}
-                      : { moduleScope: requestedModuleScope }),
-                  }, {
-                    ...scopedExpenseOptions,
-                  });
-
-                  const createdTitle = {
-                    ...res,
-                  };
-
-                  setAllTitles((prev) =>
-                    [
-                      ...prev.filter((item) => String(item?._id) !== String(createdTitle._id)),
-                      createdTitle,
-                    ].sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
-                  );
-
-                  setSearch(createdTitle.name || '');
-
-                  setFormData((prev) => ({
-                    ...prev,
-                    title: createdTitle.name || '',
-                    titleId: createdTitle._id,
-                    category: createdTitle.categoryId?._id || createdTitle.categoryId || '',
-                  }));
-
-                  setTitles([]);
-                  setNewAccount({
-                    name: '',
-                    category: '',
-                  });
-                  setShowModal(false);
+                  try {
+                    setIsSavingTitle(true);
+                    setTitleSaveError('');
+                    const createdTitle = await createExpenseTitle(
+                      {
+                        name: newAccount.name,
+                        categoryId: newAccount.category,
+                        ...(requestedModuleScope === 'trading'
+                          ? {}
+                          : { moduleScope: requestedModuleScope }),
+                      },
+                      scopedExpenseOptions
+                    );
+                    const categoryId = createdTitle?.categoryId?._id || createdTitle?.categoryId;
+                    if (!createdTitle?._id || !categoryId) {
+                      throw new Error('The created title does not have a valid category.');
+                    }
+                    setAllTitles((prev) =>
+                      [
+                        ...prev.filter((item) => String(item?._id) !== String(createdTitle._id)),
+                        createdTitle,
+                      ].sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
+                    );
+                    setSearch(createdTitle.name || '');
+                    setFormData((prev) => ({
+                      ...prev,
+                      title: createdTitle.name || '',
+                      titleId: createdTitle._id,
+                      category: categoryId,
+                    }));
+                    setTitles([]);
+                    setNewAccount({ name: '', category: '' });
+                    setShowModal(false);
+                  } catch (error) {
+                    setTitleSaveError(
+                      error.response?.data?.error ||
+                        error.response?.data?.message ||
+                        error.message ||
+                        t('alerts.error')
+                    );
+                  } finally {
+                    setIsSavingTitle(false);
+                  }
                 }}
-                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg"
+                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg disabled:opacity-50"
               >
-                {t('save')}
+                {isSavingTitle ? t('saving') : t('save')}
               </button>
             </div>
           </div>

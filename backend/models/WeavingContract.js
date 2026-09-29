@@ -7,6 +7,8 @@ const schema = new mongoose.Schema(
     purchaseItemType: { type: String, enum: ["yarn", "fabric"], default: "yarn" },
     contractType: { type: String, enum: ["fabric_sale", "conversion"], default: "fabric_sale" },
     contractNo: { type: String, required: true, trim: true },
+    entryNo: { type: Number, min: 1 },
+    yarnCount: { type: String, trim: true, default: "" },
     requestKey: { type: String, trim: true },
     contractDate: { type: String, required: true },
     partyName: { type: String, required: true, trim: true },
@@ -32,6 +34,7 @@ const schema = new mongoose.Schema(
 );
 
 schema.index({ userId: 1, type: 1, contractNo: 1 }, { unique: true });
+schema.index({ userId: 1, type: 1, entryNo: 1 }, { unique: true, partialFilterExpression: { entryNo: { $type: "number" } } });
 schema.index({ userId: 1, requestKey: 1 }, { unique: true, sparse: true });
 schema.index({ userId: 1, type: 1, contractDate: -1 });
 schema.index({ userId: 1, partyName: 1, itemId: 1 });

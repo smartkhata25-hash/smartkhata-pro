@@ -62,7 +62,6 @@ import { generateWhatsAppLink } from '../../utils/whatsapp';
 
 import {
   TravelActionButton,
-  TravelMasterPageFrame,
   buildTravelConfirmMessage,
 } from '../../components/travel/master/TravelMasterUI';
 import { TravelReminderStatusPanel } from '../../components/travel/reminders/TravelReminderCenter';
@@ -432,8 +431,8 @@ const PaxPricingTable = ({ rows, currency }) => {
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[620px] space-y-2">
-        {activeRows.map((row) => {
+      <div className="min-w-[800px] space-y-2">
+        {activeRows.map((row, index) => {
           const count = numberValue(row.count);
 
           const totalCost = count * numberValue(row.costPrice);
@@ -442,8 +441,8 @@ const PaxPricingTable = ({ rows, currency }) => {
 
           return (
             <div
-              key={row._id || row.paxType}
-              className="grid grid-cols-[100px_70px_minmax(120px,1fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(120px,1fr)] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2"
+              key={row._id || `${row.paxType}-${index}`}
+              className="grid grid-cols-[100px_70px_minmax(120px,1fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(150px,1fr)] items-center gap-2 rounded-xl border border-slate-200 bg-white p-2"
             >
               <span className="rounded-lg bg-cyan-50 px-2 py-2 text-center text-xs font-black text-cyan-700">
                 {getPaxLabel(row.paxType)}
@@ -465,6 +464,10 @@ const PaxPricingTable = ({ rows, currency }) => {
 
               <span className="text-sm font-black text-cyan-700">
                 {formatPlainMoney(totalSale, currency)}
+              </span>
+
+              <span className="truncate text-sm font-bold text-violet-700">
+                {getVendorName(getBookingVendor(row))}
               </span>
             </div>
           );
@@ -1305,9 +1308,78 @@ const TravelBookingDetailPage = () => {
           map.set(String(componentVendor._id), componentVendor);
         }
       });
+
+      (item.paxPricing || []).forEach((row) => {
+        const rowVendor = getBookingVendor(row);
+
+        if (rowVendor && typeof rowVendor === 'object') {
+          map.set(String(rowVendor._id), rowVendor);
+        }
+      });
     });
 
     return [...map.values()];
+  }, [booking]);
+
+  const vendorFinancials = useMemo(() => {
+    const map = new Map();
+    const usesVendorPayments = Array.isArray(booking?.vendorPayments);
+    const add = (source, cost, legacyPaid = 0) => {
+      const vendor = getBookingVendor(source);
+      const id = vendor?._id || vendor;
+
+      if (!id) {
+        return;
+      }
+
+      const key = String(id);
+      const current = map.get(key) || { cost: 0, paid: 0 };
+      current.cost += numberValue(cost);
+      if (!usesVendorPayments) {
+        current.paid += numberValue(legacyPaid);
+      }
+      map.set(key, current);
+    };
+
+    (booking?.bookingItems || []).forEach((item) => {
+      const useComponents =
+        item.itemType === 'umrah_package' &&
+        item.umrahDetails?.packageMode === 'custom_component_package' &&
+        Array.isArray(item.umrahDetails?.components) &&
+        item.umrahDetails.components.length > 0;
+
+      if (useComponents) {
+        item.umrahDetails.components.forEach((component) =>
+          add(component, component.estimatedCostBase, component.estimatedVendorPaidBase)
+        );
+        return;
+      }
+
+      const rowMode =
+        Array.isArray(item.paxPricing) &&
+        item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
+
+      if (rowMode) {
+        item.paxPricing.forEach((row) => add(row, row.estimatedCostBase));
+        return;
+      }
+
+      add(item, item.estimatedCostBase, item.estimatedVendorPaidBase);
+    });
+
+    (booking?.vendorPayments || []).forEach((payment) => {
+      const vendor = getBookingVendor(payment);
+      const id = vendor?._id || vendor;
+      if (!id) {
+        return;
+      }
+      const key = String(id);
+      const current = map.get(key) || { cost: 0, paid: 0 };
+      current.paid += numberValue(payment.paidAmount);
+      map.set(key, current);
+    });
+
+    return map;
   }, [booking]);
 
   const handleStatusChange = async (status) => {
@@ -1899,34 +1971,62 @@ const TravelBookingDetailPage = () => {
     <DetailGroup title="Vendors" icon={FaUser} tone="violet">
       {vendors.length ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {vendors.map((vendor) => (
-            <article
-              key={vendor._id}
-              className="overflow-hidden rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/50 via-white to-indigo-50/40 shadow-sm"
-            >
-              <div className="flex items-center gap-3 border-b border-violet-100 p-3">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white">
-                  <FaUser />
-                </span>
+          {vendors.map((vendor) => {
+            const financials = vendorFinancials.get(String(vendor._id));
 
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-black text-slate-900">
-                    {getVendorName(vendor)}
-                  </p>
+            return (
+              <article
+                key={vendor._id}
+                className="overflow-hidden rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/50 via-white to-indigo-50/40 shadow-sm"
+              >
+                <div className="flex items-center gap-3 border-b border-violet-100 p-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white">
+                    <FaUser />
+                  </span>
 
-                  <p className="text-xs font-bold text-violet-700">
-                    {vendor.travelVendorType
-                      ? t(`travel.vendorTypes.${vendor.travelVendorType}`)
-                      : 'Vendor'}
-                  </p>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-slate-900">
+                      {getVendorName(vendor)}
+                    </p>
+
+                    <p className="text-xs font-bold text-violet-700">
+                      {vendor.travelVendorType
+                        ? t(`travel.vendorTypes.${vendor.travelVendorType}`)
+                        : 'Vendor'}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="p-3">
-                <InfoCard icon={FaUser} label="Phone" value={vendor.phone} />
-              </div>
-            </article>
-          ))}
+                <div className="p-3">
+                  <InfoCard icon={FaUser} label="Phone" value={vendor.phone} />
+                  {financials && (
+                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <InfoCard
+                        icon={FaCoins}
+                        label="Allocated Cost"
+                        value={formatBookingMoney(financials.cost, booking.baseCurrency || 'PKR')}
+                      />
+                      <InfoCard
+                        icon={FaWallet}
+                        label="Paid on Invoice"
+                        value={formatBookingMoney(financials.paid, booking.baseCurrency || 'PKR')}
+                        tone="amber"
+                      />
+                      <InfoCard
+                        icon={FaMoneyBillWave}
+                        label="Payable"
+                        value={formatBookingMoney(
+                          Math.max(financials.cost - financials.paid, 0),
+                          booking.baseCurrency || 'PKR'
+                        )}
+                        tone="violet"
+                      />
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <EmptyState text={t('travel.booking.detail.noVendors')} />
@@ -2058,7 +2158,7 @@ const TravelBookingDetailPage = () => {
   };
 
   return (
-    <TravelMasterPageFrame titleKey="" actions={null}>
+    <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
       {pageError && (
         <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-3 text-sm font-bold text-rose-700">
           {pageError}
@@ -2082,49 +2182,26 @@ const TravelBookingDetailPage = () => {
           <section className="overflow-hidden rounded-2xl border border-cyan-100 bg-white shadow-sm">
             <div className="h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
 
-            <div className="p-4">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="inline-flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-xl text-white shadow-lg shadow-cyan-100">
+            <div className="p-3 sm:p-4">
+              {/* FIRST ROW — INVOICE + STATUS + ACTION ICONS */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-sm text-white shadow-sm">
                     <FaFileInvoiceDollar />
                   </span>
 
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h1 className="truncate text-xl font-black text-slate-950 sm:text-2xl">
-                        {booking.invoiceNumber || booking.bookingNumber}
-                      </h1>
+                  <h1 className="truncate text-lg font-black text-slate-950 sm:text-xl">
+                    {booking.invoiceNumber || booking.bookingNumber}
+                  </h1>
 
-                      <BookingStatusBadge status={booking.status} />
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-bold text-slate-500">
-                      <span className="inline-flex items-center gap-1.5">
-                        <FaUser className="text-cyan-600" />
-
-                        {getBookingCustomerName(booking)}
-                      </span>
-
-                      <span className="inline-flex items-center gap-1.5">
-                        <FaSuitcaseRolling className="text-violet-600" />
-
-                        {t(`travel.booking.serviceTypes.${booking.serviceType || 'mixed'}`)}
-                      </span>
-
-                      <span className="inline-flex items-center gap-1.5">
-                        <FaCalendarAlt className="text-emerald-600" />
-
-                        {formatDate(booking.invoiceDate)}
-                      </span>
-                    </div>
-                  </div>
+                  <BookingStatusBadge status={booking.status} />
                 </div>
 
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => navigate('/travel/bookings')}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-600 shadow-sm transition hover:bg-slate-50 sm:h-9 sm:w-9 sm:text-sm"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
                     title={t('travel.booking.actions.backToList')}
                   >
                     <FaArrowLeft />
@@ -2134,9 +2211,8 @@ const TravelBookingDetailPage = () => {
                     type="button"
                     disabled={shareLoading}
                     onClick={handlePreviewInvoice}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 sm:h-9 sm:w-9 sm:text-sm"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
                     title={t('common.preview')}
-                    aria-label={t('common.preview')}
                   >
                     <FaEye />
                   </button>
@@ -2145,9 +2221,8 @@ const TravelBookingDetailPage = () => {
                     type="button"
                     disabled={shareLoading}
                     onClick={handlePrintInvoice}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-xs text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 sm:h-9 sm:w-9 sm:text-sm"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
                     title={t('common.print')}
-                    aria-label={t('common.print')}
                   >
                     <FaPrint />
                   </button>
@@ -2156,9 +2231,8 @@ const TravelBookingDetailPage = () => {
                     type="button"
                     disabled={shareLoading}
                     onClick={handleDownloadPdf}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-amber-100 bg-amber-50 text-xs text-amber-700 shadow-sm transition hover:bg-amber-100 disabled:opacity-50 sm:h-9 sm:w-9 sm:text-sm"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-amber-100 bg-amber-50 text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
                     title={t('pdf.download')}
-                    aria-label={t('pdf.download')}
                   >
                     <FaFilePdf />
                   </button>
@@ -2167,9 +2241,8 @@ const TravelBookingDetailPage = () => {
                     type="button"
                     disabled={shareLoading}
                     onClick={handleSharePdf}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-xs text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50 sm:h-9 sm:w-9 sm:text-sm"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
                     title={t('pdf.share')}
-                    aria-label={t('pdf.share')}
                   >
                     <FaShareAlt />
                   </button>
@@ -2178,7 +2251,7 @@ const TravelBookingDetailPage = () => {
                     <button
                       type="button"
                       onClick={() => navigate(`/travel/bookings/${id}/edit`)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-cyan-100 bg-cyan-50 text-xs text-cyan-700 shadow-sm transition hover:bg-cyan-100 sm:h-9 sm:w-9 sm:text-sm"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-100 bg-cyan-50 text-cyan-700 transition hover:bg-cyan-100"
                       title={t('travel.booking.actions.edit')}
                     >
                       <FaEdit />
@@ -2189,7 +2262,7 @@ const TravelBookingDetailPage = () => {
                     <button
                       type="button"
                       onClick={() => navigate(`/travel/refunds/new?invoiceId=${id}`)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-xs text-emerald-700 shadow-sm transition hover:bg-emerald-100 sm:h-9 sm:w-9 sm:text-sm"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
                       title={t('travel.refund.actions.new')}
                     >
                       <FaUndo />
@@ -2201,7 +2274,7 @@ const TravelBookingDetailPage = () => {
                       type="button"
                       disabled={actionLoading}
                       onClick={handleArchive}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-rose-100 bg-rose-50 text-xs text-rose-600 shadow-sm transition hover:bg-rose-100 disabled:opacity-50 sm:h-9 sm:w-9 sm:text-sm"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-100 bg-rose-50 text-rose-600 transition hover:bg-rose-100 disabled:opacity-50"
                       title={t('travel.common.delete')}
                     >
                       <FaTrash />
@@ -2210,58 +2283,84 @@ const TravelBookingDetailPage = () => {
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
-                <FinancialCard
-                  icon={FaFileInvoiceDollar}
-                  label="Net Sale"
-                  value={formatBookingMoney(booking.netSale, baseCurrency)}
-                  tone="cyan"
-                />
+              {/* SECOND ROW — CUSTOMER / SERVICE / DATE */}
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-100 pt-3 text-sm font-bold text-slate-600">
+                <span className="inline-flex items-center gap-1.5">
+                  <FaUser className="text-cyan-600" />
+                  {getBookingCustomerName(booking)}
+                </span>
 
-                <FinancialCard
-                  icon={FaWallet}
-                  label="Received"
-                  value={formatBookingMoney(booking.receivedAmount, baseCurrency)}
-                  tone="emerald"
-                />
+                <span className="inline-flex items-center gap-1.5">
+                  <FaSuitcaseRolling className="text-violet-600" />
+                  {t(`travel.booking.serviceTypes.${booking.serviceType || 'mixed'}`)}
+                </span>
 
-                <FinancialCard
-                  icon={FaWallet}
-                  label="Due"
-                  value={formatBookingMoney(booking.customerDue, baseCurrency)}
-                  tone="rose"
-                />
-
-                <FinancialCard
-                  icon={FaCoins}
-                  label="Cost"
-                  value={formatBookingMoney(booking.costTotal, baseCurrency)}
-                  tone="amber"
-                />
-
-                <FinancialCard
-                  icon={FaMoneyBillWave}
-                  label="Vendor Paid"
-                  value={formatBookingMoney(booking.vendorPaidTotal, baseCurrency)}
-                  tone="amber"
-                />
-
-                <FinancialCard
-                  icon={FaUser}
-                  label="Vendor Due"
-                  value={formatBookingMoney(booking.vendorPayable, baseCurrency)}
-                  tone="orange"
-                />
-
-                <FinancialCard
-                  icon={FaCoins}
-                  label="Profit"
-                  value={formatBookingMoney(profit, baseCurrency)}
-                  tone={profit >= 0 ? 'emerald' : 'rose'}
-                />
+                <span className="inline-flex items-center gap-1.5">
+                  <FaCalendarAlt className="text-emerald-600" />
+                  {formatDate(booking.invoiceDate)}
+                </span>
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              {/* SINGLE COLUMN FINANCIAL TABLE */}
+              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+                <div className="divide-y divide-slate-100">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Net Sale</span>
+                    <span className="text-sm font-black text-cyan-700">
+                      {formatBookingMoney(booking.netSale, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Received</span>
+                    <span className="text-sm font-black text-emerald-700">
+                      {formatBookingMoney(booking.receivedAmount, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Customer Due</span>
+                    <span className="text-sm font-black text-rose-700">
+                      {formatBookingMoney(booking.customerDue, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Cost</span>
+                    <span className="text-sm font-black text-amber-700">
+                      {formatBookingMoney(booking.costTotal, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Vendor Paid</span>
+                    <span className="text-sm font-black text-amber-700">
+                      {formatBookingMoney(booking.vendorPaidTotal, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5">
+                    <span className="text-xs font-bold text-slate-500">Vendor Due</span>
+                    <span className="text-sm font-black text-orange-700">
+                      {formatBookingMoney(booking.vendorPayable, baseCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 bg-emerald-50/40 px-3 py-2.5">
+                    <span className="text-xs font-black text-slate-700">Profit</span>
+                    <span
+                      className={`text-sm font-black ${
+                        profit >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {formatBookingMoney(profit, baseCurrency)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* STATUS ACTIONS */}
+              <div className="mt-3 flex flex-wrap gap-2">
                 {canEdit && booking.status === 'draft' && (
                   <TravelActionButton
                     icon={FaClipboardList}
@@ -2358,7 +2457,7 @@ const TravelBookingDetailPage = () => {
           {renderActiveTab()}
         </div>
       )}
-    </TravelMasterPageFrame>
+    </div>
   );
 };
 

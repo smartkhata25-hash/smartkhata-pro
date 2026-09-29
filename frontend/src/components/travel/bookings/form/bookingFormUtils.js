@@ -7,6 +7,8 @@ export const sanitizeDraftState = (state) => ({
 
   keepAttachmentKeys: [],
 
+  vendorPayments: (state.vendorPayments || []).map((payment) => ({ ...payment })),
+
   bookingItems: (state.bookingItems || []).map((item) => ({
     ...item,
 
@@ -487,6 +489,123 @@ export const calculateBookingItemSourceTotals = (item = {}) => {
   };
 };
 
+export const getVendorCounterpartyKey = (source = {}) => {
+  const isParty = source?.vendorType === 'party' || Boolean(source?.vendorPartyId);
+  const id = isParty ? source?.vendorPartyId : source?.vendorId;
+
+  return id ? `${isParty ? 'party' : 'vendor'}:${String(id?._id || id)}` : '';
+};
+
+export const isRowVendorMode = (item = {}) =>
+  Array.isArray(item?.paxPricing) &&
+  item.paxPricing.some((row) => Boolean(row?.vendorId || row?.vendorPartyId));
+
+export const deriveVendorCostGroups = (formState = {}, currencySettings = null) => {
+  const settings = buildRateMap(currencySettings, getCalculatorRateSnapshot(formState));
+  const groups = new Map();
+  let unassignedCostBase = 0;
+
+  const addCost = (source, amount, description) => {
+    const totalCostBase = roundMoney(amount);
+
+    if (!(totalCostBase > 0)) {
+      return;
+    }
+
+    const key = getVendorCounterpartyKey(source);
+
+    if (!key) {
+      unassignedCostBase = roundMoney(unassignedCostBase + totalCostBase);
+      return;
+    }
+
+    const vendorType = key.startsWith('party:') ? 'party' : 'vendor';
+    const id = key.slice(key.indexOf(':') + 1);
+    const current = groups.get(key) || {
+      key,
+      vendorType,
+      vendorId: vendorType === 'vendor' ? id : '',
+      vendorPartyId: vendorType === 'party' ? id : '',
+      totalCostBase: 0,
+      descriptions: [],
+      sourceCount: 0,
+    };
+
+    current.totalCostBase = roundMoney(current.totalCostBase + totalCostBase);
+    current.sourceCount += 1;
+    if (description && !current.descriptions.includes(description)) {
+      current.descriptions.push(description);
+    }
+    groups.set(key, current);
+  };
+
+  (formState.bookingItems || []).forEach((item, itemIndex) => {
+    const description = item.title || String(item.itemType || `Item ${itemIndex + 1}`).replace(/_/g, ' ');
+    const useComponents =
+      item.itemType === 'umrah_package' &&
+      item.umrahDetails?.packageMode === 'custom_component_package' &&
+      Array.isArray(item.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
+
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component) => {
+        const totals = calculateUmrahComponentSourceTotals(component);
+        addCost(
+          component,
+          estimateAmount(totals.cost, component.costCurrency, settings),
+          component.label || component.componentType || description
+        );
+      });
+      return;
+    }
+
+    if (Array.isArray(item.paxPricing) && item.paxPricing.length > 0 && isRowVendorMode(item)) {
+      const rowCosts = item.paxPricing.map((row) =>
+        roundMoney(
+          estimateAmount(
+            parseQuantity(row?.count, 0) * parseMoney(row?.costPrice),
+            item.costCurrency,
+            settings
+          )
+        )
+      );
+      const itemCostBase = roundMoney(
+        estimateAmount(calculateBookingItemSourceTotals(item).cost, item.costCurrency, settings)
+      );
+      const delta = roundMoney(
+        itemCostBase - rowCosts.reduce((sum, amount) => sum + amount, 0)
+      );
+      const adjustmentIndex = [...rowCosts]
+        .map((amount, index) => ({ amount, index }))
+        .reverse()
+        .find(({ amount }) => amount > 0)?.index;
+
+      if (adjustmentIndex !== undefined) {
+        rowCosts[adjustmentIndex] = roundMoney(rowCosts[adjustmentIndex] + delta);
+      }
+
+      item.paxPricing.forEach((row, rowIndex) => {
+        addCost(
+          row,
+          rowCosts[rowIndex],
+          `${description} (${String(row?.paxType || 'adult')})`
+        );
+      });
+      return;
+    }
+
+    const totals = calculateBookingItemSourceTotals(item);
+    addCost(item, estimateAmount(totals.cost, item.costCurrency, settings), description);
+  });
+
+  return {
+    groups: [...groups.values()],
+    unassignedCostBase: roundMoney(unassignedCostBase),
+    hasUnassignedCost: unassignedCostBase > 0,
+    baseCurrency: settings.baseCurrency,
+  };
+};
+
 export const calculateLocalTotals = (formState, currencySettings) => {
   const calculatorRates = getCalculatorRateSnapshot(formState);
 
@@ -520,23 +639,9 @@ export const calculateLocalTotals = (formState, currencySettings) => {
             settings
           );
 
-          const componentVendorPaid = estimateAmount(
-            component.vendorPaidAmount,
+          result.selling += roundMoney(componentSelling);
 
-            component.costCurrency,
-
-            settings
-          );
-
-          result.selling += componentSelling;
-
-          result.cost += componentCost;
-
-          result.vendorPaid += Math.min(
-            Math.max(componentVendorPaid, 0),
-
-            Math.max(componentCost, 0)
-          );
+          result.cost += roundMoney(componentCost);
         });
 
         return result;
@@ -560,23 +665,9 @@ export const calculateLocalTotals = (formState, currencySettings) => {
         settings
       );
 
-      const itemVendorPaid = estimateAmount(
-        item.vendorPaidAmount,
+      result.selling += roundMoney(itemSelling);
 
-        item.costCurrency,
-
-        settings
-      );
-
-      result.selling += itemSelling;
-
-      result.cost += itemCost;
-
-      result.vendorPaid += Math.min(
-        Math.max(itemVendorPaid, 0),
-
-        Math.max(itemCost, 0)
-      );
+      result.cost += roundMoney(itemCost);
 
       return result;
     },
@@ -595,7 +686,12 @@ export const calculateLocalTotals = (formState, currencySettings) => {
 
   const cost = roundMoney(totals.cost);
 
-  const vendorPaid = roundMoney(Math.min(totals.vendorPaid, totals.cost));
+  const vendorPaid = roundMoney(
+    (formState.vendorPayments || []).reduce(
+      (sum, payment) => sum + parseMoney(payment?.paidAmount),
+      0
+    )
+  );
 
   const discount = roundMoney(parseMoney(formState.discountAmount));
 

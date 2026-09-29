@@ -233,11 +233,24 @@ export const getRoomTypeOccupancy = (roomType) => {
   return Number(option?.occupancy || 0);
 };
 
+let paxRowSequence = 0;
+
+const createPaxRowKey = () => {
+  paxRowSequence += 1;
+  return `pax-${Date.now().toString(36)}-${paxRowSequence.toString(36)}`;
+};
+
 export const createEmptyPaxPricingRow = (paxType = 'adult') => ({
+  uiKey: createPaxRowKey(),
   paxType,
   count: paxType === 'adult' ? 1 : 0,
   costPrice: '',
   sellingPrice: '',
+  vendorType: 'vendor',
+  vendorId: '',
+  vendorPartyId: '',
+  estimatedCostBase: 0,
+  estimatedSellingBase: 0,
 });
 
 export const createDefaultPaxPricing = () => [createEmptyPaxPricingRow('adult')];
@@ -558,6 +571,8 @@ export const createInitialBookingForm = (serviceType = 'air_ticket') => {
 
     vendorPaymentAccountId: '',
 
+    vendorPayments: [],
+
     attachments: [],
 
     keepAttachmentKeys: [],
@@ -599,6 +614,8 @@ const preparePaxPricingForForm = (rows = []) => {
   }
 
   return rows.map((row) => ({
+    uiKey: row?.uiKey || createPaxRowKey(),
+
     paxType: row?.paxType || 'adult',
 
     count: row?.count ?? 0,
@@ -606,6 +623,16 @@ const preparePaxPricingForForm = (rows = []) => {
     costPrice: row?.costPrice ?? '',
 
     sellingPrice: row?.sellingPrice ?? '',
+
+    vendorType: row?.vendorType === 'party' || row?.vendorPartyId ? 'party' : 'vendor',
+
+    vendorId: getRecordId(row?.vendorId),
+
+    vendorPartyId: getRecordId(row?.vendorPartyId),
+
+    estimatedCostBase: Number(row?.estimatedCostBase || 0),
+
+    estimatedSellingBase: Number(row?.estimatedSellingBase || 0),
   }));
 };
 
@@ -888,6 +915,64 @@ const prepareBookingItemForForm = (item = {}) => {
   };
 };
 
+const prepareVendorPaymentsForForm = (booking = {}, bookingItems = []) => {
+  if (Array.isArray(booking.vendorPayments)) {
+    return booking.vendorPayments.map((payment) => ({
+      vendorType:
+        payment?.vendorType === 'party' || payment?.vendorPartyId ? 'party' : 'vendor',
+      vendorId: getRecordId(payment?.vendorId),
+      vendorPartyId: getRecordId(payment?.vendorPartyId),
+      paidAmount: payment?.paidAmount ?? '',
+      paymentType: payment?.paymentType === 'credit' ? 'cash' : payment?.paymentType || 'cash',
+      accountId: getRecordId(payment?.accountId),
+    }));
+  }
+
+  const legacyPayments = new Map();
+  const addLegacyPayment = (source, paidAmount) => {
+    const vendorType = source?.vendorType === 'party' || source?.vendorPartyId ? 'party' : 'vendor';
+    const vendorId = getRecordId(source?.vendorId);
+    const vendorPartyId = getRecordId(source?.vendorPartyId);
+    const id = vendorType === 'party' ? vendorPartyId : vendorId;
+    const amount = Number(paidAmount || 0);
+
+    if (!id || !(amount > 0)) {
+      return;
+    }
+
+    const key = `${vendorType}:${id}`;
+    const current = legacyPayments.get(key) || {
+      vendorType,
+      vendorId: vendorType === 'vendor' ? vendorId : '',
+      vendorPartyId: vendorType === 'party' ? vendorPartyId : '',
+      paidAmount: 0,
+      paymentType: booking.vendorPaymentType === 'credit' ? 'cash' : booking.vendorPaymentType || 'cash',
+      accountId: getRecordId(booking.vendorPaymentAccountId),
+    };
+    current.paidAmount += amount;
+    legacyPayments.set(key, current);
+  };
+
+  bookingItems.forEach((item) => {
+    const useComponents =
+      item.itemType === 'umrah_package' &&
+      item.umrahDetails?.packageMode === 'custom_component_package' &&
+      Array.isArray(item.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
+
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component) =>
+        addLegacyPayment(component, component.estimatedVendorPaidBase)
+      );
+      return;
+    }
+
+    addLegacyPayment(item, item.estimatedVendorPaidBase);
+  });
+
+  return [...legacyPayments.values()];
+};
+
 export const prepareBookingForForm = (booking = null) => {
   if (!booking) {
     return createInitialBookingForm();
@@ -943,6 +1028,8 @@ export const prepareBookingForForm = (booking = null) => {
     vendorPaymentType: booking.vendorPaymentType || 'cash',
 
     vendorPaymentAccountId: getRecordId(booking.vendorPaymentAccountId),
+
+    vendorPayments: prepareVendorPaymentsForForm(booking, bookingItems),
 
     attachments: Array.isArray(booking.attachments) ? booking.attachments : [],
 

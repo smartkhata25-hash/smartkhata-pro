@@ -4,7 +4,7 @@ const lineSchema = new mongoose.Schema({
   yarnId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingYarn", required: true },
   quantityKg: { type: Number, min: 0.000001, required: true },
   bags: { type: Number, min: 0, default: 0 },
-  packageType: { type: String, enum: ["", "bag", "carton"], default: "" },
+  packageType: { type: String, trim: true, lowercase: true, default: "" },
   packageQty: { type: Number, min: 0, default: 0 },
   coneSize: { type: String, enum: ["", "small", "large"], default: "" },
   conesPerPackage: { type: Number, min: 0, default: 0 },

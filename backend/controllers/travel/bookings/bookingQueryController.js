@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Account = require("../../../models/Account");
 const Customer = require("../../../models/Customer");
 const Supplier = require("../../../models/Supplier");
+const Party = require("../../../models/Party");
 const TravelBooking = require("../../../models/TravelBooking");
 const {
   MODULE_SCOPES,
@@ -19,6 +20,9 @@ const {
   sendError,
   serializeBooking,
 } = require("../../../services/travel/travelBookingService");
+const {
+  buildTravelPartyRoleQuery,
+} = require("../../../services/travel/travelCounterpartyService");
 const {
   buildBusinessDateRange,
   startOfBusinessDay,
@@ -149,6 +153,22 @@ const findVendorIdsForBookingSearch = async (userId, search) => {
     .lean();
 };
 
+const findVendorPartyIdsForBookingSearch = async (userId, search) => {
+  const safeSearch = escapeRegex(search);
+
+  return Party.find({
+    ...buildTravelPartyRoleQuery(userId, "supplier"),
+    $or: [
+      { name: { $regex: safeSearch, $options: "i" } },
+      { phone: { $regex: safeSearch, $options: "i" } },
+      { email: { $regex: safeSearch, $options: "i" } },
+    ],
+  })
+    .select("_id")
+    .limit(50)
+    .lean();
+};
+
 exports.getTravelBookings = async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -228,6 +248,7 @@ exports.getTravelBookings = async (req, res) => {
       addAndClause(query, {
         $or: [
           { "bookingItems.vendorId": selectedVendorId },
+          { "bookingItems.paxPricing.vendorId": selectedVendorId },
           { "bookingItems.umrahDetails.components.vendorId": selectedVendorId },
         ],
       });
@@ -239,9 +260,10 @@ exports.getTravelBookings = async (req, res) => {
 
     if (cleanSearch) {
       const safeSearch = escapeRegex(cleanSearch);
-      const [matchingCustomers, matchingVendors] = await Promise.all([
+      const [matchingCustomers, matchingVendors, matchingVendorParties] = await Promise.all([
         findCustomerIdsForBookingSearch(userId, cleanSearch),
         findVendorIdsForBookingSearch(userId, cleanSearch),
+        findVendorPartyIdsForBookingSearch(userId, cleanSearch),
       ]);
 
       addAndClause(query, {
@@ -281,8 +303,28 @@ exports.getTravelBookings = async (req, res) => {
             },
           },
           {
+            "bookingItems.paxPricing.vendorId": {
+              $in: matchingVendors.map((vendor) => vendor._id),
+            },
+          },
+          {
             "bookingItems.umrahDetails.components.vendorId": {
               $in: matchingVendors.map((vendor) => vendor._id),
+            },
+          },
+          {
+            "bookingItems.vendorPartyId": {
+              $in: matchingVendorParties.map((party) => party._id),
+            },
+          },
+          {
+            "bookingItems.paxPricing.vendorPartyId": {
+              $in: matchingVendorParties.map((party) => party._id),
+            },
+          },
+          {
+            "bookingItems.umrahDetails.components.vendorPartyId": {
+              $in: matchingVendorParties.map((party) => party._id),
             },
           },
         ],

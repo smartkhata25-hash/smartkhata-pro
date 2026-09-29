@@ -52,7 +52,8 @@ const fresh = (type, number = '') => ({
   type,
   contractType: 'fabric_sale',
   purchaseItemType: 'yarn',
-  contractNo: number,
+  contractNo: type === 'purchase' ? '' : number,
+  entryNo: type === 'purchase' ? number : '',
   contractDate: getBusinessDateInputValue(),
   partyId: '',
   partyName: '',
@@ -110,15 +111,9 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
   const [detail, setDetail] = useState(null);
   useWeavingFeedback(notice, setNotice);
 
-  const load = useCallback(async () => {
+  const loadMeta = useCallback(async () => {
     try {
-      const [setup, list] = await Promise.all([
-        getWeavingContractMeta(),
-
-        listWeavingContracts({
-          type: tab,
-        }),
-      ]);
+      const setup = await getWeavingContractMeta();
 
       setup.yarns = (setup.yarns || []).map((row) => ({
         ...row,
@@ -131,19 +126,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
       }));
 
       setMeta(setup);
-      const term = search.trim().toLocaleLowerCase('en');
-      setRows(term
-        ? list.filter((row) => [row.contractNo, row.partyName, row.itemName, row.contractDate, row.deliveryDate, row.status]
-          .some((value) => String(value || '').toLocaleLowerCase('en').includes(term)))
-        : list);
-
-      if (!editingId) {
-        setForm((current) => ({
-          ...current,
-
-          contractNo: current.contractNo || setup.nextNumbers?.[tab] || '',
-        }));
-      }
+      setForm((current) => !editingId ? { ...current, ...(tab === 'purchase' ? { entryNo: current.entryNo || setup.nextNumbers?.purchase || '' } : { contractNo: current.contractNo || setup.nextNumbers?.sales || '' }) } : current);
     } catch (error) {
       setNotice({
         error: true,
@@ -151,13 +134,17 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
         text: error.response?.data?.message || t('weaving.operations.loadFailed'),
       });
     }
-  }, [editingId, search, tab]);
+  }, [editingId, tab]);
+
+  const loadContracts = useCallback(async () => {
+    try { setRows(await listWeavingContracts({ type: tab })); }
+    catch (error) { setNotice({ error: true, text: error.response?.data?.message || t('weaving.operations.loadFailed') }); }
+  }, [tab]);
 
   useEffect(() => {
-    const timer = window.setTimeout(load, 200);
-
-    return () => window.clearTimeout(timer);
-  }, [load]);
+    void loadMeta();
+    void loadContracts();
+  }, [loadMeta, loadContracts]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -204,8 +191,9 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
       });
 
       setEditingId('');
-      setForm(fresh(tab));
-      void load();
+      setForm(fresh(tab, tab === 'purchase' ? Number(saved.entryNo || 0) + 1 : meta.nextNumbers?.sales));
+      void loadMeta();
+      void loadContracts();
     } catch (error) {
       setNotice({
         error: true,
@@ -241,6 +229,10 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
   };
 
   const label = (key) => t(`weaving.operations.${key}`);
+  const visibleRows = rows.filter((row) => {
+    const term = search.trim().toLocaleLowerCase('en');
+    return !term || [row.entryNo, row.contractNo, row.partyName, row.itemName, row.contractDate, row.deliveryDate, row.status].some((value) => String(value || '').toLocaleLowerCase('en').includes(term));
+  });
 
   const patch = (key) => (event) =>
     setForm((current) => ({
@@ -291,9 +283,11 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
           </div>
 
           <div className="grid gap-x-3 gap-y-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label={`${label('contractNo')} *`}>
-              <input disabled className={input} value={form.contractNo} />
-            </Field>
+            {tab === 'purchase' && <Field label="Purchase No">
+              <input disabled className={input} value={form.entryNo} />
+            </Field>}
+
+            {tab === 'sales' && <Field label={`${label('contractNo')} *`}><input disabled className={input} value={form.contractNo} /></Field>}
 
             <Field label={`${label('contractDate')} *`}>
               <input
@@ -310,6 +304,9 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                 <option value="fabric">{t('weaving.production.fabricPurchaseContract')}</option>
               </select>
             </Field>}
+            {tab === 'purchase' && <Field label={`${label('contractNo')} *`}>
+              <input className={input} placeholder="Enter Contract No" value={form.contractNo} onChange={patch('contractNo')} />
+            </Field>}
             {tab === 'sales' && (
               <Field label={`${t('weaving.sales.contractType')} *`}>
                 <select
@@ -324,7 +321,24 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
               </Field>
             )}
 
-            <SearchableCreatableSelect
+            {tab === 'purchase' && !fabricContract && <>
+              <SearchableCreatableSelect
+                label={label('yarnMaster')}
+                placeholder="Search Item"
+                options={meta.yarns}
+                value={form.itemId}
+                required
+                getLabel={itemLabel}
+                onChange={(itemId, row) => setForm({ ...form, itemId, yarnCount: row?.count || '' })}
+              />
+              <Field label="Count"><input disabled className={input} value={form.yarnCount || meta.yarns.find((row) => String(row._id) === String(form.itemId))?.count || ''} /></Field>
+              <SearchableCreatableSelect label={label('supplier')} placeholder="Search Party" options={parties} value={form.partyId} required onChange={(partyId, row) => setForm({ ...form, partyId, partyName: row?.name || '' })} />
+              <Field label={`${label('rate')} *`}><input type="number" min="0" className={input} value={form.rate} onChange={patch('rate')} /></Field>
+              <div className="sm:col-span-2"><WeightKgLbsInput kg={form.kg} lbs={form.lbs} required onChange={(value) => setForm({ ...form, ...value })} /></div>
+              <Field label={label('deliveryDate')}><input type="date" className={input} value={form.deliveryDate} onChange={patch('deliveryDate')} /></Field>
+            </>}
+
+            {(tab === 'sales' || fabricContract) && <SearchableCreatableSelect
               label={tab === 'sales' ? label('customer') : label('supplier')}
               placeholder="Search Party"
               options={parties}
@@ -337,9 +351,9 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                   partyName: row?.name || '',
                 })
               }
-            />
+            />}
 
-            <SearchableCreatableSelect
+            {(tab === 'sales' || fabricContract) && <SearchableCreatableSelect
               label={fabricContract ? label('fabricQuality') : label('yarnMaster')}
               placeholder="Search Item"
               options={items}
@@ -358,21 +372,21 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                     : {}),
                 })
               }
-            />
+            />}
 
-            <Field label={`${label('unit')} *`}>
+            {(tab === 'sales' || fabricContract) && <Field label={`${label('unit')} *`}>
               <select
                 className={input}
                 value={form.unit}
                 onChange={patch('unit')}
                 disabled={!fabricContract}
               >
-                <option>KG</option>
+                {(tab === 'sales' || form.unit === 'KG') && <option>KG</option>}
                 {fabricContract && <><option>Meter</option><option>Yard</option></>}
               </select>
-            </Field>
+            </Field>}
 
-            <div className="sm:col-span-2">
+            {(tab === 'sales' || fabricContract) && <div className="sm:col-span-2">
               {form.unit === 'KG' ? (
                 <WeightKgLbsInput
                   kg={form.kg}
@@ -396,9 +410,9 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                   />
                 </Field>
               )}
-            </div>
+            </div>}
 
-            <Field label={`${label('rate')} *`}>
+            {(tab === 'sales' || fabricContract) && <Field label={`${label('rate')} *`}>
               <input
                 type="number"
                 min="0"
@@ -406,16 +420,16 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                 value={form.rate}
                 onChange={patch('rate')}
               />
-            </Field>
+            </Field>}
 
-            <Field label={label('deliveryDate')}>
+            {(tab === 'sales' || fabricContract) && <Field label={label('deliveryDate')}>
               <input
                 type="date"
                 className={input}
                 value={form.deliveryDate}
                 onChange={patch('deliveryDate')}
               />
-            </Field>
+            </Field>}
 
             {tab === 'sales' && (
               <>
@@ -535,8 +549,8 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
             <table className="min-w-full text-sm">
               <thead className="bg-gradient-to-r from-slate-100 to-teal-50 text-left text-xs uppercase text-slate-600">
                 <tr>
-                  {[
-                    'contractNo',
+                {[
+                    ...(tab === 'purchase' ? ['purchaseNo', 'contractNo'] : ['contractNo']),
                     'contractDate',
                     'party',
                     'item',
@@ -545,15 +559,16 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                     'actions',
                   ].map((key) => (
                     <th key={key} className="px-4 py-2.5">
-                      {label(key)}
+                      {key === 'purchaseNo' ? 'Purchase No' : label(key)}
                     </th>
                   ))}
                 </tr>
               </thead>
 
               <tbody>
-                {rows.map((row) => (
+                {visibleRows.map((row) => (
                   <tr key={row._id} role="button" tabIndex={0} onClick={() => setDetail(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDetail(row); } }} className="cursor-pointer border-t transition hover:bg-teal-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-teal-500">
+                    {tab === 'purchase' && <td className="px-4 py-2.5 font-semibold text-slate-900">{row.entryNo || String(row.contractNo || '').match(/^PC-(\d+)$/i)?.[1] || '-'}</td>}
                     <td className="px-4 py-2.5 font-semibold text-slate-900">
                       {row.contractNo}
 

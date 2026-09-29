@@ -79,6 +79,8 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const PAYMENT_TYPES = new Set(["cash", "online", "cheque"]);
 
+const POSTING_STATUSES = new Set(["confirmed", "processing", "completed"]);
+
 const PAYMENT_ACCOUNT_CATEGORIES = ["cash", "bank", "online", "cheque"];
 
 const ROOM_OCCUPANCY_MAP = Object.freeze({
@@ -351,23 +353,74 @@ const normalizePaxPricing = (rows = []) => {
     return [];
   }
 
-  const seenTypes = new Set();
-
   return rows.map((row = {}) => {
     const paxType = normalizePaxType(row.paxType);
-
-    if (seenTypes.has(paxType)) {
-      throw createHttpError(400, `Duplicate ${paxType} passenger pricing row`);
-    }
-
-    seenTypes.add(paxType);
+    const vendorCounterparty = normalizeVendorCounterpartyInput(row);
 
     return {
       paxType,
       count: nonNegativeInteger(row.count, 0, "Passenger count"),
       costPrice: moneyNumber(row.costPrice),
       sellingPrice: moneyNumber(row.sellingPrice),
+      vendorType: vendorCounterparty.vendorType,
+      vendorId: vendorCounterparty.vendorId || null,
+      vendorPartyId: vendorCounterparty.vendorPartyId || null,
+      estimatedCostBase: 0,
+      estimatedSellingBase: 0,
     };
+  });
+};
+
+const getVendorKey = (source = {}) => {
+  const isParty = source.vendorType === "party" || Boolean(source.vendorPartyId);
+  const id = isParty ? source.vendorPartyId : source.vendorId;
+  return id ? `${isParty ? "party" : "vendor"}:${String(id)}` : "";
+};
+
+const normalizeVendorPayments = (value) => {
+  const rows = parseJsonField(value, []);
+
+  if (!Array.isArray(rows)) {
+    throw createHttpError(400, "Invalid vendor payments");
+  }
+
+  const seenKeys = new Set();
+
+  return rows.map((row = {}) => {
+    const counterparty = normalizeVendorCounterpartyInput(row);
+    const normalized = {
+      vendorType: counterparty.vendorType,
+      vendorId: counterparty.vendorId || null,
+      vendorPartyId: counterparty.vendorPartyId || null,
+      paidAmount: moneyNumber(row.paidAmount),
+      paymentType: "credit",
+      accountId: null,
+    };
+    const key = getVendorKey(normalized);
+
+    if (!key) {
+      throw createHttpError(400, "Vendor is required for each vendor payment row");
+    }
+
+    if (seenKeys.has(key)) {
+      throw createHttpError(400, "Duplicate vendor payment row");
+    }
+    seenKeys.add(key);
+
+    if (normalized.paidAmount > 0) {
+      normalized.paymentType = normalizePaymentType(row.paymentType);
+      normalized.accountId =
+        ensureObjectIdString(row.accountId, "vendor payment account") || null;
+
+      if (!normalized.accountId) {
+        throw createHttpError(
+          400,
+          "Vendor payment account is required when paid amount is greater than zero",
+        );
+      }
+    }
+
+    return normalized;
   });
 };
 
@@ -1203,7 +1256,13 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
     }
   });
 
-  const vendorCounterparty = normalizeVendorCounterpartyInput(rawItem);
+  const paxPricing = normalizePaxPricing(rawItem.paxPricing);
+  const rowVendorMode = paxPricing.some(
+    (row) => Boolean(row.vendorId || row.vendorPartyId),
+  );
+  const vendorCounterparty = rowVendorMode
+    ? { vendorType: "vendor", vendorId: null, vendorPartyId: null }
+    : normalizeVendorCounterpartyInput(rawItem);
   const vendorId = vendorCounterparty.vendorId || null;
   const vendorPartyId = vendorCounterparty.vendorPartyId || null;
 
@@ -1232,11 +1291,11 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
 
     costCurrency: normalizeCurrency(rawItem.costCurrency),
 
-    paxPricing: normalizePaxPricing(rawItem.paxPricing),
+    paxPricing,
 
     quantityPricing: normalizeQuantityPricing(rawItem.quantityPricing),
 
-    vendorPaidAmount: moneyNumber(rawItem.vendorPaidAmount),
+    vendorPaidAmount: rowVendorMode ? 0 : moneyNumber(rawItem.vendorPaidAmount),
 
     estimatedSellingBase: 0,
 
@@ -1301,6 +1360,11 @@ const collectItemReferences = (collector, item) => {
 
   addReference(collector, "vendorIds", item.vendorId);
   addReference(collector, "vendorPartyIds", item.vendorPartyId);
+
+  (item.paxPricing || []).forEach((row) => {
+    addReference(collector, "vendorIds", row.vendorId);
+    addReference(collector, "vendorPartyIds", row.vendorPartyId);
+  });
 
   item.travelerIds.forEach((id) => addReference(collector, "travelerIds", id));
 
@@ -1669,10 +1733,6 @@ const applyEstimatedTotals = (items, currencySettings) => {
       nextItem.umrahDetails?.components?.length > 0;
 
     if (useComponents) {
-      let itemSellingBase = 0;
-      let itemCostBase = 0;
-      let itemVendorPaidBase = 0;
-
       nextItem.vendorPaidAmount = 0;
       nextItem.estimatedVendorPaidBase = 0;
 
@@ -1721,12 +1781,6 @@ const applyEstimatedTotals = (items, currencySettings) => {
             componentTotals.costTotal,
           );
 
-          itemSellingBase += estimatedSellingBase;
-
-          itemCostBase += estimatedCostBase;
-
-          itemVendorPaidBase += estimatedVendorPaidBase;
-
           return {
             ...component,
             estimatedSellingBase: roundMoney(estimatedSellingBase),
@@ -1736,15 +1790,30 @@ const applyEstimatedTotals = (items, currencySettings) => {
         }),
       };
 
-      nextItem.estimatedSellingBase = roundMoney(itemSellingBase);
+      nextItem.estimatedSellingBase = roundMoney(
+        nextItem.umrahDetails.components.reduce(
+          (sum, component) => sum + Number(component.estimatedSellingBase || 0),
+          0,
+        ),
+      );
 
-      nextItem.estimatedCostBase = roundMoney(itemCostBase);
+      nextItem.estimatedCostBase = roundMoney(
+        nextItem.umrahDetails.components.reduce(
+          (sum, component) => sum + Number(component.estimatedCostBase || 0),
+          0,
+        ),
+      );
 
-      nextItem.estimatedVendorPaidBase = roundMoney(itemVendorPaidBase);
+      nextItem.estimatedVendorPaidBase = roundMoney(
+        nextItem.umrahDetails.components.reduce(
+          (sum, component) => sum + Number(component.estimatedVendorPaidBase || 0),
+          0,
+        ),
+      );
 
-      sellingTotal += itemSellingBase;
-      costTotal += itemCostBase;
-      vendorPaidTotal += itemVendorPaidBase;
+      sellingTotal += nextItem.estimatedSellingBase;
+      costTotal += nextItem.estimatedCostBase;
+      vendorPaidTotal += nextItem.estimatedVendorPaidBase;
 
       return nextItem;
     }
@@ -1777,6 +1846,60 @@ const applyEstimatedTotals = (items, currencySettings) => {
 
     nextItem.estimatedCostBase = roundMoney(estimatedCostBase);
 
+    if (Array.isArray(nextItem.paxPricing) && nextItem.paxPricing.length > 0) {
+      nextItem.paxPricing = nextItem.paxPricing.map((row) => ({
+        ...row,
+        estimatedCostBase: roundMoney(
+          estimateBaseAmount(
+            Number(row.count || 0) * Number(row.costPrice || 0),
+            nextItem.costCurrency,
+            currencySettings,
+          ),
+        ),
+        estimatedSellingBase: roundMoney(
+          estimateBaseAmount(
+            Number(row.count || 0) * Number(row.sellingPrice || 0),
+            nextItem.sellingCurrency,
+            currencySettings,
+          ),
+        ),
+      }));
+
+      const costDelta = roundMoney(
+        nextItem.estimatedCostBase -
+          nextItem.paxPricing.reduce(
+            (sum, row) => sum + Number(row.estimatedCostBase || 0),
+            0,
+          ),
+      );
+      const sellingDelta = roundMoney(
+        nextItem.estimatedSellingBase -
+          nextItem.paxPricing.reduce(
+            (sum, row) => sum + Number(row.estimatedSellingBase || 0),
+            0,
+          ),
+      );
+      const costAdjustmentIndex = [...nextItem.paxPricing]
+        .map((row, index) => ({ row, index }))
+        .reverse()
+        .find(({ row }) => Number(row.estimatedCostBase || 0) > 0)?.index;
+      const sellingAdjustmentIndex = [...nextItem.paxPricing]
+        .map((row, index) => ({ row, index }))
+        .reverse()
+        .find(({ row }) => Number(row.estimatedSellingBase || 0) > 0)?.index;
+
+      if (costAdjustmentIndex !== undefined) {
+        nextItem.paxPricing[costAdjustmentIndex].estimatedCostBase = roundMoney(
+          nextItem.paxPricing[costAdjustmentIndex].estimatedCostBase + costDelta,
+        );
+      }
+      if (sellingAdjustmentIndex !== undefined) {
+        nextItem.paxPricing[sellingAdjustmentIndex].estimatedSellingBase = roundMoney(
+          nextItem.paxPricing[sellingAdjustmentIndex].estimatedSellingBase + sellingDelta,
+        );
+      }
+    }
+
     nextItem.estimatedVendorPaidBase = roundMoney(estimatedVendorPaidBase);
 
     addBreakdownAmount(
@@ -1793,9 +1916,9 @@ const applyEstimatedTotals = (items, currencySettings) => {
       itemSourceTotals.costTotal,
     );
 
-    sellingTotal += estimatedSellingBase;
-    costTotal += estimatedCostBase;
-    vendorPaidTotal += estimatedVendorPaidBase;
+    sellingTotal += nextItem.estimatedSellingBase;
+    costTotal += nextItem.estimatedCostBase;
+    vendorPaidTotal += nextItem.estimatedVendorPaidBase;
 
     return nextItem;
   });
@@ -1832,6 +1955,92 @@ const applyEstimatedTotals = (items, currencySettings) => {
 
     estimatedProfit: roundMoney(roundedSellingTotal - roundedCostTotal),
   };
+};
+
+const collectEffectiveVendorCosts = (items = [], { requireAssigned = false } = {}) => {
+  const groups = new Map();
+
+  const add = (source, amount, description) => {
+    const cost = roundMoney(amount);
+    if (!(cost > 0)) {
+      return;
+    }
+
+    const key = getVendorKey(source);
+    if (!key) {
+      if (requireAssigned) {
+        throw createHttpError(
+          400,
+          `Vendor is required for cost row: ${description || "Travel service"}`,
+        );
+      }
+      return;
+    }
+
+    groups.set(key, roundMoney((groups.get(key) || 0) + cost));
+  };
+
+  items.forEach((item, itemIndex) => {
+    const itemLabel = item.title || item.itemType || `Item ${itemIndex + 1}`;
+    const useComponents =
+      item.itemType === "umrah_package" &&
+      item.umrahDetails?.packageMode === "custom_component_package" &&
+      Array.isArray(item.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
+
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component, componentIndex) =>
+        add(
+          component,
+          component.estimatedCostBase,
+          component.label || `${itemLabel} component ${componentIndex + 1}`,
+        ),
+      );
+      return;
+    }
+
+    const rowVendorMode =
+      Array.isArray(item.paxPricing) &&
+      item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
+
+    if (rowVendorMode) {
+      item.paxPricing.forEach((row, rowIndex) =>
+        add(
+          row,
+          row.estimatedCostBase,
+          `${itemLabel} ${row.paxType || "passenger"} row ${rowIndex + 1}`,
+        ),
+      );
+      return;
+    }
+
+    add(item, item.estimatedCostBase, itemLabel);
+  });
+
+  return groups;
+};
+
+const validateVendorPaymentsAgainstCosts = ({
+  bookingItems,
+  vendorPayments,
+  requireAssigned = false,
+}) => {
+  const costs = collectEffectiveVendorCosts(bookingItems, { requireAssigned });
+
+  (vendorPayments || []).forEach((payment) => {
+    const key = getVendorKey(payment);
+    const allocatedCost = roundMoney(costs.get(key) || 0);
+
+    if (!(allocatedCost > 0)) {
+      throw createHttpError(400, "Vendor payment has no allocated vendor cost");
+    }
+
+    if (roundMoney(payment.paidAmount) > allocatedCost + 0.009) {
+      throw createHttpError(400, "Vendor paid amount cannot exceed allocated vendor cost");
+    }
+  });
+
+  return costs;
 };
 
 const getItemDateRange = (item) => {
@@ -2009,6 +2218,31 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
     normalizeBookingItem(item, serviceType),
   );
 
+  const vendorPaymentsSupplied = Object.prototype.hasOwnProperty.call(
+    body,
+    "vendorPayments",
+  );
+  const existingVendorPayments = Array.isArray(existingBooking?.vendorPayments)
+    ? existingBooking.vendorPayments
+    : null;
+  const usesVendorPayments = vendorPaymentsSupplied || existingVendorPayments !== null;
+  const vendorPayments = usesVendorPayments
+    ? normalizeVendorPayments(
+        vendorPaymentsSupplied ? body.vendorPayments : existingVendorPayments,
+      )
+    : null;
+
+  if (usesVendorPayments) {
+    bookingItems.forEach((item) => {
+      item.vendorPaidAmount = 0;
+      item.estimatedVendorPaidBase = 0;
+      (item.umrahDetails?.components || []).forEach((component) => {
+        component.vendorPaidAmount = 0;
+        component.estimatedVendorPaidBase = 0;
+      });
+    });
+  }
+
   const rootTravelers = normalizeObjectIdArray(
     parseJsonField(body.travelers, []),
     "traveler ID",
@@ -2031,6 +2265,11 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
   bookingItems.forEach((item) => collectItemReferences(collector, item));
 
+  (vendorPayments || []).forEach((payment) => {
+    addReference(collector, "vendorIds", payment.vendorId);
+    addReference(collector, "vendorPartyIds", payment.vendorPartyId);
+  });
+
   await assertReferencesBelongToUser({
     collector,
     userId,
@@ -2045,6 +2284,12 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
   const totals = applyEstimatedTotals(bookingItems, currencySettings);
 
+  validateVendorPaymentsAgainstCosts({
+    bookingItems: totals.bookingItems,
+    vendorPayments,
+    requireAssigned: POSTING_STATUSES.has(status),
+  });
+
   if (discountAmount > totals.sellingTotal) {
     throw createHttpError(400, "Discount cannot exceed gross sale");
   }
@@ -2055,10 +2300,17 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
     throw createHttpError(400, "Received amount cannot exceed net invoice");
   }
 
-  const vendorPaidTotal = roundMoney(totals.vendorPaidTotal);
+  const vendorPaidTotal = usesVendorPayments
+    ? roundMoney(
+        vendorPayments.reduce(
+          (sum, payment) => sum + Number(payment.paidAmount || 0),
+          0,
+        ),
+      )
+    : roundMoney(totals.vendorPaidTotal);
 
   const vendorPaymentType =
-    vendorPaidTotal > 0
+    !usesVendorPayments && vendorPaidTotal > 0
       ? normalizePaymentType(
           body.vendorPaymentType ||
             existingBooking?.vendorPaymentType ||
@@ -2067,7 +2319,7 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
       : "credit";
 
   const vendorPaymentAccountId =
-    vendorPaidTotal > 0
+    !usesVendorPayments && vendorPaidTotal > 0
       ? ensureObjectIdString(
           body.vendorPaymentAccountId ||
             existingBooking?.vendorPaymentAccountId,
@@ -2094,7 +2346,7 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
     );
   }
 
-  if (vendorPaidTotal > 0) {
+  if (!usesVendorPayments && vendorPaidTotal > 0) {
     if (!vendorPaymentAccountId) {
       throw createHttpError(
         400,
@@ -2109,6 +2361,20 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
         label: "Vendor payment account",
       }),
     );
+  }
+
+  if (usesVendorPayments) {
+    vendorPayments
+      .filter((payment) => Number(payment.paidAmount || 0) > 0)
+      .forEach((payment) => {
+        paymentAccountPromises.push(
+          getPaymentAccount({
+            userId,
+            accountId: payment.accountId,
+            label: "Vendor payment account",
+          }),
+        );
+      });
   }
 
   if (paymentAccountPromises.length) {
@@ -2195,6 +2461,8 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
     vendorPaymentAccountId,
 
+    ...(usesVendorPayments ? { vendorPayments } : {}),
+
     assignedStaffId:
       ensureObjectIdString(body.assignedStaffId, "assigned staff ID") || null,
 
@@ -2235,6 +2503,14 @@ const populateBooking = (query) =>
       "bookingItems.vendorPartyId",
       "name phone email role moduleScope",
     )
+    .populate(
+      "bookingItems.paxPricing.vendorId",
+      "name phone travelVendorType moduleScope",
+    )
+    .populate(
+      "bookingItems.paxPricing.vendorPartyId",
+      "name phone email role moduleScope",
+    )
     .populate("bookingItems.hotelDetails.hotelId", "name city country")
     .populate("bookingItems.umrahDetails.makkahHotelId", "name city country")
     .populate("bookingItems.umrahDetails.madinahHotelId", "name city country")
@@ -2260,7 +2536,10 @@ const populateBooking = (query) =>
       "name iataCode icaoCode country",
     )
     .populate("accountId", "name code category type")
-    .populate("vendorPaymentAccountId", "name code category type");
+    .populate("vendorPaymentAccountId", "name code category type")
+    .populate("vendorPayments.vendorId", "name phone travelVendorType moduleScope")
+    .populate("vendorPayments.vendorPartyId", "name phone email role moduleScope")
+    .populate("vendorPayments.accountId", "name code category type");
 
 const serializeBooking = (booking) => {
   if (!booking) {
@@ -2334,6 +2613,7 @@ module.exports = {
   HOTEL_ROOM_TYPES,
   ONE_DAY_MS,
   buildBookingPayload,
+  collectEffectiveVendorCosts,
   cleanString,
   createHttpError,
   escapeRegex,
@@ -2344,6 +2624,8 @@ module.exports = {
   getUserId,
   nullableDate,
   normalizeStatus,
+  normalizePaxPricing,
+  normalizeVendorPayments,
   populateBooking,
   sendError,
   serializeBooking,

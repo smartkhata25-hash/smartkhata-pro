@@ -2,7 +2,7 @@ import WeavingProductionContext, { contextForRun } from '../../components/weavin
 import React, { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { FaEdit, FaIndustry, FaPlus, FaSearch, FaSpinner, FaTimes } from 'react-icons/fa';
+import { FaEdit, FaIndustry, FaPlus, FaSave, FaSearch, FaSpinner, FaTimes } from 'react-icons/fa';
 
 import { t as translate } from '../../i18n/i18n';
 
@@ -10,7 +10,7 @@ import WeightKgLbsInput, { KG_TO_LBS } from '../../components/weaving/WeightKgLb
 
 import WeavingFormActions from '../../components/weaving/WeavingFormActions';
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
-import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 
 import {
   bulkCreateWeavingLooms,
@@ -24,6 +24,7 @@ import {
   quickAddWeavingMasterOption,
   updateWeavingLoom,
   updateWeavingMaster,
+  updateWeavingYarnPackaging,
 } from '../../services/weavingOperationsService';
 import { hasPermission } from '../../utils/permissionHelper';
 
@@ -46,9 +47,11 @@ const initial = {
     quality: '',
     millBrand: '',
     lotReference: '',
-    defaultPackageType: '',
-    largeConesPerPackage: '',
-    smallConesPerPackage: '',
+    defaultPackageType: 'bag',
+    packagingProfiles: [{ packageType: 'bag', packageWeight: 100, smallConesPerPackage: 40, largeConesPerPackage: 24 }],
+    packageWeight: 100,
+    largeConesPerPackage: 24,
+    smallConesPerPackage: 40,
     openingRate: '',
     notes: '',
     isActive: true,
@@ -138,207 +141,62 @@ const TextInput = forwardRef(({ label, required, className = '', ...props }, ref
 
 TextInput.displayName = 'TextInput';
 
+const packageDisplayName = (value) => String(value || '').trim().replace(/\b\w/g, (letter) => letter.toUpperCase());
+const packageProfilesFor = (form) => {
+  const profiles = Array.isArray(form.packagingProfiles) && form.packagingProfiles.length ? form.packagingProfiles : [];
+  return profiles.length ? profiles : [{ packageType: form.defaultPackageType || 'bag', packageWeight: form.packageWeight ?? 100, smallConesPerPackage: form.smallConesPerPackage ?? 40, largeConesPerPackage: form.largeConesPerPackage ?? 24 }];
+};
+
 const OpeningStock = ({ form, setForm, godowns, t, canAddGodown, onAddGodown }) => {
   const unit = form.primaryUnit || 'KG';
-
+  const isYarn = Object.prototype.hasOwnProperty.call(form, 'defaultPackageType');
   const rows = form.openingStock?.length ? form.openingStock : [emptyOpening()];
-
-  const update = (index, patch) => {
-    setForm((current) => ({
-      ...current,
-
-      openingStock: current.openingStock.map((row, i) =>
-        i === index
-          ? {
-              ...row,
-              ...patch,
-            }
-          : row
-      ),
-    }));
+  const packageType = String(form.defaultPackageType || 'bag').trim();
+  const packageLabel = packageType.toLowerCase() === 'bag' ? 'Bags' : packageType.toLowerCase() === 'carton' ? 'Cartons' : `Package Qty (${packageType || 'Package'})`;
+  const defaultProfile = packageProfilesFor(form).find((profile) => profile.packageType === packageType.toLowerCase()) || packageProfilesFor(form)[0];
+  const packageWeight = Number(defaultProfile.packageWeight ?? 100);
+  const smallPerPackage = Number(defaultProfile.smallConesPerPackage ?? 40);
+  const largePerPackage = Number(defaultProfile.largeConesPerPackage ?? 24);
+  const calculateWeight = useCallback((row) => {
+    const packages = Number(row.packageQty || 0);
+    const small = Number(row.smallCones || 0);
+    const large = Number(row.largeCones || 0);
+    const total = (packages + (smallPerPackage ? small / smallPerPackage : 0) + (largePerPackage ? large / largePerPackage : 0)) * packageWeight;
+    const lbs = total;
+    const kg = lbs / KG_TO_LBS;
+    return { kg: String(Math.round(kg * 1000) / 1000), lbs: String(Math.round(lbs * 1000) / 1000), sourceEntryUnit: 'LBS', packageType: packageType.toLowerCase() };
+  }, [packageType, packageWeight, smallPerPackage, largePerPackage]);
+  useEffect(() => {
+    if (!isYarn) return;
+    setForm((current) => {
+      const openingStock = (current.openingStock || []).map((row) => ({ ...row, ...calculateWeight(row) }));
+      const changed = openingStock.some((row, index) => row.kg !== current.openingStock[index]?.kg || row.lbs !== current.openingStock[index]?.lbs || row.packageType !== current.openingStock[index]?.packageType);
+      return changed ? { ...current, openingStock } : current;
+    });
+  }, [isYarn, calculateWeight, setForm]);
+  const update = async (index, patch) => {
+    const row = { ...rows[index], ...patch };
+    let extraPackages = 0;
+    let message = '';
+    if (isYarn && smallPerPackage && Number(row.smallCones || 0) >= smallPerPackage) {
+      extraPackages += Math.floor(Number(row.smallCones) / smallPerPackage);
+      message = `${smallPerPackage} Small Cones make 1 full ${packageType}.`;
+    }
+    if (isYarn && largePerPackage && Number(row.largeCones || 0) >= largePerPackage) {
+      extraPackages += Math.floor(Number(row.largeCones) / largePerPackage);
+      message = `${largePerPackage} Large Cones make 1 full ${packageType}.`;
+    }
+    if (extraPackages && !(await requestWeavingConfirmation({ message: `${message}\nConvert to full ${packageType}s?`, confirmLabel: 'Convert' }))) return;
+    if (extraPackages) {
+      if (smallPerPackage) row.smallCones = String(Number(row.smallCones || 0) % smallPerPackage);
+      if (largePerPackage) row.largeCones = String(Number(row.largeCones || 0) % largePerPackage);
+      row.packageQty = String(Number(row.packageQty || 0) + extraPackages);
+    }
+    setForm((current) => ({ ...current, openingStock: current.openingStock.map((item, i) => i === index ? { ...item, ...row, ...(isYarn ? calculateWeight(row) : {}) } : item) }));
   };
-
-  const addGodown = () => {
-    setForm((current) => ({
-      ...current,
-
-      openingStock: [...(current.openingStock || []), emptyOpening()],
-    }));
-  };
-
-  const removeGodown = (index) => {
-    setForm((current) => ({
-      ...current,
-
-      openingStock: current.openingStock.filter((_, i) => i !== index),
-    }));
-  };
-
-  return (
-    <div className="col-span-full overflow-visible rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 p-3 shadow-sm">
-      {/* SECTION HEADER */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold text-slate-800">{t('weaving.operations.openingStock')}</h3>
-
-        <button
-          type="button"
-          onClick={addGodown}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
-        >
-          <FaPlus className="text-xs" />
-
-          {t('weaving.operations.addGodown')}
-        </button>
-      </div>
-
-      {/* GODOWN ROWS */}
-      <div className="space-y-2">
-        {rows.map((row, index) => (
-          <div
-            key={index}
-            className="rounded-md border border-slate-200 bg-white/90 p-2.5 transition hover:border-teal-200 hover:shadow-sm"
-          >
-            <div
-              className={`grid items-end gap-2 ${
-                unit === 'KG'
-                  ? 'md:grid-cols-2 lg:grid-cols-[1.25fr_1.15fr_1.1fr_1fr_1fr_1fr_auto]'
-                  : 'md:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_auto]'
-              }`}
-            >
-              <Field label={t('weaving.operations.godown')}>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    className={inputClass}
-                    value={row.godownId}
-                    onChange={(event) =>
-                      update(index, {
-                        godownId: event.target.value,
-                      })
-                    }
-                  >
-                    <option value="">{t('weaving.operations.selectGodown')}</option>
-
-                    {godowns
-                      .filter((godown) => godown.isActive)
-                      .map((godown) => (
-                        <option key={godown._id} value={godown._id}>
-                          {godown.name}
-                        </option>
-                      ))}
-                  </select>
-
-                  {canAddGodown && (
-                    <button
-                      type="button"
-                      title={t('weaving.operations.newGodown')}
-                      onClick={() => onAddGodown(index)}
-                      className="mt-1 inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-teal-200 px-2 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
-                    >
-                      <FaPlus className="text-[10px]" /> Add Godown
-                    </button>
-                  )}
-                </div>
-              </Field>
-
-              {unit === 'KG' ? (
-                <WeightKgLbsInput
-                  kg={row.kg}
-                  lbs={row.lbs}
-                  onChange={(value) => update(index, value)}
-                />
-              ) : (
-                <TextInput
-                  label={`${t('weaving.operations.quantity')} (${unit})`}
-                  placeholder="e.g. 10000"
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  value={row.quantity}
-                  onChange={(event) =>
-                    update(index, {
-                      quantity: event.target.value,
-
-                      sourceEntryUnit: unit,
-                    })
-                  }
-                />
-              )}
-
-              {unit === 'KG' && (
-                <>
-                  <Field label="Package Type">
-                    <select
-                      className={inputClass}
-                      value={row.packageType || ''}
-                      onChange={(event) =>
-                        update(index, {
-                          packageType: event.target.value,
-                        })
-                      }
-                    >
-                      <option value="">None</option>
-
-                      <option value="bag">Bag</option>
-
-                      <option value="carton">Carton</option>
-                    </select>
-                  </Field>
-
-                  <TextInput
-                    label={row.packageType === 'carton' ? 'Cartons' : 'Bags'}
-                    type="number"
-                    min="0"
-                    value={row.packageQty || ''}
-                    onChange={(event) =>
-                      update(index, {
-                        packageQty: event.target.value,
-                      })
-                    }
-                  />
-
-                  <TextInput
-                    label="Small Cones"
-                    type="number"
-                    min="0"
-                    value={row.smallCones || ''}
-                    onChange={(event) =>
-                      update(index, {
-                        smallCones: event.target.value,
-                      })
-                    }
-                  />
-
-                  <TextInput
-                    label="Large Cones"
-                    type="number"
-                    min="0"
-                    value={row.largeCones || ''}
-                    onChange={(event) =>
-                      update(index, {
-                        largeCones: event.target.value,
-                      })
-                    }
-                  />
-                </>
-              )}
-
-              {rows.length > 1 && (
-                <button
-                  type="button"
-                  title={t('weaving.operations.remove')}
-                  aria-label={t('weaving.operations.remove')}
-                  onClick={() => removeGodown(index)}
-                  className="flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-rose-600 transition hover:border-rose-100 hover:bg-rose-50"
-                >
-                  <FaTimes />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  const addGodown = () => setForm((current) => ({ ...current, openingStock: [...(current.openingStock || []), emptyOpening()] }));
+  const removeGodown = (index) => setForm((current) => ({ ...current, openingStock: current.openingStock.filter((_, i) => i !== index) }));
+  return <div className="col-span-full overflow-visible rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 p-3 shadow-sm"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{t('weaving.operations.openingStock')}</h3><button type="button" onClick={addGodown} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"><FaPlus className="text-xs" />{t('weaving.operations.addGodown')}</button></div><div className="space-y-2">{rows.map((row, index) => <div key={index} className="rounded-md border border-slate-200 bg-white/90 p-2.5 transition hover:border-teal-200 hover:shadow-sm"><div className={`grid items-end gap-2 ${isYarn ? 'md:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1.2fr_auto]' : unit === 'KG' ? 'md:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_auto]' : 'md:grid-cols-2 lg:grid-cols-[1.4fr_1.4fr_auto]'}`}><Field label={t('weaving.operations.godown')}><div className="flex items-center gap-1.5"><select className={inputClass} value={row.godownId} onChange={(event) => update(index, { godownId: event.target.value })}><option value="">{t('weaving.operations.selectGodown')}</option>{godowns.filter((godown) => godown.isActive).map((godown) => <option key={godown._id} value={godown._id}>{godown.name}</option>)}</select>{canAddGodown && <button type="button" title={t('weaving.operations.newGodown')} aria-label={t('weaving.operations.newGodown')} onClick={() => onAddGodown(index)} className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-teal-200 text-teal-700 transition hover:bg-teal-50"><FaPlus className="text-[10px]" /></button>}</div></Field>{isYarn ? <><TextInput label={packageLabel} type="number" min="0" value={row.packageQty || ''} onChange={(event) => update(index, { packageQty: event.target.value })} /><TextInput label="Small Cones" type="number" min="0" value={row.smallCones || ''} onChange={(event) => update(index, { smallCones: event.target.value })} /><TextInput label="Large Cones" type="number" min="0" value={row.largeCones || ''} onChange={(event) => update(index, { largeCones: event.target.value })} /><WeightKgLbsInput kg={row.kg} lbs={row.lbs} disabled /></> : unit === 'KG' ? <WeightKgLbsInput kg={row.kg} lbs={row.lbs} onChange={(value) => update(index, value)} /> : <TextInput label={`${t('weaving.operations.quantity')} (${unit})`} type="number" min="0" step="0.001" value={row.quantity} onChange={(event) => update(index, { quantity: event.target.value, sourceEntryUnit: unit })} />}{rows.length > 1 && <button type="button" title={t('weaving.operations.remove')} aria-label={t('weaving.operations.remove')} onClick={() => removeGodown(index)} className="flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-rose-600 transition hover:border-rose-100 hover:bg-rose-50"><FaTimes /></button>}</div></div>)}</div></div>;
 };
 
 const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = false, onNew }) => {
@@ -365,6 +223,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
   const [form, setForm] = useState(initial.yarn);
 
   const [editingId, setEditingId] = useState('');
+  const [selectedYarnId, setSelectedYarnId] = useState('');
 
   const [formOpen, setFormOpen] = useState(true);
 
@@ -464,6 +323,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
     setForm(initial[tab]);
 
     setEditingId('');
+    setSelectedYarnId('');
     setBulk(false);
     setFormOpen(true);
     setNotice(null);
@@ -477,6 +337,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
     setForm(initial[tab]);
 
     setEditingId('');
+    setSelectedYarnId('');
     setBulk(false);
 
     if (focus) {
@@ -546,6 +407,7 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
     });
 
     setEditingId(row._id);
+    setSelectedYarnId(row._id);
 
     setBulk(false);
     setFormOpen(true);
@@ -687,7 +549,8 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
         name: saved.name,
         count: saved.count,
       }));
-      setEditingId(saved._id);
+      setSelectedYarnId(saved._id);
+      setEditingId('');
       setYarnQuickAdd(null);
       await load();
     } catch (error) {
@@ -699,6 +562,48 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
       quickSavingRef.current = false;
       setQuickSaving(false);
     }
+  };
+
+  const activePackagingProfile = packageProfilesFor(form).find((profile) => profile.packageType === (form.defaultPackageType || 'bag').toLowerCase()) || packageProfilesFor(form)[0];
+  const updateActivePackaging = (patch) => setForm((current) => {
+    const packageType = (current.defaultPackageType || 'bag').toLowerCase();
+    const packagingProfiles = packageProfilesFor(current).map((profile) => profile.packageType === packageType ? { ...profile, ...patch } : profile);
+    const active = packagingProfiles.find((profile) => profile.packageType === packageType) || packagingProfiles[0];
+    return { ...current, defaultPackageType: active.packageType, packagingProfiles, packageWeight: active.packageWeight, smallConesPerPackage: active.smallConesPerPackage, largeConesPerPackage: active.largeConesPerPackage, packageWeightUnit: 'LBS' };
+  });
+  const selectPackaging = (value) => {
+    if (value === '__add__') {
+      const name = window.prompt('Packaging name');
+      const packageType = String(name || '').trim().toLowerCase();
+      if (!packageType) return;
+      setForm((current) => {
+        const packagingProfiles = packageProfilesFor(current);
+        const existing = packagingProfiles.find((profile) => profile.packageType === packageType);
+        const active = existing || { packageType, packageWeight: 100, smallConesPerPackage: 40, largeConesPerPackage: 24 };
+        return { ...current, defaultPackageType: active.packageType, packagingProfiles: existing ? packagingProfiles : [...packagingProfiles, active], packageWeight: active.packageWeight, smallConesPerPackage: active.smallConesPerPackage, largeConesPerPackage: active.largeConesPerPackage, packageWeightUnit: 'LBS' };
+      });
+      return;
+    }
+    setForm((current) => {
+      const packagingProfiles = packageProfilesFor(current);
+      const existing = packagingProfiles.find((profile) => profile.packageType === value);
+      const active = existing || { packageType: value, packageWeight: 100, smallConesPerPackage: 40, largeConesPerPackage: 24 };
+      return { ...current, defaultPackageType: active.packageType, packagingProfiles: existing ? packagingProfiles : [...packagingProfiles, active], packageWeight: active.packageWeight, smallConesPerPackage: active.smallConesPerPackage, largeConesPerPackage: active.largeConesPerPackage, packageWeightUnit: 'LBS' };
+    });
+  };
+  const savePackaging = async () => {
+    if (!editingId) {
+      setNotice({ type: 'success', text: 'Package profile will be saved with this Yarn.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await updateWeavingYarnPackaging(editingId, { defaultPackageType: form.defaultPackageType, packagingProfiles: packageProfilesFor(form) });
+      setForm((current) => ({ ...current, ...saved }));
+      setNotice({ type: 'success', text: 'Package profile saved.' });
+    } catch (error) {
+      setNotice({ type: 'error', text: error.response?.data?.message || t('weaving.operations.saveFailed') });
+    } finally { setSaving(false); }
   };
 
   return (
@@ -807,13 +712,14 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
                     placeholder="Search yarn name or count"
                     required
                     options={yarnOptions}
-                    value={editingId}
+                    value={selectedYarnId}
                     getLabel={(item) => [item.name, item.count].filter(Boolean).join(' / ')}
                     onChange={(_, item) => {
                       if (item) {
                         edit(item);
                       } else {
                         setEditingId('');
+                        setSelectedYarnId('');
                       }
                     }}
                     onQuickAdd={(name) => {
@@ -876,56 +782,19 @@ const WeavingMastersPage = ({ initialTab = 'yarn', embedded = false, listMode = 
 
               {/* YARN PACKAGE SETTINGS */}
               {tab === 'yarn' && (
-                <div className="col-span-full grid gap-3 rounded-lg border border-teal-100 bg-gradient-to-r from-teal-50/60 via-white to-emerald-50/50 p-3 shadow-sm sm:grid-cols-3">
-                  <Field label="Default Package Type">
-                    <select
-                      className={inputClass}
-                      value={form.defaultPackageType || ''}
-                      onChange={(event) =>
-                        setForm({
-                          ...form,
-
-                          defaultPackageType: event.target.value,
-                        })
-                      }
-                    >
-                      <option value="">None</option>
-
-                      <option value="bag">Bag</option>
-
-                      <option value="carton">Carton</option>
+                <div className="col-span-full grid gap-3 rounded-lg border border-teal-100 bg-gradient-to-r from-teal-50/60 via-white to-emerald-50/50 p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+                  <Field label="Package Type">
+                    <select className={inputClass} value={activePackagingProfile.packageType} onChange={(event) => selectPackaging(event.target.value)}>
+                      {packageProfilesFor(form).map((profile) => <option key={profile.packageType} value={profile.packageType}>{packageDisplayName(profile.packageType)}</option>)}
+                      {!packageProfilesFor(form).some((profile) => profile.packageType === 'bag') && <option value="bag">Bag</option>}
+                      {!packageProfilesFor(form).some((profile) => profile.packageType === 'carton') && <option value="carton">Carton</option>}
+                      <option value="__add__">Add New Packaging</option>
                     </select>
                   </Field>
-
-                  <TextInput
-                    label="Large Cones per Package"
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 6"
-                    value={form.largeConesPerPackage || ''}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-
-                        largeConesPerPackage: event.target.value,
-                      })
-                    }
-                  />
-
-                  <TextInput
-                    label="Small Cones per Package"
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 15"
-                    value={form.smallConesPerPackage || ''}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-
-                        smallConesPerPackage: event.target.value,
-                      })
-                    }
-                  />
+                  <Field label="Package Weight"><div className="mt-1 flex h-9 overflow-hidden rounded-md border border-slate-300 bg-white focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-100"><input className="min-w-0 flex-1 px-3 text-sm outline-none" type="number" min="0" value={activePackagingProfile.packageWeight ?? 100} onChange={(event) => updateActivePackaging({ packageWeight: event.target.value })} /><span className="flex items-center border-l border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-600">LBS</span></div></Field>
+                  <TextInput label="Small Cones / Package" type="number" min="0" value={activePackagingProfile.smallConesPerPackage ?? 40} onChange={(event) => updateActivePackaging({ smallConesPerPackage: event.target.value })} />
+                  <TextInput label="Large Cones / Package" type="number" min="0" value={activePackagingProfile.largeConesPerPackage ?? 24} onChange={(event) => updateActivePackaging({ largeConesPerPackage: event.target.value })} />
+                  <button type="button" title="Save package profile" aria-label="Save package profile" disabled={saving} onClick={savePackaging} className="mt-6 inline-flex h-9 w-9 items-center justify-center rounded-md bg-teal-600 text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"><FaSave /></button>
                 </div>
               )}
 

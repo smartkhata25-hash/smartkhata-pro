@@ -1,7 +1,7 @@
 const number = (value) => Math.max(0, Number(value) || 0);
 
 const normalizePacking = (source = {}, defaults = {}) => {
-  const packageType = source.packageType === "carton" ? "carton" : source.packageType === "bag" ? "bag" : "";
+  const packageType = String(source.packageType || "").trim().toLowerCase();
   const coneSize = source.coneSize === "small" || source.coneSize === "large" ? source.coneSize : "";
   const packageQty = number(source.packageQty ?? source.bags);
   const defaultCones = coneSize === "small" ? defaults.smallConesPerPackage : coneSize === "large" ? defaults.largeConesPerPackage : 0;

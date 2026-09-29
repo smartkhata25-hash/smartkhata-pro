@@ -113,10 +113,64 @@ const paxPricingRowSchema = new mongoose.Schema(
     costPrice: amountField,
 
     sellingPrice: amountField,
+
+    vendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Supplier",
+      default: null,
+    },
+
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
+
+    estimatedCostBase: amountField,
+
+    estimatedSellingBase: amountField,
   },
   {
     _id: false,
   },
+);
+
+const vendorPaymentSchema = new mongoose.Schema(
+  {
+    vendorType: {
+      type: String,
+      enum: ["vendor", "party"],
+      default: "vendor",
+    },
+    vendorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Supplier",
+      default: null,
+    },
+    vendorPartyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
+    paidAmount: amountField,
+    paymentType: {
+      type: String,
+      enum: ["cash", "online", "cheque", "credit"],
+      default: "credit",
+    },
+    accountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Account",
+      default: null,
+    },
+  },
+  { _id: false },
 );
 
 const quantityPricingSchema = new mongoose.Schema(
@@ -1187,6 +1241,11 @@ const travelBookingSchema = new mongoose.Schema(
       default: null,
     },
 
+    vendorPayments: {
+      type: [vendorPaymentSchema],
+      default: undefined,
+    },
+
     vendorPaymentJournalEntryIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -1381,6 +1440,18 @@ travelBookingSchema.index({
 travelBookingSchema.index({
   userId: 1,
   "bookingItems.vendorPartyId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.paxPricing.vendorId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.paxPricing.vendorPartyId": 1,
   updatedAt: -1,
 });
 

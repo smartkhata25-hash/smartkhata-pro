@@ -13,6 +13,7 @@ router.post("/master-options", requirePermission(PERMISSIONS.WEAVING_MASTERS.CRE
 router.get("/masters/:kind", requirePermission(PERMISSIONS.WEAVING_MASTERS.VIEW), ctrl.listMaster);
 router.post("/masters/:kind", requirePermission(PERMISSIONS.WEAVING_MASTERS.CREATE), ctrl.createMaster);
 router.put("/masters/:kind/:id", requirePermission(PERMISSIONS.WEAVING_MASTERS.EDIT), ctrl.updateMaster);
+router.patch("/masters/yarn/:id/packaging", requirePermission(PERMISSIONS.WEAVING_MASTERS.EDIT), ctrl.updateYarnPackaging);
 router.get("/looms", requirePermission(PERMISSIONS.WEAVING_MASTERS.VIEW), ctrl.listLooms);
 router.post("/looms", requirePermission(PERMISSIONS.WEAVING_MASTERS.CREATE), ctrl.createLoom);
 router.post("/looms/bulk", requirePermission(PERMISSIONS.WEAVING_MASTERS.CREATE), ctrl.bulkCreateLooms);

@@ -12,7 +12,10 @@ import {
 } from 'react-icons/fa';
 
 import WeavingPartyLedgerPanel from '../../components/weaving/WeavingPartyLedgerPanel';
-import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import {
+  requestWeavingConfirmation,
+  useWeavingFeedback,
+} from '../../components/weaving/WeavingFeedbackModal';
 
 import {
   createCounterparty,
@@ -494,7 +497,11 @@ export default function WeavingPartiesPage() {
       return;
     }
 
-    if (!await requestWeavingConfirmation({ message: `Delete ${row.name}? Historical ledger entries will remain available.` })) {
+    if (
+      !(await requestWeavingConfirmation({
+        message: `Delete ${row.name}? Historical ledger entries will remain available.`,
+      }))
+    ) {
       return;
     }
 
@@ -889,7 +896,11 @@ export default function WeavingPartiesPage() {
             <WeavingPartyLedgerPanel
               party={selected}
               onBack={() => setMobileDetail(false)}
-              onEdit={selected && !selected.isHidden && canEdit ? (options) => edit(selected, options) : null}
+              onEdit={
+                selected && !selected.isHidden && canEdit
+                  ? (options) => edit(selected, options)
+                  : null
+              }
             />
           </div>
         </div>
@@ -1013,11 +1024,7 @@ export default function WeavingPartiesPage() {
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeForm}
-                className="h-10 rounded-md border px-4"
-              >
+              <button type="button" onClick={closeForm} className="h-10 rounded-md border px-4">
                 Cancel
               </button>
 

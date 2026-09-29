@@ -215,6 +215,36 @@ const collectVendorCostRows = (invoice, vendor) => {
       return;
     }
 
+    const rowVendorMode =
+      Array.isArray(item.paxPricing) &&
+      item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
+
+    if (rowVendorMode) {
+      const matchingRowCost = roundMoney(
+        item.paxPricing.reduce((sum, row) => {
+          const rowKey = getVendorMatchKey({
+            vendorType: row.vendorType === "party" ? "party" : "vendor",
+            vendorId: row.vendorId,
+            vendorPartyId: row.vendorPartyId,
+          });
+
+          return rowKey === vendorKey
+            ? sum + Number(row.estimatedCostBase || 0)
+            : sum;
+        }, 0),
+      );
+
+      if (matchingRowCost > 0) {
+        rows.push({
+          id: item._id,
+          label: item.title || item.itemType || "Travel service",
+          amount: matchingRowCost,
+        });
+      }
+
+      return;
+    }
+
     if (
       getVendorMatchKey({
         vendorType: item.vendorType === "party" ? "party" : "vendor",
@@ -792,11 +822,13 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
     if (vendorPartyId) {
       query.$or = [
         { "bookingItems.vendorPartyId": vendorPartyId },
+        { "bookingItems.paxPricing.vendorPartyId": vendorPartyId },
         { "bookingItems.umrahDetails.components.vendorPartyId": vendorPartyId },
       ];
     } else if (vendorId) {
       query.$or = [
         { "bookingItems.vendorId": vendorId },
+        { "bookingItems.paxPricing.vendorId": vendorId },
         { "bookingItems.umrahDetails.components.vendorId": vendorId },
       ];
     }
@@ -938,6 +970,10 @@ exports.createTravelVendorReturn = async (req, res) => {
   } finally {
     await session.endSession();
   }
+};
+
+exports._test = {
+  collectVendorCostRows,
 };
 
 exports.reverseTravelVendorReturn = async (req, res) => {

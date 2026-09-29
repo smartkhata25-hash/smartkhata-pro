@@ -339,15 +339,12 @@ const TimingControl = ({ value, onChange, disabled = false, useDefaultKey = fals
   );
 };
 
-/* -------------------------------------------------------------------------- */
-/*                     BOOKING FORM REMINDER CONTROLS                         */
-/* -------------------------------------------------------------------------- */
-
 export const TravelBookingReminderControls = ({
   value,
   onChange,
   businessSettings = null,
   disabled = false,
+  embedded = false,
 }) => {
   const settings = normalizeReminderSettingsForForm(value);
 
@@ -371,26 +368,40 @@ export const TravelBookingReminderControls = ({
   };
 
   return (
-    <section className="overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-100 bg-gradient-to-r from-cyan-50 via-white to-sky-50 px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-white text-cyan-700 shadow-sm ring-1 ring-black/5">
-            <FaBell aria-hidden="true" />
+    <section
+      className={
+        embedded
+          ? 'bg-transparent'
+          : 'overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm'
+      }
+    >
+      {!embedded && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-100 bg-gradient-to-r from-cyan-50 via-white to-sky-50 px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-white text-cyan-700 shadow-sm ring-1 ring-black/5">
+              <FaBell aria-hidden="true" />
+            </span>
+
+            <h2 className="truncate text-sm font-black text-slate-900">
+              {t('travel.reminders.formTitle')}
+            </h2>
+          </div>
+
+          <span className="rounded-full border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-[11px] font-extrabold text-cyan-700">
+            {effectiveSettings.enabled
+              ? `${leadLabel(effectiveSettings.leadMinutes)} ${t('travel.reminders.beforeEvent')}`
+              : t('travel.reminders.disabled')}
           </span>
-
-          <h2 className="truncate text-sm font-black text-slate-900">
-            {t('travel.reminders.formTitle')}
-          </h2>
         </div>
+      )}
 
-        <span className="rounded-full border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-[11px] font-extrabold text-cyan-700">
-          {effectiveSettings.enabled
-            ? `${leadLabel(effectiveSettings.leadMinutes)} ${t('travel.reminders.beforeEvent')}`
-            : t('travel.reminders.disabled')}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-[220px_minmax(0,1fr)]">
+      <div
+        className={`grid grid-cols-1 gap-2 ${
+          embedded
+            ? 'p-2 md:grid-cols-[190px_minmax(0,1fr)]'
+            : 'p-3 md:grid-cols-[220px_minmax(0,1fr)]'
+        }`}
+      >
         <ToggleField
           checked={settings.inheritBusinessDefaults}
           disabled={disabled}
@@ -403,7 +414,7 @@ export const TravelBookingReminderControls = ({
           }
         />
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[160px_minmax(0,1fr)_180px_210px]">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[145px_minmax(0,1fr)_165px_190px]">
           <ToggleField
             checked={effectiveSettings.enabled}
             disabled={controlsDisabled}
@@ -458,10 +469,6 @@ export const TravelBookingReminderControls = ({
     </section>
   );
 };
-
-/* -------------------------------------------------------------------------- */
-/*                              STATUS / ACTION UI                            */
-/* -------------------------------------------------------------------------- */
 
 const StatusPill = ({ children, tone = 'slate' }) => {
   const tones = {

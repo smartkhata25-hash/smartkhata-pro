@@ -1682,6 +1682,32 @@ exports.confirmMergeParties = async (req, res) => {
                   session,
                 },
               ),
+              TravelBooking.updateMany(
+                { userId, "bookingItems.paxPricing.vendorPartyId": sourceParty._id },
+                {
+                  $set: {
+                    "bookingItems.$[].paxPricing.$[row].vendorType": "party",
+                    "bookingItems.$[].paxPricing.$[row].vendorPartyId": targetParty._id,
+                  },
+                },
+                {
+                  arrayFilters: [{ "row.vendorPartyId": sourceParty._id }],
+                  session,
+                },
+              ),
+              TravelBooking.updateMany(
+                { userId, "vendorPayments.vendorPartyId": sourceParty._id },
+                {
+                  $set: {
+                    "vendorPayments.$[payment].vendorType": "party",
+                    "vendorPayments.$[payment].vendorPartyId": targetParty._id,
+                  },
+                },
+                {
+                  arrayFilters: [{ "payment.vendorPartyId": sourceParty._id }],
+                  session,
+                },
+              ),
               TravelRefund.updateMany(
                 { userId, customerPartyId: sourceParty._id },
                 {

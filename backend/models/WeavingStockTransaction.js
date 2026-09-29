@@ -11,7 +11,7 @@ const schema = new mongoose.Schema(
     unit: { type: String, enum: ["KG", "Meter", "Yard"], required: true },
     rate: { type: Number, min: 0, default: 0 },
     sourceEntryUnit: { type: String, enum: ["KG", "LBS", "Meter", "Yard"], default: "KG" },
-    packageType: { type: String, enum: ["", "bag", "carton"], default: "" },
+    packageType: { type: String, trim: true, lowercase: true, default: "" },
     packageQty: { type: Number, min: 0, default: 0 },
     smallCones: { type: Number, min: 0, default: 0 },
     largeCones: { type: Number, min: 0, default: 0 },

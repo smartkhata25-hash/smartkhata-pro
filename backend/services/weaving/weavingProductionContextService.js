@@ -101,8 +101,7 @@ const purchaseLineContext = async (userId, payload, line, previous = null) => {
     const itemId = payload.purchaseType === "yarn" ? line.yarnId : line.fabricQualityId;
     if (id(purchase.partyId) !== id(payload.partyId) || id(purchase.itemId) !== id(itemId)) throw fail("Supplier and Item must match the Purchase Contract");
     const unit = payload.purchaseType === "yarn" ? "KG" : line.unit || "Meter";
-    const expectedRate = id(priorPurchaseId) === id(purchaseContractId) ? previous.sourceRate ?? previous.rate : purchase.rate;
-    if (unit !== purchase.unit || (payload.purchaseType === "yarn" && line.rateBasis === "lbs" && !(id(priorPurchaseId) === id(purchaseContractId) && previous?.rateBasis === "lbs")) || !Number.isFinite(Number(line.rate)) || Math.abs(Number(line.rate) - Number(expectedRate)) > 0.000001) throw fail("Unit and Rate must match the selected Purchase Contract");
+    if (unit !== purchase.unit || !Number.isFinite(Number(line.rate))) throw fail("Unit and Rate must match the selected Purchase Contract");
   }
   let production = null;
   if (productionContractId) {

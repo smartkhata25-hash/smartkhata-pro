@@ -221,7 +221,33 @@ const assertConfirmedInvoiceIsPostable = (booking) => {
     }
   }
 
-  if (vendorPaidTotal > 0) {
+  const usesVendorPayments = Array.isArray(booking.vendorPayments);
+
+  if (usesVendorPayments) {
+    const seenKeys = new Set();
+    (booking.vendorPayments || []).forEach((payment) => {
+      const key = getVendorCostKey(payment);
+      if (!key || key.endsWith(":")) {
+        throw createHttpError(400, "Vendor is required for each vendor payment row");
+      }
+      if (seenKeys.has(key)) {
+        throw createHttpError(400, "Duplicate vendor payment row");
+      }
+      seenKeys.add(key);
+
+      if (roundMoney(payment.paidAmount) > 0) {
+        if (!payment.accountId) {
+          throw createHttpError(
+            400,
+            "Vendor payment account is required when paid amount is greater than zero",
+          );
+        }
+        if (!PAYMENT_TYPES.has(normalizePaymentType(payment.paymentType))) {
+          throw createHttpError(400, "Invalid vendor payment type");
+        }
+      }
+    });
+  } else if (vendorPaidTotal > 0) {
     if (!booking.vendorPaymentAccountId) {
       throw createHttpError(
         400,
@@ -378,6 +404,28 @@ const collectVendorCostRows = (booking) => {
       return;
     }
 
+    const rowVendorMode =
+      Array.isArray(item.paxPricing) &&
+      item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
+
+    if (rowVendorMode) {
+      item.paxPricing.forEach((row, rowIndex) => {
+        pushVendorCostRow({
+          rows,
+          vendorId: row.vendorId,
+          vendorType: row.vendorType,
+          vendorPartyId: row.vendorPartyId,
+          costAmount: row.estimatedCostBase,
+          paidAmount: 0,
+          description: `${item.title || serviceTypeLabel(item.itemType)} ${
+            row.paxType || "passenger"
+          } row ${rowIndex + 1}`,
+        });
+      });
+
+      return;
+    }
+
     pushVendorCostRow({
       rows,
       vendorId: item.vendorId,
@@ -392,10 +440,12 @@ const collectVendorCostRows = (booking) => {
   return rows;
 };
 
+const getReferenceId = (value) => value?._id || value?.id || value || "";
+
 const getVendorCostKey = (row = {}) =>
-  row.vendorType === "party"
-    ? `party:${row.vendorPartyId || ""}`
-    : `vendor:${row.vendorId || ""}`;
+  row.vendorType === "party" || row.vendorPartyId
+    ? `party:${getReferenceId(row.vendorPartyId)}`
+    : `vendor:${getReferenceId(row.vendorId)}`;
 
 const loadVendorAccounts = async ({ costRows, userId, session }) => {
   const vendorMap = new Map();
@@ -453,7 +503,34 @@ const groupVendorCosts = async ({ booking, userId, session }) => {
     grouped.set(key, current);
   });
 
-  return [...grouped.values()].filter((row) => roundMoney(row.amount) > 0);
+  const result = [...grouped.entries()]
+    .map(([key, row]) => ({ ...row, key }))
+    .filter((row) => roundMoney(row.amount) > 0);
+
+  if (Array.isArray(booking.vendorPayments)) {
+    const paymentMap = new Map(
+      booking.vendorPayments.map((payment) => [getVendorCostKey(payment), payment]),
+    );
+
+    paymentMap.forEach((payment, key) => {
+      if (!grouped.has(key)) {
+        throw createHttpError(400, "Vendor payment has no allocated vendor cost");
+      }
+    });
+
+    result.forEach((row) => {
+      const payment = paymentMap.get(row.key);
+      row.paidAmount = roundMoney(payment?.paidAmount || 0);
+      row.paymentType = payment?.paymentType || "credit";
+      row.paymentAccountId = payment?.accountId || null;
+
+      if (row.paidAmount > roundMoney(row.amount)) {
+        throw createHttpError(400, "Vendor paid amount cannot exceed allocated vendor cost");
+      }
+    });
+  }
+
+  return result;
 };
 
 const collectJournalAccountIds = (journals = []) => {
@@ -500,6 +577,15 @@ const buildAccountingSnapshot = (source = {}) =>
 
     vendorPaymentAccountId: String(source.vendorPaymentAccountId || ""),
 
+    vendorPayments: (source.vendorPayments || []).map((payment) => ({
+      vendorType: payment.vendorType || "vendor",
+      vendorId: String(payment.vendorId || ""),
+      vendorPartyId: String(payment.vendorPartyId || ""),
+      paidAmount: roundMoney(payment.paidAmount),
+      paymentType: payment.paymentType || "",
+      accountId: String(payment.accountId || ""),
+    })),
+
     items: (source.bookingItems || []).map((item) => ({
       itemType: item.itemType || "",
 
@@ -528,6 +614,18 @@ const buildAccountingSnapshot = (source = {}) =>
       vendorPaidAmount: roundMoney(item.vendorPaidAmount),
 
       estimatedVendorPaidBase: roundMoney(item.estimatedVendorPaidBase),
+
+      paxPricing: (item.paxPricing || []).map((row) => ({
+        paxType: row.paxType || "adult",
+        count: Number(row.count || 0),
+        costPrice: roundMoney(row.costPrice),
+        sellingPrice: roundMoney(row.sellingPrice),
+        vendorType: row.vendorType || "vendor",
+        vendorId: String(row.vendorId || ""),
+        vendorPartyId: String(row.vendorPartyId || ""),
+        estimatedCostBase: roundMoney(row.estimatedCostBase),
+        estimatedSellingBase: roundMoney(row.estimatedSellingBase),
+      })),
 
       components: (item.umrahDetails?.components || []).map((component) => ({
         vendorType: component.vendorType || "vendor",
@@ -798,6 +896,16 @@ const postTravelInvoiceAccounting = async ({
       ),
     );
 
+    if (
+      Array.isArray(booking.vendorPayments) &&
+      Math.abs(totalCost - roundMoney(booking.costTotal)) > 0.01
+    ) {
+      throw createHttpError(
+        400,
+        "Vendor cost allocation does not match total travel cost",
+      );
+    }
+
     const groupedPaidTotal = roundMoney(
       vendorCosts.reduce(
         (sum, vendorCost) => sum + roundMoney(vendorCost.paidAmount),
@@ -856,7 +964,9 @@ const postTravelInvoiceAccounting = async ({
     const vendorPaymentJournals = [];
 
     if (vendorPaidTotal > 0) {
-      if (!vendorPaymentAccount) {
+      const usesVendorPayments = Array.isArray(booking.vendorPayments);
+
+      if (!usesVendorPayments && !vendorPaymentAccount) {
         throw createHttpError(400, "Vendor payment account not found");
       }
 
@@ -876,6 +986,19 @@ const postTravelInvoiceAccounting = async ({
           );
         }
 
+        const paymentAccount = usesVendorPayments
+          ? await getPaymentAccountById({
+              accountId: vendorCost.paymentAccountId,
+              userId,
+              session,
+              label: "Vendor payment account",
+            })
+          : vendorPaymentAccount;
+
+        if (!paymentAccount) {
+          throw createHttpError(400, "Vendor payment account not found");
+        }
+
         const paymentJournal = await createPaymentEntry({
           userId,
 
@@ -887,13 +1010,15 @@ const postTravelInvoiceAccounting = async ({
 
           billNo: invoiceNumber,
 
-          accountId: vendorPaymentAccount._id,
+          accountId: paymentAccount._id,
 
           counterPartyAccountId: vendorCost.vendor.accountId,
 
           amount: paidAmount,
 
-          paymentType: normalizePaymentType(booking.vendorPaymentType),
+          paymentType: normalizePaymentType(
+            usesVendorPayments ? vendorCost.paymentType : booking.vendorPaymentType,
+          ),
 
           description: `Travel Vendor Payment ${invoiceNumber} - ${
             vendorCost.vendor?.name ||
@@ -1034,4 +1159,10 @@ module.exports = {
   postTravelInvoiceAccounting,
 
   recalculateTravelAccountingAccounts,
+
+  _test: {
+    buildAccountingSnapshot,
+    collectVendorCostRows,
+    getVendorCostKey,
+  },
 };

@@ -8,6 +8,7 @@ const data = (response) => response.data?.data ?? response.data;
 export const listWeavingMaster = async (kind, params = {}) => data(await axios.get(`${API_URL}/masters/${kind}`, config(params)));
 export const createWeavingMaster = async (kind, payload) => data(await axios.post(`${API_URL}/masters/${kind}`, payload, config()));
 export const updateWeavingMaster = async (kind, id, payload) => data(await axios.put(`${API_URL}/masters/${kind}/${id}`, payload, config()));
+export const updateWeavingYarnPackaging = async (id, payload) => data(await axios.patch(`${API_URL}/masters/yarn/${id}/packaging`, payload, config()));
 export const listWeavingMasterOptions = async (type = '') => data(await axios.get(`${API_URL}/master-options`, config(type ? { type } : {})));
 export const quickAddWeavingMasterOption = async (payload) => data(await axios.post(`${API_URL}/master-options`, payload, config()));
 export const listWeavingLooms = async (params = {}) => data(await axios.get(`${API_URL}/looms`, config(params)));

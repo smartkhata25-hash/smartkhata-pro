@@ -10,17 +10,11 @@ const {
   searchPurchaseInvoices,
   getItemPurchaseHistory,
   getPurchaseInvoiceFormOptions,
-  getTemporaryRecoveryAudit,
-  recoverTemporaryApprovedRecords,
 } = require("../controllers/purchaseInvoiceController");
 const upload = require("../middleware/uploadMiddleware");
 const protect = require("../middleware/authMiddleware");
 
-const { requirePermission, ownerOnly } = require("../middleware/permissionMiddleware");
-
-// TEMPORARY: recovery-candidate audit only. This route has no repair mode.
-router.get("/temporary-recovery-audit", protect, ownerOnly, getTemporaryRecoveryAudit);
-router.post("/temporary-recovery-audit/recover-approved", protect, ownerOnly, recoverTemporaryApprovedRecords);
+const { requirePermission } = require("../middleware/permissionMiddleware");
 
 // Create Purchase Invoice
 router.post(

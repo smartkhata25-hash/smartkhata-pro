@@ -282,6 +282,42 @@ const travelTopMenuConfig = [
       },
     ],
   },
+  {
+    label: 'banking',
+    module: MODULE_KEYS.TRAVEL,
+    sections: [
+      {
+        title: 'RECEIVE',
+        items: [
+          {
+            label: 'travel.payments.receiveAction',
+            path: '/travel/payments/receive',
+            anyPermissions: ['travel.bookings.view', 'travel.bookings.edit', 'travel.payments'],
+          },
+          {
+            label: 'travel.payments.receivedHistory.title',
+            path: '/travel/payments/received',
+            anyPermissions: ['travel.bookings.view', 'travel.payments'],
+          },
+        ],
+      },
+      {
+        title: 'PAY',
+        items: [
+          {
+            label: 'travel.payments.vendorActionShort',
+            path: '/travel/vendor-payments/new',
+            anyPermissions: ['travel.vendors.view', 'travel.vendors.manage', 'travel.payments'],
+          },
+          {
+            label: 'travel.payments.vendorHistory.title',
+            path: '/travel/payments/vendors',
+            anyPermissions: ['travel.vendors.view', 'travel.payments'],
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 const TopHeader = ({

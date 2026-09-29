@@ -9,7 +9,6 @@ import {
   FaMoneyBillWave,
   FaPaperclip,
   FaPlus,
-  FaReceipt,
   FaSave,
   FaTimes,
   FaTrash,
@@ -49,7 +48,6 @@ import { hasPermission } from '../../utils/permissionHelper';
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
-  TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
 import { TravelBookingReminderControls } from '../../components/travel/reminders/TravelReminderCenter';
 
@@ -109,6 +107,9 @@ import {
   calculateLocalTotals,
   calculateUmrahComponentSourceTotals,
   compactPayload,
+  deriveVendorCostGroups,
+  getVendorCounterpartyKey,
+  isRowVendorMode,
   sanitizeDraftState,
   upsertRecord,
 } from '../../components/travel/bookings/form/bookingFormUtils';
@@ -655,6 +656,8 @@ const TravelBookingFormPage = () => {
   const [reminderBusinessSettings, setReminderBusinessSettings] = useState(null);
 
   const [expandedItems, setExpandedItems] = useState({});
+  const [openRowVendorKeys, setOpenRowVendorKeys] = useState({});
+  const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
 
   const [modal, setModal] = useState(null);
   const [modalValues, setModalValues] = useState({});
@@ -686,6 +689,7 @@ const TravelBookingFormPage = () => {
           value?.customerPartyId ||
           value?.notes ||
           value?.receivedAmount ||
+          value?.vendorPayments?.some((payment) => payment?.paidAmount || payment?.accountId) ||
           value?.bookingItems?.some(
             (item) =>
               item.title ||
@@ -693,7 +697,10 @@ const TravelBookingFormPage = () => {
               item.costPrice ||
               item.sellingPrice ||
               item.vendorPaidAmount ||
-              item.vendorPartyId
+              item.vendorPartyId ||
+              item.paxPricing?.some(
+                (row) => row?.costPrice || row?.sellingPrice || row?.vendorId || row?.vendorPartyId
+              )
           )
         ),
     }
@@ -886,9 +893,37 @@ const TravelBookingFormPage = () => {
     loadBooking();
   }, [ensureReferencesLoaded, id, isEditMode]);
 
-  const totals = useMemo(
-    () => calculateLocalTotals(formState, currencySettings),
+  const vendorCostSummary = useMemo(
+    () => deriveVendorCostGroups(formState, currencySettings),
     [currencySettings, formState]
+  );
+
+  const effectiveVendorPayments = useMemo(
+    () =>
+      vendorCostSummary.groups.map((group) => {
+        const current = (formState.vendorPayments || []).find(
+          (payment) => getVendorCounterpartyKey(payment) === group.key
+        );
+
+        return {
+          vendorType: group.vendorType,
+          vendorId: group.vendorId,
+          vendorPartyId: group.vendorPartyId,
+          paidAmount: current?.paidAmount ?? '',
+          paymentType: current?.paymentType || 'cash',
+          accountId: current?.accountId || '',
+        };
+      }),
+    [formState.vendorPayments, vendorCostSummary.groups]
+  );
+
+  const totals = useMemo(
+    () =>
+      calculateLocalTotals(
+        { ...formState, vendorPayments: effectiveVendorPayments },
+        currencySettings
+      ),
+    [currencySettings, effectiveVendorPayments, formState]
   );
 
   const activeCustomers = useMemo(() => customers.filter(isRecordActive), [customers]);
@@ -897,7 +932,9 @@ const TravelBookingFormPage = () => {
 
   const customerCounterparties = useMemo(
     () => [
-      ...activeCustomers.map((customerRecord) => buildCounterpartyOption(customerRecord, 'customer')),
+      ...activeCustomers.map((customerRecord) =>
+        buildCounterpartyOption(customerRecord, 'customer')
+      ),
       ...activeParties
         .filter((party) => ['customer', 'both'].includes(party.role || 'both'))
         .map((party) => buildCounterpartyOption(party, 'party')),
@@ -925,14 +962,6 @@ const TravelBookingFormPage = () => {
         .map((party) => buildCounterpartyOption(party, 'party')),
     ],
     [activeVendors, activeParties]
-  );
-
-  const customer = useMemo(
-    () =>
-      customerCounterparties.find(
-        (item) => String(item._id) === String(getCustomerCounterpartyValue(formState))
-      ) || null,
-    [customerCounterparties, formState]
   );
 
   const modalFields = useMemo(() => {
@@ -972,6 +1001,39 @@ const TravelBookingFormPage = () => {
       ...current,
       [field]: value,
     }));
+  };
+
+  const updateVendorPayment = (vendorKey, field, value) => {
+    setFormState((current) => {
+      const existing = (current.vendorPayments || []).find(
+        (payment) => getVendorCounterpartyKey(payment) === vendorKey
+      );
+      const group = vendorCostSummary.groups.find((candidate) => candidate.key === vendorKey);
+
+      if (!group) {
+        return current;
+      }
+
+      const nextPayment = {
+        vendorType: group.vendorType,
+        vendorId: group.vendorId,
+        vendorPartyId: group.vendorPartyId,
+        paidAmount: existing?.paidAmount ?? '',
+        paymentType: existing?.paymentType || 'cash',
+        accountId: existing?.accountId || '',
+        [field]: value,
+      };
+
+      return {
+        ...current,
+        vendorPayments: [
+          ...(current.vendorPayments || []).filter(
+            (payment) => getVendorCounterpartyKey(payment) !== vendorKey
+          ),
+          nextPayment,
+        ],
+      };
+    });
   };
 
   const updateReminderSettings = (value) => {
@@ -1064,23 +1126,15 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const updatePaxPricingRow = (itemIndex, paxType, field, value) => {
+  const updatePaxPricingRow = (itemIndex, rowIndex, field, value) => {
     updateItem(itemIndex, (item) => {
       const rows = Array.isArray(item.paxPricing) ? item.paxPricing.map((row) => ({ ...row })) : [];
 
-      const rowIndex = rows.findIndex((row) => row?.paxType === paxType);
-
-      if (rowIndex === -1) {
-        rows.push({
-          ...createEmptyPaxPricingRow(paxType),
-          [field]: value,
-        });
-      } else {
-        rows[rowIndex] = {
-          ...rows[rowIndex],
-          [field]: value,
-        };
+      if (!rows[rowIndex]) {
+        return item;
       }
+
+      rows[rowIndex] = { ...rows[rowIndex], [field]: value };
 
       return {
         ...item,
@@ -1089,31 +1143,44 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const addPaxPricingRow = (itemIndex, paxType) => {
+  const addPaxPricingRow = (itemIndex, rowIndex, paxType) => {
     updateItem(itemIndex, (item) => {
       const rows = Array.isArray(item.paxPricing) ? item.paxPricing.map((row) => ({ ...row })) : [];
-
-      if (rows.some((row) => row?.paxType === paxType)) {
-        return item;
-      }
+      const insertAt = Number.isInteger(rowIndex) ? rowIndex + 1 : rows.length;
+      rows.splice(insertAt, 0, { ...createEmptyPaxPricingRow(paxType), count: 1 });
 
       return {
         ...item,
-        paxPricing: [...rows, createEmptyPaxPricingRow(paxType)],
+        paxPricing: rows,
       };
     });
   };
 
-  const removePaxPricingRow = (itemIndex, paxType) => {
-    if (paxType === 'adult') {
-      return;
-    }
+  const removePaxPricingRow = (itemIndex, rowIndex) => {
+    updateItem(itemIndex, (item) => {
+      const rows = (item.paxPricing || []).filter((_, index) => index !== rowIndex);
+      return {
+        ...item,
+        paxPricing: rows.length ? rows : [createEmptyPaxPricingRow('adult')],
+      };
+    });
+  };
 
-    updateItem(itemIndex, (item) => ({
-      ...item,
+  const updatePaxRowVendorCounterparty = (itemIndex, rowIndex, value, record) => {
+    const selection = getCounterpartySelection(value, record, 'vendor');
 
-      paxPricing: (item.paxPricing || []).filter((row) => row?.paxType !== paxType),
-    }));
+    updateItem(itemIndex, (item) => {
+      const rows = (item.paxPricing || []).map((row, index) =>
+        index === rowIndex ? applyVendorCounterpartyToItem(row, selection) : { ...row }
+      );
+      const rowModeActive = rows.some((row) => Boolean(row.vendorId || row.vendorPartyId));
+
+      return {
+        ...item,
+        ...(rowModeActive ? { vendorType: 'vendor', vendorId: '', vendorPartyId: '' } : {}),
+        paxPricing: rows,
+      };
+    });
   };
 
   const updateQuantityPricing = (itemIndex, field, value) => {
@@ -1807,29 +1874,6 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const primaryVendorId = getVendorCounterpartyValue(formState.bookingItems?.[0] || {});
-
-  const updatePrimaryVendor = (value, record) => {
-    const selection = getCounterpartySelection(value, record, 'vendor');
-
-    if ((formState.bookingItems || []).length === 0) {
-      setFormState((current) => ({
-        ...current,
-
-        bookingItems: [
-          applyVendorCounterpartyToItem(
-            createEmptyBookingItem(current.serviceType || 'service'),
-            selection
-          ),
-        ],
-      }));
-
-      return;
-    }
-
-    updateItem(0, (item) => applyVendorCounterpartyToItem(item, selection));
-  };
-
   const updateItemVendorCounterparty = (itemIndex, value, record) => {
     const selection = getCounterpartySelection(value, record, 'vendor');
 
@@ -2022,6 +2066,7 @@ const TravelBookingFormPage = () => {
     const itemIndex = modal?.context?.itemIndex;
 
     const componentIndex = modal?.context?.componentIndex;
+    const rowIndex = modal?.context?.rowIndex;
 
     if (type === 'customer') {
       setCustomers((current) => upsertRecord(current, record));
@@ -2069,7 +2114,14 @@ const TravelBookingFormPage = () => {
     if (type === 'service') {
       setServices((current) => upsertRecord(current, record));
 
-      if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
+      if (Number.isInteger(itemIndex) && Number.isInteger(rowIndex)) {
+        updatePaxRowVendorCounterparty(
+          itemIndex,
+          rowIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
+      } else if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
         updateUmrahComponent(itemIndex, componentIndex, 'serviceId', record._id);
       } else if (Number.isInteger(itemIndex)) {
         selectServiceForItem(itemIndex, record);
@@ -2222,7 +2274,8 @@ const TravelBookingFormPage = () => {
     setFormError('');
   };
 
-  const validateBooking = () => {
+  const validateBooking = (status) => {
+    const isConfirming = ['confirmed', 'processing', 'completed'].includes(status);
     if (!formState.customerId && !formState.customerPartyId) {
       return 'Customer is required.';
     }
@@ -2250,18 +2303,13 @@ const TravelBookingFormPage = () => {
 
           const componentTotals = calculateUmrahComponentSourceTotals(component);
 
-          const componentCost = numberValue(componentTotals.cost);
-
-          const paid = numberValue(component.vendorPaidAmount);
-
-          if (paid > componentCost) {
-            return `Vendor Paid Now cannot exceed cost in Umrah component ${componentIndex + 1}.`;
-          }
-
-          if (paid > 0 && !component.vendorId && !component.vendorPartyId) {
-            return `Vendor is required in Umrah component ${
-              componentIndex + 1
-            } when Vendor Paid Now is entered.`;
+          if (
+            isConfirming &&
+            numberValue(componentTotals.cost) > 0 &&
+            !component.vendorId &&
+            !component.vendorPartyId
+          ) {
+            return `Vendor is required in Umrah component ${componentIndex + 1}.`;
           }
         }
 
@@ -2269,18 +2317,6 @@ const TravelBookingFormPage = () => {
       }
 
       const calculatedItemTotals = calculateBookingItemSourceTotals(item);
-
-      const cost = numberValue(calculatedItemTotals.cost);
-
-      const paid = numberValue(item.vendorPaidAmount);
-
-      if (paid > cost) {
-        return `Vendor Paid Now cannot exceed cost in item ${index + 1}.`;
-      }
-
-      if (paid > 0 && !item.vendorId && !item.vendorPartyId) {
-        return `Vendor is required in item ${index + 1} when Vendor Paid Now is entered.`;
-      }
 
       if (
         ['air_ticket', 'visit_visa'].includes(item.itemType) ||
@@ -2309,6 +2345,30 @@ const TravelBookingFormPage = () => {
 
           return `${label} Selling Price is required in item ${index + 1}.`;
         }
+
+        if (isConfirming && isRowVendorMode(item)) {
+          const missingVendorRow = paxRows.find(
+            (row) =>
+              numberValue(row?.count) > 0 &&
+              numberValue(row?.costPrice) > 0 &&
+              !row?.vendorId &&
+              !row?.vendorPartyId
+          );
+
+          if (missingVendorRow) {
+            return `Every cost-bearing passenger row needs a vendor in item ${index + 1}.`;
+          }
+        }
+      }
+
+      if (
+        isConfirming &&
+        numberValue(calculatedItemTotals.cost) > 0 &&
+        !isRowVendorMode(item) &&
+        !item.vendorId &&
+        !item.vendorPartyId
+      ) {
+        return `Vendor is required for cost in item ${index + 1}.`;
       }
 
       if (item.itemType === 'hotel') {
@@ -2366,8 +2426,19 @@ const TravelBookingFormPage = () => {
       return 'Customer payment account is required.';
     }
 
-    if (totals.vendorPaid > 0 && !formState.vendorPaymentAccountId) {
-      return 'Vendor payment account is required.';
+    for (const payment of effectiveVendorPayments) {
+      const group = vendorCostSummary.groups.find(
+        (candidate) => candidate.key === getVendorCounterpartyKey(payment)
+      );
+      const paidAmount = numberValue(payment.paidAmount);
+
+      if (paidAmount > numberValue(group?.totalCostBase)) {
+        return "Vendor Paid Now cannot exceed that vendor's allocated cost.";
+      }
+
+      if (paidAmount > 0 && (!payment.paymentType || !payment.accountId)) {
+        return 'Payment type and account are required for each vendor payment.';
+      }
     }
 
     return '';
@@ -2398,32 +2469,50 @@ const TravelBookingFormPage = () => {
 
       vendorPaidTotal: totals.vendorPaid,
 
+      vendorPayments: effectiveVendorPayments,
+
+      vendorPaymentAccountId: undefined,
+
+      vendorPaymentType: undefined,
+
       serviceType:
         formState.bookingItems.length === 1
           ? formState.bookingItems[0]?.itemType || formState.serviceType
           : 'mixed',
 
-      bookingItems: (formState.bookingItems || []).map((item) => ({
-        ...item,
+      bookingItems: (formState.bookingItems || []).map((item) => {
+        const rowModeActive = isRowVendorMode(item);
 
-        title: item.title || getDefaultServiceTitle(item),
-
-        travelerIds:
-          item.travelerIds?.length || !['air_ticket', 'visit_visa'].includes(item.itemType)
-            ? item.travelerIds
-            : formState.travelers,
-      })),
+        return {
+          ...item,
+          ...(rowModeActive ? { vendorType: 'vendor', vendorId: '', vendorPartyId: '' } : {}),
+          vendorPaidAmount: 0,
+          estimatedVendorPaidBase: 0,
+          paxPricing: (item.paxPricing || []).map((row) => {
+            const payloadRow = { ...row };
+            delete payloadRow.uiKey;
+            return payloadRow;
+          }),
+          umrahDetails: {
+            ...(item.umrahDetails || {}),
+            components: (item.umrahDetails?.components || []).map((component) => ({
+              ...component,
+              vendorPaidAmount: 0,
+              estimatedVendorPaidBase: 0,
+            })),
+          },
+          title: item.title || getDefaultServiceTitle(item),
+          travelerIds:
+            item.travelerIds?.length || !['air_ticket', 'visit_visa'].includes(item.itemType)
+              ? item.travelerIds
+              : formState.travelers,
+        };
+      }),
     };
 
     if (numberValue(formState.receivedAmount) <= 0) {
       source.accountId = undefined;
       source.paymentType = undefined;
-    }
-
-    if (totals.vendorPaid <= 0) {
-      source.vendorPaymentAccountId = undefined;
-
-      source.vendorPaymentType = undefined;
     }
 
     const payload = compactPayload(source);
@@ -2448,7 +2537,7 @@ const TravelBookingFormPage = () => {
       return;
     }
 
-    const validationError = validateBooking();
+    const validationError = validateBooking(status);
 
     if (validationError) {
       setFormError(validationError);
@@ -3172,16 +3261,6 @@ const TravelBookingFormPage = () => {
                         }}
                       />
                     </label>
-
-                    <MoneyField
-                      labelKey="travel.booking.fields.vendorPaidAmount"
-                      value={component.vendorPaidAmount}
-                      disabled={accountingLocked}
-                      accent
-                      onChange={(value) =>
-                        updateUmrahComponent(itemIndex, componentIndex, 'vendorPaidAmount', value)
-                      }
-                    />
 
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-[10px] font-bold uppercase text-slate-400">
@@ -4186,22 +4265,26 @@ const TravelBookingFormPage = () => {
   };
 
   const renderPaxPricing = (item, itemIndex) => {
-    const rows = Array.isArray(item.paxPricing) ? item.paxPricing : [];
+    const rows =
+      Array.isArray(item.paxPricing) && item.paxPricing.length
+        ? item.paxPricing
+        : [createEmptyPaxPricingRow('adult')];
 
-    const adultRow =
-      rows.find((row) => row?.paxType === 'adult') || createEmptyPaxPricingRow('adult');
-
-    const childRow = rows.find((row) => row?.paxType === 'child');
-
-    const infantRow = rows.find((row) => row?.paxType === 'infant');
-
-    const renderPaxRow = (row, paxType) => {
+    const renderPaxRow = (row, rowIndex) => {
+      const paxType = row?.paxType || 'adult';
       const label = paxType === 'child' ? 'Child' : paxType === 'infant' ? 'Infant' : 'Adult';
+      const rowKey = row?.uiKey || `${paxType}-${rowIndex}`;
+      const showRowVendor =
+        Boolean(row?.vendorId || row?.vendorPartyId) || Boolean(openRowVendorKeys[rowKey]);
 
       return (
         <div
-          key={paxType}
-          className="grid grid-cols-[90px_minmax(70px,100px)_minmax(120px,1fr)_minmax(120px,1fr)_40px] items-end gap-2 rounded-lg border border-slate-200 bg-white p-2"
+          key={rowKey}
+          className={`relative grid items-end gap-2 rounded-lg border border-slate-200 bg-white p-2 ${
+            showRowVendor
+              ? 'grid-cols-[76px_72px_minmax(105px,0.7fr)_minmax(105px,0.7fr)_minmax(260px,1.6fr)_112px]'
+              : 'grid-cols-[76px_72px_minmax(150px,1fr)_minmax(150px,1fr)_112px]'
+          }`}
         >
           <div className="pb-2">
             <span
@@ -4227,7 +4310,7 @@ const TravelBookingFormPage = () => {
               value={row?.count ?? ''}
               disabled={accountingLocked}
               onChange={(event) =>
-                updatePaxPricingRow(itemIndex, paxType, 'count', event.target.value)
+                updatePaxPricingRow(itemIndex, rowIndex, 'count', event.target.value)
               }
               className={fieldClass}
             />
@@ -4237,39 +4320,90 @@ const TravelBookingFormPage = () => {
             labelKey="travel.booking.fields.costPrice"
             value={row?.costPrice}
             disabled={accountingLocked}
-            onChange={(value) => updatePaxPricingRow(itemIndex, paxType, 'costPrice', value)}
+            onChange={(value) => updatePaxPricingRow(itemIndex, rowIndex, 'costPrice', value)}
           />
 
           <MoneyField
             labelKey="travel.booking.fields.sellingPrice"
             value={row?.sellingPrice}
             disabled={accountingLocked}
-            onChange={(value) => updatePaxPricingRow(itemIndex, paxType, 'sellingPrice', value)}
+            onChange={(value) => updatePaxPricingRow(itemIndex, rowIndex, 'sellingPrice', value)}
           />
 
-          <div className="flex h-10 items-center justify-center">
-            {!accountingLocked && paxType !== 'adult' && (
-              <button
-                type="button"
-                onClick={() => removePaxPricingRow(itemIndex, paxType)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-xs text-rose-600 transition hover:bg-rose-100 sm:h-9 sm:w-9 sm:text-sm"
-                title={`Remove ${label}`}
-              >
-                <FaTrash aria-hidden="true" />
-              </button>
+          {showRowVendor && (
+            <div className="relative z-30 min-w-0">
+              <TravelCompactAutocomplete
+                labelKey="travel.booking.fields.vendor"
+                value={getVendorCounterpartyValue(row)}
+                records={vendorCounterparties}
+                disabled={accountingLocked}
+                getLabel={getVendorLabel}
+                getMeta={getVendorMeta}
+                placeholderKey="travel.placeholders.vendorName"
+                onChange={(value, record) =>
+                  updatePaxRowVendorCounterparty(itemIndex, rowIndex, value, record)
+                }
+                onQuickAdd={
+                  canManageVendors
+                    ? (query) => openModal('vendor', 'quick', { query, itemIndex, rowIndex })
+                    : null
+                }
+                onAddDetails={
+                  canManageVendors
+                    ? (query) => openModal('vendor', 'details', { query, itemIndex, rowIndex })
+                    : null
+                }
+              />
+            </div>
+          )}
+
+          <div className="flex h-10 items-center justify-end gap-2">
+            {!accountingLocked && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => addPaxPricingRow(itemIndex, rowIndex, paxType)}
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700 transition hover:bg-cyan-100"
+                  title="Add row"
+                  aria-label="Add row"
+                >
+                  <FaPlus aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenRowVendorKeys((current) => ({ ...current, [rowKey]: true }))
+                  }
+                  className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100 ${
+                    showRowVendor ? 'ring-1 ring-amber-200' : ''
+                  }`}
+                  title="Add vendor"
+                  aria-label="Add vendor"
+                >
+                  <FaUserTie aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => removePaxPricingRow(itemIndex, rowIndex)}
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-600 transition hover:bg-rose-100"
+                  title="Delete row"
+                  aria-label="Delete row"
+                >
+                  <FaTrash aria-hidden="true" />
+                </button>
+              </>
             )}
           </div>
         </div>
       );
     };
 
-    const sourceTotals = calculateBookingItemSourceTotals({
-      ...item,
-      paxPricing: [adultRow, ...(childRow ? [childRow] : []), ...(infantRow ? [infantRow] : [])],
-    });
+    const sourceTotals = calculateBookingItemSourceTotals({ ...item, paxPricing: rows });
 
     return (
-      <div className="mt-3 rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/60 via-white to-sky-50/50 p-3">
+      <div className="relative z-10 mt-3 overflow-visible rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/60 via-white to-sky-50/50 p-3">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-xs font-black text-slate-900">Passenger Pricing</p>
@@ -4277,39 +4411,29 @@ const TravelBookingFormPage = () => {
 
           {!accountingLocked && (
             <div className="flex flex-wrap gap-2">
-              {!childRow && (
-                <button
-                  type="button"
-                  onClick={() => addPaxPricingRow(itemIndex, 'child')}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-extrabold text-violet-700 transition hover:bg-violet-100"
-                >
-                  <FaPlus aria-hidden="true" />
-                  Child
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => addPaxPricingRow(itemIndex, null, 'child')}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-xs font-extrabold text-violet-700 transition hover:bg-violet-100"
+              >
+                <FaPlus aria-hidden="true" />
+                Child
+              </button>
 
-              {!infantRow && (
-                <button
-                  type="button"
-                  onClick={() => addPaxPricingRow(itemIndex, 'infant')}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-xs font-extrabold text-amber-700 transition hover:bg-amber-100"
-                >
-                  <FaPlus aria-hidden="true" />
-                  Infant
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => addPaxPricingRow(itemIndex, null, 'infant')}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-xs font-extrabold text-amber-700 transition hover:bg-amber-100"
+              >
+                <FaPlus aria-hidden="true" />
+                Infant
+              </button>
             </div>
           )}
         </div>
 
-        <div className="space-y-2 overflow-x-auto">
-          <div className="min-w-[600px] space-y-2">
-            {renderPaxRow(adultRow, 'adult')}
-
-            {childRow && renderPaxRow(childRow, 'child')}
-
-            {infantRow && renderPaxRow(infantRow, 'infant')}
-          </div>
+        <div className="relative overflow-visible">
+          <div className="min-w-[760px] space-y-2 overflow-visible">{rows.map(renderPaxRow)}</div>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -4328,14 +4452,6 @@ const TravelBookingFormPage = () => {
               }}
             />
           </label>
-
-          <MoneyField
-            labelKey="travel.booking.fields.vendorPaidAmount"
-            value={item.vendorPaidAmount}
-            disabled={accountingLocked}
-            accent
-            onChange={(value) => updateItemField(itemIndex, 'vendorPaidAmount', value)}
-          />
 
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
@@ -4585,14 +4701,6 @@ const TravelBookingFormPage = () => {
             />
           </label>
 
-          <MoneyField
-            labelKey="travel.booking.fields.vendorPaidAmount"
-            value={item.vendorPaidAmount}
-            disabled={accountingLocked}
-            accent
-            onChange={(value) => updateItemField(itemIndex, 'vendorPaidAmount', value)}
-          />
-
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-extrabold uppercase text-slate-400">Total Cost</p>
@@ -4674,14 +4782,6 @@ const TravelBookingFormPage = () => {
           />
         </label>
 
-        <MoneyField
-          labelKey="travel.booking.fields.vendorPaidAmount"
-          value={item.vendorPaidAmount}
-          disabled={accountingLocked}
-          accent
-          onChange={(value) => updateItemField(itemIndex, 'vendorPaidAmount', value)}
-        />
-
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
             <p className="text-[10px] font-extrabold uppercase text-slate-400">Total Cost</p>
@@ -4707,6 +4807,7 @@ const TravelBookingFormPage = () => {
     const useComponents =
       item.itemType === 'umrah_package' &&
       item.umrahDetails?.packageMode === 'custom_component_package';
+    const rowVendorsActive = !useComponents && isRowVendorMode(item);
 
     return (
       <div
@@ -4807,34 +4908,31 @@ const TravelBookingFormPage = () => {
             />
 
             {!useComponents && (
-              <TravelCompactAutocomplete
-                labelKey="travel.booking.fields.vendor"
-                value={getVendorCounterpartyValue(item)}
-                records={vendorCounterparties}
-                disabled={accountingLocked}
-                getLabel={getVendorLabel}
-                getMeta={getVendorMeta}
-                placeholderKey="travel.placeholders.vendorName"
-                onChange={(value, record) => updateItemVendorCounterparty(index, value, record)}
-                onQuickAdd={
-                  canManageVendors
-                    ? (query) =>
-                        openModal('vendor', 'quick', {
-                          query,
-                          itemIndex: index,
-                        })
-                    : null
-                }
-                onAddDetails={
-                  canManageVendors
-                    ? (query) =>
-                        openModal('vendor', 'details', {
-                          query,
-                          itemIndex: index,
-                        })
-                    : null
-                }
-              />
+              <div>
+                <TravelCompactAutocomplete
+                  labelKey="travel.booking.fields.vendor"
+                  value={getVendorCounterpartyValue(item)}
+                  records={vendorCounterparties}
+                  disabled={accountingLocked || rowVendorsActive}
+                  getLabel={getVendorLabel}
+                  getMeta={getVendorMeta}
+                  placeholderKey="travel.placeholders.vendorName"
+                  onChange={(value, record) => updateItemVendorCounterparty(index, value, record)}
+                  onQuickAdd={
+                    canManageVendors && !rowVendorsActive
+                      ? (query) => openModal('vendor', 'quick', { query, itemIndex: index })
+                      : null
+                  }
+                  onAddDetails={
+                    canManageVendors && !rowVendorsActive
+                      ? (query) => openModal('vendor', 'details', { query, itemIndex: index })
+                      : null
+                  }
+                />
+                {rowVendorsActive && (
+                  <p className="mt-1 text-[11px] font-bold text-amber-700">Row vendors active</p>
+                )}
+              </div>
             )}
           </div>
 
@@ -4869,36 +4967,10 @@ const TravelBookingFormPage = () => {
 
   const showCustomerPayment = numberValue(formState.receivedAmount) > 0;
 
-  const showVendorPayment = totals.vendorPaid > 0;
-
   const canSubmitFinal = !saving && !loading && (!isEditMode || !accountingLocked);
 
   return (
-    <TravelMasterPageFrame
-      titleKey={isEditMode ? 'travel.booking.form.editTitle' : 'travel.booking.form.newTitle'}
-      actions={
-        <div className="flex flex-wrap gap-2">
-          {!isEditMode && (
-            <TravelActionButton
-              icon={FaTrash}
-              variant="secondary"
-              onClick={handleClearDraft}
-              disabled={loading || saving}
-            >
-              {t('travel.booking.actions.clearDraft')}
-            </TravelActionButton>
-          )}
-
-          <TravelActionButton
-            icon={FaTimes}
-            variant="secondary"
-            onClick={() => navigate('/travel/bookings')}
-          >
-            {t('travel.common.cancel')}
-          </TravelActionButton>
-        </div>
-      }
-    >
+    <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
       {formError && (
         <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-3 text-sm font-bold text-rose-700 shadow-sm">
           {formError}
@@ -4913,20 +4985,32 @@ const TravelBookingFormPage = () => {
 
       <div className="space-y-4">
         <section className={sectionClasses}>
-          <SectionHeader icon={FaReceipt} title="Invoice Information" tone="cyan" />
+          <div className="flex flex-col gap-2 border-b border-violet-100 bg-gradient-to-r from-violet-50 via-white to-indigo-50 px-3 py-2.5 sm:px-4 xl:flex-row xl:items-end xl:justify-between">
+            {/* LEFT SIDE: Invoice + Date + Customer */}
+            <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+              <div className="flex h-10 flex-shrink-0 items-center gap-2 pr-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-violet-700 shadow-sm ring-1 ring-black/5">
+                  <FaClipboardList aria-hidden="true" />
+                </span>
 
-          <div className={sectionBodyClasses}>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[160px_minmax(220px,1fr)_minmax(220px,1fr)_180px]">
-              <TextField
-                labelKey="travel.booking.fields.invoiceDate"
-                type="date"
-                value={formState.invoiceDate}
-                disabled={accountingLocked}
-                onChange={(value) => updateRoot('invoiceDate', value)}
-              />
+                <h2 className="whitespace-nowrap text-sm font-black text-slate-900">
+                  {isEditMode ? 'Edit Invoice' : 'New Invoice'}
+                </h2>
+              </div>
+
+              <div className="w-[155px] flex-shrink-0">
+                <input
+                  type="date"
+                  value={formState.invoiceDate || ''}
+                  disabled={accountingLocked}
+                  onChange={(event) => updateRoot('invoiceDate', event.target.value)}
+                  aria-label="Invoice Date"
+                  className={fieldClass}
+                />
+              </div>
 
               <TravelCompactAutocomplete
-                labelKey="travel.booking.fields.customer"
+                className="min-w-[260px] flex-1 xl:max-w-[520px]"
                 value={getCustomerCounterpartyValue(formState)}
                 records={customerCounterparties}
                 disabled={accountingLocked}
@@ -4947,69 +5031,11 @@ const TravelBookingFormPage = () => {
                 onQuickAdd={(query) => openModal('customer', 'quick', { query })}
                 onAddDetails={(query) => openModal('customer', 'details', { query })}
               />
-
-              <TravelCompactAutocomplete
-                labelKey="travel.booking.fields.vendor"
-                value={primaryVendorId}
-                records={vendorCounterparties}
-                disabled={accountingLocked}
-                getLabel={getVendorLabel}
-                getMeta={getVendorMeta}
-                placeholderKey="travel.placeholders.vendorName"
-                onChange={updatePrimaryVendor}
-                onQuickAdd={
-                  canManageVendors
-                    ? (query) =>
-                        openModal('vendor', 'quick', {
-                          query,
-                          itemIndex: 0,
-                        })
-                    : null
-                }
-                onAddDetails={
-                  canManageVendors
-                    ? (query) =>
-                        openModal('vendor', 'details', {
-                          query,
-                          itemIndex: 0,
-                        })
-                    : null
-                }
-              />
-
-              <div className="rounded-lg border border-blue-100 bg-gradient-to-br from-blue-50 to-cyan-50 px-3 py-2">
-                <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-400">
-                  {t('travel.booking.fields.invoiceNumber')}
-                </p>
-
-                <p className="mt-1 truncate text-sm font-black text-slate-900">
-                  {formState.invoiceNumber || t('travel.booking.invoice.autoOnConfirm')}
-                </p>
-              </div>
             </div>
 
-            {customer && (
-              <p className="mt-2 text-xs font-semibold text-slate-500">
-                {getCustomerMeta(customer) || t('travel.common.noneSelected')}
-              </p>
-            )}
-          </div>
-        </section>
-
-        <TravelBookingReminderControls
-          value={formState.reminderSettings}
-          businessSettings={reminderBusinessSettings}
-          disabled={accountingLocked}
-          onChange={updateReminderSettings}
-        />
-
-        <section className={sectionClasses}>
-          <SectionHeader
-            icon={FaClipboardList}
-            title={t('travel.booking.sections.invoiceItems')}
-            tone="violet"
-            action={
-              !accountingLocked ? (
+            {/* RIGHT SIDE: Actions */}
+            <div className="flex flex-shrink-0 flex-wrap items-end gap-2">
+              {!accountingLocked && (
                 <button
                   type="button"
                   onClick={() => addBookingItem('service')}
@@ -5018,21 +5044,42 @@ const TravelBookingFormPage = () => {
                   <FaPlus aria-hidden="true" />
                   {t('travel.booking.actions.addService')}
                 </button>
-              ) : null
-            }
-          />
+              )}
+
+              {!isEditMode && (
+                <TravelActionButton
+                  icon={FaTrash}
+                  variant="secondary"
+                  onClick={handleClearDraft}
+                  disabled={loading || saving}
+                >
+                  {t('travel.booking.actions.clearDraft')}
+                </TravelActionButton>
+              )}
+
+              <TravelActionButton
+                icon={FaTimes}
+                variant="secondary"
+                onClick={() => navigate('/travel/bookings')}
+              >
+                {t('travel.common.cancel')}
+              </TravelActionButton>
+            </div>
+          </div>
 
           <div className={`${sectionBodyClasses} space-y-3`}>
             {(formState.bookingItems || []).map(renderInvoiceRow)}
           </div>
         </section>
 
-        <section className={sectionClasses}>
-          <SectionHeader icon={FaMoneyBillWave} title="Payments & Totals" tone="emerald" />
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+          {/* LEFT SIDE — PAYMENTS ONLY */}
+          <div className="overflow-hidden rounded-xl border border-emerald-100 bg-white shadow-sm">
+            <SectionHeader icon={FaMoneyBillWave} title="Payments & Totals" tone="emerald" />
 
-          <div className={sectionBodyClasses}>
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <div className={sectionBodyClasses}>
               <div className="space-y-4">
+                {/* CUSTOMER RECEIPT */}
                 <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60 p-3">
                   <div className="mb-3 flex items-center gap-2">
                     <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
@@ -5067,9 +5114,7 @@ const TravelBookingFormPage = () => {
                         className={selectClass}
                       >
                         <option value="cash">{t('payment.cash')}</option>
-
                         <option value="online">{t('payment.online')}</option>
-
                         <option value="cheque">{t('payment.cheque')}</option>
                       </select>
                     </label>
@@ -5095,22 +5140,11 @@ const TravelBookingFormPage = () => {
                   </div>
                 </div>
 
-                <div
-                  className={`rounded-xl border p-3 transition ${
-                    showVendorPayment
-                      ? 'border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50'
-                      : 'border-slate-200 bg-slate-50/70'
-                  }`}
-                >
+                {/* VENDOR PAYMENT */}
+                <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-3">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-white shadow-sm ${
-                          showVendorPayment
-                            ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                            : 'bg-slate-400'
-                        }`}
-                      >
+                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-sm">
                         <FaUserTie aria-hidden="true" />
                       </span>
 
@@ -5124,239 +5158,343 @@ const TravelBookingFormPage = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <label>
-                      <FieldLabel>Vendor Payment Type</FieldLabel>
+                  {vendorCostSummary.hasUnassignedCost && (
+                    <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+                      Unassigned vendor cost:{' '}
+                      {formatMoney(vendorCostSummary.unassignedCostBase, baseCurrency)}
+                    </div>
+                  )}
 
-                      <select
-                        value={formState.vendorPaymentType || 'cash'}
-                        disabled={accountingLocked || !showVendorPayment}
-                        onChange={(event) => updateRoot('vendorPaymentType', event.target.value)}
-                        className={selectClass}
-                      >
-                        <option value="cash">{t('payment.cash')}</option>
+                  <div className="space-y-2">
+                    {vendorCostSummary.groups.map((group) => {
+                      const payment = effectiveVendorPayments.find(
+                        (candidate) => getVendorCounterpartyKey(candidate) === group.key
+                      );
 
-                        <option value="online">{t('payment.online')}</option>
+                      const paidAmount = numberValue(payment?.paidAmount);
 
-                        <option value="cheque">{t('payment.cheque')}</option>
-                      </select>
-                    </label>
+                      const remaining = Math.max(numberValue(group.totalCostBase) - paidAmount, 0);
 
-                    <label>
-                      <FieldLabel>Vendor Payment Account</FieldLabel>
+                      const vendorRecord = vendorCounterparties.find(
+                        (record) => String(record._id) === group.key
+                      );
 
-                      <select
-                        value={formState.vendorPaymentAccountId || ''}
-                        disabled={accountingLocked || !showVendorPayment}
-                        onChange={(event) =>
-                          updateRoot('vendorPaymentAccountId', event.target.value)
-                        }
-                        className={selectClass}
-                      >
-                        <option value="">{t('travel.booking.placeholders.paymentAccount')}</option>
+                      return (
+                        <div
+                          key={group.key}
+                          className="rounded-lg border border-amber-100 bg-white p-2"
+                        >
+                          <div className="grid grid-cols-[minmax(150px,1fr)_130px_130px_130px] items-end gap-2 overflow-x-auto">
+                            <div className="min-w-[150px] pb-2">
+                              <p className="truncate text-xs font-black text-slate-900">
+                                {vendorRecord ? getVendorLabel(vendorRecord) : group.key}
+                              </p>
 
-                        {paymentAccounts.map((account) => (
-                          <option key={account._id} value={account._id}>
-                            {[account.name, account.code].filter(Boolean).join(' - ')}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              </div>
+                              <p className="text-[10px] font-bold text-slate-500">
+                                Cost {formatMoney(group.totalCostBase, baseCurrency)} · Remaining{' '}
+                                {formatMoney(remaining, baseCurrency)}
+                              </p>
+                            </div>
 
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 p-3 shadow-sm">
-                <div className="mb-3 flex items-center gap-2">
-                  <FaUniversity className="text-cyan-600" />
-                  <p className="text-sm font-black text-slate-900">Invoice Summary</p>
-                </div>
+                            <MoneyField
+                              labelKey="travel.booking.fields.vendorPaidAmount"
+                              value={payment?.paidAmount ?? ''}
+                              disabled={accountingLocked}
+                              accent
+                              onChange={(value) =>
+                                updateVendorPayment(group.key, 'paidAmount', value)
+                              }
+                            />
 
-                <div className="grid grid-cols-2 gap-2">
-                  <MiniTotal
-                    labelKey="travel.booking.fields.grossSale"
-                    value={formatMoney(totals.selling, baseCurrency)}
-                    icon={FaFileInvoiceDollar}
-                  />
+                            {paidAmount > 0 && (
+                              <label>
+                                <FieldLabel>Payment Type</FieldLabel>
 
-                  <MiniTotal
-                    labelKey="travel.booking.fields.netSale"
-                    value={formatMoney(totals.net, baseCurrency)}
-                    accent="text-blue-700"
-                    icon={FaCoins}
-                  />
+                                <select
+                                  value={payment?.paymentType || 'cash'}
+                                  disabled={accountingLocked}
+                                  onChange={(event) =>
+                                    updateVendorPayment(
+                                      group.key,
+                                      'paymentType',
+                                      event.target.value
+                                    )
+                                  }
+                                  className={selectClass}
+                                >
+                                  <option value="cash">{t('payment.cash')}</option>
+                                  <option value="online">{t('payment.online')}</option>
+                                  <option value="cheque">{t('payment.cheque')}</option>
+                                </select>
+                              </label>
+                            )}
 
-                  <MiniTotal
-                    labelKey="travel.booking.fields.customerDue"
-                    value={formatMoney(totals.due, baseCurrency)}
-                    accent="text-rose-700"
-                    icon={FaWallet}
-                  />
+                            {paidAmount > 0 && (
+                              <label>
+                                <FieldLabel>Payment Account</FieldLabel>
 
-                  <MiniTotal
-                    labelKey="travel.booking.fields.estimatedCostBase"
-                    value={formatMoney(totals.cost, baseCurrency)}
-                    icon={FaCoins}
-                  />
+                                <select
+                                  value={payment?.accountId || ''}
+                                  disabled={accountingLocked}
+                                  onChange={(event) =>
+                                    updateVendorPayment(group.key, 'accountId', event.target.value)
+                                  }
+                                  className={selectClass}
+                                >
+                                  <option value="">
+                                    {t('travel.booking.placeholders.paymentAccount')}
+                                  </option>
 
-                  <MiniTotal
-                    labelKey="travel.booking.fields.vendorPaidAmount"
-                    value={formatMoney(totals.vendorPaid, baseCurrency)}
-                    accent="text-amber-700"
-                    icon={FaMoneyBillWave}
-                  />
+                                  {paymentAccounts.map((account) => (
+                                    <option key={account._id} value={account._id}>
+                                      {[account.name, account.code].filter(Boolean).join(' - ')}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
 
-                  <MiniTotal
-                    labelKey="travel.booking.fields.vendorPayable"
-                    value={formatMoney(totals.vendorPayable, baseCurrency)}
-                    accent="text-orange-700"
-                    icon={FaUserTie}
-                  />
-
-                  <div className="col-span-2">
-                    <MiniTotal
-                      labelKey="travel.booking.fields.estimatedProfit"
-                      value={formatMoney(totals.profit, baseCurrency)}
-                      accent={totals.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}
-                      icon={FaFileInvoiceDollar}
-                    />
+                    {!vendorCostSummary.groups.length && !vendorCostSummary.hasUnassignedCost && (
+                      <p className="text-xs font-semibold text-slate-500">No vendor costs yet.</p>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </section>
 
-        <section className={sectionClasses}>
-          <SectionHeader icon={FaPaperclip} title="Notes & Attachments" tone="amber" />
+          {/* RIGHT SIDE — SUMMARY + ACTION BUTTONS */}
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 p-3 shadow-sm">
+              <div className="mb-3 flex items-center gap-2">
+                <FaUniversity className="text-cyan-600" />
 
-          <div className={sectionBodyClasses}>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="block">
-                  <FieldLabel>{t('travel.fields.notes')}</FieldLabel>
-
-                  <textarea
-                    value={formState.notes || ''}
-                    onChange={(event) => updateRoot('notes', event.target.value)}
-                    rows={3}
-                    className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-
-                <label className="block">
-                  <FieldLabel>{t('travel.booking.fields.internalNotes')}</FieldLabel>
-
-                  <textarea
-                    value={formState.internalNotes || ''}
-                    onChange={(event) => updateRoot('internalNotes', event.target.value)}
-                    rows={3}
-                    className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
+                <p className="text-sm font-black text-slate-900">Invoice Summary</p>
               </div>
 
-              <div className="rounded-xl border border-dashed border-cyan-200 bg-gradient-to-br from-cyan-50/60 to-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-extrabold text-slate-600">
-                    {t('travel.booking.fields.attachments')}
-                  </p>
+              <div className="grid grid-cols-2 gap-2">
+                <MiniTotal
+                  labelKey="travel.booking.fields.grossSale"
+                  value={formatMoney(totals.selling, baseCurrency)}
+                  icon={FaFileInvoiceDollar}
+                />
 
-                  <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 px-3 text-xs font-extrabold text-white shadow-sm transition hover:-translate-y-0.5">
-                    <FaPaperclip aria-hidden="true" />
+                <MiniTotal
+                  labelKey="travel.booking.fields.netSale"
+                  value={formatMoney(totals.net, baseCurrency)}
+                  accent="text-blue-700"
+                  icon={FaCoins}
+                />
 
-                    <span>{t('travel.booking.actions.attachFiles')}</span>
+                <MiniTotal
+                  labelKey="travel.booking.fields.customerDue"
+                  value={formatMoney(totals.due, baseCurrency)}
+                  accent="text-rose-700"
+                  icon={FaWallet}
+                />
 
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,.pdf"
-                      className="hidden"
-                      disabled={attachments.length >= MAX_ATTACHMENTS}
-                      onChange={handleAttachmentChange}
-                    />
-                  </label>
+                <MiniTotal
+                  labelKey="travel.booking.fields.estimatedCostBase"
+                  value={formatMoney(totals.cost, baseCurrency)}
+                  icon={FaCoins}
+                />
+
+                <MiniTotal
+                  labelKey="travel.booking.fields.vendorPaidAmount"
+                  value={formatMoney(totals.vendorPaid, baseCurrency)}
+                  accent="text-amber-700"
+                  icon={FaMoneyBillWave}
+                />
+
+                <MiniTotal
+                  labelKey="travel.booking.fields.vendorPayable"
+                  value={formatMoney(totals.vendorPayable, baseCurrency)}
+                  accent="text-orange-700"
+                  icon={FaUserTie}
+                />
+
+                <div className="col-span-2">
+                  <MiniTotal
+                    labelKey="travel.booking.fields.estimatedProfit"
+                    value={formatMoney(totals.profit, baseCurrency)}
+                    accent={totals.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}
+                    icon={FaFileInvoiceDollar}
+                  />
                 </div>
+              </div>
+            </div>
 
-                <div className="space-y-2">
+            {/* ACTION BUTTONS UNDER INVOICE SUMMARY */}
+            <div className="flex flex-wrap justify-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              {!accountingLocked && (
+                <>
+                  <TravelActionButton
+                    icon={FaSave}
+                    variant="secondary"
+                    disabled={saving || loading}
+                    onClick={() => submitBooking('draft')}
+                  >
+                    {t('travel.booking.actions.saveDraft')}
+                  </TravelActionButton>
+
+                  <TravelActionButton
+                    icon={FaClipboardList}
+                    variant="soft"
+                    disabled={saving || loading}
+                    onClick={() => submitBooking('quotation')}
+                  >
+                    {t('travel.booking.actions.saveQuotation')}
+                  </TravelActionButton>
+
+                  <TravelActionButton
+                    icon={FaFileInvoiceDollar}
+                    variant="success"
+                    disabled={saving || loading || !canSubmitFinal}
+                    onClick={() => submitBooking('confirmed')}
+                  >
+                    {saving
+                      ? t('travel.common.saving')
+                      : t('travel.booking.actions.confirmInvoice')}
+                  </TravelActionButton>
+                </>
+              )}
+
+              {accountingLocked && (
+                <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
+                  <FaSave aria-hidden="true" />
+                  Accounting Posted
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="overflow-visible rounded-xl border border-cyan-100 bg-white shadow-sm">
+          {/* COMPACT MAIN ROW */}
+          <div className="flex flex-wrap items-center gap-2 bg-gradient-to-r from-cyan-50 via-white to-sky-50 px-3 py-2.5">
+            {/* Reminder title */}
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-cyan-700 shadow-sm ring-1 ring-black/5">
+                <span className="text-base">🔔</span>
+              </span>
+
+              <span className="text-sm font-black text-slate-900">Reminder</span>
+            </div>
+
+            {/* Small Notes field */}
+            <div className="min-w-[220px] flex-1">
+              <input
+                type="text"
+                value={formState.notes || ''}
+                disabled={accountingLocked}
+                onChange={(event) => updateRoot('notes', event.target.value)}
+                placeholder="Notes"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-50"
+              />
+            </div>
+
+            {/* Attachment icon only */}
+            <label
+              className={`relative inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-cyan-200 bg-white text-cyan-700 shadow-sm transition hover:bg-cyan-50 ${
+                attachments.length >= MAX_ATTACHMENTS
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'cursor-pointer'
+              }`}
+              title="Attach files"
+            >
+              <FaPaperclip aria-hidden="true" />
+
+              {attachments.length > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 min-w-[18px] rounded-full bg-cyan-600 px-1 text-center text-[10px] font-black text-white">
+                  {attachments.length}
+                </span>
+              )}
+
+              <input
+                type="file"
+                multiple
+                accept="image/*,.pdf"
+                className="hidden"
+                disabled={accountingLocked || attachments.length >= MAX_ATTACHMENTS}
+                onChange={handleAttachmentChange}
+              />
+            </label>
+
+            {/* Current reminder status */}
+            <span className="hidden rounded-full border border-cyan-100 bg-white px-2.5 py-1 text-[11px] font-extrabold text-cyan-700 sm:inline-flex">
+              {formState.reminderSettings?.enabled === false
+                ? 'Disabled'
+                : `${Number(formState.reminderSettings?.leadMinutes || 1440) / 60}h before`}
+            </span>
+
+            {/* Expand / Collapse */}
+            <button
+              type="button"
+              onClick={() => setReminderPanelOpen((current) => !current)}
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700"
+              title={reminderPanelOpen ? 'Hide reminder settings' : 'Show reminder settings'}
+              aria-label={reminderPanelOpen ? 'Hide reminder settings' : 'Show reminder settings'}
+            >
+              {reminderPanelOpen ? (
+                <FaChevronUp aria-hidden="true" />
+              ) : (
+                <FaChevronDown aria-hidden="true" />
+              )}
+            </button>
+          </div>
+
+          {/* EXPANDED AREA */}
+          {reminderPanelOpen && (
+            <div className="border-t border-cyan-100 bg-white p-2">
+              <TravelBookingReminderControls
+                value={formState.reminderSettings}
+                businessSettings={reminderBusinessSettings}
+                disabled={accountingLocked}
+                onChange={updateReminderSettings}
+                embedded
+              />
+
+              {/* Attached files only when expanded */}
+              {attachments.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2 border-t border-slate-100 pt-2">
                   {attachments.map((attachment, index) => (
                     <div
                       key={attachment.key || `${attachment.name}-${index}`}
-                      className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm"
+                      className="flex max-w-[280px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5"
                     >
                       {attachment.url ? (
                         <a
                           href={attachment.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="min-w-0 truncate text-sm font-bold text-cyan-700 hover:text-cyan-900"
+                          className="min-w-0 truncate text-xs font-bold text-cyan-700"
                         >
                           {attachment.originalName || attachment.name || attachment.key}
                         </a>
                       ) : (
-                        <span className="min-w-0 truncate text-sm font-bold text-slate-700">
+                        <span className="min-w-0 truncate text-xs font-bold text-slate-700">
                           {attachment.name}
                         </span>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(index)}
-                        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-rose-600 transition hover:bg-rose-50"
-                        title={t('travel.booking.actions.removeAttachment')}
-                      >
-                        <FaTimes aria-hidden="true" />
-                      </button>
+                      {!accountingLocked && (
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(index)}
+                          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50"
+                          title={t('travel.booking.actions.removeAttachment')}
+                        >
+                          <FaTimes aria-hidden="true" />
+                        </button>
+                      )}
                     </div>
                   ))}
-
-                  {attachments.length === 0 && (
-                    <p className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-center text-sm font-semibold text-slate-500">
-                      {t('travel.booking.empty.attachments')}
-                    </p>
-                  )}
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="sticky bottom-0 z-20 flex flex-wrap justify-end gap-2 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.10)] backdrop-blur">
-          {!accountingLocked && (
-            <>
-              <TravelActionButton
-                icon={FaSave}
-                variant="secondary"
-                disabled={saving || loading}
-                onClick={() => submitBooking('draft')}
-              >
-                {t('travel.booking.actions.saveDraft')}
-              </TravelActionButton>
-
-              <TravelActionButton
-                icon={FaClipboardList}
-                variant="soft"
-                disabled={saving || loading}
-                onClick={() => submitBooking('quotation')}
-              >
-                {t('travel.booking.actions.saveQuotation')}
-              </TravelActionButton>
-
-              <TravelActionButton
-                icon={FaFileInvoiceDollar}
-                variant="success"
-                disabled={saving || loading || !canSubmitFinal}
-                onClick={() => submitBooking('confirmed')}
-              >
-                {saving ? t('travel.common.saving') : t('travel.booking.actions.confirmInvoice')}
-              </TravelActionButton>
-            </>
-          )}
-
-          {accountingLocked && (
-            <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
-              <FaSave aria-hidden="true" />
-              Accounting Posted
+              )}
             </div>
           )}
         </section>
@@ -5374,7 +5512,7 @@ const TravelBookingFormPage = () => {
         onSubmit={submitModal}
         onQuickAddCategory={(query) => openModal('category', 'quick', { query })}
       />
-    </TravelMasterPageFrame>
+    </div>
   );
 };
 

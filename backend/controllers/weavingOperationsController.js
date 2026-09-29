@@ -2,6 +2,7 @@ const { attachLoomRuns, contractProgress, assertContractIdentityEdit } = require
 const mongoose = require("mongoose");
 
 const WeavingContract = require("../models/WeavingContract");
+const Counter = require("../models/Counter");
 const WeavingFabricQuality = require("../models/WeavingFabricQuality");
 const WeavingGodown = require("../models/WeavingGodown");
 const WeavingLoom = require("../models/WeavingLoom");
@@ -40,6 +41,17 @@ const required = (value, label) => {
   }
   return result;
 };
+const packagingProfiles = (body = {}) => {
+  const source = Array.isArray(body.packagingProfiles) && body.packagingProfiles.length ? body.packagingProfiles : [{ packageType: body.defaultPackageType || "bag", packageWeight: body.packageWeight ?? 100, largeConesPerPackage: body.largeConesPerPackage ?? 24, smallConesPerPackage: body.smallConesPerPackage ?? 40 }];
+  const profiles = [], seen = new Set();
+  source.forEach((profile) => {
+    const packageType = clean(profile.packageType).toLowerCase();
+    if (!packageType || seen.has(packageType)) return;
+    seen.add(packageType);
+    profiles.push({ packageType, packageWeight: number(profile.packageWeight ?? 100, "Package weight"), largeConesPerPackage: number(profile.largeConesPerPackage ?? 24, "Large cones per package"), smallConesPerPackage: number(profile.smallConesPerPackage ?? 40, "Small cones per package") });
+  });
+  return profiles.length ? profiles : [{ packageType: "bag", packageWeight: 100, largeConesPerPackage: 24, smallConesPerPackage: 40 }];
+};
 const canonicalQuantity = (row, unit) => {
   if (unit !== "KG") return number(row.quantity, "Opening stock");
   const enteredUnit = row.sourceEntryUnit === "LBS" ? "LBS" : "KG";
@@ -71,7 +83,7 @@ const reconcileOpening = async ({ ownerId, itemType, itemId, unit, rate, rows = 
       godownId: row.godownId,
       quantity: canonicalQuantity(row, unit),
       sourceEntryUnit: unit === "KG" && row.sourceEntryUnit === "LBS" ? "LBS" : unit,
-      packageType: itemType === "yarn" && ["bag", "carton"].includes(row.packageType) ? row.packageType : "",
+      packageType: itemType === "yarn" ? clean(row.packageType).toLowerCase() : "",
       packageQty: itemType === "yarn" ? number(row.packageQty, "Package quantity") : 0,
       smallCones: itemType === "yarn" ? number(row.smallCones, "Small cones") : 0,
       largeCones: itemType === "yarn" ? number(row.largeCones, "Large cones") : 0,
@@ -116,15 +128,22 @@ const masterConfig = {
     Model: WeavingYarn,
     itemType: "yarn",
     label: "Yarn",
-    payload: (body) => ({
+    payload: (body) => {
+      const profiles = packagingProfiles(body);
+      const defaultProfile = profiles.find((profile) => profile.packageType === (clean(body.defaultPackageType).toLowerCase() || "bag")) || profiles[0];
+      return {
       name: required(body.name, "Yarn Name"), count: required(body.count, "Count"),
       quality: clean(body.quality), millBrand: clean(body.millBrand), lotReference: clean(body.lotReference), stockUnit: "KG",
       openingRate: number(body.openingRate, "Opening rate"), notes: clean(body.notes),
-      defaultPackageType: ["bag", "carton"].includes(body.defaultPackageType) ? body.defaultPackageType : "",
-      largeConesPerPackage: number(body.largeConesPerPackage, "Large cones per package"),
-      smallConesPerPackage: number(body.smallConesPerPackage, "Small cones per package"),
+      defaultPackageType: defaultProfile.packageType,
+      packagingProfiles: profiles,
+      packageWeight: defaultProfile.packageWeight,
+      packageWeightUnit: "LBS",
+      largeConesPerPackage: defaultProfile.largeConesPerPackage,
+      smallConesPerPackage: defaultProfile.smallConesPerPackage,
       isActive: body.isActive !== false,
-    }),
+      };
+    },
     unit: () => "KG",
   },
   fabric: {
@@ -178,6 +197,15 @@ const saveMaster = async (req, res, editing) => {
 };
 exports.createMaster = async (req, res) => { try { return await saveMaster(req, res, false); } catch (error) { return fail(res, error, "Failed to create master record"); } };
 exports.updateMaster = async (req, res) => { try { return await saveMaster(req, res, true); } catch (error) { return fail(res, error, "Failed to update master record"); } };
+exports.updateYarnPackaging = async (req, res) => {
+  try {
+    const profiles = packagingProfiles(req.body);
+    const defaultProfile = profiles.find((profile) => profile.packageType === (clean(req.body.defaultPackageType).toLowerCase() || "bag")) || profiles[0];
+    const record = await WeavingYarn.findOneAndUpdate({ _id: req.params.id, userId: userId(req) }, { $set: { packagingProfiles: profiles, defaultPackageType: defaultProfile.packageType, packageWeight: defaultProfile.packageWeight, packageWeightUnit: "LBS", largeConesPerPackage: defaultProfile.largeConesPerPackage, smallConesPerPackage: defaultProfile.smallConesPerPackage } }, { new: true });
+    if (!record) return res.status(404).json({ message: "Yarn not found" });
+    return res.json({ data: record });
+  } catch (error) { return fail(res, error, "Failed to update Yarn packaging"); }
+};
 
 exports.listMasterOptions = async (req, res) => {
   try {
@@ -246,7 +274,33 @@ const nextContractNo = async (ownerId, type) => {
   const next = (Number(String(latest?.contractNo || "").match(/(\d+)$/)?.[1]) || 0) + 1;
   return `${prefix}-${String(next).padStart(5, "0")}`;
 };
-exports.contractMeta = async (req, res) => { try { const ownerId = userId(req); const [yarns, fabrics, parties, salesNo, purchaseNo] = await Promise.all([WeavingYarn.find({ userId: ownerId, isActive: true }).select("name millBrand quality count lotReference"), WeavingFabricQuality.find({ userId: ownerId, isActive: true }).select("name code construction width weave primaryUnit"), WeavingParty.find({ userId: ownerId, isActive: true, isHidden: false }).sort({ name: 1 }), nextContractNo(ownerId, "sales"), nextContractNo(ownerId, "purchase")]); return res.json({ data: { yarns, fabrics, parties, nextNumbers: { sales: salesNo, purchase: purchaseNo } } }); } catch (e) { return fail(res, e, "Failed to load Contract setup"); } };
+const PURCHASE_CONTRACT_COUNTER = "weaving_purchase_contract";
+const legacyPurchaseEntryNo = (contractNo) => Number(String(contractNo || "").match(/^PC-(\d+)$/i)?.[1]) || 0;
+const purchaseSequenceHighWater = async (ownerId) => {
+  const rows = await WeavingContract.find({ userId: ownerId, type: "purchase" }).select("entryNo contractNo").lean();
+  return rows.reduce((highest, row) => Math.max(highest, Number(row.entryNo) || 0, legacyPurchaseEntryNo(row.contractNo)), 0);
+};
+const ensurePurchaseCounter = async (ownerId, minimum) => {
+  await Counter.findOneAndUpdate({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER, seq: { $lt: minimum } }, { $set: { seq: minimum } }, { new: true, setDefaultsOnInsert: false });
+};
+const nextPurchaseEntryNo = async (ownerId) => {
+  const highWater = await purchaseSequenceHighWater(ownerId);
+  await ensurePurchaseCounter(ownerId, highWater);
+  let counter = await Counter.findOne({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER }).select("seq").lean();
+  if (!counter) {
+    try { counter = await Counter.create({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER, seq: highWater + 1 }); }
+    catch (error) {
+      if (error?.code !== 11000) throw error;
+      counter = await Counter.findOneAndUpdate({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER }, { $inc: { seq: 1 } }, { new: true, setDefaultsOnInsert: false });
+    }
+  } else counter = await Counter.findOneAndUpdate({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER }, { $inc: { seq: 1 } }, { new: true, setDefaultsOnInsert: false });
+  return counter.seq;
+};
+const previewPurchaseEntryNo = async (ownerId) => {
+  const [counter, highWater] = await Promise.all([Counter.findOne({ userId: ownerId, type: PURCHASE_CONTRACT_COUNTER }).select("seq").lean(), purchaseSequenceHighWater(ownerId)]);
+  return Math.max(Number(counter?.seq) || 0, highWater) + 1;
+};
+exports.contractMeta = async (req, res) => { try { const ownerId = userId(req); const [yarns, fabrics, parties, salesNo, purchaseNo] = await Promise.all([WeavingYarn.find({ userId: ownerId, isActive: true }).select("name millBrand quality count lotReference"), WeavingFabricQuality.find({ userId: ownerId, isActive: true }).select("name code construction width weave primaryUnit"), WeavingParty.find({ userId: ownerId, isActive: true, isHidden: false }).sort({ name: 1 }), nextContractNo(ownerId, "sales"), previewPurchaseEntryNo(ownerId)]); return res.json({ data: { yarns, fabrics, parties, nextNumbers: { sales: salesNo, purchase: purchaseNo } } }); } catch (e) { return fail(res, e, "Failed to load Contract setup"); } };
 exports.listContracts = async (req, res) => { try { const q = { userId: userId(req) }; if (["sales", "purchase"].includes(req.query.type)) q.type = req.query.type; if (req.query.search) q.$or = ["contractNo", "partyName", "itemName"].map((field) => ({ [field]: { $regex: clean(req.query.search), $options: "i" } })); if (req.query.startDate || req.query.endDate) q.contractDate = { ...(req.query.startDate ? { $gte: req.query.startDate } : {}), ...(req.query.endDate ? { $lte: req.query.endDate } : {}) }; return res.json({ data: await contractProgress(userId(req), await WeavingContract.find(q).sort({ contractDate: -1, createdAt: -1 }).lean()) }); } catch (e) { return fail(res, e, "Failed to load Contracts"); } };
 const contractPayload = async (ownerId, body) => {
   const type = body.type === "purchase" ? "purchase" : "sales";
@@ -260,7 +314,7 @@ const contractPayload = async (ownerId, body) => {
   if (quantity <= 0) { const e = new Error("Quantity must be greater than zero"); e.statusCode = 400; throw e; }
   const party = await WeavingParty.findOne({ _id: body.partyId, userId: ownerId, isActive: true, isHidden: false, role: { $in: [type === "sales" ? "customer" : "supplier", "both"] } });
   if (!party) { const e = new Error(type === "sales" ? "Party / Customer is required" : "Supplier / Party is required"); e.statusCode = 400; throw e; }
-  return { type, purchaseItemType, contractType: type === "sales" && body.contractType === "conversion" ? "conversion" : "fabric_sale", contractNo: required(await nextContractNo(ownerId, type), "Contract No"), contractDate: required(body.contractDate, "Contract Date"), partyId: party._id, partyName: party.name, itemId: item._id, itemName: item.name, quantity, unit, rate: number(body.rate, "Rate"), sourceEntryUnit: unit === "KG" && body.sourceEntryUnit === "LBS" ? "LBS" : unit, deliveryDate: clean(body.deliveryDate), brokerName: clean(body.brokerName), commissionPercent: number(body.commissionPercent, "Commission"), creditDays: Math.trunc(number(body.creditDays, "Credit Days")), paymentTerms: clean(body.paymentTerms), packingTerms: clean(body.packingTerms), deliveryTerms: clean(body.deliveryTerms), expiryDate: clean(body.expiryDate), status: ["active", "complete", "expired"].includes(body.status) ? body.status : "active", notes: clean(body.notes) };
+  return { type, purchaseItemType, contractType: type === "sales" && body.contractType === "conversion" ? "conversion" : "fabric_sale", contractNo: type === "purchase" ? required(body.contractNo, "Contract No") : required(await nextContractNo(ownerId, type), "Contract No"), contractDate: required(body.contractDate, "Contract Date"), partyId: party._id, partyName: party.name, itemId: item._id, itemName: item.name, yarnCount: !fabric ? clean(item.count) : "", quantity, unit, rate: number(body.rate, "Rate"), sourceEntryUnit: unit === "KG" && body.sourceEntryUnit === "LBS" ? "LBS" : unit, deliveryDate: clean(body.deliveryDate), brokerName: clean(body.brokerName), commissionPercent: number(body.commissionPercent, "Commission"), creditDays: Math.trunc(number(body.creditDays, "Credit Days")), paymentTerms: clean(body.paymentTerms), packingTerms: clean(body.packingTerms), deliveryTerms: clean(body.deliveryTerms), expiryDate: clean(body.expiryDate), status: ["active", "complete", "expired"].includes(body.status) ? body.status : "active", notes: clean(body.notes) };
 };
 exports.createContract = async (req, res) => {
   try {
@@ -272,6 +326,7 @@ exports.createContract = async (req, res) => {
     }
 
     const payload = await contractPayload(ownerId, req.body);
+    if (payload.type === "purchase") payload.entryNo = await nextPurchaseEntryNo(ownerId);
     const row = await WeavingContract.create({ ...payload, ...(requestKey ? { requestKey } : {}), userId: ownerId });
     res.status(201).json({ data: row });
     void logActivity({ req, action: "create", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo });
@@ -280,7 +335,8 @@ exports.createContract = async (req, res) => {
       const existing = await WeavingContract.findOne({ userId: userId(req), requestKey: clean(req.body.requestKey) });
       if (existing) return res.json({ data: existing });
     }
+    if (e?.code === 11000) return res.status(409).json({ message: "A Purchase Contract with this Contract No already exists." });
     return fail(res, e, "Failed to create Contract");
   }
 };
-exports.updateContract = async (req, res) => { try { const existing = await WeavingContract.findOne({ _id: req.params.id, userId: userId(req) }); if (!existing) return res.status(404).json({ message: "Contract not found" }); if (req.body.type && req.body.type !== existing.type) throw Object.assign(new Error("Contract nature cannot be changed"), { statusCode: 400 }); const payload = await contractPayload(userId(req), { ...req.body, type: existing.type }); payload.contractNo = existing.contractNo; await assertContractIdentityEdit(userId(req), existing, payload); const row = await WeavingContract.findByIdAndUpdate(existing._id, { $set: payload }, { new: true }); await logActivity({ req, action: "update", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Contract"); } };
+exports.updateContract = async (req, res) => { try { const ownerId = userId(req); const existing = await WeavingContract.findOne({ _id: req.params.id, userId: ownerId }); if (!existing) return res.status(404).json({ message: "Contract not found" }); if (req.body.type && req.body.type !== existing.type) throw Object.assign(new Error("Contract nature cannot be changed"), { statusCode: 400 }); const payload = await contractPayload(ownerId, { ...req.body, type: existing.type }); if (existing.type === "sales") payload.contractNo = existing.contractNo; if (existing.type === "purchase" && !existing.entryNo) { const legacyNo = legacyPurchaseEntryNo(existing.contractNo); if (legacyNo && !await WeavingContract.exists({ userId: ownerId, type: "purchase", entryNo: legacyNo, _id: { $ne: existing._id } })) { await ensurePurchaseCounter(ownerId, legacyNo); payload.entryNo = legacyNo; } else payload.entryNo = await nextPurchaseEntryNo(ownerId); } await assertContractIdentityEdit(ownerId, existing, payload); const row = await WeavingContract.findByIdAndUpdate(existing._id, { $set: payload }, { new: true }); await logActivity({ req, action: "update", module: "weaving.contracts", moduleScope: "weaving", entityType: "WeavingContract", entityId: row._id, title: row.contractNo }); return res.json({ data: row }); } catch (e) { if (e?.code === 11000) return res.status(409).json({ message: "A Purchase Contract with this Contract No already exists." }); return fail(res, e, "Failed to update Contract"); } };

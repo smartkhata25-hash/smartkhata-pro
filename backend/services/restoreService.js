@@ -70,6 +70,8 @@ const MODEL_LOADERS = {
   weavingbeamsets: () => require("../models/WeavingBeamSet"),
   weavingbeams: () => require("../models/WeavingBeam"),
   weavingknottingjobs: () => require("../models/WeavingKnottingJob"),
+  weavingsettings: () => require("../models/WeavingSettings"),
+  weavingproductionentries: () => require("../models/WeavingProductionEntry"),
   weavingcostsnapshots: () => require("../models/WeavingCostSnapshot"),
 
   activitylogs: () => require("../models/ActivityLog"),

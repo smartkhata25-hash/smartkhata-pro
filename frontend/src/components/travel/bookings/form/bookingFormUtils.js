@@ -699,9 +699,17 @@ export const calculateLocalTotals = (formState, currencySettings) => {
 
   const net = roundMoney(Math.max(selling - discount, 0));
 
-  const due = roundMoney(Math.max(net - received, 0));
+  const customerBalance = roundMoney(net - received);
 
-  const vendorPayable = roundMoney(Math.max(cost - vendorPaid, 0));
+  const due = roundMoney(Math.max(customerBalance, 0));
+
+  const customerAdvance = roundMoney(Math.max(-customerBalance, 0));
+
+  const vendorBalance = roundMoney(cost - vendorPaid);
+
+  const vendorPayable = roundMoney(Math.max(vendorBalance, 0));
+
+  const vendorAdvance = roundMoney(Math.max(-vendorBalance, 0));
 
   const profit = roundMoney(net - cost);
 
@@ -722,7 +730,15 @@ export const calculateLocalTotals = (formState, currencySettings) => {
 
     due,
 
+    customerAdvance,
+
+    customerBalance,
+
     vendorPayable,
+
+    vendorAdvance,
+
+    vendorBalance,
 
     profit,
 

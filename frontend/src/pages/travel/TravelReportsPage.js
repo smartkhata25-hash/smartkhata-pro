@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import {
+Link, useSearchParams } from 'react-router-dom';
 import {
   Bar,
   BarChart,
@@ -26,7 +27,8 @@ import { fetchTravelReportSummary } from '../../services/travelMasterService';
 import { getLocalDateInputValue } from '../../utils/localDateTime';
 
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelFilterSelect,
   TravelMasterPageFrame,
   TravelMasterToolbar,
@@ -1203,11 +1205,11 @@ const TravelReportsPage = () => {
         </button>
       </div>
 
-      {pageError && (
-        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {activeReportContent}
 

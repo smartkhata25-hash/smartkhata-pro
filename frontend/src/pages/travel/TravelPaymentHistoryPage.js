@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBookOpen,
   FaEye,
@@ -38,7 +39,8 @@ import {
   openBackendPrintWindow,
 } from '../../utils/backendPrintDocument';
 import {
-  TravelCardLine,
+    TravelErrorModal,
+TravelCardLine,
   TravelFilterSelect,
   TravelMasterList,
   TravelMasterPageFrame,
@@ -488,7 +490,7 @@ const TravelPaymentHistoryPage = () => {
       try {
         await openBackendPreviewWindow({ url: getPreviewUrl(documentId) });
       } catch (error) {
-        alert(error.message || t('alerts.printWindowBlocked'));
+setPageError(error.message || t('alerts.printWindowBlocked'));
       }
     },
     [getPreviewUrl]
@@ -507,7 +509,7 @@ const TravelPaymentHistoryPage = () => {
       try {
         await openBackendPrintWindow({ url: getPrintUrl(documentId) });
       } catch (error) {
-        alert(error.message || t('alerts.printWindowBlocked'));
+setPageError(error.message || t('alerts.printWindowBlocked'));
       }
     },
     [getPrintUrl]
@@ -531,7 +533,7 @@ const TravelPaymentHistoryPage = () => {
       try {
         await downloadBackendPdf({ url: getPdfUrl(documentId), fileName });
       } catch (error) {
-        alert(error.message || t('pdf.shareFailed'));
+setPageError(error.message || t('pdf.shareFailed'));
       }
     },
     [getPdfUrl, isVendorMode]
@@ -565,7 +567,7 @@ const TravelPaymentHistoryPage = () => {
       } catch (error) {
         console.error('Travel payment receipt share failed:', error);
 
-        alert(t('pdf.shareFailed'));
+setPageError(t('pdf.shareFailed'));
       } finally {
         setSharingId('');
       }
@@ -606,7 +608,7 @@ const TravelPaymentHistoryPage = () => {
       } catch (error) {
         console.error('Travel payment delete failed:', error);
 
-        alert(
+setPageError(
           error?.response?.data?.message ||
             (isVendorMode
               ? t('travel.payments.vendorHistory.deleteFailed')
@@ -1045,11 +1047,11 @@ const TravelPaymentHistoryPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
         <span>

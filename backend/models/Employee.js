@@ -154,7 +154,7 @@ const employeeSchema = new mongoose.Schema(
     knottingDefaultRate: { type: Number, min: 0 },
     knottingPaymentMethod: {
       type: String,
-      enum: ["monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"],
+      enum: ["monthly", "fixed_monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"],
       default: "monthly",
     },
     dutyHours: {

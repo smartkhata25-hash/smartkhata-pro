@@ -3,6 +3,7 @@ const Expense = require("../../models/Expense");
 const WeavingContract = require("../../models/WeavingContract");
 const WeavingFabricQuality = require("../../models/WeavingFabricQuality");
 const WeavingFoldingEntry = require("../../models/WeavingFoldingEntry");
+const WeavingProductionEntry = require("../../models/WeavingProductionEntry");
 const WeavingGodown = require("../../models/WeavingGodown");
 const WeavingLoom = require("../../models/WeavingLoom");
 const WeavingParty = require("../../models/WeavingParty");
@@ -45,7 +46,7 @@ const dateRangeMatch = (field, range) => range.from || range.to ? {
 } : {};
 
 const entryTotals = (rows = []) => rows.reduce((sum, row) => ({
-  than: sum.than + 1,
+  than: sum.than + (row.thanCount === undefined ? 1 : Number(row.thanCount || 0)),
   meter: round(sum.meter + row.meter),
   kg: round(sum.kg + row.weightKg),
   goodMeter: round(sum.goodMeter + row.goodMeter),
@@ -64,6 +65,13 @@ const loadProductionRows = async (userId, query = {}) => {
     .populate("fabricQualityId", "name code warpCount weftCount width")
     .populate("contractId", "contractNo")
     .sort({ date: 1, createdAt: 1 }).lean();
+  if (!query.contractId && (!query.grade || query.grade === "a")) {
+    const aggregateMatch = { userId, status: "posted", ...rangeMatch("date", range) };
+    if (query.loomId) aggregateMatch.loomId = query.loomId;
+    if (query.fabricQualityId) aggregateMatch.fabricQualityId = query.fabricQualityId;
+    const aggregate = await WeavingProductionEntry.find(aggregateMatch).populate("loomId", "loomNumber name brand model loomType").populate("fabricQualityId", "name code warpCount weftCount width").sort({ date: 1, createdAt: 1 }).lean();
+    rows.push(...aggregate.map((row) => ({ ...row, thanNo: "", thanCount: 0, goodMeter: row.meter, bGradeMeter: 0, rejectedMeter: 0, grade: "a", qualitySnapshot: {}, loomNumberSnapshot: "", beamNoSnapshot: "", setNoSnapshot: "", contractNoSnapshot: "", productionMode: row.productionMode })));
+  }
   if (query.grade) rows = rows.filter((row) => Number(gradeMeter(row, query.grade) || 0) > 0).map((row) => {
     const selectedMeter = Number(gradeMeter(row, query.grade) || 0);
     const ratio = Number(row.meter || 0) > 0 ? selectedMeter / Number(row.meter) : 0;
@@ -73,7 +81,7 @@ const loadProductionRows = async (userId, query = {}) => {
 };
 
 const productionRow = (row) => ({
-  _id: row._id, date: row.date, thanNo: row.thanNo,
+  _id: row._id, date: row.date, thanNo: row.thanNo, thanCount: row.thanCount === undefined ? 1 : row.thanCount, productionMode: row.productionMode || "detailed",
   loomId: id(row.loomId), loomNo: row.loomId?.loomNumber || row.loomNumberSnapshot || "-", loomName: row.loomId?.name || "",
   qualityId: id(row.fabricQualityId), quality: row.fabricQualityId?.name || row.qualitySnapshot?.name || "-",
   count: [row.fabricQualityId?.warpCount || row.qualitySnapshot?.warpCount, row.fabricQualityId?.weftCount || row.qualitySnapshot?.weftCount].filter(Boolean).join(" / "),
@@ -91,7 +99,7 @@ const getProduction = async (userId, query = {}) => {
     const group = groupBy === "loom" ? { key: row.loomId, label: `${row.loomNo}${row.loomName ? ` - ${row.loomName}` : ""}` } : groupBy === "quality" ? { key: row.qualityId, label: row.quality } : groupBy === "contract" ? { key: row.contract || "unassigned", label: row.contract || "Unassigned" } : { key: row.date, label: row.date };
     const current = groups.get(group.key) || { ...group, rows: [] }; current.rows.push(row); groups.set(group.key, current);
   });
-  const grouped = [...groups.values()].map((group) => ({ ...group, totals: entryTotals(group.rows.map((row) => ({ meter: row.meter, weightKg: row.kg, goodMeter: row.goodMeter, bGradeMeter: row.bGradeMeter, rejectedMeter: row.rejectedMeter }))) }));
+  const grouped = [...groups.values()].map((group) => ({ ...group, totals: entryTotals(group.rows.map((row) => ({ thanCount: row.thanCount, meter: row.meter, weightKg: row.kg, goodMeter: row.goodMeter, bGradeMeter: row.bGradeMeter, rejectedMeter: row.rejectedMeter }))) }));
   return { range, groupBy, summary: entryTotals(rows), groups: grouped, rows: mapped };
 };
 

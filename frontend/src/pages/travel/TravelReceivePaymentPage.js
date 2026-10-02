@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FaHistory, FaSave, FaUsers } from 'react-icons/fa';
+import { FaEraser, FaHistory, FaSave, FaTimes, FaUsers } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
@@ -15,8 +15,10 @@ import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/loca
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
+  TravelErrorModal,
   TravelMasterPageFrame,
   formatTravelMoney,
+  getTravelErrorMessage,
 } from '../../components/travel/master/TravelMasterUI';
 
 const createInitialForm = () => ({
@@ -158,7 +160,7 @@ const FieldLabel = ({ children }) => (
 const inputClass =
   'h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100';
 
-const TravelReceivePaymentPage = () => {
+const TravelReceivePaymentPage = ({ modeActions = null }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const paymentId = searchParams.get('paymentId') || '';
@@ -173,11 +175,26 @@ const TravelReceivePaymentPage = () => {
   const [saving, setSaving] = useState(false);
 
   const [formError, setFormError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
 
   const queryCustomerId = searchParams.get('customerId') || '';
   const queryCustomerType = searchParams.get('customerType') === 'party' ? 'party' : 'customer';
   const queryCustomerPartyId = searchParams.get('customerPartyId') || '';
+
+  const getDefaultAccountId = useCallback(
+    () =>
+      paymentAccounts.find(
+        (account) => String(account?.category || '').toLowerCase() === 'cash'
+      )?._id || paymentAccounts[0]?._id || '',
+    [paymentAccounts]
+  );
+
+  const resetCreateForm = useCallback(() => {
+    setFormState({ ...createInitialForm(), accountId: getDefaultAccountId() });
+    setFormError('');
+    if (queryCustomerId || queryCustomerPartyId) {
+      navigate(modeActions ? '/travel/payments?mode=receive' : '/travel/payments/receive', { replace: true });
+    }
+  }, [getDefaultAccountId, modeActions, navigate, queryCustomerId, queryCustomerPartyId]);
 
   const customerOptions = useMemo(
     () => [
@@ -300,7 +317,7 @@ const TravelReceivePaymentPage = () => {
       customerPartyId: selection.type === 'party' ? selection.id : '',
     }));
 
-    setSuccessMessage('');
+    setFormError('');
   };
 
   const updateField = (field, value) => {
@@ -309,17 +326,30 @@ const TravelReceivePaymentPage = () => {
       [field]: value,
     }));
 
-    setSuccessMessage('');
+    setFormError('');
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (paymentId && loadedPaymentId !== paymentId) return;
 
+    const numericAmount = Number(formState.amount || 0);
+    if (!formState.customerId && !formState.customerPartyId) {
+      setFormError(t('travel.payments.customerPlaceholder'));
+      return;
+    }
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setFormError(t('travel.payments.invalidAmount'));
+      return;
+    }
+    if (!formState.accountId) {
+      setFormError(t('travel.payments.accountPlaceholder'));
+      return;
+    }
+
     try {
       setSaving(true);
       setFormError('');
-      setSuccessMessage('');
 
       const saved = paymentId
         ? await updateTravelReceivePayment(paymentId, {
@@ -365,20 +395,11 @@ const TravelReceivePaymentPage = () => {
         );
       }
 
-      setFormState((current) => ({
-        ...createInitialForm(),
-        customerType: current.customerType,
-        customerId: current.customerId,
-        customerPartyId: current.customerPartyId,
-        accountId: current.accountId,
-        paymentType: current.paymentType,
-      }));
-
-      setSuccessMessage(t('travel.payments.receiveSuccess'));
+      resetCreateForm();
     } catch (error) {
       console.error('Travel receive payment failed:', error);
 
-      setFormError(error?.response?.data?.message || t('travel.payments.saveFailed'));
+      setFormError(getTravelErrorMessage(error, t('travel.payments.saveFailed')));
     } finally {
       setSaving(false);
     }
@@ -387,8 +408,10 @@ const TravelReceivePaymentPage = () => {
   return (
     <TravelMasterPageFrame
       titleKey="travel.payments.receiveTitle"
+      className={modeActions ? 'mx-auto w-full max-w-4xl !pt-0' : ''}
       actions={
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {modeActions}
           <HeaderIconButton
             icon={FaHistory}
             title={t('travel.payments.receivedHistory.title')}
@@ -396,15 +419,23 @@ const TravelReceivePaymentPage = () => {
             onClick={() => navigate('/travel/payments/received')}
           />
 
-          <HeaderIconButton
-            icon={FaUsers}
-            title={t('travel.sidebar.customers')}
-            variant="violet"
-            onClick={() => navigate('/travel/customers')}
-          />
+          {!modeActions && (
+            <HeaderIconButton
+              icon={FaUsers}
+              title={t('travel.sidebar.customers')}
+              variant="violet"
+              onClick={() => navigate('/travel/customers')}
+            />
+          )}
         </div>
       }
     >
+      <TravelErrorModal
+        open={Boolean(formError)}
+        title={t('travel.feedback.paymentErrorTitle')}
+        message={formError}
+        onClose={() => setFormError('')}
+      />
       <form
         onSubmit={handleSubmit}
         className="mx-auto max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
@@ -412,18 +443,6 @@ const TravelReceivePaymentPage = () => {
         <div className="h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500" />
 
         <div className="space-y-4 p-4">
-          {formError && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-              {formError}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-              {successMessage}
-            </div>
-          )}
-
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.customer"
@@ -446,7 +465,6 @@ const TravelReceivePaymentPage = () => {
                 step="0.01"
                 value={formState.amount}
                 onChange={(event) => updateField('amount', event.target.value)}
-                required
                 className={inputClass}
               />
             </label>
@@ -473,7 +491,6 @@ const TravelReceivePaymentPage = () => {
               <select
                 value={formState.accountId}
                 onChange={(event) => updateField('accountId', event.target.value)}
-                required
                 className={`${inputClass} font-bold`}
               >
                 <option value="">{t('travel.payments.accountPlaceholder')}</option>
@@ -548,16 +565,22 @@ const TravelReceivePaymentPage = () => {
             </div>
           )}
 
-          <div className="flex justify-end border-t border-slate-100 pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+            {!paymentId && (
+              <TravelActionButton icon={FaEraser} variant="secondary" onClick={resetCreateForm} disabled={saving}>
+                {t('clear')}
+              </TravelActionButton>
+            )}
+            <TravelActionButton icon={FaTimes} variant="secondary" onClick={() => navigate('/travel/payments/received')} disabled={saving}>
+              {t('cancel')}
+            </TravelActionButton>
             <TravelActionButton
               type="submit"
               icon={FaSave}
               disabled={
                 saving ||
                 loading ||
-                (paymentId && loadedPaymentId !== paymentId) ||
-                (!formState.customerId && !formState.customerPartyId) ||
-                !formState.accountId
+                (paymentId && loadedPaymentId !== paymentId)
               }
             >
               {saving ? t('travel.common.saving') : paymentId ? t('updateClose') : t('travel.payments.receiveAction')}

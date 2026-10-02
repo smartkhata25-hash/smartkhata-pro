@@ -28,6 +28,7 @@ import {
 } from '../../utils/umrahTripPlanner';
 import {
   TravelActionButton,
+  TravelErrorModal,
   TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
 
@@ -378,6 +379,7 @@ const TravelTripPlannerPage = () => {
   const [values, setValues] = useState(() => initialPlannerState());
   const [result, setResult] = useState(null);
   const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [printBranding, setPrintBranding] = useState(null);
 
   const selectedTotalDays = useMemo(() => {
@@ -419,13 +421,14 @@ const TravelTripPlannerPage = () => {
 
   useEffect(() => {
     if (result?.error) {
-      setMessage(result.error);
+      setErrorMessage(result.error);
     }
   }, [result]);
 
   const invalidateGeneratedPlan = () => {
     setResult(null);
     setMessage('');
+    setErrorMessage('');
   };
 
   const setField = (field, value, options = {}) => {
@@ -467,7 +470,7 @@ const TravelTripPlannerPage = () => {
   const showGenerateResult = (generated) => {
     if (generated.error) {
       setResult(null);
-      setMessage(generated.error);
+      setErrorMessage(generated.error);
       return;
     }
 
@@ -477,10 +480,9 @@ const TravelTripPlannerPage = () => {
 
     setResult(generated);
 
+    setErrorMessage('');
     setMessage(
-      hasUnresolvedFridayConflict
-        ? t('travel.tripPlanner.fridayTransferDetected')
-        : t('travel.tripPlanner.generated')
+      hasUnresolvedFridayConflict ? t('travel.tripPlanner.fridayTransferDetected') : ''
     );
   };
 
@@ -552,6 +554,7 @@ const TravelTripPlannerPage = () => {
     setValues(initialPlannerState());
     setResult(null);
     setMessage('');
+    setErrorMessage('');
   };
 
   const handlePrint = async () => {
@@ -578,7 +581,9 @@ const TravelTripPlannerPage = () => {
       window.print();
     } catch (printError) {
       console.error('Travel trip planner print failed:', printError);
-      setMessage(printError?.response?.data?.message || printError.message || t('common.error'));
+      setErrorMessage(
+        printError?.response?.data?.message || printError.message || t('common.error')
+      );
     }
   };
 
@@ -645,6 +650,11 @@ const TravelTripPlannerPage = () => {
         </div>
       }
     >
+      <TravelErrorModal
+        open={Boolean(errorMessage)}
+        message={errorMessage}
+        onClose={() => setErrorMessage('')}
+      />
       <section className="print-only mb-4 border-b border-slate-300 pb-3">
         <div className="flex items-start gap-3">
           {printBranding?.logoUrl && (

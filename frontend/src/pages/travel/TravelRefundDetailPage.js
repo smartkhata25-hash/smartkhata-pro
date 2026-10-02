@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import {
+useNavigate, useParams } from 'react-router-dom';
 import {
   FaArrowLeft,
   FaEye,
@@ -27,7 +28,8 @@ import {
   openBackendPrintWindow,
 } from '../../utils/backendPrintDocument';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelMasterPageFrame,
   buildTravelConfirmMessage,
 } from '../../components/travel/master/TravelMasterUI';
@@ -231,11 +233,11 @@ const TravelRefundDetailPage = () => {
         </div>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {loading && (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm font-bold text-slate-500">

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBook,
   FaEdit,
@@ -25,7 +26,8 @@ import { buildTravelRouteState } from '../../utils/travelContext';
 import { hasPermission } from '../../utils/permissionHelper';
 import { sendWhatsAppReminder } from '../../utils/whatsapp';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelCardLine,
   TravelFilterSelect,
   TravelFormModal,
@@ -452,7 +454,7 @@ const TravelCustomersPage = () => {
         return;
       }
 
-      navigate(`/travel/payments/receive?customerId=${customer._id}`);
+      navigate(`/travel/payments?mode=receive&customerId=${customer._id}`);
     },
     [canReceivePayment, navigate]
   );
@@ -478,7 +480,7 @@ const TravelCustomersPage = () => {
       const isEditing = customer && typeof customer === 'object';
 
       if ((isEditing && !canEditCustomer) || (!isEditing && !canCreateCustomer)) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -504,7 +506,7 @@ const TravelCustomersPage = () => {
   const openQuickAdd = useCallback(
     (draftName = '') => {
       if (!canCreateCustomer) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -636,7 +638,7 @@ const TravelCustomersPage = () => {
       event?.stopPropagation?.();
 
       if (!canDeleteCustomer) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -661,7 +663,7 @@ const TravelCustomersPage = () => {
       } catch (error) {
         console.error('Travel customer delete failed:', error);
 
-        alert(error?.response?.data?.message || t('travel.customers.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.customers.deleteFailed'));
       } finally {
         setDeletingId('');
       }
@@ -674,12 +676,12 @@ const TravelCustomersPage = () => {
       event?.stopPropagation?.();
 
       if (!canRestoreCustomer) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
       if (!isDeletedHiddenRecord(customer)) {
-        alert(t('travel.common.notRestorable'));
+setPageError(t('travel.common.notRestorable'));
         return;
       }
 
@@ -693,7 +695,7 @@ const TravelCustomersPage = () => {
         });
       } catch (error) {
         console.error('Travel customer restore failed:', error);
-        alert(error?.response?.data?.message || t('travel.customers.restoreFailed'));
+setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed'));
       } finally {
         setRestoringId('');
       }
@@ -1041,11 +1043,11 @@ const TravelCustomersPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <TravelMasterList
         columns={columns}

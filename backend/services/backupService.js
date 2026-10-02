@@ -70,6 +70,8 @@ const COLLECTION_CONFIG = {
   weavingbeamsets: { field: "userId", required: false },
   weavingbeams: { field: "userId", required: false },
   weavingknottingjobs: { field: "userId", required: false },
+  weavingsettings: { field: "userId", required: false },
+  weavingproductionentries: { field: "userId", required: false },
   weavingcostsnapshots: { field: "userId", required: false },
 
   activitylogs: { field: "businessOwnerId", required: false },

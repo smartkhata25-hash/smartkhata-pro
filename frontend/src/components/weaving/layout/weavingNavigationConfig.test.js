@@ -90,6 +90,18 @@ describe('Weaving navigation coverage', () => {
     ]);
   });
 
+  test('exposes standalone Sizing Return and Bill entry links', () => {
+    const sizingPaths = menuPaths('weaving.sidebar.sizing');
+    expect(sizingPaths).toEqual(expect.arrayContaining([
+      '/weaving/sizing?tab=issue',
+      '/weaving/sizing?tab=receiving',
+      '/weaving/sizing?tab=return',
+      '/weaving/sizing?tab=bill',
+      '/weaving/sizing?tab=list&type=return',
+      '/weaving/sizing?tab=list&type=bill',
+    ]));
+  });
+
   test('keeps employee and commercial workspaces reachable from the header', () => {
     expect(menuPaths('weaving.nav.employees')).toEqual(expect.arrayContaining([
       '/weaving/employees',

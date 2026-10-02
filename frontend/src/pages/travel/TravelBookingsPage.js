@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaCheckCircle,
   FaEdit,
@@ -22,7 +23,8 @@ import usePageMemory from '../../hooks/usePageMemory';
 import { hasPermission } from '../../utils/permissionHelper';
 import { sharePdfDocument } from '../../utils/documentShare';
 import {
-  TravelCardLine,
+    TravelErrorModal,
+TravelCardLine,
   TravelFilterSelect,
   TravelMasterList,
   TravelMasterPageFrame,
@@ -503,7 +505,7 @@ const TravelBookingsPage = () => {
       event?.stopPropagation?.();
 
       if (!canDelete) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
 
         return;
       }
@@ -535,7 +537,7 @@ const TravelBookingsPage = () => {
       } catch (error) {
         console.error('Travel booking delete failed:', error);
 
-        alert(error?.response?.data?.message || t('travel.booking.alerts.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.booking.alerts.deleteFailed'));
       } finally {
         setDeletingId('');
       }
@@ -568,7 +570,7 @@ const TravelBookingsPage = () => {
     } catch (error) {
       console.error('Travel booking PDF share failed:', error);
 
-      alert(t('pdf.shareFailed'));
+setPageError(t('pdf.shareFailed'));
     } finally {
       setSharingId('');
     }
@@ -949,11 +951,11 @@ const TravelBookingsPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <div className="mb-2 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
         <span>

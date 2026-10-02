@@ -21,7 +21,9 @@ router.put("/looms/:id", requirePermission(PERMISSIONS.WEAVING_MASTERS.EDIT), ct
 router.get("/godowns", requirePermission(PERMISSIONS.WEAVING_SETTINGS.MANAGE, PERMISSIONS.WEAVING_MASTERS.VIEW, PERMISSIONS.WEAVING_CONTRACTS.VIEW), ctrl.listGodowns);
 router.post("/godowns", requirePermission(PERMISSIONS.WEAVING_SETTINGS.MANAGE), ctrl.createGodown);
 router.put("/godowns/:id", requirePermission(PERMISSIONS.WEAVING_SETTINGS.MANAGE), ctrl.updateGodown);
-router.get("/parties", requirePermission(PERMISSIONS.WEAVING_CONTRACTS.VIEW), ctrl.listParties);
+router.get("/settings", requirePermission(PERMISSIONS.WEAVING_SETTINGS.MANAGE), ctrl.getWeavingSettings);
+router.put("/settings", requirePermission(PERMISSIONS.WEAVING_SETTINGS.MANAGE), ctrl.updateWeavingSettings);
+router.get("/parties", requirePermission(PERMISSIONS.WEAVING_CONTRACTS.VIEW, PERMISSIONS.WEAVING_SETTINGS.MANAGE), ctrl.listParties);
 router.post("/parties", requirePermission(PERMISSIONS.WEAVING_CONTRACTS.CREATE), ctrl.createParty);
 router.get("/contracts/meta", requirePermission(PERMISSIONS.WEAVING_CONTRACTS.VIEW), ctrl.contractMeta);
 router.get("/contracts", requirePermission(PERMISSIONS.WEAVING_CONTRACTS.VIEW), ctrl.listContracts);

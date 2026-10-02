@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FaCheck,
+FaCheck,
   FaEdit,
   FaEyeSlash,
   FaMapMarkerAlt,
@@ -21,6 +21,7 @@ import usePageMemory from '../../hooks/usePageMemory';
 import { t } from '../../i18n/i18n';
 import { hasPermission } from '../../utils/permissionHelper';
 import {
+  TravelErrorModal,
   TravelActionButton,
   TravelCardLine,
   TravelFilterSelect,
@@ -351,7 +352,7 @@ const TravelAirportsPage = () => {
 
   const openDetails = (airport = null, draftName = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -416,13 +417,13 @@ const TravelAirportsPage = () => {
       setAirports((current) => upsertRecord(current, saved));
     } catch (error) {
       console.error('Travel airport status update failed:', error);
-      alert(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
+setPageError(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
     }
   };
 
   const handleDelete = async (airport) => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -448,7 +449,7 @@ const TravelAirportsPage = () => {
       }
     } catch (error) {
       console.error('Travel airport delete failed:', error);
-      alert(error?.response?.data?.message || t('travel.airports.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.airports.deleteFailed'));
     } finally {
       setDeletingId('');
     }
@@ -616,11 +617,11 @@ const TravelAirportsPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <TravelMasterList
         columns={columns}

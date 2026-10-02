@@ -432,7 +432,7 @@ export const fetchTravelVendors = (params = {}, options = {}) =>
   fetchList(
     TRAVEL_CACHE_DOMAINS.VENDORS,
     `${SUPPLIER_API}/travel-vendors`,
-    { status: 'active', limit: 500, ...params },
+    { status: 'active', limit: 500, includeBalance: 'true', ...params },
     options
   );
 
@@ -480,7 +480,7 @@ export const fetchTravelCustomers = (params = {}, options = {}) =>
   fetchList(
     TRAVEL_CACHE_DOMAINS.TRAVEL_CUSTOMERS,
     `${CUSTOMER_API}/travel-options`,
-    { status: 'active', limit: 500, ...params },
+    { status: 'active', limit: 500, includeBalance: 'true', ...params },
     options
   );
 

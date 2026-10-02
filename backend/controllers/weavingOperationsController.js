@@ -5,6 +5,7 @@ const WeavingContract = require("../models/WeavingContract");
 const Counter = require("../models/Counter");
 const WeavingFabricQuality = require("../models/WeavingFabricQuality");
 const WeavingGodown = require("../models/WeavingGodown");
+const weavingSettingsService = require("../services/weaving/weavingSettingsService");
 const WeavingLoom = require("../models/WeavingLoom");
 const WeavingParty = require("../models/WeavingParty");
 const WeavingStockTransaction = require("../models/WeavingStockTransaction");
@@ -259,6 +260,8 @@ const godownPayload = (body) => ({ name: required(body.name, "Godown Name / Numb
 exports.listGodowns = async (req, res) => { try { return res.json({ data: await WeavingGodown.find({ userId: userId(req) }).sort({ name: 1 }) }); } catch (e) { return fail(res, e, "Failed to load Godowns"); } };
 exports.createGodown = async (req, res) => { try { const row = await WeavingGodown.create({ ...godownPayload(req.body), userId: userId(req) }); await logActivity({ req, action: "create", module: "weaving.settings", moduleScope: "weaving", entityType: "WeavingGodown", entityId: row._id, title: row.name }); return res.status(201).json({ data: row }); } catch (e) { return fail(res, e, "Failed to create Godown"); } };
 exports.updateGodown = async (req, res) => { try { const row = await WeavingGodown.findOneAndUpdate({ _id: req.params.id, userId: userId(req) }, { $set: godownPayload(req.body) }, { new: true }); if (!row) return res.status(404).json({ message: "Godown not found" }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Godown"); } };
+exports.getWeavingSettings = async (req, res) => { try { return res.json({ data: await weavingSettingsService.getSettings(userId(req)) }); } catch (e) { return fail(res, e, "Failed to load Weaving settings"); } };
+exports.updateWeavingSettings = async (req, res) => { try { const previous = await weavingSettingsService.getSettings(userId(req)); const row = await weavingSettingsService.updateSettings(userId(req), req.body); await logActivity({ req, action: "update", module: "weaving.settings", moduleScope: "weaving", entityType: "WeavingSettings", entityId: row._id, title: "Production Tracking Method", description: `${previous.productionTrackingMode} to ${row.productionTrackingMode}` }); return res.json({ data: row }); } catch (e) { return fail(res, e, "Failed to update Weaving settings"); } };
 
 const partyPayload = (body) => ({
   name: required(body.name, "Party Name"), normalizedName: required(body.name, "Party Name").toLowerCase(),

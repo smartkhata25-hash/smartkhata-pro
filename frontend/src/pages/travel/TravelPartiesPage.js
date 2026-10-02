@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBook,
   FaEdit,
@@ -23,7 +24,8 @@ import {
 import { buildTravelRouteState } from '../../utils/travelContext';
 import { hasPermission } from '../../utils/permissionHelper';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelCardLine,
   TravelFilterSelect,
   TravelFormModal,
@@ -51,6 +53,7 @@ const emptyPartyForm = {
   address: '',
   notes: '',
   role: 'both',
+  openingType: 'receivable',
   openingBalance: 0,
   moduleScope: 'travel',
   isActive: true,
@@ -69,14 +72,13 @@ const partyFields = [
     placeholderKey: 'travel.placeholders.mobile',
   },
   {
-    name: 'role',
-    labelKey: 'travel.parties.fields.role',
+    name: 'openingType',
+    labelKey: 'travel.parties.fields.openingType',
     type: 'select',
     required: true,
     options: [
-      { value: 'customer', labelKey: 'travel.parties.roles.customer' },
-      { value: 'supplier', labelKey: 'travel.parties.roles.supplier' },
-      { value: 'both', labelKey: 'travel.parties.roles.both' },
+      { value: 'receivable', labelKey: 'travel.fields.receivable' },
+      { value: 'payable', labelKey: 'travel.fields.payable' },
     ],
   },
   {
@@ -301,13 +303,16 @@ const TravelPartiesPage = () => {
   }, [filters, isHiddenTab, parties]);
 
   const openDetails = (party = null) => {
+    const openingBalance = Number(party?.openingBalance || 0);
+
     setEditingParty(party);
     setPartyValues(
       party
         ? {
             ...emptyPartyForm,
             ...party,
-            openingBalance: Number(party.openingBalance || 0),
+            openingType: openingBalance < 0 ? 'payable' : 'receivable',
+            openingBalance: Math.abs(openingBalance),
             moduleScope: 'travel',
             isActive: party.isActive !== false,
           }
@@ -345,9 +350,11 @@ const TravelPartiesPage = () => {
       setSubmitting(true);
       setFormError('');
 
+      const openingAmount = Math.abs(Number(partyValues.openingBalance || 0));
       const payload = {
         ...partyValues,
-        openingBalance: Number(partyValues.openingBalance || 0),
+        role: editingParty ? editingParty.role : 'both',
+        openingBalance: partyValues.openingType === 'payable' ? -openingAmount : openingAmount,
         moduleScope: 'travel',
       };
       const saved = editingParty
@@ -381,7 +388,7 @@ const TravelPartiesPage = () => {
       await loadParties({ forceRefresh: true });
     } catch (error) {
       console.error('Travel party archive failed:', error);
-      alert(error?.response?.data?.message || t('travel.parties.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.parties.deleteFailed'));
     } finally {
       setDeletingId('');
     }
@@ -393,7 +400,7 @@ const TravelPartiesPage = () => {
     if (!party?._id || !canManage) return;
 
     if (!canRestoreHiddenParty(party)) {
-      alert(t('travel.common.notRestorable'));
+setPageError(t('travel.common.notRestorable'));
       return;
     }
 
@@ -407,7 +414,7 @@ const TravelPartiesPage = () => {
       });
     } catch (error) {
       console.error('Travel party restore failed:', error);
-      alert(error?.response?.data?.message || t('travel.parties.restoreFailed'));
+setPageError(error?.response?.data?.message || t('travel.parties.restoreFailed'));
     } finally {
       setRestoringId('');
     }
@@ -445,10 +452,9 @@ const TravelPartiesPage = () => {
         forceRefresh: true,
         status: 'active',
       });
-      alert(t('alerts.partiesMerged'));
     } catch (error) {
       console.error('Travel party merge failed:', error);
-      alert(error?.response?.data?.message || t('alerts.mergeFailed'));
+setPageError(error?.response?.data?.message || t('alerts.mergeFailed'));
     } finally {
       setMergingId('');
     }
@@ -465,7 +471,7 @@ const TravelPartiesPage = () => {
   const openReceivePayment = (party) => {
     if (!party?._id) return;
 
-    navigate(`/travel/payments/receive?customerType=party&customerPartyId=${party._id}`, {
+    navigate(`/travel/payments?mode=receive&customerType=party&customerPartyId=${party._id}`, {
       state: buildTravelRouteState('/travel/parties'),
     });
   };
@@ -473,7 +479,7 @@ const TravelPartiesPage = () => {
   const openVendorPayment = (party) => {
     if (!party?._id) return;
 
-    navigate(`/travel/vendor-payments/new?vendorType=party&vendorPartyId=${party._id}`, {
+    navigate(`/travel/payments?mode=vendor&vendorType=party&vendorPartyId=${party._id}`, {
       state: buildTravelRouteState('/travel/parties'),
     });
   };
@@ -766,11 +772,11 @@ const TravelPartiesPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {loading && (
         <div className="mb-3 rounded-lg border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm font-bold text-cyan-700">

@@ -21,6 +21,7 @@ import { hasPermission } from '../../utils/permissionHelper';
 
 import {
   TravelActionButton,
+  TravelErrorModal,
   TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
 
@@ -58,7 +59,6 @@ const TravelSettingsPage = () => {
 
   const [saving, setSaving] = useState(false);
 
-  const [message, setMessage] = useState('');
 
   const [error, setError] = useState('');
   const [branding, setBranding] = useState(null);
@@ -81,7 +81,6 @@ const TravelSettingsPage = () => {
     try {
       setLoading(true);
       setError('');
-      setMessage('');
 
       const data = await fetchTravelCurrencySettings(options);
 
@@ -130,7 +129,6 @@ const TravelSettingsPage = () => {
       const header = { ...normalizedBrandingHeader, [field]: checked };
       const saved = await updatePrintSettings('travelInvoice', { header });
       setBranding(saved);
-      setMessage(t('travel.settings.brandingSaved'));
     } catch (saveError) {
       console.error('Travel branding visibility save failed:', saveError);
       setError(saveError?.response?.data?.msg || t('travel.settings.brandingSaveFailed'));
@@ -148,7 +146,6 @@ const TravelSettingsPage = () => {
       setBrandingLoading(true);
       setError('');
       setBranding(await uploadPrintLogo('travelInvoice', file));
-      setMessage(t('travel.settings.logoUploaded'));
     } catch (uploadError) {
       console.error('Travel logo upload failed:', uploadError);
       setError(uploadError?.response?.data?.msg || t('travel.settings.logoUploadFailed'));
@@ -164,7 +161,6 @@ const TravelSettingsPage = () => {
       setBrandingLoading(true);
       setError('');
       setBranding(await removePrintLogo('travelInvoice'));
-      setMessage(t('travel.settings.logoRemoved'));
     } catch (removeError) {
       console.error('Travel logo remove failed:', removeError);
       setError(removeError?.response?.data?.msg || t('travel.settings.logoRemoveFailed'));
@@ -192,7 +188,6 @@ const TravelSettingsPage = () => {
     try {
       setSaving(true);
       setError('');
-      setMessage('');
 
       const saved = await updateTravelCurrencySettings({
         baseCurrency: DEFAULT_TRAVEL_CURRENCY,
@@ -208,7 +203,6 @@ const TravelSettingsPage = () => {
 
       setRateValues(normalizeRateMap(saved));
 
-      setMessage(t('travel.settings.saveSuccess'));
     } catch (saveError) {
       console.error('Travel currency settings save failed:', saveError);
 
@@ -354,19 +348,7 @@ const TravelSettingsPage = () => {
           </div>
         </section>
 
-        {/* ERROR */}
-        {error && (
-          <div className="rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm">
-            {error}
-          </div>
-        )}
-
-        {/* SUCCESS */}
-        {message && (
-          <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm">
-            {message}
-          </div>
-        )}
+        <TravelErrorModal open={Boolean(error)} message={error} onClose={() => setError('')} />
 
         {/* RATE CARDS */}
         <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

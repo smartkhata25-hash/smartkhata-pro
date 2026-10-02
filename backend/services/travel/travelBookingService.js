@@ -1152,13 +1152,6 @@ const normalizeUmrahComponent = (component = {}) => {
 
   const totals = calculateComponentSourceTotals(normalized);
 
-  if (vendorPaidAmount > totals.costTotal) {
-    throw createHttpError(
-      400,
-      "Vendor paid amount cannot exceed component cost",
-    );
-  }
-
   if (vendorPaidAmount > 0 && !vendorId && !vendorPartyId) {
     throw createHttpError(
       400,
@@ -1327,14 +1320,6 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
       0,
     );
 
-    if (item.vendorPaidAmount > roundMoney(componentCostTotal)) {
-      throw createHttpError(
-        400,
-        "Vendor paid amount cannot exceed Umrah component cost",
-      );
-    }
-  } else if (item.vendorPaidAmount > itemTotals.costTotal) {
-    throw createHttpError(400, "Vendor paid amount cannot exceed item cost");
   }
 
   if (
@@ -1760,13 +1745,6 @@ const applyEstimatedTotals = (items, currencySettings) => {
             currencySettings,
           );
 
-          if (estimatedVendorPaidBase > estimatedCostBase + 0.009) {
-            throw createHttpError(
-              400,
-              "Vendor paid amount cannot exceed component cost",
-            );
-          }
-
           addBreakdownAmount(
             breakdown,
             component.sellingCurrency,
@@ -1837,10 +1815,6 @@ const applyEstimatedTotals = (items, currencySettings) => {
       nextItem.costCurrency,
       currencySettings,
     );
-
-    if (estimatedVendorPaidBase > estimatedCostBase + 0.009) {
-      throw createHttpError(400, "Vendor paid amount cannot exceed item cost");
-    }
 
     nextItem.estimatedSellingBase = roundMoney(estimatedSellingBase);
 
@@ -1928,13 +1902,6 @@ const applyEstimatedTotals = (items, currencySettings) => {
   const roundedCostTotal = roundMoney(costTotal);
 
   const roundedVendorPaidTotal = roundMoney(vendorPaidTotal);
-
-  if (roundedVendorPaidTotal > roundedCostTotal + 0.009) {
-    throw createHttpError(
-      400,
-      "Vendor paid amount cannot exceed total travel cost",
-    );
-  }
 
   return {
     bookingItems: nextItems,
@@ -2035,9 +2002,6 @@ const validateVendorPaymentsAgainstCosts = ({
       throw createHttpError(400, "Vendor payment has no allocated vendor cost");
     }
 
-    if (roundMoney(payment.paidAmount) > allocatedCost + 0.009) {
-      throw createHttpError(400, "Vendor paid amount cannot exceed allocated vendor cost");
-    }
   });
 
   return costs;
@@ -2296,9 +2260,6 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
   const netSale = roundMoney(Math.max(totals.sellingTotal - discountAmount, 0));
 
-  if (receivedAmount > netSale) {
-    throw createHttpError(400, "Received amount cannot exceed net invoice");
-  }
 
   const vendorPaidTotal = usesVendorPayments
     ? roundMoney(

@@ -15,6 +15,7 @@ import {
 } from '../../services/weavingFoldingService';
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
+import WeavingAggregateProductionPage from './WeavingAggregateProductionPage';
 
 const inputClass = 'mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
 const qualityLabel = (quality) => [quality?.name, quality?.code].filter(Boolean).join(' - ');
@@ -244,6 +245,7 @@ export default function WeavingFoldingPage() {
   };
 
   return (
+    meta.productionTrackingMode && meta.productionTrackingMode !== 'detailed' ? <WeavingAggregateProductionPage /> :
     <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-teal-50/50 p-3 sm:p-5">
       <div className="space-y-5">
         <header>
@@ -317,7 +319,6 @@ export default function WeavingFoldingPage() {
               </select>}
             </div>}
             {resolved?.beam && <div className="col-span-full text-sm font-bold text-teal-800">{t(resolved.historical ? 'weaving.folding.previousRun' : 'weaving.folding.currentRun')}: {resolved.beam.beamNo}</div>}
-            {!knownRun && !form.contractId && <label className="col-span-full flex items-center gap-2 text-xs"><input type="checkbox" checked={manualContext} onChange={(event) => setManualContext(event.target.checked)} />{t('weaving.production.manual')}</label>}
             <WeavingProductionContext context={{ ...(resolved?.contract ? contextForRun(resolved) : selectedContract?.productionContext), fabricQualityId: form.fabricQualityId, ownershipType: form.ownershipType, ownerPartyId: form.ownerPartyId }} fabrics={meta.fabrics} parties={meta.parties}><span>{t('weaving.folding.loom')}: <strong>{resolved?.loom?.loomNumber || '-'}</strong></span><span>{t('weaving.production.beam')}: <strong>{resolved?.beam?.beamNo || '-'}</strong></span></WeavingProductionContext>
 
             {(selectedQuality || resolved?.beam) && (

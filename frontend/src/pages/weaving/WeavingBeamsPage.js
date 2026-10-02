@@ -13,6 +13,7 @@ import {
   showWeavingWarning,
 } from '../../components/weaving/WeavingFeedbackModal';
 import {
+  createManualKnottingJob,
   createKnottingJob,
   completeBeam,
   getBeamMeta,
@@ -68,6 +69,8 @@ export default function WeavingBeamsPage() {
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [manualEmployeeId, setManualEmployeeId] = useState('');
+  const [manualQuantities, setManualQuantities] = useState({});
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -83,6 +86,28 @@ export default function WeavingBeamsPage() {
   useEffect(() => {
     load();
   }, [load]);
+  const manualEmployees = useMemo(
+    () => meta.employees.filter((row) => row.knottingPaymentMethod === 'per_beam'),
+    [meta.employees]
+  );
+  const mode = meta.productionTrackingMode === 'detailed' ? 'detailed' : 'manual';
+  useEffect(() => {
+    setManualEmployeeId((current) => {
+      if (manualEmployees.length === 1) return manualEmployees[0]._id;
+      return manualEmployees.some((row) => row._id === current) ? current : '';
+    });
+  }, [manualEmployees]);
+  useEffect(() => {
+    setManualQuantities((current) => {
+      const next = { ...current };
+      sets.forEach((row) => {
+        const available = Number(row.beamCounts?.available || 0);
+        if (available > 0 && (next[row._id] === undefined || Number(next[row._id]) > available))
+          next[row._id] = String(available);
+      });
+      return next;
+    });
+  }, [sets]);
   const openSet = async (id) => {
     if (opening || saving) return;
     setOpening(true);
@@ -243,7 +268,38 @@ export default function WeavingBeamsPage() {
       setLoading(false);
     }
   };
+  const saveManual = async (row) => {
+    if (saving || !canSave || !canLoad) return;
+    const available = Number(row.beamCounts?.available || 0);
+    const quantity = Number(manualQuantities[row._id]);
+    if (manualEmployees.length && !manualEmployeeId) {
+      showWeavingWarning('Select a Per-Beam Knotting Worker.');
+      return;
+    }
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > available) {
+      showWeavingWarning(`Qty to Load must be between 1 and ${available}.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await createManualKnottingJob({
+        beamSetId: row._id,
+        employeeId: manualEmployeeId,
+        quantity,
+        workDate: getBusinessDateInputValue(),
+        approve: canApprove,
+      });
+      showWeavingSuccess(`${quantity} Beams loaded successfully.`);
+      await load();
+    } catch (error) {
+      showWeavingError(error, 'Could not save Manual Knotting.');
+    } finally {
+      setSaving(false);
+    }
+  };
   const disabledSave = saving || !canSave || !canLoad;
+  const manualRows = sets.filter((row) => Number(row.beamCounts?.available || 0) > 0);
+  const manualWorker = manualEmployees.find((row) => row._id === manualEmployeeId);
 
   return (
     <div className="min-h-full bg-slate-50 p-4 sm:p-6">
@@ -263,6 +319,10 @@ export default function WeavingBeamsPage() {
           </button>
         )}
       </div>
+      <div className="mb-5 inline-flex rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-800">
+        Production Mode: {meta.productionTrackingMode === 'loom_wise' ? 'Loom-wise' : meta.productionTrackingMode === 'quality_total' ? 'Total Production' : 'Detailed'}
+      </div>
+      {mode === 'detailed' && <>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {['available', 'knotting', 'loaded', 'completed'].map((status) => (
           <div key={status} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -365,7 +425,110 @@ export default function WeavingBeamsPage() {
           </tbody>
         </table>
       </div>
-      {selected && (
+      </>}
+      {mode === 'manual' && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-cyan-100 bg-white p-4 shadow-sm">
+            {!!manualEmployees.length && <div className="grid items-end gap-3 sm:grid-cols-3">
+              <label className="text-xs font-bold text-slate-600 sm:col-span-2">
+                Per-Beam Knotting Worker
+                {manualEmployees.length === 1 ? (
+                  <div className={`${inputClass} flex items-center font-bold`}>
+                    {manualEmployees[0].name}
+                  </div>
+                ) : (
+                  <select
+                    value={manualEmployeeId}
+                    onChange={(event) => setManualEmployeeId(event.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">Select Worker</option>
+                    {manualEmployees.map((row) => (
+                      <option key={row._id} value={row._id}>{row.name}</option>
+                    ))}
+                  </select>
+                )}
+              </label>
+              <div className="rounded-lg bg-cyan-50 px-3 py-2">
+                <div className="text-xs font-bold text-cyan-700">Per-Beam Rate</div>
+                <div className="mt-1 font-black text-slate-900">
+                  Rs. {money(manualWorker?.knottingDefaultRate)}
+                </div>
+              </div>
+            </div>}
+            {!manualEmployees.length && <p className="text-sm font-semibold text-cyan-700">Load Only: no per-beam earning will be created.</p>}
+          </div>
+
+          {loading ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+              <Loader2 className="mx-auto animate-spin" />
+            </div>
+          ) : manualRows.length ? (
+            <div className="grid gap-3">
+              {manualRows.map((row) => {
+                const received = Number(row.beamCounts?.total || 0);
+                const remaining = Number(row.beamCounts?.available || 0);
+                const loaded = received - remaining;
+                const quantity = Number(manualQuantities[row._id] || 0);
+                const amount = quantity * Number(manualWorker?.knottingDefaultRate || 0);
+                return (
+                  <div key={row._id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-7">
+                      <div className="lg:col-span-2">
+                        <div className="text-xs font-bold uppercase text-slate-500">Sizing Ref</div>
+                        <div className="mt-1 text-lg font-black text-slate-900">
+                          {row.setNo || row.receiptNo}
+                        </div>
+                        {row.setNo && <div className="text-xs text-slate-500">{row.receiptNo}</div>}
+                      </div>
+                      {[
+                        ['Received', received],
+                        ['Loaded', loaded],
+                        ['Remaining', remaining],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-lg bg-slate-50 px-3 py-2 text-center">
+                          <div className="text-xs font-bold text-slate-500">{label}</div>
+                          <div className="mt-1 text-lg font-black text-slate-900">{value}</div>
+                        </div>
+                      ))}
+                      <label className="text-xs font-bold text-slate-600">
+                        Qty to Load
+                        <input
+                          type="number"
+                          min="1"
+                          max={remaining}
+                          step="1"
+                          value={manualQuantities[row._id] ?? String(remaining)}
+                          onChange={(event) =>
+                            setManualQuantities((current) => ({
+                              ...current,
+                              [row._id]: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={disabledSave || (manualEmployees.length > 0 && !manualEmployeeId) || quantity < 1 || quantity > remaining}
+                        onClick={() => saveManual(row)}
+                        className="h-10 rounded-lg bg-gradient-to-r from-slate-900 to-cyan-800 px-4 text-sm font-bold text-white disabled:opacity-50"
+                      >
+                        {saving ? tr('saving') : manualEmployees.length ? `Save · Rs. ${money(amount)}` : 'Load Beams'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+              No Sizing Beams are currently available for Manual loading.
+            </div>
+          )}
+        </div>
+      )}
+      {mode === 'detailed' && selected && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-3 sm:p-5"
           role="dialog"
@@ -591,8 +754,8 @@ export default function WeavingBeamsPage() {
                   </label>
                 )}
               </fieldset>
-              {canLoad && selected.beams?.some((beam) => beam.status === 'loaded') && <div className="mt-4 space-y-2 border-t pt-3">
-                {selected.beams.filter((beam) => beam.status === 'loaded').map((beam) => <div key={beam._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 p-3">
+              {canLoad && selected.beams?.some((beam) => beam.status === 'loaded' && (beam.activeLoomId || beam.loomNumber)) && <div className="mt-4 space-y-2 border-t pt-3">
+                {selected.beams.filter((beam) => beam.status === 'loaded' && (beam.activeLoomId || beam.loomNumber)).map((beam) => <div key={beam._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 p-3">
                   <span className="text-sm font-bold">{beam.beamNo} / {tr('loomRequired')} {beam.activeLoomId?.loomNumber || beam.loomNumber}</span>
                   <button type="button" disabled={saving} onClick={() => unload(beam)} className="rounded border border-amber-300 px-3 py-2 text-xs font-bold text-amber-800">{tr('completeUnload')}</button>
                 </div>)}

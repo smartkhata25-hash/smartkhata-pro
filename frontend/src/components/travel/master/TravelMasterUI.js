@@ -3,6 +3,7 @@ import {
   FaBolt,
   FaCheck,
   FaEdit,
+  FaExclamationTriangle,
   FaExternalLinkAlt,
   FaPlus,
   FaSave,
@@ -93,35 +94,105 @@ export const buildTravelConfirmMessage = (actionKey, recordLabel = '') => {
   return `${t(actionKey)}: ${label}?`;
 };
 
+export const getTravelErrorMessage = (error, fallback = '') => {
+  const data = error?.response?.data;
+  const candidates = [
+    data?.message,
+    data?.error,
+    Array.isArray(data?.errors) ? data.errors.map((item) => item?.message || item).join(' ') : '',
+    error?.message,
+    fallback,
+  ];
+
+  const message = candidates.find(
+    (candidate) => typeof candidate === 'string' && candidate.trim()
+  );
+
+  return String(message || t('travel.feedback.defaultError')).trim();
+};
+
+export const TravelErrorModal = ({ open, message, title, onClose }) => {
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose?.();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="travel-error-title"
+      dir={document.documentElement.dir || 'ltr'}
+    >
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-rose-200 bg-white shadow-2xl">
+        <div className="flex items-center gap-3 bg-gradient-to-r from-rose-700 to-red-600 px-4 py-3 text-white">
+          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/15">
+            <FaExclamationTriangle aria-hidden="true" />
+          </span>
+          <h2 id="travel-error-title" className="text-lg font-extrabold">
+            {title || t('travel.feedback.errorTitle')}
+          </h2>
+        </div>
+        <div className="p-4 sm:p-5">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-rose-700">
+            {t('travel.feedback.reason')}
+          </p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-slate-700">
+            {message || t('travel.feedback.defaultError')}
+          </p>
+          <div className="mt-5 flex justify-end">
+            <TravelActionButton onClick={onClose} variant="danger">
+              {t('travel.common.close')}
+            </TravelActionButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const TravelMasterPageFrame = ({
   titleKey,
   subtitleKey,
   children,
   actions = null,
   filters = null,
+  className = '',
+  embedded = false,
 }) => (
-  <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
-    <section className="mb-3 overflow-hidden rounded-lg border border-cyan-100 bg-white shadow-sm">
-      <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
-      <div className="flex flex-col gap-2 px-3 py-3 lg:flex-row lg:items-center lg:justify-between md:px-4">
-        <div className="min-w-0">
-          <h1 className="text-lg font-extrabold leading-tight text-slate-950 md:text-xl">
-            {t(titleKey)}
-          </h1>
-          {subtitleKey && (
-            <p className="mt-0.5 text-xs font-semibold text-slate-500 md:text-sm">
-              {t(subtitleKey)}
-            </p>
-          )}
+  <div className={`${embedded ? 'min-w-0' : 'min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6'} ${className}`}>
+    {!embedded && (
+      <section className="mb-3 overflow-hidden rounded-lg border border-cyan-100 bg-white shadow-sm">
+        <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" />
+        <div className="flex flex-col gap-2 px-3 py-3 lg:flex-row lg:items-center lg:justify-between md:px-4">
+          <div className="min-w-0">
+            <h1 className="text-lg font-extrabold leading-tight text-slate-950 md:text-xl">
+              {t(titleKey)}
+            </h1>
+            {subtitleKey && (
+              <p className="mt-0.5 text-xs font-semibold text-slate-500 md:text-sm">
+                {t(subtitleKey)}
+              </p>
+            )}
+          </div>
+
+          {actions && <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">{actions}</div>}
         </div>
 
-        {actions && <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">{actions}</div>}
-      </div>
-
-      {filters && (
-        <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2 md:px-4">{filters}</div>
-      )}
-    </section>
+        {filters && (
+          <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2 md:px-4">{filters}</div>
+        )}
+      </section>
+    )}
 
     {children}
   </div>
@@ -347,11 +418,18 @@ export const TravelFormModal = ({
   children = null,
   submitIcon: SubmitIcon = FaSave,
 }) => {
+  const [errorOpen, setErrorOpen] = useState(false);
+
+  useEffect(() => {
+    setErrorOpen(Boolean(error));
+  }, [error]);
+
   useEffect(() => {
     if (!open) return undefined;
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
+        if (error) return;
         onClose();
       }
     };
@@ -359,7 +437,7 @@ export const TravelFormModal = ({
     window.addEventListener('keydown', handleKeyDown);
 
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
+  }, [error, open, onClose]);
 
   if (!open) {
     return null;
@@ -387,12 +465,6 @@ export const TravelFormModal = ({
 
         <form onSubmit={onSubmit}>
           <div className="max-h-[70vh] space-y-4 overflow-y-auto p-4 md:max-h-[68vh]">
-            {error && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-                {error}
-              </div>
-            )}
-
             {fields.length > 0 && (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {fields.map((field) => {
@@ -436,6 +508,7 @@ export const TravelFormModal = ({
           </div>
         </form>
       </div>
+      <TravelErrorModal open={errorOpen} message={error} onClose={() => setErrorOpen(false)} />
     </div>
   );
 };

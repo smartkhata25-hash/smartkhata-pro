@@ -48,6 +48,7 @@ import { hasPermission } from '../../utils/permissionHelper';
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
+  TravelErrorModal,
 } from '../../components/travel/master/TravelMasterUI';
 import { TravelBookingReminderControls } from '../../components/travel/reminders/TravelReminderCenter';
 
@@ -606,13 +607,13 @@ const SectionHeader = ({ icon: Icon, title, tone = 'cyan', action = null }) => {
   );
 };
 
-const MiniTotal = ({ labelKey, value, accent = 'text-slate-900', icon: Icon = FaCoins }) => (
+const MiniTotal = ({ labelKey, label = '', value, accent = 'text-slate-900', icon: Icon = FaCoins }) => (
   <div className="min-w-0 rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2.5 shadow-sm">
     <div className="flex items-center gap-2">
       <Icon aria-hidden="true" className="flex-shrink-0 text-xs text-slate-400" />
 
       <p className="truncate text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-        {t(labelKey)}
+        {label || t(labelKey)}
       </p>
     </div>
 
@@ -663,6 +664,7 @@ const TravelBookingFormPage = () => {
   const [modalValues, setModalValues] = useState({});
   const [modalError, setModalError] = useState('');
   const [modalSaving, setModalSaving] = useState(false);
+  const [advanceConfirmationStatus, setAdvanceConfirmationStatus] = useState('');
 
   const accountingLocked = Boolean(formState.accountingPosted);
 
@@ -917,7 +919,7 @@ const TravelBookingFormPage = () => {
     [formState.vendorPayments, vendorCostSummary.groups]
   );
 
-  const totals = useMemo(
+  const localTotals = useMemo(
     () =>
       calculateLocalTotals(
         { ...formState, vendorPayments: effectiveVendorPayments },
@@ -963,6 +965,75 @@ const TravelBookingFormPage = () => {
     ],
     [activeVendors, activeParties]
   );
+
+  const totals = useMemo(() => {
+    const customerKey = getCustomerCounterpartyValue(formState);
+    const customer = customerCounterparties.find((record) => record._id === customerKey);
+    const previousCustomerBalance = numberValue(customer?.balance);
+    const customerBalance = accountingLocked
+      ? previousCustomerBalance
+      : numberValue(previousCustomerBalance + localTotals.customerBalance);
+    const vendorBalances = vendorCostSummary.groups.map((group) => {
+      const vendor = vendorCounterparties.find((record) => record._id === group.key);
+      const previousPayable = vendor?.counterpartyType === 'party'
+        ? -numberValue(vendor?.balance)
+        : numberValue(vendor?.balance);
+      const payment = effectiveVendorPayments.find(
+        (candidate) => getVendorCounterpartyKey(candidate) === group.key
+      );
+      const balance = accountingLocked
+        ? previousPayable
+        : numberValue(
+            previousPayable +
+              numberValue(group.totalCostBase) -
+              numberValue(payment?.paidAmount)
+          );
+      return {
+        ...group,
+        name: vendor ? getVendorLabel(vendor) : group.key,
+        previousBalance: previousPayable,
+        paymentNow: numberValue(payment?.paidAmount),
+        balance,
+        payable: Math.max(balance, 0),
+        advance: Math.max(-balance, 0),
+      };
+    });
+    return {
+      ...localTotals,
+      previousCustomerBalance,
+      customerBalance,
+      due: Math.max(customerBalance, 0),
+      customerAdvance: Math.max(-customerBalance, 0),
+      vendorBalances,
+      vendorPayable: vendorBalances.reduce((sum, row) => sum + row.payable, 0),
+      vendorAdvance: vendorBalances.reduce((sum, row) => sum + row.advance, 0),
+    };
+  }, [accountingLocked, customerCounterparties, effectiveVendorPayments, formState, localTotals, vendorCostSummary.groups, vendorCounterparties]);
+
+  const advanceWarnings = useMemo(() => {
+    const rows = [];
+    if (totals.customerAdvance > 0) {
+      rows.push({
+        key: 'customer',
+        label: 'Customer',
+        name: customerCounterparties.find(
+          (record) => record._id === getCustomerCounterpartyValue(formState)
+        )?.name || 'Customer',
+        amount: totals.net,
+        paymentNow: numberValue(formState.receivedAmount),
+        advance: totals.customerAdvance,
+      });
+    }
+    totals.vendorBalances.filter((row) => row.advance > 0).forEach((row) => rows.push({
+      key: row.key,
+      label: 'Vendor',
+      name: row.name,
+      amount: row.totalCostBase,
+      paymentNow: row.paymentNow,
+      advance: row.advance,
+    }));
+    return rows;
+  }, [customerCounterparties, formState, totals]);
 
   const modalFields = useMemo(() => {
     if (!modal) {
@@ -2418,23 +2489,12 @@ const TravelBookingFormPage = () => {
       }
     }
 
-    if (numberValue(formState.receivedAmount) > totals.net) {
-      return 'Received amount cannot exceed net invoice amount.';
-    }
-
     if (numberValue(formState.receivedAmount) > 0 && !formState.accountId) {
       return 'Customer payment account is required.';
     }
 
     for (const payment of effectiveVendorPayments) {
-      const group = vendorCostSummary.groups.find(
-        (candidate) => candidate.key === getVendorCounterpartyKey(payment)
-      );
       const paidAmount = numberValue(payment.paidAmount);
-
-      if (paidAmount > numberValue(group?.totalCostBase)) {
-        return "Vendor Paid Now cannot exceed that vendor's allocated cost.";
-      }
 
       if (paidAmount > 0 && (!payment.paymentType || !payment.accountId)) {
         return 'Payment type and account are required for each vendor payment.';
@@ -2526,7 +2586,7 @@ const TravelBookingFormPage = () => {
     return payload;
   };
 
-  const submitBooking = async (status) => {
+  const submitBooking = async (status, advanceConfirmed = false) => {
     if (isEditMode && !canEdit) {
       setFormError(t('travel.alerts.permissionDenied'));
       return;
@@ -2541,6 +2601,15 @@ const TravelBookingFormPage = () => {
 
     if (validationError) {
       setFormError(validationError);
+      return;
+    }
+
+    if (
+      !advanceConfirmed &&
+      ['confirmed', 'processing', 'completed'].includes(status) &&
+      advanceWarnings.length > 0
+    ) {
+      setAdvanceConfirmationStatus(status);
       return;
     }
 
@@ -4971,9 +5040,32 @@ const TravelBookingFormPage = () => {
 
   return (
     <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
-      {formError && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-3 text-sm font-bold text-rose-700 shadow-sm">
-          {formError}
+      <TravelErrorModal open={Boolean(formError)} message={formError} onClose={() => setFormError('')} />
+
+      {advanceConfirmationStatus && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="advance-confirmation-title">
+          <div className="w-full max-w-lg overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-emerald-700 to-teal-700 px-5 py-4 text-white">
+              <h2 id="advance-confirmation-title" className="text-lg font-black">Advance Payment Confirmation</h2>
+            </div>
+            <div className="space-y-3 p-5">
+              {advanceWarnings.map((row) => (
+                <div key={row.key} className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+                  <div className="font-black text-slate-900">{row.label}: {row.name}</div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div><span className="block font-bold text-slate-500">Invoice / Cost</span>{formatMoney(row.amount, baseCurrency)}</div>
+                    <div><span className="block font-bold text-slate-500">Payment Now</span>{formatMoney(row.paymentNow, baseCurrency)}</div>
+                    <div><span className="block font-bold text-emerald-700">Advance After</span>{formatMoney(row.advance, baseCurrency)}</div>
+                  </div>
+                </div>
+              ))}
+              <p className="text-sm font-semibold leading-6 text-slate-600">This extra amount will remain as advance in the customer/vendor Travel Ledger and will automatically adjust against future invoices.</p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
+              <TravelActionButton variant="secondary" onClick={() => setAdvanceConfirmationStatus('')}>Cancel</TravelActionButton>
+              <TravelActionButton variant="success" onClick={() => { const status = advanceConfirmationStatus; setAdvanceConfirmationStatus(''); void submitBooking(status, true); }}>Continue &amp; Confirm</TravelActionButton>
+            </div>
+          </div>
         </div>
       )}
 
@@ -5173,7 +5265,7 @@ const TravelBookingFormPage = () => {
 
                       const paidAmount = numberValue(payment?.paidAmount);
 
-                      const remaining = Math.max(numberValue(group.totalCostBase) - paidAmount, 0);
+                      const vendorBalance = totals.vendorBalances.find((row) => row.key === group.key);
 
                       const vendorRecord = vendorCounterparties.find(
                         (record) => String(record._id) === group.key
@@ -5191,8 +5283,9 @@ const TravelBookingFormPage = () => {
                               </p>
 
                               <p className="text-[10px] font-bold text-slate-500">
-                                Cost {formatMoney(group.totalCostBase, baseCurrency)} · Remaining{' '}
-                                {formatMoney(remaining, baseCurrency)}
+                                Cost {formatMoney(group.totalCostBase, baseCurrency)} ·{' '}
+                                {vendorBalance?.advance > 0 ? 'Advance ' : 'Payable '}
+                                {formatMoney(vendorBalance?.advance || vendorBalance?.payable || 0, baseCurrency)}
                               </p>
                             </div>
 
@@ -5291,9 +5384,9 @@ const TravelBookingFormPage = () => {
                 />
 
                 <MiniTotal
-                  labelKey="travel.booking.fields.customerDue"
-                  value={formatMoney(totals.due, baseCurrency)}
-                  accent="text-rose-700"
+                  label={totals.customerAdvance > 0 ? 'Customer Advance' : totals.due > 0 ? 'Customer Due' : 'Customer Balance'}
+                  value={formatMoney(totals.customerAdvance || totals.due, baseCurrency)}
+                  accent={totals.customerAdvance > 0 ? 'text-emerald-700' : totals.due > 0 ? 'text-rose-700' : 'text-slate-700'}
                   icon={FaWallet}
                 />
 
@@ -5314,6 +5407,13 @@ const TravelBookingFormPage = () => {
                   labelKey="travel.booking.fields.vendorPayable"
                   value={formatMoney(totals.vendorPayable, baseCurrency)}
                   accent="text-orange-700"
+                  icon={FaUserTie}
+                />
+
+                <MiniTotal
+                  label="Vendor Advance"
+                  value={formatMoney(totals.vendorAdvance, baseCurrency)}
+                  accent="text-emerald-700"
                   icon={FaUserTie}
                 />
 

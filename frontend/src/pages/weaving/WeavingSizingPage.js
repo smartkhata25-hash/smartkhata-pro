@@ -1,6 +1,5 @@
-import WeavingProductionContext, { contractIsOpen } from '../../components/weaving/WeavingProductionContext';
 import { t } from '../../i18n/i18n';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   FaBoxes,
@@ -15,12 +14,19 @@ import {
 
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
-import WeightKgLbsInput from '../../components/weaving/WeightKgLbsInput';
 import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import { getYarnStockSummary } from '../../services/weavingYarnStockService';
+import {
+  autoYarnWeight,
+  defaultPackageProfileFor,
+  packageProfilesFor,
+} from '../../utils/weaving/yarnPackaging';
 
 import {
   createSizingIssue,
   createSizingReceipt,
+  createSizingReturn,
+  createSizingBill,
   getCommercialMeta,
   getSizingMaterialLedger,
   getSizingMeta,
@@ -73,7 +79,7 @@ const Field = ({ label, children, className = '' }) => (
 
 const WeavingSizingPage = () => {
   const [params, setParams] = useSearchParams();
-  const requestedTab = ['issue', 'receiving', 'stock', 'ledger', 'list'].includes(params.get('tab'))
+  const requestedTab = ['issue', 'receiving', 'return', 'bill', 'stock', 'ledger', 'list'].includes(params.get('tab'))
     ? params.get('tab')
     : 'issue';
   const [tab, setTab] = useState(requestedTab);
@@ -109,9 +115,17 @@ const WeavingSizingPage = () => {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  const [packingOpen, setPackingOpen] = useState(false);
+  const [additionalOpen, setAdditionalOpen] = useState(false);
+  const [eligibleGodowns, setEligibleGodowns] = useState([]);
+  const [stockLoading, setStockLoading] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
+  const [receivingMoreOpen, setReceivingMoreOpen] = useState(false);
+  const [returnMoreOpen, setReturnMoreOpen] = useState(false);
+  const [sameReturnChallan, setSameReturnChallan] = useState(true);
+  const [sameBillChallan, setSameBillChallan] = useState(true);
+  const returnChallanDraft = useRef('');
+  const billInvoiceDraft = useRef('');
   const [billDetail, setBillDetail] = useState(null);
 
   const [issue, setIssue] = useState({
@@ -119,7 +133,11 @@ const WeavingSizingPage = () => {
     date: today(),
 
     sizingPartyId: '',
-    contractId: '', fabricQualityId: '', ownershipType: 'own', ownerPartyId: '', productionMode: 'own',
+    contractId: '',
+    fabricQualityId: '',
+    ownershipType: 'own',
+    ownerPartyId: '',
+    productionMode: 'own',
 
     sourceGodownId: '',
     yarnId: '',
@@ -133,6 +151,12 @@ const WeavingSizingPage = () => {
 
     packageType: '',
     packageQty: '',
+    smallCones: '',
+    largeCones: '',
+    packageWeight: '',
+    packageWeightUnit: 'LBS',
+    smallConesPerPackage: '',
+    largeConesPerPackage: '',
     coneSize: '',
     conesPerPackage: '',
     extraCones: '',
@@ -141,7 +165,10 @@ const WeavingSizingPage = () => {
   const [receipt, setReceipt] = useState({
     receiptNo: '',
     partyReceiptNo: '',
-    contractId: '', fabricQualityId: '', ownershipType: '', ownerPartyId: '',
+    contractId: '',
+    fabricQualityId: '',
+    ownershipType: '',
+    ownerPartyId: '',
     date: today(),
 
     sizingPartyId: '',
@@ -177,6 +204,10 @@ const WeavingSizingPage = () => {
 
     returnedSmallCones: '',
     returnedLargeCones: '',
+    packageWeight: '',
+    packageWeightUnit: 'LBS',
+    smallConesPerPackage: '',
+    largeConesPerPackage: '',
 
     issueId: '',
     lotReference: '',
@@ -217,21 +248,27 @@ const WeavingSizingPage = () => {
     setIssue((value) => ({
       ...value,
       issueNo: value.issueNo || sizingMeta.nextIssueNo || '',
+      sizingPartyId:
+        value.sizingPartyId || (sizingMeta.parties?.length === 1 ? sizingMeta.parties[0]._id : ''),
     }));
 
     setReceipt((value) => ({
       ...value,
       receiptNo: value.receiptNo || sizingMeta.nextReceiptNo || '',
+      sizingPartyId:
+        value.sizingPartyId || (sizingMeta.parties?.length === 1 ? sizingMeta.parties[0]._id : ''),
     }));
 
     setYarnReturn((value) => ({
       ...value,
       returnNo: value.returnNo || sizingMeta.nextReturnNo || '',
+      sizingPartyId: value.sizingPartyId || (sizingMeta.parties?.length === 1 ? sizingMeta.parties[0]._id : ''),
     }));
 
     setBill((value) => ({
       ...value,
       billNo: value.billNo || sizingMeta.nextBillNo || '',
+      sizingPartyId: value.sizingPartyId || (sizingMeta.parties?.length === 1 ? sizingMeta.parties[0]._id : ''),
     }));
     return sizingMeta;
   };
@@ -360,16 +397,47 @@ const WeavingSizingPage = () => {
           yarnId: line.yarnId?._id || line.yarnId || '',
           sourceGodownId: line.sourceGodownId || '',
           quantityKg: line.quantityKg || '',
+          quantityLbs:
+            line.quantityLbs ||
+            (line.quantityKg ? String(Number(line.quantityKg) / 0.45359237) : ''),
           packageType: line.packageType || '',
           packageQty: line.packageQty || '',
           coneSize: line.coneSize || '',
           conesPerPackage: line.conesPerPackage || '',
           extraCones: line.extraCones || '',
+          smallCones: line.smallCones ?? (line.coneSize === 'small' ? line.extraCones || 0 : 0),
+          largeCones: line.largeCones ?? (line.coneSize === 'large' ? line.extraCones || 0 : 0),
+          packageWeight: line.packageWeight || '',
+          packageWeightUnit: line.packageWeightUnit || 'LBS',
+          smallConesPerPackage: line.smallConesPerPackage || '',
+          largeConesPerPackage: line.largeConesPerPackage || '',
           lotReference: line.lotReference || '',
           ownershipType: row.ownershipType || line.ownershipType || '',
           ownerPartyId: row.ownerPartyId || line.ownerPartyId || '',
-          productionMode: row.contractId ? 'contract' : row.ownershipType === 'own' ? 'own' : 'manual',
+          productionMode: row.contractId
+            ? 'contract'
+            : row.ownershipType === 'own'
+              ? 'own'
+              : 'manual',
         });
+        const stock = await getYarnStockSummary({
+          yarnId: line.yarnId?._id || line.yarnId,
+          ownershipType: row.ownershipType || line.ownershipType || 'own',
+        });
+        setEligibleGodowns(
+          (stock.stockRows || []).filter(
+            (stockRow) =>
+              stockRow.ownershipType === (row.ownershipType || line.ownershipType || 'own') &&
+              String(stockRow.ownerPartyId || '') ===
+                String(
+                  (row.ownerPartyId || line.ownerPartyId || '')?._id ||
+                    row.ownerPartyId ||
+                    line.ownerPartyId ||
+                    ''
+                ) &&
+              Number(stockRow.kg) > 0
+          )
+        );
         setEditing({ type: 'issue', id: editId });
         setTab('issue');
       } else if (editType === 'receipt') {
@@ -396,7 +464,17 @@ const WeavingSizingPage = () => {
             yarnId: linkedReturn.yarnId?._id || linkedReturn.yarnId,
             destinationGodownId: linkedReturn.godownId?._id || linkedReturn.godownId || '',
             returnedKg: linkedReturn.quantityKg || '',
+            returnedLbs:
+              linkedReturn.quantityLbs ||
+              (linkedReturn.quantityKg ? String(Number(linkedReturn.quantityKg) / 0.45359237) : ''),
+            returnedSmallCones: linkedReturn.smallCones || '',
+            returnedLargeCones: linkedReturn.largeCones || '',
+            packageWeight: linkedReturn.packageWeight || '',
+            packageWeightUnit: linkedReturn.packageWeightUnit || 'LBS',
+            smallConesPerPackage: linkedReturn.smallConesPerPackage || '',
+            largeConesPerPackage: linkedReturn.largeConesPerPackage || '',
           });
+          setSameReturnChallan(linkedReturn.partyReturnNo === row.partyReceiptNo);
           setReturnOpen(true);
         }
         if (linkedBill) {
@@ -414,6 +492,7 @@ const WeavingSizingPage = () => {
             chequeBank: payment.chequeBank || '',
             chequeDate: payment.chequeDate || '',
           });
+          setSameBillChallan(linkedBill.partyInvoiceNo === row.partyReceiptNo);
           setBillOpen(true);
         }
         setEditing({ type: 'receipt', id: editId });
@@ -436,7 +515,7 @@ const WeavingSizingPage = () => {
         });
         setReturnOpen(true);
         setEditing({ type: 'return', id: editId });
-        setTab('receiving');
+        setTab('return');
       } else if (editType === 'bill') {
         const row = (await listSizingBills()).find((item) => item._id === editId);
         const receiptId = row?.receiptId?._id || row?.receiptId;
@@ -459,7 +538,7 @@ const WeavingSizingPage = () => {
         });
         setBillOpen(true);
         setEditing({ type: 'bill', id: editId });
-        setTab('receiving');
+        setTab('bill');
       }
     })().catch((error) =>
       setNotice({
@@ -497,10 +576,6 @@ const WeavingSizingPage = () => {
     }
   };
 
-  const totalCones =
-    Number(issue.packageQty || 0) * Number(issue.conesPerPackage || 0) +
-    Number(issue.extraCones || 0);
-
   const gross = Number(bill.billableWeightKg || 0) * Number(bill.ratePerKg || 0);
 
   const gstAmount = gross * (Number(bill.gstPercent || 0) / 100);
@@ -514,81 +589,199 @@ const WeavingSizingPage = () => {
       </option>
     ));
 
-  const selectIssueYarn = (yarnId, yarn) => {
+  const selectIssueYarn = async (yarnId, yarn) => {
+    const profile = defaultPackageProfileFor(yarn);
     setIssue((current) => ({
       ...current,
-
       yarnId,
-
-      packageType: current.packageType || yarn?.defaultPackageType || '',
-
-      conesPerPackage:
-        current.coneSize === 'small'
-          ? yarn?.smallConesPerPackage || ''
-          : current.coneSize === 'large'
-            ? yarn?.largeConesPerPackage || ''
-            : current.conesPerPackage,
+      sourceGodownId: '',
+      packageType: profile?.packageType || '',
+      packageWeight: profile?.packageWeight || '',
+      packageWeightUnit: profile?.packageWeightUnit || 'LBS',
+      smallConesPerPackage: profile?.smallConesPerPackage || '',
+      largeConesPerPackage: profile?.largeConesPerPackage || '',
     }));
-  };
-
-  const productionDefaults = (contractId, selectedIssue) => {
-    const context = selectedIssue?.productionContext || meta.contracts.find((row) => String(row._id) === String(contractId))?.productionContext;
-    return { contractId: context?.contractId || '', fabricQualityId: context?.fabricQualityId || '',
-      ownershipType: context?.ownershipType || '', ownerPartyId: context?.ownerPartyId || '' };
-  };
-  const chooseProduction = (value) => {
-    if (value === 'own' || value === 'manual') {
-      setIssue((current) => ({ ...current, contractId: '', productionMode: value, ownershipType: value === 'own' ? 'own' : '', ownerPartyId: '' }));
-    } else {
-      setIssue((current) => ({ ...current, ...productionDefaults(value), productionMode: 'contract' }));
+    setEligibleGodowns([]);
+    if (!yarnId) return;
+    setStockLoading(true);
+    try {
+      const summary = await getYarnStockSummary({ yarnId, ownershipType: 'own' });
+      const rows = (summary.stockRows || []).filter(
+        (row) => row.ownershipType === 'own' && Number(row.kg) > 0
+      );
+      setEligibleGodowns(rows);
+      if (rows.length === 1)
+        setIssue((current) => ({ ...current, sourceGodownId: rows[0].godownId }));
+    } catch (error) {
+      setNotice({
+        error: true,
+        text: error.response?.data?.message || 'Could not load available Yarn stock.',
+      });
+    } finally {
+      setStockLoading(false);
     }
   };
-  const issueContext = { ...meta.contracts.find((row) => String(row._id) === String(issue.contractId))?.productionContext,
-    fabricQualityId: issue.fabricQualityId, ownershipType: issue.ownershipType, ownerPartyId: issue.ownerPartyId };
-  const receiptSource = meta.issues.find((row) => String(row._id) === String(receipt.issueId))?.productionContext;
-  const receiptLocked = Boolean(receiptSource?.fabricQualityId && receiptSource?.ownershipType);
-  const receiptContext = { ...meta.contracts.find((row) => String(row._id) === String(receipt.contractId))?.productionContext,
-    fabricQualityId: receipt.fabricQualityId, ownershipType: receipt.ownershipType, ownerPartyId: receipt.ownerPartyId };
 
-  const chooseReceiptIssue = (issueId) => {
-    const selectedIssue = meta.issues.find((row) => String(row._id) === String(issueId));
+  const updateIssuePacking = (changes) =>
+    setIssue((current) => {
+      const yarn = meta.yarns.find((row) => String(row._id) === String(current.yarnId));
+      const next = { ...current, ...changes };
+      if (Object.prototype.hasOwnProperty.call(changes, 'packageType')) {
+        const profile = packageProfilesFor(yarn).find(
+          (row) => row.packageType === changes.packageType
+        );
+        Object.assign(next, {
+          packageWeight: profile?.packageWeight || '',
+          packageWeightUnit: profile?.packageWeightUnit || 'LBS',
+          smallConesPerPackage: profile?.smallConesPerPackage || '',
+          largeConesPerPackage: profile?.largeConesPerPackage || '',
+        });
+      }
+      const weight = autoYarnWeight(next);
+      return { ...next, quantityLbs: weight.lbs ?? '', quantityKg: weight.kg ?? '' };
+    });
 
-    const issuePartyId = selectedIssue?.sizingPartyId?._id || selectedIssue?.sizingPartyId || '';
+  const productionDefaults = (contractId, selectedIssue) => {
+    const context =
+      selectedIssue?.productionContext ||
+      meta.contracts.find((row) => String(row._id) === String(contractId))?.productionContext;
+    return {
+      contractId: context?.contractId || '',
+      fabricQualityId: context?.fabricQualityId || '',
+      ownershipType: context?.ownershipType || '',
+      ownerPartyId: context?.ownerPartyId || '',
+    };
+  };
 
-    const issueYarnId =
-      selectedIssue?.lines?.[0]?.yarnId?._id ||
-      selectedIssue?.lines?.[0]?.yarnId ||
-      selectedIssue?.yarnId?._id ||
-      selectedIssue?.yarnId ||
-      '';
+  const eligibleReceivingIssues = (sizingPartyId) => {
+    const used = new Set(
+      (meta.receipts || [])
+        .map((row) => String(row.issueId?._id || row.issueId || ''))
+        .filter(Boolean)
+    );
+
+    return (meta.issues || [])
+      .filter(
+        (row) =>
+          String(row.sizingPartyId?._id || row.sizingPartyId) === String(sizingPartyId) &&
+          !used.has(String(row._id))
+      )
+      .sort(
+        (a, b) =>
+          String(a.date || '').localeCompare(String(b.date || '')) ||
+          String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+      );
+  };
+
+  const selectReceivingIssue = (issueId) => {
+    const selected = (meta.issues || []).find(
+      (row) => String(row._id) === String(issueId)
+    );
+    const yarnId = selected?.lines?.[0]?.yarnId?._id || selected?.lines?.[0]?.yarnId || '';
+    const yarn = meta.yarns.find((row) => String(row._id) === String(yarnId));
+    const profile = defaultPackageProfileFor(yarn);
 
     setReceipt((current) => ({
       ...current,
-      issueId,
-      ...productionDefaults(selectedIssue?.contractId, selectedIssue),
-      sizingPartyId: current.sizingPartyId || issuePartyId,
+      issueId: selected?._id || '',
+      ...(selected ? productionDefaults(selected.contractId, selected) : {}),
     }));
-
     setYarnReturn((current) => ({
       ...current,
-      issueId,
-      sizingPartyId: issuePartyId || receipt.sizingPartyId || current.sizingPartyId,
-      yarnId: current.yarnId || issueYarnId,
+      issueId: selected?._id || '',
+      yarnId,
+      packageType: current.packageType || profile?.packageType || '',
+      packageWeight: profile?.packageWeight || '',
+      packageWeightUnit: profile?.packageWeightUnit || 'LBS',
+      smallConesPerPackage: profile?.smallConesPerPackage || '',
+      largeConesPerPackage: profile?.largeConesPerPackage || '',
     }));
   };
+
+  const chooseReceivingSizing = (sizingPartyId) => {
+    const candidates = eligibleReceivingIssues(sizingPartyId);
+    setReceipt((current) => ({
+      ...current,
+      sizingPartyId,
+      issueId: '',
+      contractId: '',
+      fabricQualityId: '',
+      ownershipType: '',
+      ownerPartyId: '',
+    }));
+    setYarnReturn((current) => ({
+      ...current,
+      sizingPartyId,
+      issueId: '',
+      yarnId: '',
+    }));
+    setBill((current) => ({ ...current, sizingPartyId }));
+
+    if (candidates.length === 1) selectReceivingIssue(candidates[0]._id);
+  };
+
+  const updateReturnPacking = (changes) =>
+    setYarnReturn((current) => {
+      const yarn = meta.yarns.find((row) => String(row._id) === String(current.yarnId));
+      const next = { ...current, ...changes };
+      if (Object.prototype.hasOwnProperty.call(changes, 'packageType')) {
+        const profile = packageProfilesFor(yarn).find(
+          (row) => row.packageType === changes.packageType
+        );
+        Object.assign(next, {
+          packageWeight: profile?.packageWeight || '',
+          packageWeightUnit: profile?.packageWeightUnit || 'LBS',
+          smallConesPerPackage: profile?.smallConesPerPackage || '',
+          largeConesPerPackage: profile?.largeConesPerPackage || '',
+        });
+      }
+      const weight = autoYarnWeight({
+        ...next,
+        smallCones: next.returnedSmallCones,
+        largeCones: next.returnedLargeCones,
+      });
+      return { ...next, returnedLbs: weight.lbs ?? '', returnedKg: weight.kg ?? '' };
+    });
+
+  useEffect(() => {
+    if (!editing && receipt.sizingPartyId && !receipt.issueId && meta.issues.length)
+      chooseReceivingSizing(receipt.sizingPartyId);
+  }, [receipt.sizingPartyId, receipt.issueId, meta.issues, editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (sameReturnChallan)
+      setYarnReturn((current) =>
+        current.partyReturnNo === receipt.partyReceiptNo
+          ? current
+          : { ...current, partyReturnNo: receipt.partyReceiptNo }
+      );
+    if (sameBillChallan)
+      setBill((current) =>
+        current.partyInvoiceNo === receipt.partyReceiptNo
+          ? current
+          : { ...current, partyInvoiceNo: receipt.partyReceiptNo }
+      );
+  }, [receipt.partyReceiptNo, sameReturnChallan, sameBillChallan]);
 
   const clearReceiving = (numbers = meta) => {
     setReturnOpen(false);
     setBillOpen(false);
+    setReceivingMoreOpen(false);
+    setReturnMoreOpen(false);
+    setSameReturnChallan(true);
+    setSameBillChallan(true);
 
     setReceipt({
       receiptNo: numbers.nextReceiptNo || '',
       date: today(),
 
-      sizingPartyId: '',
+      sizingPartyId: meta.parties.length === 1 ? meta.parties[0]._id : '',
       issueId: '',
       partyReceiptNo: '',
-      contractId: '', fabricQualityId: '', ownershipType: '', ownerPartyId: '',
+      contractId: '',
+      fabricQualityId: '',
+      ownershipType: '',
+      ownerPartyId: '',
 
       beamCount: '',
       length: '',
@@ -608,7 +801,7 @@ const WeavingSizingPage = () => {
       partyReturnNo: '',
       date: today(),
 
-      sizingPartyId: '',
+      sizingPartyId: meta.parties.length === 1 ? meta.parties[0]._id : '',
       yarnId: '',
       destinationGodownId: '',
 
@@ -620,6 +813,10 @@ const WeavingSizingPage = () => {
 
       returnedSmallCones: '',
       returnedLargeCones: '',
+      packageWeight: '',
+      packageWeightUnit: 'LBS',
+      smallConesPerPackage: '',
+      largeConesPerPackage: '',
 
       issueId: '',
       lotReference: '',
@@ -631,7 +828,7 @@ const WeavingSizingPage = () => {
       partyInvoiceNo: '',
       billDate: today(),
 
-      sizingPartyId: '',
+      sizingPartyId: meta.parties.length === 1 ? meta.parties[0]._id : '',
       receiptId: '',
 
       billableWeightKg: '',
@@ -656,8 +853,12 @@ const WeavingSizingPage = () => {
     setIssue({
       issueNo: numbers.nextIssueNo || '',
       date: today(),
-      sizingPartyId: '',
-      contractId: '', fabricQualityId: '', ownershipType: 'own', ownerPartyId: '', productionMode: 'own',
+      sizingPartyId: meta.parties.length === 1 ? meta.parties[0]._id : '',
+      contractId: '',
+      fabricQualityId: '',
+      ownershipType: 'own',
+      ownerPartyId: '',
+      productionMode: 'own',
       sourceGodownId: '',
       yarnId: '',
       quantityKg: '',
@@ -670,6 +871,12 @@ const WeavingSizingPage = () => {
       coneSize: '',
       conesPerPackage: '',
       extraCones: '',
+      smallCones: '',
+      largeCones: '',
+      packageWeight: '',
+      packageWeightUnit: 'LBS',
+      smallConesPerPackage: '',
+      largeConesPerPackage: '',
     });
   const cancelEdit = async () => {
     setEditing(null);
@@ -680,8 +887,15 @@ const WeavingSizingPage = () => {
   };
 
   const saveIssue = async () => {
-    if (!editing && (!issue.fabricQualityId || !issue.ownershipType || (issue.ownershipType === 'party' && !issue.ownerPartyId))) {
-      setNotice({ error: true, text: t('weaving.production.requiredIdentity') }); return;
+    if (!issue.sourceGodownId) {
+      setNotice({
+        error: true,
+        text:
+          issue.yarnId && !stockLoading && !eligibleGodowns.length
+            ? 'No available stock found for this Yarn.'
+            : 'Select a Source Godown.',
+      });
+      return;
     }
     setSaving(true);
     setNotice(null);
@@ -700,6 +914,8 @@ const WeavingSizingPage = () => {
             packageType: issue.packageType,
 
             packageQty: issue.packageQty,
+            smallCones: issue.smallCones,
+            largeCones: issue.largeCones,
 
             coneSize: issue.coneSize,
 
@@ -757,24 +973,121 @@ const WeavingSizingPage = () => {
     }
   };
 
-  const totalDeductions = Number(receipt.gullaWeightKg || 0) + Number(receipt.packingWeightKg || 0) + Number(receipt.bardanaWeightKg || 0);
-  const calculatedNetKg = receipt.yarnGrossWeightKg === '' ? '' : Math.round((Number(receipt.yarnGrossWeightKg || 0) - totalDeductions) * 1000000) / 1000000;
+  const totalDeductions =
+    Number(receipt.gullaWeightKg || 0) +
+    Number(receipt.packingWeightKg || 0) +
+    Number(receipt.bardanaWeightKg || 0);
+  const calculatedNetKg =
+    receipt.yarnGrossWeightKg === ''
+      ? ''
+      : Math.round((Number(receipt.yarnGrossWeightKg || 0) - totalDeductions) * 1000000) / 1000000;
   const invalidReceivingWeight = totalDeductions > Number(receipt.yarnGrossWeightKg || 0);
+  const linkedReceivingIssue = meta.issues.find((row) => String(row._id) === String(receipt.issueId));
+  const linkedReceivingYarnId = linkedReceivingIssue?.lines?.[0]?.yarnId?._id || linkedReceivingIssue?.lines?.[0]?.yarnId || yarnReturn.yarnId || '';
+  const linkedReceivingYarn = meta.yarns.find((row) => String(row._id) === String(linkedReceivingYarnId));
+  const receivingIssueOptions = eligibleReceivingIssues(receipt.sizingPartyId);
+  if (
+    editing?.type === 'receipt' &&
+    linkedReceivingIssue &&
+    !receivingIssueOptions.some((row) => String(row._id) === String(linkedReceivingIssue._id))
+  )
+    receivingIssueOptions.push(linkedReceivingIssue);
+  const receivingIssueLabel = (row) => {
+    const yarnId = row?.lines?.[0]?.yarnId?._id || row?.lines?.[0]?.yarnId || '';
+    const yarnName =
+      row?.lines?.[0]?.yarnId?.name ||
+      meta.yarns.find((item) => String(item._id) === String(yarnId))?.name ||
+      '';
+    return [row?.issueNo, yarnName].filter(Boolean).join(' — ');
+  };
+  const standaloneReturnIssues = (meta.issues || []).filter((row) => String(row.sizingPartyId?._id || row.sizingPartyId) === String(yarnReturn.sizingPartyId));
+  const standaloneBillReceipts = (meta.receipts || []).filter((row) => String(row.sizingPartyId?._id || row.sizingPartyId) === String(bill.sizingPartyId));
+  const standaloneBillReceipt = meta.receipts.find((row) => String(row._id) === String(bill.receiptId));
+  const billSourceChallan = tab === 'receiving' ? receipt.partyReceiptNo : standaloneBillReceipt?.partyReceiptNo || '';
+
+  const selectStandaloneReturnYarn = (yarnId, yarn) => {
+    const profile = defaultPackageProfileFor(yarn);
+    const matchingIssues = standaloneReturnIssues.filter((row) => (row.lines || []).some((line) => String(line.yarnId?._id || line.yarnId) === String(yarnId)));
+    setYarnReturn((current) => ({ ...current, yarnId, issueId: matchingIssues.length === 1 ? matchingIssues[0]._id : '', packageType: profile?.packageType || '',
+      packageWeight: profile?.packageWeight || '', packageWeightUnit: profile?.packageWeightUnit || 'LBS',
+      smallConesPerPackage: profile?.smallConesPerPackage || '', largeConesPerPackage: profile?.largeConesPerPackage || '',
+      returnedKg: '', returnedLbs: '', packageQty: '', returnedSmallCones: '', returnedLargeCones: '' }));
+  };
+  const selectStandaloneReturnIssue = (issueId) => {
+    const source = meta.issues.find((row) => String(row._id) === String(issueId));
+    const yarnId = source?.lines?.[0]?.yarnId?._id || source?.lines?.[0]?.yarnId || '';
+    selectStandaloneReturnYarn(yarnId, meta.yarns.find((row) => String(row._id) === String(yarnId)));
+    setYarnReturn((current) => ({ ...current, issueId, sizingPartyId: source?.sizingPartyId?._id || source?.sizingPartyId || current.sizingPartyId }));
+  };
+  const selectStandaloneBillReceipt = (receiptId) => {
+    const source = meta.receipts.find((row) => String(row._id) === String(receiptId));
+    setBill((current) => ({ ...current, receiptId, sizingPartyId: source?.sizingPartyId?._id || source?.sizingPartyId || current.sizingPartyId,
+      billableWeightKg: source?.netWeightKg ?? current.billableWeightKg,
+      partyInvoiceNo: sameBillChallan && source?.partyReceiptNo ? source.partyReceiptNo : current.partyInvoiceNo }));
+  };
+  const chooseStandaloneReturnSizing = (sizingPartyId) => {
+    const candidates = (meta.issues || []).filter((row) => String(row.sizingPartyId?._id || row.sizingPartyId) === String(sizingPartyId));
+    setYarnReturn((current) => ({ ...current, sizingPartyId, issueId: '', yarnId: '' }));
+    if (candidates.length === 1) selectStandaloneReturnIssue(candidates[0]._id);
+  };
+  const chooseStandaloneBillSizing = (sizingPartyId) => {
+    const candidates = (meta.receipts || []).filter((row) => String(row.sizingPartyId?._id || row.sizingPartyId) === String(sizingPartyId));
+    setBill((current) => ({ ...current, sizingPartyId, receiptId: '' }));
+    if (candidates.length === 1) selectStandaloneBillReceipt(candidates[0]._id);
+  };
+
+  useEffect(() => {
+    if (tab === 'return' && meta.godowns.length === 1 && !yarnReturn.destinationGodownId)
+      setYarnReturn((current) => ({ ...current, destinationGodownId: meta.godowns[0]._id }));
+    if (
+      tab === 'return' &&
+      yarnReturn.sizingPartyId &&
+      !yarnReturn.issueId &&
+      !yarnReturn.yarnId &&
+      standaloneReturnIssues.length === 1
+    )
+      selectStandaloneReturnIssue(standaloneReturnIssues[0]._id);
+    if (
+      tab === 'bill' &&
+      bill.sizingPartyId &&
+      !bill.receiptId &&
+      standaloneBillReceipts.length === 1
+    )
+      selectStandaloneBillReceipt(standaloneBillReceipts[0]._id);
+  // The selectors intentionally key this effect by candidate counts; the arrays
+  // and local selector functions are recreated on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tab,
+    meta.godowns,
+    yarnReturn.destinationGodownId,
+    yarnReturn.sizingPartyId,
+    yarnReturn.issueId,
+    yarnReturn.yarnId,
+    bill.sizingPartyId,
+    bill.receiptId,
+    standaloneReturnIssues.length,
+    standaloneBillReceipts.length,
+  ]);
 
   const saveReceivingAll = async () => {
-    if ((!editing || editing.type === 'receipt') && invalidReceivingWeight) {
-      setNotice({ error: true, text: t('weaving.sizingUx.invalidDeductions') }); return;
+    if (tab === 'receiving' && !receipt.issueId) {
+      setNotice({ error: true, text: 'Select a Yarn Issue for this Receiving.' });
+      return;
     }
-    if (!editing && (!receipt.fabricQualityId || !receipt.ownershipType ||
-      (receipt.ownershipType === 'party' && !receipt.ownerPartyId))) {
-      setNotice({ error: true, text: t('weaving.production.requiredIdentity') });
+    if ((!editing || editing.type === 'receipt') && invalidReceivingWeight) {
+      setNotice({ error: true, text: t('weaving.sizingUx.invalidDeductions') });
       return;
     }
     setSaving(true);
     setNotice(null);
 
     try {
-      if (editing?.type === 'return') {
+      if (tab === 'return' && !editing) {
+        await createSizingReturn(yarnReturn);
+      } else if (tab === 'bill' && !editing) {
+        await createSizingBill(bill);
+      } else if (editing?.type === 'return') {
         await updateSizingReturn(editing.id, {
           ...yarnReturn,
           receiptId: yarnReturn.sizingReceiptId?._id || yarnReturn.sizingReceiptId || '',
@@ -797,8 +1110,7 @@ const WeavingSizingPage = () => {
                 ...bill,
                 billDate: bill.billDate || receipt.date,
                 sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
-                billableWeightKg:
-                  bill.billableWeightKg || calculatedNetKg,
+                billableWeightKg: bill.billableWeightKg || calculatedNetKg,
               }
             : null,
         });
@@ -818,8 +1130,7 @@ const WeavingSizingPage = () => {
                 ...bill,
                 billDate: bill.billDate || receipt.date,
                 sizingPartyId: bill.sizingPartyId || receipt.sizingPartyId,
-                billableWeightKg:
-                  bill.billableWeightKg || calculatedNetKg,
+                billableWeightKg: bill.billableWeightKg || calculatedNetKg,
               }
             : null,
         });
@@ -838,7 +1149,7 @@ const WeavingSizingPage = () => {
       });
 
       setEditing(null);
-      setParams({ tab: 'receiving' }, { replace: true });
+      setParams({ tab: tab === 'return' ? 'return' : tab === 'bill' ? 'bill' : 'receiving' }, { replace: true });
 
       // The receipt and its beams are already atomically committed. Reset without
       // waiting for optional commercial metadata so the form cannot remain stuck.
@@ -879,6 +1190,8 @@ const WeavingSizingPage = () => {
   const tabs = [
     ['issue', 'Yarn Issue', FaTruckLoading],
     ['receiving', 'Sizing Receiving', FaIndustry],
+    ['return', 'Sizing Return', FaRedoAlt],
+    ['bill', 'Sizing Bill', FaFileInvoiceDollar],
     ['stock', 'Stock at Sizing', FaBoxes],
     ['ledger', 'Material Ledger', FaListAlt],
   ];
@@ -927,7 +1240,7 @@ const WeavingSizingPage = () => {
               <h2 className="font-bold text-teal-950">Yarn Issue to Sizing</h2>
             </div>
 
-            <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
               <Field label="Issue No.">
                 <input
                   className={control}
@@ -952,9 +1265,9 @@ const WeavingSizingPage = () => {
               </Field>
 
               <SearchableCreatableSelect
-                label="Sizing Party"
+                label="Sizing"
                 required
-                placeholder="Search sizing party"
+                placeholder="Search sizing"
                 options={meta.parties}
                 value={issue.sizingPartyId}
                 onChange={(sizingPartyId) =>
@@ -965,47 +1278,6 @@ const WeavingSizingPage = () => {
                 }
               />
 
-              <Field label={t('weaving.production.contract')}>
-                <select
-                  className={control}
-                  value={issue.contractId || issue.productionMode || 'manual'}
-                  onChange={(e) => chooseProduction(e.target.value)}
-                >
-                  <option value="own">{t('weaving.production.ownStock')}</option>
-                  <option value="manual">{t('weaving.production.manual')}</option>
-                  {options(meta.contracts.filter((row) => (row.type === 'sales' && contractIsOpen(row)) || String(row._id) === String(issue.contractId)), 'contractNo')}
-                </select>
-              </Field>
-
-              <WeavingProductionContext context={issueContext} fabrics={meta.fabrics} parties={meta.productionParties} />
-              {!issue.contractId && <>
-                {issue.productionMode === 'manual' && <Field label={t('weaving.production.owner')}>
-                  <select className={control} value={issue.ownershipType === 'own' ? 'own' : issue.ownerPartyId || ''}
-                    onChange={(event) => setIssue({ ...issue, ownershipType: event.target.value === 'own' ? 'own' : event.target.value ? 'party' : '', ownerPartyId: event.target.value === 'own' ? '' : event.target.value })}>
-                    <option value="">{t('weaving.production.selectOwner')}</option><option value="own">{t('weaving.production.own')}</option>
-                    {(meta.productionParties || []).map((party) => <option key={party._id} value={party._id}>{party.name}</option>)}
-                  </select>
-                </Field>}
-                <SearchableCreatableSelect label={t('weaving.folding.quality')} options={meta.fabrics || []} value={issue.fabricQualityId || ''}
-                  onChange={(fabricQualityId) => setIssue({ ...issue, fabricQualityId })} />
-              </>}
-              <Field label="Source Godown *">
-                <select
-                  className={control}
-                  value={issue.sourceGodownId}
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      sourceGodownId: e.target.value,
-                    })
-                  }
-                >
-                  <option value="">Select Godown</option>
-
-                  {options(meta.godowns)}
-                </select>
-              </Field>
-
               <SearchableCreatableSelect
                 label="Yarn"
                 required
@@ -1014,198 +1286,130 @@ const WeavingSizingPage = () => {
                 value={issue.yarnId}
                 onChange={selectIssueYarn}
               />
-
-              <div className="sm:col-span-2">
-                <WeightKgLbsInput
-                  kg={issue.quantityKg}
-                  lbs={issue.quantityLbs}
-                  required
-                  onChange={({ kg, lbs }) =>
-                    setIssue({
-                      ...issue,
-                      quantityKg: kg,
-                      quantityLbs: lbs,
-                    })
-                  }
-                />
-              </div>
-
-              <Field label="Gate Pass">
-                <input
+            </div>
+            <div className="grid gap-4 border-t border-slate-100 px-4 py-4 sm:grid-cols-2 lg:grid-cols-6">
+              <Field label="Package Type">
+                <select
                   className={control}
-                  placeholder="Optional"
-                  value={issue.gatePassNo}
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      gatePassNo: e.target.value,
-                    })
-                  }
+                  value={issue.packageType}
+                  onChange={(e) => updateIssuePacking({ packageType: e.target.value })}
+                >
+                  {packageProfilesFor(
+                    meta.yarns.find((row) => String(row._id) === String(issue.yarnId))
+                  ).map((profile) => (
+                    <option key={profile.packageType} value={profile.packageType}>
+                      {profile.packageType.replace(/^./, (value) => value.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Quantity">
+                <input
+                  type="number"
+                  min="0"
+                  className={control}
+                  placeholder="e.g. 10"
+                  value={issue.packageQty}
+                  step="1"
+                  onChange={(e) => updateIssuePacking({ packageQty: e.target.value })}
                 />
               </Field>
-
-              <Field label="Lot / Reference">
+              <Field label="Small Cones">
                 <input
+                  type="number"
+                  min="0"
                   className={control}
-                  placeholder="Optional"
-                  value={issue.lotReference}
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      lotReference: e.target.value,
-                    })
-                  }
+                  placeholder="e.g. 15"
+                  value={issue.smallCones}
+                  onChange={(e) => updateIssuePacking({ smallCones: e.target.value })}
                 />
               </Field>
-
-              <Field label="Notes" className="sm:col-span-2">
-                <textarea
-                  className={textarea}
-                  placeholder="Optional note"
-                  value={issue.notes}
-                  onChange={(e) =>
-                    setIssue({
-                      ...issue,
-                      notes: e.target.value,
-                    })
-                  }
+              <Field label="Large Cones">
+                <input
+                  type="number"
+                  min="0"
+                  className={control}
+                  placeholder="e.g. 4"
+                  value={issue.largeCones}
+                  onChange={(e) => updateIssuePacking({ largeCones: e.target.value })}
+                />
+              </Field>
+              <Field label="Total LBS">
+                <input
+                  className={`${control} bg-teal-50 font-semibold`}
+                  value={issue.quantityLbs}
+                  readOnly
+                />
+              </Field>
+              <Field label="Total KG">
+                <input
+                  className={`${control} bg-teal-50 font-semibold`}
+                  value={issue.quantityKg}
+                  readOnly
                 />
               </Field>
             </div>
-
-            {/* PACKING DETAILS */}
+            {issue.yarnId && stockLoading && (
+              <p className="px-4 pb-3 text-sm text-slate-500">Checking available stock...</p>
+            )}
+            {issue.yarnId && !stockLoading && eligibleGodowns.length === 0 && (
+              <p className="px-4 pb-3 text-sm font-medium text-rose-600">
+                No available stock found for this Yarn.
+              </p>
+            )}
+            {eligibleGodowns.length > 1 && (
+              <div className="px-4 pb-4 sm:max-w-md">
+                <Field label="Source Godown *">
+                  <select
+                    className={control}
+                    value={issue.sourceGodownId}
+                    onChange={(e) => setIssue({ ...issue, sourceGodownId: e.target.value })}
+                  >
+                    <option value="">Select Godown</option>
+                    {eligibleGodowns.map((row) => (
+                      <option key={row.godownId} value={row.godownId}>
+                        {row.godownName} ({Number(row.kg).toFixed(3)} KG)
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            )}
             <div className="border-t border-slate-100 px-4 py-3">
               <button
                 type="button"
-                onClick={() => setPackingOpen((current) => !current)}
-                className="flex w-full items-center justify-between rounded-lg border border-teal-200 bg-gradient-to-r from-teal-100 via-cyan-50 to-emerald-100 px-4 py-3 text-left text-sm font-bold text-teal-950 transition hover:from-teal-200 hover:to-emerald-200"
+                onClick={() => setAdditionalOpen((current) => !current)}
+                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-bold text-slate-700"
               >
-                <span>Packing Details</span>
-
-                {packingOpen ? <FaChevronUp /> : <FaChevronDown />}
+                <span>Additional Details</span>
+                {additionalOpen ? <FaChevronUp /> : <FaChevronDown />}
               </button>
-
-              {packingOpen && (
-                <div className="mt-3 grid gap-4 rounded-lg border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-6">
-                  <Field label="Package Type">
-                    <select
-                      className={control}
-                      value={issue.packageType}
-                      onChange={(e) =>
-                        setIssue({
-                          ...issue,
-                          packageType: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="">None</option>
-
-                      <option value="bag">Bag</option>
-
-                      <option value="carton">Carton</option>
-                    </select>
-                  </Field>
-
-                  <Field
-                    label={
-                      issue.packageType === 'bag'
-                        ? 'Bags'
-                        : issue.packageType === 'carton'
-                          ? 'Cartons'
-                          : 'Packages'
-                    }
-                  >
+              {additionalOpen && (
+                <div className="mt-3 grid gap-4 rounded-lg border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2">
+                  <Field label="Gate Pass">
                     <input
-                      type="number"
-                      min="0"
                       className={control}
-                      placeholder="e.g. 10"
-                      value={issue.packageQty}
-                      onChange={(e) =>
-                        setIssue({
-                          ...issue,
-                          packageQty: e.target.value,
-                        })
-                      }
+                      placeholder="Optional"
+                      value={issue.gatePassNo}
+                      onChange={(e) => setIssue({ ...issue, gatePassNo: e.target.value })}
                     />
                   </Field>
-
-                  <Field label="Cone Size">
-                    <select
-                      className={control}
-                      value={issue.coneSize}
-                      onChange={(e) => {
-                        const coneSize = e.target.value;
-
-                        const yarn = meta.yarns.find(
-                          (row) => String(row._id) === String(issue.yarnId)
-                        );
-
-                        setIssue({
-                          ...issue,
-
-                          coneSize,
-
-                          conesPerPackage:
-                            coneSize === 'small'
-                              ? yarn?.smallConesPerPackage || ''
-                              : coneSize === 'large'
-                                ? yarn?.largeConesPerPackage || ''
-                                : '',
-                        });
-                      }}
-                    >
-                      <option value="">None</option>
-
-                      <option value="small">Small</option>
-
-                      <option value="large">Large</option>
-                    </select>
-                  </Field>
-
-                  <Field label="Cones / Package">
+                  <Field label="Lot / Reference">
                     <input
-                      type="number"
-                      min="0"
                       className={control}
-                      placeholder="e.g. 15"
-                      value={issue.conesPerPackage}
-                      onChange={(e) =>
-                        setIssue({
-                          ...issue,
-                          conesPerPackage: e.target.value,
-                        })
-                      }
+                      placeholder="Optional"
+                      value={issue.lotReference}
+                      onChange={(e) => setIssue({ ...issue, lotReference: e.target.value })}
                     />
                   </Field>
-
-                  <Field label="Extra Loose Cones">
-                    <input
-                      type="number"
-                      min="0"
-                      className={control}
-                      placeholder="e.g. 4"
-                      value={issue.extraCones}
-                      onChange={(e) =>
-                        setIssue({
-                          ...issue,
-                          extraCones: e.target.value,
-                        })
-                      }
+                  <Field label="Notes" className="sm:col-span-2">
+                    <textarea
+                      className={textarea}
+                      placeholder="Optional note"
+                      value={issue.notes}
+                      onChange={(e) => setIssue({ ...issue, notes: e.target.value })}
                     />
                   </Field>
-
-                  <div>
-                    <span className="block min-h-[20px] text-sm font-medium leading-5 text-slate-700">
-                      Total Cones
-                    </span>
-
-                    <div className="mt-1 flex h-10 items-center justify-between rounded-md border border-teal-200 bg-teal-50 px-3">
-                      <span className="text-xs text-teal-700">Total</span>
-
-                      <span className="font-bold text-teal-950">{totalCones}</span>
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
@@ -1221,7 +1425,16 @@ const WeavingSizingPage = () => {
                   Cancel Edit
                 </button>
               )}
-              {!editing && <button type="button" disabled={saving} onClick={() => clearIssue()} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">{t('weaving.sizingUx.clear')}</button>}
+              {!editing && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => clearIssue()}
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  {t('weaving.sizingUx.clear')}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={saving}
@@ -1280,6 +1493,26 @@ const WeavingSizingPage = () => {
                 ownershipType: '',
                 paymentStatus: '',
               });
+
+            const shortCombinedDate = (value) => {
+              const [year, month] = String(value || '').slice(0, 10).split('-');
+              return year && month ? `${year.slice(-2)}-${Number(month)}` : '-';
+            };
+
+            const combinedYarnName = (row) => {
+              const issueId = row.issueId?._id || row.issueId;
+              const linkedIssue = (meta.issues || []).find(
+                (issueRow) => String(issueRow._id) === String(issueId)
+              );
+              const yarn = linkedIssue?.lines?.[0]?.yarnId;
+              const yarnId = yarn?._id || yarn;
+
+              return (
+                yarn?.name ||
+                meta.yarns.find((yarnRow) => String(yarnRow._id) === String(yarnId))?.name ||
+                '-'
+              );
+            };
 
             return (
               <section className="overflow-hidden rounded-2xl border border-teal-100 bg-white shadow-lg shadow-slate-200/60">
@@ -1438,15 +1671,26 @@ const WeavingSizingPage = () => {
                   <table className="min-w-full border-collapse text-sm">
                     <thead className="bg-gradient-to-r from-slate-800 via-teal-800 to-emerald-800 text-[11px] font-bold uppercase tracking-wide text-white">
                       <tr>
-                        {[
-                          'No.',
-                          'Date',
-                          'Sizing Party',
-                          'Yarn / Linked Issue',
-                          'Amount / Weight',
-                          'Status',
-                          'Actions',
-                        ].map((head) => (
+                        {(type === 'combined'
+                          ? [
+                              'Date',
+                              'Receiving No.',
+                              'Yarn',
+                              'Sizing Party',
+                              'Linked Issue',
+                              'Amount / Weight',
+                              'Actions',
+                            ]
+                          : [
+                              'No.',
+                              'Date',
+                              'Sizing Party',
+                              'Yarn / Linked Issue',
+                              'Amount / Weight',
+                              'Status',
+                              'Actions',
+                            ]
+                        ).map((head) => (
                           <th
                             key={head}
                             className="whitespace-nowrap border-r border-white/10 px-3 py-3 text-center last:border-r-0"
@@ -1472,6 +1716,51 @@ const WeavingSizingPage = () => {
                               : status === 'unpaid'
                                 ? 'border-rose-200 bg-rose-50 text-rose-700'
                                 : 'border-sky-200 bg-sky-50 text-sky-700';
+
+                        if (type === 'combined')
+                          return (
+                            <tr
+                              key={row._id}
+                              className={`cursor-pointer transition hover:bg-teal-50 ${
+                                index % 2 ? 'bg-slate-50/60' : 'bg-white'
+                              }`}
+                              onClick={() =>
+                                setParams({
+                                  tab: 'receiving',
+                                  editType: 'receipt',
+                                  editId: row._id,
+                                })
+                              }
+                            >
+                              <td className="whitespace-nowrap px-3 py-3 text-center text-slate-600">
+                                {shortCombinedDate(row.date)}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 text-center font-bold text-slate-800">
+                                {row.receiptNo || '-'}
+                              </td>
+                              <td className="px-3 py-3 text-center font-semibold text-slate-800">
+                                {combinedYarnName(row)}
+                              </td>
+                              <td className="px-3 py-3 text-center font-semibold text-slate-800">
+                                {row.sizingPartyId?.name || '-'}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 text-center text-slate-600">
+                                {row.issueId?.issueNo || '-'}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 text-center font-bold text-slate-800">
+                                {row.netWeightKg == null ? '-' : `${row.netWeightKg} KG`}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={(event) => voidSizingRow(type, row._id, event)}
+                                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
 
                         return (
                           <tr
@@ -1508,16 +1797,26 @@ const WeavingSizingPage = () => {
                             </td>
 
                             <td className="px-3 py-3 text-slate-600">
-                              {type === 'issue' ? ([...new Set((row.lines || []).map((line) => line.yarnId?.name).filter(Boolean))].join(', ') || '-') : row.yarnId?.name ||
-                                row.issueId?.issueNo ||
-                                row.receiptId?.receiptNo ||
-                                '-'}
+                              {type === 'issue'
+                                ? [
+                                    ...new Set(
+                                      (row.lines || [])
+                                        .map((line) => line.yarnId?.name)
+                                        .filter(Boolean)
+                                    ),
+                                  ].join(', ') || '-'
+                                : row.yarnId?.name ||
+                                  row.issueId?.issueNo ||
+                                  row.receiptId?.receiptNo ||
+                                  '-'}
                             </td>
 
                             <td className="whitespace-nowrap px-3 py-3 text-right font-bold text-slate-800">
-                              {type === 'issue' ? `${money((row.lines || []).reduce((total, line) => total + Number(line.quantityKg || 0), 0))} KG` : row.billAmount
-                                ? money(row.billAmount)
-                                : `${row.quantityKg || row.netWeightKg || '-'} KG`}
+                              {type === 'issue'
+                                ? `${money((row.lines || []).reduce((total, line) => total + Number(line.quantityKg || 0), 0))} KG`
+                                : row.billAmount
+                                  ? money(row.billAmount)
+                                  : `${row.quantityKg || row.netWeightKg || '-'} KG`}
                             </td>
 
                             <td className="whitespace-nowrap px-3 py-3 text-center">
@@ -1560,7 +1859,7 @@ const WeavingSizingPage = () => {
         {/* ===================================================
             COMBINED SIZING RECEIVING
         =================================================== */}
-        {tab === 'receiving' && (
+        {['receiving', 'return', 'bill'].includes(tab) && (
           <section className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
             {/* MAIN HEADER */}
             <div className="border-b border-teal-200 bg-gradient-to-r from-teal-200 via-cyan-100 to-emerald-100 px-4 py-3">
@@ -1568,7 +1867,7 @@ const WeavingSizingPage = () => {
                 <FaIndustry className="text-teal-800" />
 
                 <div>
-                  <h2 className="font-bold text-teal-950">Sizing Receiving</h2>
+                  <h2 className="font-bold text-teal-950">{tab === 'return' ? 'Sizing Return' : tab === 'bill' ? 'Sizing Bill' : 'Sizing Receiving'}</h2>
                 </div>
               </div>
             </div>
@@ -1576,99 +1875,12 @@ const WeavingSizingPage = () => {
             {/* =================================================
                 RECEIVING DETAILS
             ================================================= */}
-            <div className="border-b border-slate-100">
+            {tab === 'receiving' && <div className="border-b border-slate-100">
               <div className="bg-gradient-to-r from-slate-50 to-white px-4 py-2.5">
                 <h3 className="font-bold text-slate-800">Receiving Details</h3>
               </div>
 
               <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                <SearchableCreatableSelect
-                  label="Sizing Party"
-                  required
-                  placeholder="Search sizing party"
-                  options={meta.parties}
-                  value={receipt.sizingPartyId}
-                  onChange={(sizingPartyId) => {
-                    setReceipt({
-                      ...receipt,
-                      sizingPartyId,
-                      issueId: '',
-                    });
-
-                    setYarnReturn((current) => ({
-                      ...current,
-                      sizingPartyId,
-                      issueId: '',
-                    }));
-
-                    setBill((current) => ({
-                      ...current,
-                      sizingPartyId,
-                    }));
-                  }}
-                />
-
-                <Field label="Issue / Job">
-                  <select
-                    className={control}
-                    value={receipt.issueId}
-                    onChange={(e) => chooseReceiptIssue(e.target.value)}
-                  >
-                    <option value="">Select Issue / Job</option>
-
-                    {meta.issues
-                      .filter((row) => {
-                        if (!receipt.sizingPartyId) return true;
-
-                        return (
-                          String(row.sizingPartyId?._id || row.sizingPartyId) ===
-                          String(receipt.sizingPartyId)
-                        );
-                      })
-                      .map((row) => (
-                        <option key={row._id} value={row._id}>
-                          {row.issueNo}
-                        </option>
-                      ))}
-                  </select>
-                </Field>
-
-                <Field label={t('weaving.production.contract')}>
-                  <select disabled={receiptLocked} className={control} value={receipt.contractId || ''} onChange={(event) =>
-                    setReceipt((current) => ({ ...current, ...productionDefaults(event.target.value,
-                      null) }))}>
-                    <option value="">-</option>
-                    {meta.contracts.filter((row) => (row.type === 'sales' && contractIsOpen(row)) || String(row._id) === String(receipt.contractId)).map((row) => <option key={row._id} value={row._id}>{row.contractNo}</option>)}
-                  </select>
-                </Field>
-                <Field label={t('weaving.production.owner')}>
-                  <select disabled={receiptLocked || Boolean(receipt.contractId)} className={control} value={receipt.ownershipType === 'own' ? 'own' : receipt.ownerPartyId || ''}
-                    onChange={(event) => setReceipt({ ...receipt, ownershipType: event.target.value === 'own' ? 'own' : event.target.value ? 'party' : '', ownerPartyId: event.target.value === 'own' ? '' : event.target.value })}>
-                    <option value="">{t('weaving.production.selectOwner')}</option>
-                    <option value="own">{t('weaving.production.own')}</option>
-                    {(meta.productionParties || []).map((party) => <option key={party._id} value={party._id}>{party.name}</option>)}
-                  </select>
-                </Field>
-                <fieldset disabled={receiptLocked || Boolean(receipt.contractId)}>
-                <SearchableCreatableSelect
-                  label={t('weaving.folding.quality')}
-                  placeholder={t('weaving.folding.selectQuality')}
-                  options={meta.fabrics || []}
-                  value={receipt.fabricQualityId || ''}
-                  onChange={(fabricQualityId) => setReceipt({ ...receipt, fabricQualityId })}
-                  getLabel={(quality) => [quality.name, quality.code].filter(Boolean).join(' - ')}
-                />
-                </fieldset>
-                <WeavingProductionContext context={receiptContext} fabrics={meta.fabrics} parties={meta.productionParties} />
-
-                <Field label="Party Receiving / Challan No. *">
-                  <input
-                    className={control}
-                    value={receipt.partyReceiptNo}
-                    onChange={(e) => setReceipt({ ...receipt, partyReceiptNo: e.target.value })}
-                  />
-                </Field>
-
                 <Field label="Receipt No.">
                   <input className={control} value={receipt.receiptNo} disabled />
                 </Field>
@@ -1690,6 +1902,48 @@ const WeavingSizingPage = () => {
                     }}
                   />
                 </Field>
+
+                <SearchableCreatableSelect
+                  label="Sizing"
+                  required
+                  placeholder="Search sizing party"
+                  options={meta.parties}
+                  value={receipt.sizingPartyId}
+                  onChange={chooseReceivingSizing}
+                />
+                <Field label="Receiving Challan No. *">
+                  <input
+                    className={control}
+                    value={receipt.partyReceiptNo}
+                    onChange={(e) => setReceipt({ ...receipt, partyReceiptNo: e.target.value })}
+                  />
+                </Field>
+
+                {receivingIssueOptions.length > 1 ? (
+                  <SearchableCreatableSelect
+                    label="Yarn / Issue"
+                    required
+                    placeholder="Search issue or yarn"
+                    options={receivingIssueOptions}
+                    value={receipt.issueId}
+                    onChange={selectReceivingIssue}
+                    getLabel={receivingIssueLabel}
+                  />
+                ) : (
+                  <Field label="Yarn / Issue">
+                    <input
+                      className={`${control} bg-slate-50`}
+                      value={linkedReceivingIssue ? receivingIssueLabel(linkedReceivingIssue) : ''}
+                      readOnly
+                      placeholder="Linked from Sizing Issue"
+                    />
+                    {receipt.sizingPartyId && receivingIssueOptions.length === 0 && (
+                      <span className="mt-1 block text-xs font-medium text-rose-600">
+                        No open Yarn Issue found for this Sizing.
+                      </span>
+                    )}
+                  </Field>
+                )}
 
                 <Field label="Beam Count *">
                   <input
@@ -1821,32 +2075,55 @@ const WeavingSizingPage = () => {
                   />
                 </Field>
 
-                <div className="sm:col-span-2 xl:col-span-4 text-xs text-slate-600">{t('weaving.sizingUx.totalDeductions')}: {money(totalDeductions)} KG
-                  {invalidReceivingWeight && <p role="alert" className="mt-1 font-bold text-rose-700">{t('weaving.sizingUx.invalidDeductions')}</p>}
+                <div className="sm:col-span-2 xl:col-span-4 text-xs text-slate-600">
+                  {t('weaving.sizingUx.totalDeductions')}: {money(totalDeductions)} KG
+                  {invalidReceivingWeight && (
+                    <p role="alert" className="mt-1 font-bold text-rose-700">
+                      {t('weaving.sizingUx.invalidDeductions')}
+                    </p>
+                  )}
                 </div>
-                <Field label="Notes" className="sm:col-span-2 xl:col-span-4">
-                  <textarea
-                    className={textarea}
-                    placeholder="Optional receiving note"
-                    value={receipt.notes}
-                    onChange={(e) =>
-                      setReceipt({
-                        ...receipt,
-                        notes: e.target.value,
-                      })
-                    }
-                  />
-                </Field>
+                <div className="sm:col-span-2 xl:col-span-4">
+                  <button
+                    type="button"
+                    onClick={() => setReceivingMoreOpen((value) => !value)}
+                    className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                  >
+                    <span>Additional / More</span>
+                    {receivingMoreOpen ? <FaChevronUp /> : <FaChevronDown />}
+                  </button>
+                  {receivingMoreOpen && (
+                    <Field label="Notes" className="mt-3">
+                      <textarea
+                        className={textarea}
+                        placeholder="Optional receiving note"
+                        value={receipt.notes}
+                        onChange={(e) => setReceipt({ ...receipt, notes: e.target.value })}
+                      />
+                    </Field>
+                  )}
+                </div>
               </div>
-            </div>
+            </div>}
 
             {/* =================================================
                 OPTIONAL YARN RETURN
             ================================================= */}
-            <div className="border-b border-slate-100 p-4">
+            {tab !== 'bill' && <div className="border-b border-slate-100 p-4">
               <button
                 type="button"
-                onClick={() => setReturnOpen((current) => !current)}
+                hidden={tab === 'return'}
+                onClick={() =>
+                  setReturnOpen((current) => {
+                    const opening = !current;
+                    if (opening && meta.godowns.length === 1)
+                      setYarnReturn((row) => ({
+                        ...row,
+                        destinationGodownId: row.destinationGodownId || meta.godowns[0]._id,
+                      }));
+                    return opening;
+                  })
+                }
                 className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition ${
                   returnOpen
                     ? 'border-amber-200 bg-gradient-to-r from-amber-100 via-yellow-50 to-orange-100 text-amber-950'
@@ -1863,7 +2140,7 @@ const WeavingSizingPage = () => {
               </button>
               <p className="mt-2 text-xs text-amber-800">{t('weaving.sizingUx.returnHelp')}</p>
 
-              {returnOpen && (
+              {(returnOpen || tab === 'return') && (
                 <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/30 p-4">
                   <div className="mb-4">
                     <h3 className="font-bold text-slate-800">Returned Yarn Details</h3>
@@ -1883,173 +2160,206 @@ const WeavingSizingPage = () => {
                       />
                     </Field>
 
-                    <Field label="Party Return / Challan No. *">
+                    {tab === 'return' && <>
+                      <Field label="Date *"><input type="date" className={control} value={yarnReturn.date} onChange={(e) => setYarnReturn({ ...yarnReturn, date: e.target.value })} /></Field>
+                      <SearchableCreatableSelect label="Sizing" required placeholder="Search sizing" options={meta.parties} value={yarnReturn.sizingPartyId} onChange={chooseStandaloneReturnSizing} />
+                    </>}
+
+                    <Field
+                      label={
+                        <span className="flex items-center justify-between gap-2">
+                          <span>Return Challan No. *</span>
+
+                          {tab === 'receiving' && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={sameReturnChallan}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setSameReturnChallan(checked);
+
+                                setYarnReturn((row) => {
+                                  if (checked) {
+                                    if (row.partyReturnNo !== receipt.partyReceiptNo)
+                                      returnChallanDraft.current = row.partyReturnNo;
+
+                                    return {
+                                      ...row,
+                                      partyReturnNo: receipt.partyReceiptNo,
+                                    };
+                                  }
+
+                                  return {
+                                    ...row,
+                                    partyReturnNo: returnChallanDraft.current || row.partyReturnNo,
+                                  };
+                                });
+                              }}
+                            />
+                            Same
+                          </span>}
+                        </span>
+                      }
+                    >
                       <input
                         className={control}
                         value={yarnReturn.partyReturnNo}
-                        onChange={(e) =>
-                          setYarnReturn({ ...yarnReturn, partyReturnNo: e.target.value })
-                        }
+                        readOnly={tab === 'receiving' && sameReturnChallan}
+                        onChange={(e) => {
+                          returnChallanDraft.current = e.target.value;
+
+                          setYarnReturn({
+                            ...yarnReturn,
+                            partyReturnNo: e.target.value,
+                          });
+                        }}
                       />
                     </Field>
 
-                    <SearchableCreatableSelect
-                      label="Yarn"
-                      required
-                      placeholder="Search yarn"
-                      options={meta.yarns}
-                      value={yarnReturn.yarnId}
-                      onChange={(yarnId) =>
-                        setYarnReturn({
-                          ...yarnReturn,
-                          yarnId,
-                        })
-                      }
-                    />
+                    {tab === 'return' && standaloneReturnIssues.length > 1 && <Field label="Source Issue"><select className={control} value={yarnReturn.issueId} onChange={(e) => selectStandaloneReturnIssue(e.target.value)}><option value="">Select Issue</option>{standaloneReturnIssues.map((row) => <option key={row._id} value={row._id}>{row.issueNo}</option>)}</select></Field>}
+                    {tab === 'return' && <SearchableCreatableSelect label="Yarn" required placeholder="Search yarn" options={meta.yarns} value={yarnReturn.yarnId} onChange={selectStandaloneReturnYarn} />}
+                    {tab === 'receiving' && <Field label="Yarn"><input className={`${control} bg-slate-50`} value={linkedReceivingYarn?.name || ''} readOnly /></Field>}
 
-                    <Field label="Destination Godown *">
-                      <select
-                        className={control}
-                        value={yarnReturn.destinationGodownId}
-                        onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            destinationGodownId: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="">Select Godown</option>
+                    {meta.godowns.length > 1 && (
+                      <Field label="Destination Godown *">
+                        <select
+                          className={control}
+                          value={yarnReturn.destinationGodownId}
+                          onChange={(e) =>
+                            setYarnReturn({
+                              ...yarnReturn,
+                              destinationGodownId: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Select Godown</option>
 
-                        {options(meta.godowns)}
-                      </select>
-                    </Field>
-
-                    <Field label="Lot / Reference">
-                      <input
-                        className={control}
-                        placeholder="Optional"
-                        value={yarnReturn.lotReference}
-                        onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            lotReference: e.target.value,
-                          })
-                        }
-                      />
-                    </Field>
-
-                    <div className="sm:col-span-2">
-                      <WeightKgLbsInput
-                        kg={yarnReturn.returnedKg}
-                        lbs={yarnReturn.returnedLbs}
-                        required
-                        onChange={({ kg, lbs }) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            returnedKg: kg,
-                            returnedLbs: lbs,
-                          })
-                        }
-                      />
-                    </div>
+                          {options(meta.godowns)}
+                        </select>
+                      </Field>
+                    )}
 
                     <Field label="Package Type">
                       <select
                         className={control}
                         value={yarnReturn.packageType}
-                        onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            packageType: e.target.value,
-                          })
-                        }
+                        onChange={(e) => updateReturnPacking({ packageType: e.target.value })}
                       >
-                        <option value="">None</option>
-
-                        <option value="bag">Bag</option>
-
-                        <option value="carton">Carton</option>
+                        {packageProfilesFor(
+                          meta.yarns.find((row) => String(row._id) === String(yarnReturn.yarnId))
+                        ).map((profile) => (
+                          <option key={profile.packageType} value={profile.packageType}>
+                            {profile.packageType.replace(/^./, (value) => value.toUpperCase())}
+                          </option>
+                        ))}
                       </select>
                     </Field>
 
-                    <Field
-                      label={
-                        yarnReturn.packageType === 'bag'
-                          ? 'Returned Bags'
-                          : yarnReturn.packageType === 'carton'
-                            ? 'Returned Cartons'
-                            : 'Package Qty'
-                      }
-                    >
+                    <Field label="Quantity">
                       <input
                         type="number"
                         min="0"
                         className={control}
                         value={yarnReturn.packageQty}
-                        onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            packageQty: e.target.value,
-                          })
-                        }
+                        step="1"
+                        onChange={(e) => updateReturnPacking({ packageQty: e.target.value })}
                       />
                     </Field>
 
-                    <Field label="Returned Small Cones">
+                    <Field label="Small Cones">
                       <input
                         type="number"
                         min="0"
                         className={control}
                         value={yarnReturn.returnedSmallCones}
                         onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            returnedSmallCones: e.target.value,
-                          })
+                          updateReturnPacking({ returnedSmallCones: e.target.value })
                         }
                       />
                     </Field>
 
-                    <Field label="Returned Large Cones">
+                    <Field label="Large Cones">
                       <input
                         type="number"
                         min="0"
                         className={control}
                         value={yarnReturn.returnedLargeCones}
                         onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            returnedLargeCones: e.target.value,
-                          })
+                          updateReturnPacking({ returnedLargeCones: e.target.value })
                         }
                       />
                     </Field>
 
-                    <Field label="Return Notes" className="sm:col-span-2">
-                      <textarea
-                        className={textarea}
-                        placeholder="Optional return note"
-                        value={yarnReturn.notes}
-                        onChange={(e) =>
-                          setYarnReturn({
-                            ...yarnReturn,
-                            notes: e.target.value,
-                          })
-                        }
+                    <Field label="Total LBS">
+                      <input
+                        className={`${control} bg-amber-50 font-semibold`}
+                        value={yarnReturn.returnedLbs}
+                        readOnly
                       />
                     </Field>
+                    <Field label="Total KG">
+                      <input
+                        className={`${control} bg-amber-50 font-semibold`}
+                        value={yarnReturn.returnedKg}
+                        readOnly
+                      />
+                    </Field>
+                    <div className="sm:col-span-2 xl:col-span-4">
+                      <button
+                        type="button"
+                        onClick={() => setReturnMoreOpen((value) => !value)}
+                        className="flex w-full items-center justify-between rounded-md border border-amber-100 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      >
+                        <span>More / Additional Details</span>
+                        {returnMoreOpen ? <FaChevronUp /> : <FaChevronDown />}
+                      </button>
+                      {returnMoreOpen && (
+                        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                          <Field label="Lot / Reference">
+                            <input
+                              className={control}
+                              value={yarnReturn.lotReference}
+                              onChange={(e) =>
+                                setYarnReturn({ ...yarnReturn, lotReference: e.target.value })
+                              }
+                            />
+                          </Field>
+                          <Field label="Return Notes">
+                            <textarea
+                              className={textarea}
+                              value={yarnReturn.notes}
+                              onChange={(e) =>
+                                setYarnReturn({ ...yarnReturn, notes: e.target.value })
+                              }
+                            />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* =================================================
                 OPTIONAL BILL
             ================================================= */}
-            <div className="border-b border-slate-100 p-4">
+            {tab !== 'return' && <div className="border-b border-slate-100 p-4">
               <button
                 type="button"
-                onClick={() => setBillOpen((current) => !current)}
+                hidden={tab === 'bill'}
+                onClick={() =>
+                  setBillOpen((current) => {
+                    const opening = !current;
+                    if (opening)
+                      setBill((row) => ({
+                        ...row,
+                        billDate: row.billDate || receipt.date,
+                        billableWeightKg: row.billableWeightKg || calculatedNetKg,
+                      }));
+                    return opening;
+                  })
+                }
                 className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition ${
                   billOpen
                     ? 'border-blue-200 bg-gradient-to-r from-blue-100 via-cyan-50 to-indigo-100 text-blue-950'
@@ -2065,7 +2375,7 @@ const WeavingSizingPage = () => {
                 {billOpen ? <FaChevronUp /> : <FaChevronDown />}
               </button>
 
-              {billOpen && (
+              {(billOpen || tab === 'bill') && (
                 <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/30 p-4">
                   <div className="mb-4">
                     <h3 className="font-bold text-slate-800">Bill Details</h3>
@@ -2076,13 +2386,6 @@ const WeavingSizingPage = () => {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Field label="Party Invoice No.">
-                      <input
-                        className={control}
-                        value={bill.partyInvoiceNo}
-                        onChange={(e) => setBill({ ...bill, partyInvoiceNo: e.target.value })}
-                      />
-                    </Field>
                     <Field label="Bill No. *">
                       <input className={control} value={bill.billNo} disabled />
                     </Field>
@@ -2100,6 +2403,60 @@ const WeavingSizingPage = () => {
                             dueDate: dueFrom(e.target.value, bill.creditDays),
                           })
                         }
+                      />
+                    </Field>
+
+                    {tab === 'bill' && <SearchableCreatableSelect label="Sizing" required placeholder="Search sizing" options={meta.parties} value={bill.sizingPartyId} onChange={chooseStandaloneBillSizing} />}
+                    {tab === 'bill' && standaloneBillReceipts.length > 1 && <Field label="Receiving"><select className={control} value={bill.receiptId} onChange={(e) => selectStandaloneBillReceipt(e.target.value)}><option value="">Select Receiving</option>{standaloneBillReceipts.map((row) => <option key={row._id} value={row._id}>{row.receiptNo} — {row.partyReceiptNo || row.date}</option>)}</select></Field>}
+
+                    <Field
+                      label={
+                        <span className="flex items-center justify-between gap-2">
+                          <span>Party Invoice No.</span>
+
+                          {(tab === 'receiving' || billSourceChallan) && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={sameBillChallan}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setSameBillChallan(checked);
+
+                                setBill((row) => {
+                                  if (checked) {
+                                    if (row.partyInvoiceNo !== billSourceChallan)
+                                      billInvoiceDraft.current = row.partyInvoiceNo;
+
+                                    return {
+                                      ...row,
+                                      partyInvoiceNo: billSourceChallan,
+                                    };
+                                  }
+
+                                  return {
+                                    ...row,
+                                    partyInvoiceNo: billInvoiceDraft.current || row.partyInvoiceNo,
+                                  };
+                                });
+                              }}
+                            />
+                            Same
+                          </span>}
+                        </span>
+                      }
+                    >
+                      <input
+                        className={control}
+                        value={bill.partyInvoiceNo}
+                        readOnly={Boolean(billSourceChallan && sameBillChallan)}
+                        onChange={(e) => {
+                          billInvoiceDraft.current = e.target.value;
+
+                          setBill({
+                            ...bill,
+                            partyInvoiceNo: e.target.value,
+                          });
+                        }}
                       />
                     </Field>
 
@@ -2137,14 +2494,35 @@ const WeavingSizingPage = () => {
                       />
                     </Field>
 
-                    <Field label="GST %">
+                    <Field
+                      label={
+                        <span className="flex items-center justify-between gap-2">
+                          <span>GST %</span>
+
+                          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={Number(bill.gstPercent || 0) > 0}
+                              onChange={(e) =>
+                                setBill({
+                                  ...bill,
+                                  gstPercent: e.target.checked ? Number(bill.gstPercent || 18) : 0,
+                                })
+                              }
+                            />
+                            Apply
+                          </span>
+                        </span>
+                      }
+                    >
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         className={control}
-                        placeholder="e.g. 18"
                         value={bill.gstPercent}
+                        disabled={Number(bill.gstPercent || 0) === 0}
+                        placeholder="18"
                         onChange={(e) =>
                           setBill({
                             ...bill,
@@ -2183,38 +2561,6 @@ const WeavingSizingPage = () => {
                         {money(billTotal)}
                       </div>
                     </div>
-
-                    <Field label="Credit Days">
-                      <input
-                        type="number"
-                        min="0"
-                        className={control}
-                        placeholder="e.g. 30"
-                        value={bill.creditDays}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            creditDays: e.target.value,
-
-                            dueDate: dueFrom(bill.billDate, e.target.value),
-                          })
-                        }
-                      />
-                    </Field>
-
-                    <Field label="Due Date">
-                      <input
-                        type="date"
-                        className={control}
-                        value={bill.dueDate}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            dueDate: e.target.value,
-                          })
-                        }
-                      />
-                    </Field>
 
                     <Field label="Paid Now">
                       <input
@@ -2303,31 +2649,17 @@ const WeavingSizingPage = () => {
                         )}
                       </>
                     )}
-
-                    <Field label="Bill Notes" className="sm:col-span-2 xl:col-span-4">
-                      <textarea
-                        className={textarea}
-                        placeholder="Optional bill note"
-                        value={bill.notes}
-                        onChange={(e) =>
-                          setBill({
-                            ...bill,
-                            notes: e.target.value,
-                          })
-                        }
-                      />
-                    </Field>
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* =================================================
                 ONE SAVE FOR COMPLETE RECEIVING
             ================================================= */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-slate-50 to-teal-50/50 px-4 py-4">
               <div className="text-sm text-slate-500">
-                {editing ? (
+                {tab === 'return' ? 'Save this Yarn Return without creating a new Receiving' : tab === 'bill' ? 'Save this Sizing Bill without creating a new Receiving' : editing ? (
                   <>Updating the existing posted Sizing record and its active linked sections</>
                 ) : returnOpen || billOpen ? (
                   <>
@@ -2373,7 +2705,11 @@ const WeavingSizingPage = () => {
                         : editing.type === 'bill'
                           ? 'Update Sizing Bill'
                           : 'Update Receiving'
-                      : 'Save Receiving'}
+                      : tab === 'return'
+                        ? 'Save Return'
+                        : tab === 'bill'
+                          ? 'Save Bill'
+                          : 'Save Receiving'}
                 </button>
               </div>
             </div>

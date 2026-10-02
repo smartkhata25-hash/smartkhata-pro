@@ -238,6 +238,8 @@ export const weavingTopMenuConfig = Object.freeze([
         items: [
           { label: 'Yarn Issue', path: '/weaving/sizing?tab=issue', permission: 'weaving.sizing.view' },
           { label: 'Sizing Receiving', path: '/weaving/sizing?tab=receiving', permission: 'weaving.sizing.view' },
+          { label: 'Sizing Return', path: '/weaving/sizing?tab=return', permission: 'weaving.sizing.receive' },
+          { label: 'Sizing Bill', path: '/weaving/sizing?tab=bill', permission: 'weaving.sizing.bill' },
         ],
       },
       {

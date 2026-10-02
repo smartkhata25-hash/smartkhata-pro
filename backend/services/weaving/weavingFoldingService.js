@@ -12,6 +12,7 @@ const WeavingLoom = require("../../models/WeavingLoom");
 const WeavingParty = require("../../models/WeavingParty");
 const costing = require("./weavingCostingService");
 const { lbsFromKg } = require("./weavingOperationsUtils");
+const settingsService = require("./weavingSettingsService");
 
 const FOLDING_THAN_COUNTER_KEY = "weaving_folding_than";
 const round = (value) => Math.round((Number(value) || 0) * 1000000) / 1000000;
@@ -102,7 +103,7 @@ const previewNextThanNo = async (userId) => {
 };
 
 const meta = async (userId) => {
-  const [looms, employees, godowns, fabrics, nextPreview, parties, contracts] = await Promise.all([
+  const [looms, employees, godowns, fabrics, nextPreview, parties, contracts, productionTrackingMode] = await Promise.all([
     WeavingLoom.find({ userId, isActive: true }).select("name loomNumber").sort({ loomNumber: 1 }).lean(),
     Employee.find({ userId, moduleScope: "weaving", isDeleted: false, status: "active" }).select("name employeeNo").sort({ name: 1 }).lean(),
     WeavingGodown.find({ userId, isActive: true }).select("name").sort({ name: 1 }).lean(),
@@ -110,8 +111,9 @@ const meta = async (userId) => {
     previewNextThanNo(userId),
     WeavingParty.find({ userId, isActive: true, isHidden: { $ne: true } }).select("name").sort({ name: 1 }).lean(),
     WeavingContract.find({ userId, type: "sales" }).select("type contractType contractNo partyId partyName itemId quantity unit status expiryDate").sort({ contractDate: -1 }).lean(),
+    settingsService.getMode(userId),
   ]);
-  return { looms: await attachLoomRuns(userId, looms), employees, godowns, fabrics, parties, contracts: attachProductionContexts(contracts).contracts, nextThanNo: nextPreview };
+  return { looms: await attachLoomRuns(userId, looms), employees, godowns, fabrics, parties, contracts: attachProductionContexts(contracts).contracts, nextThanNo: nextPreview, productionTrackingMode };
 };
 
 const buildPayload = async (userId, body, existing = null) => {
@@ -125,6 +127,7 @@ const buildPayload = async (userId, body, existing = null) => {
     quality: await WeavingFabricQuality.findOne({ _id: existing.fabricQualityId, userId }).lean(),
     ownershipType: existing.ownershipType || null, ownerPartyId: existing.ownerPartyId,
   } : await resolveLoom(userId, body.loomId, body.historicalBeamId || null, false);
+  if (!existing && !resolved.beam) throw fail("No valid current or historical Beam run is available on this Loom. Load a Beam first or change the Production Tracking Method in Weaving Settings.", 409);
   if (Object.prototype.hasOwnProperty.call(body, "expectedBeamId") && String(body.expectedBeamId || "") !== String(resolved.beam?._id || "")) {
     throw fail("The Loom run has changed. Select the Loom again before saving.", 409);
   }
@@ -179,6 +182,7 @@ const buildPayload = async (userId, body, existing = null) => {
 };
 
 const create = async (userId, body) => {
+  await settingsService.requireMode(userId, ["detailed"], "Detailed Than-wise Folding is only available when Production Tracking Method is Detailed.");
   const payload = await buildPayload(userId, body);
   if (!payload.date) throw fail("Date is required");
   if (body.beamCompletionTriggered === true) {

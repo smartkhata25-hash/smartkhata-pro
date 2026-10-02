@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaArrowLeft,
   FaCalendarAlt,
@@ -28,7 +29,8 @@ import {
   getLocalTimeInputValue,
 } from '../../utils/localDateTime';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelCardLine,
   TravelCompactAutocomplete,
   TravelFilterSelect,
@@ -267,13 +269,13 @@ const CompactDateFilter = ({ value, onChange, title, variant = 'blue' }) => {
   );
 };
 
-const TravelVendorReturnsPage = () => {
+const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const formVisible = location.pathname.endsWith('/new');
+  const formVisible = forceFormVisible || location.pathname.endsWith('/new');
 
   const [returns, setReturns] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -290,7 +292,6 @@ const TravelVendorReturnsPage = () => {
 
   const [pageError, setPageError] = useState('');
   const [formError, setFormError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
 
   const [total, setTotal] = useState(0);
 
@@ -467,7 +468,6 @@ const TravelVendorReturnsPage = () => {
       [field]: value,
     }));
 
-    setSuccessMessage('');
   }, []);
 
   const selectVendor = useCallback((value, record) => {
@@ -529,6 +529,11 @@ const TravelVendorReturnsPage = () => {
     }));
   }, []);
 
+  const handleClearForm = useCallback(() => {
+    setFormState(createInitialForm());
+    setFormError('');
+  }, []);
+
   const handleSubmit = useCallback(
     async (event) => {
       event.preventDefault();
@@ -536,7 +541,6 @@ const TravelVendorReturnsPage = () => {
       try {
         setSaving(true);
         setFormError('');
-        setSuccessMessage('');
 
         await createTravelVendorReturn({
           ...formState,
@@ -552,7 +556,6 @@ const TravelVendorReturnsPage = () => {
           paymentType: current.paymentType,
         }));
 
-        setSuccessMessage(t('travel.vendorReturns.saveSuccess'));
 
         await loadList();
 
@@ -611,7 +614,7 @@ const TravelVendorReturnsPage = () => {
       event?.stopPropagation?.();
 
       if (!canManage) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -634,7 +637,7 @@ const TravelVendorReturnsPage = () => {
       } catch (error) {
         console.error('Travel vendor return delete failed:', error);
 
-        alert(error?.response?.data?.message || t('travel.vendorReturns.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFailed'));
       } finally {
         setDeletingId('');
       }
@@ -857,8 +860,9 @@ const TravelVendorReturnsPage = () => {
   return (
     <TravelMasterPageFrame
       titleKey="travel.vendorReturns.title"
+      embedded={embedded}
       actions={
-        formVisible ? (
+        embedded ? null : formVisible ? (
           <IconButton
             icon={FaArrowLeft}
             variant="blue"
@@ -922,29 +926,17 @@ const TravelVendorReturnsPage = () => {
         )
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError || formError)}
+        message={pageError || formError}
+        onClose={() => { setPageError(''); setFormError(''); }}
+      />
 
       {formVisible && (
         <form
           onSubmit={handleSubmit}
-          className="mb-4 space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+          className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
         >
-          {formError && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-              {formError}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-              {successMessage}
-            </div>
-          )}
-
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.vendor"
@@ -1121,18 +1113,6 @@ const TravelVendorReturnsPage = () => {
               />
             </label>
 
-            <label className="min-w-0 md:col-span-2">
-              <span className="mb-1 block text-xs font-extrabold text-slate-500">
-                {t('travel.fields.notes')}
-              </span>
-
-              <textarea
-                rows={3}
-                value={formState.notes}
-                onChange={(event) => updateField('notes', event.target.value)}
-                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
-              />
-            </label>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1155,17 +1135,25 @@ const TravelVendorReturnsPage = () => {
             />
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-extrabold text-slate-600">
-                {t('travel.vendorReturns.fields.attachments')}
-              </p>
+          <div className="sticky bottom-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-[0_-4px_14px_rgba(15,23,42,0.08)] backdrop-blur lg:flex-nowrap">
+            <input
+              type="text"
+              value={formState.notes}
+              onChange={(event) => updateField('notes', event.target.value)}
+              placeholder={t('travel.fields.notes')}
+              aria-label={t('travel.fields.notes')}
+              className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+            />
 
-              <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 transition hover:bg-slate-50">
-                <FaPaperclip aria-hidden="true" className="text-[11px]" />
-
-                {t('travel.booking.actions.attachFiles')}
-
+            <div className="relative flex-shrink-0">
+              <label
+                title={t('travel.booking.actions.attachFiles')}
+                className="inline-flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 px-2 text-xs font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <FaPaperclip aria-hidden="true" />
+                {(formState.attachments || []).length > 0 && (
+                  <span>{formState.attachments.length}</span>
+                )}
                 <input
                   type="file"
                   multiple
@@ -1174,32 +1162,23 @@ const TravelVendorReturnsPage = () => {
                   disabled={(formState.attachments || []).length >= MAX_ATTACHMENTS}
                 />
               </label>
+              {(formState.attachments || []).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(formState.attachments.length - 1)}
+                  title={t('travel.booking.actions.removeAttachment')}
+                  aria-label={t('travel.booking.actions.removeAttachment')}
+                  className="absolute -right-1.5 -top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-rose-600 text-[8px] text-white shadow"
+                >
+                  <FaTimes aria-hidden="true" />
+                </button>
+              )}
             </div>
 
-            {(formState.attachments || []).length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {formState.attachments.map((file, index) => (
-                  <span
-                    key={`${file.name}-${index}`}
-                    className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600"
-                  >
-                    <span className="truncate">{file.name}</span>
+            <TravelActionButton variant="secondary" disabled={saving} onClick={handleClearForm}>
+              {t('travel.common.cancel')}
+            </TravelActionButton>
 
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(index)}
-                      title={t('travel.booking.actions.removeAttachment')}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-rose-600"
-                    >
-                      <FaTimes aria-hidden="true" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end">
             <TravelActionButton type="submit" icon={FaSave} disabled={saving}>
               {saving ? t('travel.common.saving') : t('travel.vendorReturns.createAction')}
             </TravelActionButton>

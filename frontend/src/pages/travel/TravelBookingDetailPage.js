@@ -62,6 +62,7 @@ import { generateWhatsAppLink } from '../../utils/whatsapp';
 
 import {
   TravelActionButton,
+  TravelErrorModal,
   buildTravelConfirmMessage,
 } from '../../components/travel/master/TravelMasterUI';
 import { TravelReminderStatusPanel } from '../../components/travel/reminders/TravelReminderCenter';
@@ -2159,11 +2160,11 @@ const TravelBookingDetailPage = () => {
 
   return (
     <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
-      {pageError && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-3 text-sm font-bold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {loading && (
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-12 text-center text-sm font-bold text-slate-500">

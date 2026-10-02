@@ -16,7 +16,8 @@ import { isWeavingContext, buildWeavingRouteState } from '../utils/weavingContex
 import { getCurrentLanguage, setLanguage } from '../i18n/i18n';
 import { t } from '../i18n/i18n';
 import axios from 'axios';
-import { FaBars, FaBell, FaChevronDown, FaEllipsisV, FaSyncAlt, FaUserCircle } from 'react-icons/fa';
+import { FaBars, FaBell, FaCalculator, FaChevronDown, FaEllipsisV, FaSyncAlt, FaUserCircle } from 'react-icons/fa';
+import UniversalCalculator from '../components/shared/UniversalCalculator';
 
 const travelTopMenuConfig = [
   {
@@ -39,7 +40,7 @@ const travelTopMenuConfig = [
           },
           {
             label: 'travel.payments.receiveAction',
-            path: '/travel/payments/receive',
+            path: '/travel/payments?mode=receive',
             anyPermissions: ['travel.bookings.view', 'travel.bookings.edit', 'travel.payments'],
           },
         ],
@@ -80,13 +81,8 @@ const travelTopMenuConfig = [
           },
           {
             label: 'travel.payments.vendorActionShort',
-            path: '/travel/vendor-payments/new',
+            path: '/travel/payments?mode=vendor',
             anyPermissions: ['travel.vendors.view', 'travel.vendors.manage', 'travel.payments'],
-          },
-          {
-            label: 'travel.vendorReturns.add',
-            path: '/travel/vendor-returns/new',
-            permission: 'travel.vendors.manage',
           },
         ],
       },
@@ -102,11 +98,6 @@ const travelTopMenuConfig = [
             label: 'travel.payments.vendorHistory.title',
             path: '/travel/payments/vendors',
             anyPermissions: ['travel.vendors.view', 'travel.payments'],
-          },
-          {
-            label: 'travel.vendorReturns.title',
-            path: '/travel/vendor-returns',
-            permission: 'travel.vendors.view',
           },
         ],
       },
@@ -205,26 +196,26 @@ const travelTopMenuConfig = [
     ],
   },
   {
-    label: 'travel.sidebar.refunds',
+    label: 'travel.returns.title',
     module: MODULE_KEYS.TRAVEL,
     sections: [
       {
-        title: 'travel.nav.create',
+        title: 'travel.returns.title',
         items: [
           {
-            label: 'travel.refund.actions.new',
-            path: '/travel/refunds/new',
-            permission: 'travel.bookings.edit',
+            label: 'travel.returns.return',
+            path: '/travel/returns',
+            anyPermissions: ['travel.bookings.edit', 'travel.vendors.manage'],
           },
-        ],
-      },
-      {
-        title: 'travel.nav.manage',
-        items: [
           {
-            label: 'travel.refund.historyTitle',
+            label: 'travel.returns.customerList',
             path: '/travel/refunds',
             permission: 'travel.bookings.view',
+          },
+          {
+            label: 'travel.returns.vendorList',
+            path: '/travel/vendor-returns',
+            anyPermissions: ['travel.vendors.view', 'travel.vendors.manage'],
           },
         ],
       },
@@ -287,30 +278,26 @@ const travelTopMenuConfig = [
     module: MODULE_KEYS.TRAVEL,
     sections: [
       {
-        title: 'RECEIVE',
+        title: 'payment.payments',
         items: [
           {
-            label: 'travel.payments.receiveAction',
-            path: '/travel/payments/receive',
-            anyPermissions: ['travel.bookings.view', 'travel.bookings.edit', 'travel.payments'],
+            label: 'payment.payments',
+            path: '/travel/payments',
+            anyPermissions: [
+              'travel.bookings.view',
+              'travel.bookings.edit',
+              'travel.vendors.view',
+              'travel.vendors.manage',
+              'travel.payments',
+            ],
           },
           {
-            label: 'travel.payments.receivedHistory.title',
+            label: 'travel.payments.receivedHistory.listTitle',
             path: '/travel/payments/received',
             anyPermissions: ['travel.bookings.view', 'travel.payments'],
           },
-        ],
-      },
-      {
-        title: 'PAY',
-        items: [
           {
-            label: 'travel.payments.vendorActionShort',
-            path: '/travel/vendor-payments/new',
-            anyPermissions: ['travel.vendors.view', 'travel.vendors.manage', 'travel.payments'],
-          },
-          {
-            label: 'travel.payments.vendorHistory.title',
+            label: 'travel.payments.vendorHistory.listTitle',
             path: '/travel/payments/vendors',
             anyPermissions: ['travel.vendors.view', 'travel.payments'],
           },
@@ -333,6 +320,9 @@ const TopHeader = ({
   const location = useLocation();
   const isTravelWorkspace = isTravelContext(location);
   const isWeavingWorkspace = isWeavingContext(location);
+  const calculatorModule = isTravelWorkspace ? 'travel' : isWeavingWorkspace ? 'weaving' : 'trading';
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  useEffect(() => setCalculatorOpen(false), [calculatorModule]);
   const workspaceDashboardPath = isWeavingWorkspace
     ? '/weaving/dashboard'
     : isTravelWorkspace
@@ -511,7 +501,7 @@ const TopHeader = ({
         } else if (term.includes('expense')) {
           navigate('/travel/expenses');
         } else if (term.includes('payment') || term.includes('receive')) {
-          navigate('/travel/payments/receive');
+          navigate('/travel/payments?mode=receive');
         } else if (term.includes('return') || term.includes('credit')) {
           navigate('/travel/vendor-returns');
         } else if (term.includes('invoice') || term.includes('booking') || term.includes('sale')) {
@@ -723,6 +713,15 @@ const TopHeader = ({
 
       {/* RIGHT SIDE */}
       <div className="flex items-center gap-2 sm:gap-4">
+        <button
+          type="button"
+          onClick={() => setCalculatorOpen(true)}
+          title="Calculator"
+          aria-label="Open calculator"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-700 transition hover:bg-cyan-50 hover:text-cyan-700"
+        >
+          <FaCalculator aria-hidden="true" />
+        </button>
         {/* Install */}
         {deferredPrompt && !isInstalled && (
           <button
@@ -939,6 +938,12 @@ const TopHeader = ({
           )}
         </div>
       </div>
+      <UniversalCalculator
+        key={calculatorModule}
+        open={calculatorOpen}
+        onClose={() => setCalculatorOpen(false)}
+        moduleName={calculatorModule.charAt(0).toUpperCase() + calculatorModule.slice(1)}
+      />
 
       {showMessagePopup && (
         <div className="fixed top-5 right-5 z-50 max-w-[300px]">

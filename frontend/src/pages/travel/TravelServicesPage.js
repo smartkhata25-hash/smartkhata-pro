@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaSyncAlt } from 'react-icons/fa';
+import {
+FaSyncAlt } from 'react-icons/fa';
 
 import {
   createTravelService,
@@ -21,7 +22,8 @@ import { t } from '../../i18n/i18n';
 import usePageMemory from '../../hooks/usePageMemory';
 
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelFilterSelect,
   TravelMasterPageFrame,
   TravelMasterToolbar,
@@ -294,7 +296,7 @@ const TravelServicesPage = () => {
 
   const openCategoryDetails = (category = null, draftName = '', target = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -319,7 +321,7 @@ const TravelServicesPage = () => {
 
   const openServiceDetails = (service = null, draftName = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -345,7 +347,7 @@ const TravelServicesPage = () => {
 
   const openQuickCategory = (draftName = '', target = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -361,7 +363,7 @@ const TravelServicesPage = () => {
 
   const openQuickService = (draftName = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -528,7 +530,7 @@ const TravelServicesPage = () => {
     } catch (error) {
       console.error('Category status update failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
+setPageError(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
     }
   };
 
@@ -544,13 +546,13 @@ const TravelServicesPage = () => {
     } catch (error) {
       console.error('Service status update failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
+setPageError(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
     }
   };
 
   const handleDeleteCategory = async (category) => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -583,7 +585,7 @@ const TravelServicesPage = () => {
     } catch (error) {
       console.error('Travel category delete failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.services.deleteCategoryFailed'));
+setPageError(error?.response?.data?.message || t('travel.services.deleteCategoryFailed'));
     } finally {
       setDeletingId('');
     }
@@ -591,7 +593,7 @@ const TravelServicesPage = () => {
 
   const handleDeleteService = async (service) => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -618,7 +620,7 @@ const TravelServicesPage = () => {
     } catch (error) {
       console.error('Travel service delete failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.services.deleteServiceFailed'));
+setPageError(error?.response?.data?.message || t('travel.services.deleteServiceFailed'));
     } finally {
       setDeletingId('');
     }
@@ -714,11 +716,11 @@ const TravelServicesPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {pageMemory.activeTab === 'services' ? (
         <TravelServiceList

@@ -72,8 +72,8 @@ const TravelBookingsPage = lazy(() => import('./pages/travel/TravelBookingsPage'
 const TravelBookingFormPage = lazy(() => import('./pages/travel/TravelBookingFormPage'));
 const TravelBookingDetailPage = lazy(() => import('./pages/travel/TravelBookingDetailPage'));
 const TravelRefundsPage = lazy(() => import('./pages/travel/TravelRefundsPage'));
-const TravelRefundFormPage = lazy(() => import('./pages/travel/TravelRefundFormPage'));
 const TravelRefundDetailPage = lazy(() => import('./pages/travel/TravelRefundDetailPage'));
+const TravelReturnsPage = lazy(() => import('./pages/travel/TravelReturnsPage'));
 const TravelersPage = lazy(() => import('./pages/travel/TravelersPage'));
 const TravelServicesPage = lazy(() => import('./pages/travel/TravelServicesPage'));
 const TravelHotelsPage = lazy(() => import('./pages/travel/TravelHotelsPage'));
@@ -88,6 +88,7 @@ const TravelPayrollPage = lazy(() => import('./pages/travel/TravelPayrollPage'))
 const TravelEmployeeLedgerPage = lazy(() => import('./pages/travel/TravelEmployeeLedgerPage'));
 const TravelVendorsPage = lazy(() => import('./pages/travel/TravelVendorsPage'));
 const TravelPaymentHistoryPage = lazy(() => import('./pages/travel/TravelPaymentHistoryPage'));
+const TravelPaymentsPage = lazy(() => import('./pages/travel/TravelPaymentsPage'));
 const TravelReceivePaymentPage = lazy(() => import('./pages/travel/TravelReceivePaymentPage'));
 const TravelVendorPaymentPage = lazy(() => import('./pages/travel/TravelVendorPaymentPage'));
 const TravelVendorReturnsPage = lazy(() => import('./pages/travel/TravelVendorReturnsPage'));
@@ -141,6 +142,14 @@ function NavigationTracker() {
   }, [location.pathname]);
 
   return null;
+}
+
+function TravelReturnRedirect({ type }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set('type', type);
+
+  return <Navigate to={`/travel/returns?${params.toString()}`} replace />;
 }
 
 function App() {
@@ -702,6 +711,23 @@ function App() {
             />
 
             <Route
+              path="/travel/returns"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'travel.bookings.view',
+                    'travel.bookings.edit',
+                    'travel.vendors.view',
+                    'travel.vendors.manage',
+                  ]}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelReturnsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/travel/refunds"
               element={
                 <PermissionRoute permission="travel.bookings.view" moduleKey={MODULE_KEYS.TRAVEL}>
@@ -714,7 +740,7 @@ function App() {
               path="/travel/refunds/new"
               element={
                 <PermissionRoute permission="travel.bookings.edit" moduleKey={MODULE_KEYS.TRAVEL}>
-                  <TravelRefundFormPage />
+                  <TravelReturnRedirect type="customer" />
                 </PermissionRoute>
               }
             />
@@ -861,6 +887,24 @@ function App() {
             />
 
             <Route
+              path="/travel/payments"
+              element={
+                <PermissionRoute
+                  anyPermissions={[
+                    'travel.bookings.view',
+                    'travel.bookings.edit',
+                    'travel.vendors.view',
+                    'travel.vendors.manage',
+                    'travel.payments',
+                  ]}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelPaymentsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/travel/payments/receive"
               element={
                 <PermissionRoute
@@ -932,7 +976,7 @@ function App() {
               path="/travel/vendor-returns/new"
               element={
                 <PermissionRoute permission="travel.vendors.manage" moduleKey={MODULE_KEYS.TRAVEL}>
-                  <TravelVendorReturnsPage />
+                  <TravelReturnRedirect type="vendor" />
                 </PermissionRoute>
               }
             />

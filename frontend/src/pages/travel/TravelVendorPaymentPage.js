@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FaHistory, FaMoneyBillWave, FaSave, FaUserTie } from 'react-icons/fa';
+import { FaEraser, FaHistory, FaMoneyBillWave, FaSave, FaTimes, FaUserTie } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
@@ -13,8 +13,10 @@ import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/loca
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
+  TravelErrorModal,
   TravelMasterPageFrame,
   formatTravelMoney,
+  getTravelErrorMessage,
 } from '../../components/travel/master/TravelMasterUI';
 
 const createInitialForm = () => ({
@@ -175,7 +177,7 @@ const BalanceBox = ({ balance }) => {
   );
 };
 
-const TravelVendorPaymentPage = () => {
+const TravelVendorPaymentPage = ({ modeActions = null }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -188,11 +190,26 @@ const TravelVendorPaymentPage = () => {
   const [saving, setSaving] = useState(false);
 
   const [formError, setFormError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
 
   const queryVendorId = searchParams.get('vendorId') || '';
   const queryVendorType = searchParams.get('vendorType') === 'party' ? 'party' : 'vendor';
   const queryVendorPartyId = searchParams.get('vendorPartyId') || '';
+
+  const getDefaultAccountId = useCallback(
+    () =>
+      paymentAccounts.find(
+        (account) => String(account?.category || '').toLowerCase() === 'cash'
+      )?._id || paymentAccounts[0]?._id || '',
+    [paymentAccounts]
+  );
+
+  const resetCreateForm = useCallback(() => {
+    setFormState({ ...createInitialForm(), accountId: getDefaultAccountId() });
+    setFormError('');
+    if (queryVendorId || queryVendorPartyId) {
+      navigate(modeActions ? '/travel/payments?mode=vendor' : '/travel/vendor-payments/new', { replace: true });
+    }
+  }, [getDefaultAccountId, modeActions, navigate, queryVendorId, queryVendorPartyId]);
 
   const vendorOptions = useMemo(
     () => [
@@ -304,7 +321,7 @@ const TravelVendorPaymentPage = () => {
     }));
 
     setFormError('');
-    setSuccessMessage('');
+    setFormError('');
   };
 
   const updateField = useCallback((field, value) => {
@@ -314,7 +331,7 @@ const TravelVendorPaymentPage = () => {
     }));
 
     setFormError('');
-    setSuccessMessage('');
+    setFormError('');
   }, []);
 
   const handlePaymentTypeChange = useCallback(
@@ -332,7 +349,6 @@ const TravelVendorPaymentPage = () => {
       }));
 
       setFormError('');
-      setSuccessMessage('');
     },
     [paymentAccounts]
   );
@@ -348,7 +364,7 @@ const TravelVendorPaymentPage = () => {
     }
 
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      setFormError(t('travel.fields.amountPaid'));
+      setFormError(t('travel.payments.invalidAmount'));
       return;
     }
 
@@ -360,7 +376,6 @@ const TravelVendorPaymentPage = () => {
     try {
       setSaving(true);
       setFormError('');
-      setSuccessMessage('');
 
       const saved = await createTravelVendorPayment({
         ...formState,
@@ -403,20 +418,11 @@ const TravelVendorPaymentPage = () => {
         );
       }
 
-      setFormState((current) => ({
-        ...createInitialForm(),
-        vendorType: current.vendorType,
-        vendorId: current.vendorId,
-        vendorPartyId: current.vendorPartyId,
-        accountId: current.accountId,
-        paymentType: current.paymentType,
-      }));
-
-      setSuccessMessage(t('travel.payments.vendorSuccess'));
+      resetCreateForm();
     } catch (error) {
       console.error('Travel vendor payment failed:', error);
 
-      setFormError(error?.response?.data?.message || t('travel.payments.saveFailed'));
+      setFormError(getTravelErrorMessage(error, t('travel.payments.saveFailed')));
     } finally {
       setSaving(false);
     }
@@ -425,8 +431,10 @@ const TravelVendorPaymentPage = () => {
   return (
     <TravelMasterPageFrame
       titleKey="travel.payments.vendorTitle"
+      className={modeActions ? 'mx-auto w-full max-w-5xl !pt-0' : ''}
       actions={
         <>
+          {modeActions}
           <TravelActionButton
             icon={FaHistory}
             variant="secondary"
@@ -434,15 +442,23 @@ const TravelVendorPaymentPage = () => {
             title={t('travel.payments.vendorHistory.title')}
           />
 
-          <TravelActionButton
-            icon={FaUserTie}
-            variant="secondary"
-            onClick={() => navigate('/travel/vendors')}
-            title={t('travel.sidebar.vendors')}
-          />
+          {!modeActions && (
+            <TravelActionButton
+              icon={FaUserTie}
+              variant="secondary"
+              onClick={() => navigate('/travel/vendors')}
+              title={t('travel.sidebar.vendors')}
+            />
+          )}
         </>
       }
     >
+      <TravelErrorModal
+        open={Boolean(formError)}
+        title={t('travel.feedback.paymentErrorTitle')}
+        message={formError}
+        onClose={() => setFormError('')}
+      />
       <form
         onSubmit={handleSubmit}
         className="mx-auto max-w-5xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
@@ -450,18 +466,6 @@ const TravelVendorPaymentPage = () => {
         <div className="h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500" />
 
         <div className="space-y-4 p-4 md:p-5">
-          {formError && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-              {formError}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-              {successMessage}
-            </div>
-          )}
-
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <TravelCompactAutocomplete
               labelKey="travel.fields.vendor"
@@ -486,7 +490,6 @@ const TravelVendorPaymentPage = () => {
                 step="0.01"
                 value={formState.amount}
                 onChange={(event) => updateField('amount', event.target.value)}
-                required
                 disabled={saving}
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-50 disabled:text-slate-400"
               />
@@ -519,7 +522,6 @@ const TravelVendorPaymentPage = () => {
               <select
                 value={formState.accountId}
                 onChange={(event) => updateField('accountId', event.target.value)}
-                required
                 disabled={loading || saving}
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-50"
               >
@@ -595,7 +597,13 @@ const TravelVendorPaymentPage = () => {
             <BalanceBox balance={selectedVendorBalance} />
           </div>
 
-          <div className="flex justify-end border-t border-slate-100 pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+            <TravelActionButton icon={FaEraser} variant="secondary" onClick={resetCreateForm} disabled={saving}>
+              {t('clear')}
+            </TravelActionButton>
+            <TravelActionButton icon={FaTimes} variant="secondary" onClick={() => navigate('/travel/payments/vendors')} disabled={saving}>
+              {t('cancel')}
+            </TravelActionButton>
             <TravelActionButton type="submit" icon={FaSave} disabled={saving || loading}>
               {saving ? t('travel.common.saving') : t('travel.payments.vendorAction')}
             </TravelActionButton>

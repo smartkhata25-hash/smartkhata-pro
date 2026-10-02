@@ -14,6 +14,7 @@ import { t } from '../../i18n/i18n';
 import { fetchTravelDashboardSummary } from '../../services/travelMasterService';
 import { hasAnyPermission, hasPermission } from '../../utils/permissionHelper';
 import TravelProfitSummaryModal from '../../components/travel/reports/TravelProfitSummaryModal';
+import { TravelErrorModal } from '../../components/travel/master/TravelMasterUI';
 
 const formatDashboardValue = (value, format) => {
   const safeValue = Number(value || 0);
@@ -212,11 +213,11 @@ const TravelDashboardPage = () => {
         </div>
       </header>
 
-      {pageError && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <section className="space-y-3" aria-label={t('travel.dashboard.sections.operationalSummary')}>
         <div className="flex items-center justify-between gap-3">

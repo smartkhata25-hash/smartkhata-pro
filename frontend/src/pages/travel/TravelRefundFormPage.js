@@ -14,6 +14,7 @@ import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/loca
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
+  TravelErrorModal,
   TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
 import {
@@ -194,20 +195,7 @@ const HeaderIconButton = ({ icon: Icon, title, onClick }) => (
   </button>
 );
 
-const ClearIconButton = ({ title, disabled, onClick }) => (
-  <button
-    type="button"
-    title={title}
-    aria-label={title}
-    disabled={disabled}
-    onClick={onClick}
-    className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-sm text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-orange-200 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 sm:w-10 sm:text-base"
-  >
-    <FaTimes aria-hidden="true" />
-  </button>
-);
-
-const TravelRefundFormPage = () => {
+const TravelRefundFormPage = ({ embedded = false }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -539,19 +527,16 @@ const TravelRefundFormPage = () => {
   return (
     <TravelMasterPageFrame
       titleKey="travel.refund.form.title"
+      embedded={embedded}
       actions={
-        <HeaderIconButton
+        !embedded && <HeaderIconButton
           icon={FaArrowLeft}
           title={t('travel.refund.actions.backToList')}
           onClick={() => navigate('/travel/refunds')}
         />
       }
     >
-      {formError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {formError}
-        </div>
-      )}
+      <TravelErrorModal open={Boolean(formError)} message={formError} onClose={() => setFormError('')} />
 
       {loading && (
         <div className="mb-3 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-700">
@@ -559,7 +544,7 @@ const TravelRefundFormPage = () => {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500" />
 
@@ -818,80 +803,48 @@ const TravelRefundFormPage = () => {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <label className="block">
-              <FieldLabel>{t('travel.fields.notes')}</FieldLabel>
+        <section className="sticky bottom-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-[0_-4px_14px_rgba(15,23,42,0.08)] backdrop-blur lg:flex-nowrap">
+          <input
+            type="text"
+            value={formState.notes || ''}
+            onChange={(event) => updateRoot('notes', event.target.value)}
+            placeholder={t('travel.fields.notes')}
+            aria-label={t('travel.fields.notes')}
+            className="h-9 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+          />
 
-              <textarea
-                value={formState.notes || ''}
-                onChange={(event) => updateRoot('notes', event.target.value)}
-                rows={3}
-                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+          <div className="relative flex-shrink-0">
+            <label
+              title={t('travel.booking.actions.attachFiles')}
+              className="inline-flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 px-2 text-xs font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <FaPaperclip aria-hidden="true" />
+              {formState.attachments.length > 0 && <span>{formState.attachments.length}</span>}
+              <input
+                type="file"
+                multiple
+                accept="image/*,.pdf"
+                className="hidden"
+                disabled={formState.attachments.length >= MAX_ATTACHMENTS}
+                onChange={handleAttachmentChange}
               />
             </label>
-
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-extrabold text-slate-600">
-                  {t('travel.booking.fields.attachments')}
-                </p>
-
-                <label
-                  title={t('travel.booking.actions.attachFiles')}
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-xs text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:h-9 sm:w-9 sm:text-sm"
-                >
-                  <FaPaperclip aria-hidden="true" />
-
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    disabled={formState.attachments.length >= MAX_ATTACHMENTS}
-                    onChange={handleAttachmentChange}
-                  />
-                </label>
-              </div>
-
-              <div className="space-y-2">
-                {formState.attachments.map((attachment, index) => (
-                  <div
-                    key={`${attachment.name}-${index}`}
-                    className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
-                  >
-                    <span className="min-w-0 truncate text-xs font-bold text-slate-700">
-                      {attachment.name}
-                    </span>
-
-                    <button
-                      type="button"
-                      title={t('travel.booking.actions.removeAttachment')}
-                      aria-label={t('travel.booking.actions.removeAttachment')}
-                      onClick={() => removeAttachment(index)}
-                      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-rose-50 text-rose-600 transition hover:bg-rose-100"
-                    >
-                      <FaTimes aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-
-                {formState.attachments.length === 0 && (
-                  <p className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-center text-xs font-semibold text-slate-500">
-                    {t('travel.booking.empty.attachments')}
-                  </p>
-                )}
-              </div>
-            </div>
+            {formState.attachments.length > 0 && (
+              <button
+                type="button"
+                title={t('travel.booking.actions.removeAttachment')}
+                aria-label={t('travel.booking.actions.removeAttachment')}
+                onClick={() => removeAttachment(formState.attachments.length - 1)}
+                className="absolute -right-1.5 -top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-rose-600 text-[8px] text-white shadow"
+              >
+                <FaTimes aria-hidden="true" />
+              </button>
+            )}
           </div>
-        </section>
 
-        <section className="sticky bottom-0 z-20 flex items-center justify-end gap-1.5 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-6px_18px_rgba(15,23,42,0.08)] backdrop-blur sm:gap-2">
-          <ClearIconButton
-            title={t('travel.refund.actions.clear')}
-            disabled={saving}
-            onClick={handleClear}
-          />
+          <TravelActionButton variant="secondary" disabled={saving} onClick={handleClear}>
+            {t('travel.common.cancel')}
+          </TravelActionButton>
 
           <TravelActionButton
             icon={FaSave}

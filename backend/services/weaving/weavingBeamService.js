@@ -7,6 +7,7 @@ const WeavingKnottingJob = require("../../models/WeavingKnottingJob");
 const WeavingLoom = require("../../models/WeavingLoom");
 const WeavingSizingReceipt = require("../../models/WeavingSizingReceipt");
 const costing = require("./weavingCostingService");
+const settingsService = require("./weavingSettingsService");
 const {
   collectAccountIdsFromJournal,
   createEmployeeJournal,
@@ -30,7 +31,7 @@ const calculateKnottingEarning = ({ paymentMethod, completedBeams, rate }) => {
   const perSet = ["per_set", "monthly_per_set"].includes(paymentMethod);
   return {
     amount: perBeam ? roundMoney(quantity * normalizedRate) : perSet ? normalizedRate : 0,
-    earningKind: paymentMethod === "monthly" ? "none" : paymentMethod.startsWith("monthly_") ? "bonus" : "piece",
+    earningKind: ["none", "monthly", "fixed_monthly"].includes(paymentMethod) ? "none" : paymentMethod.startsWith("monthly_") ? "bonus" : "piece",
   };
 };
 
@@ -100,12 +101,13 @@ const getSet = async (userId, id) => {
 };
 
 const getMeta = async (userId) => {
-  const [employees, looms] = await Promise.all([
+  const [employees, looms, productionTrackingMode] = await Promise.all([
     Employee.find({ userId, moduleScope: WEAVING_SCOPE, isDeleted: false, status: "active", designationName: "Beam Knotting Worker" }).select("name employeeNo designationName knottingPaymentMethod knottingDefaultRate").sort({ name: 1 }).lean(),
     WeavingLoom.find({ userId, isActive: true }).select("name loomNumber").sort({ loomNumber: 1 }).lean(),
+    settingsService.getMode(userId),
   ]);
   const currentRuns = await runningContexts(userId);
-  return { employees, looms: looms.map((loom) => ({ ...loom, currentRun: runForLoom(currentRuns, loom) })), currentRuns };
+  return { employees, looms: looms.map((loom) => ({ ...loom, currentRun: runForLoom(currentRuns, loom) })), currentRuns, productionTrackingMode };
 };
 
 const validateJobEntities = async ({ userId, payload, session }) => {
@@ -159,6 +161,7 @@ const validateJobEntities = async ({ userId, payload, session }) => {
 };
 
 const createJob = async ({ userId, actorId, payload }) => {
+  await settingsService.requireMode(userId, ["detailed"], "Detailed Beam/Loom loading is only available when Production Tracking Method is Detailed.");
   const session = await mongoose.startSession(); let result; let touched = [];
   try {
     await session.withTransaction(async () => {
@@ -168,7 +171,7 @@ const createJob = async ({ userId, actorId, payload }) => {
       if (newBeams.length) {
         const paymentMethod = employee.knottingPaymentMethod || "monthly";
         const completedBeams = newBeams.length;
-        const rate = paymentMethod === "monthly" ? 0 : Number(payload.rate === undefined || payload.rate === "" ? employee.knottingDefaultRate || 0 : payload.rate);
+        const rate = ["monthly", "fixed_monthly"].includes(paymentMethod) ? 0 : Number(payload.rate === undefined || payload.rate === "" ? employee.knottingDefaultRate || 0 : payload.rate);
         if (!Number.isFinite(rate) || rate < 0) throw createHttpError("Knotting rate must be zero or greater.", 400);
         const earning = calculateKnottingEarning({ paymentMethod, completedBeams, rate });
         job = new WeavingKnottingJob({ userId, moduleScope: WEAVING_SCOPE, beamSetId: set._id, sizingReceiptId: set.sizingReceiptId, employeeId: employee._id, loomId: newBeams.length === 1 ? assignments.find((entry) => String(entry.beamId) === String(newBeams[0]._id))?.loomId || null : null, beamAssignments: assignments.filter((entry) => newBeams.some((beam) => String(beam._id) === String(entry.beamId))), beamIds: newBeams.map((beam) => beam._id), workDate: clean(payload.workDate), paymentMethod, completedBeams, rate: roundMoney(rate), ...earning, notes: clean(payload.notes), status: payload.approve ? "approved" : "draft", approvedAt: payload.approve ? new Date() : null, approvedBy: payload.approve ? actorId : null });
@@ -194,6 +197,166 @@ const createJob = async ({ userId, actorId, payload }) => {
     });
   } finally { await session.endSession(); }
   await recalculateTouchedAccounts(touched); return result;
+};
+
+const createManualJob = async ({ userId, actorId, payload }) => {
+  await settingsService.requireMode(userId, ["loom_wise", "quality_total"], "Manual Beam loading is only available in Loom-wise or Total Production mode.");
+  const quantity = Number(payload.quantity);
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
+    throw createHttpError("Qty to Load must be a positive whole number.", 400);
+  }
+
+  const session = await mongoose.startSession();
+  let result;
+  let touched = [];
+  try {
+    await session.withTransaction(async () => {
+      touched = [];
+      const set = await getSessionQuery(
+        WeavingBeamSet.findOne({ _id: payload.beamSetId, userId }),
+        session,
+      );
+      if (!set) throw createHttpError("Beam Set not found.", 404);
+
+      const receipt = await getSessionQuery(
+        WeavingSizingReceipt.findOne({
+          _id: set.sizingReceiptId,
+          userId,
+          status: "posted",
+        }),
+        session,
+      );
+      if (!receipt) throw createHttpError("Void Sizing Receipt beams cannot be used.", 409);
+
+      const perBeamWorkers = await getSessionQuery(Employee.find({
+          userId,
+          moduleScope: WEAVING_SCOPE,
+          isDeleted: false,
+          status: "active",
+          designationName: "Beam Knotting Worker",
+          knottingPaymentMethod: "per_beam",
+        }), session);
+      const employee = payload.employeeId ? perBeamWorkers.find((row) => String(row._id) === String(payload.employeeId)) : null;
+      if (perBeamWorkers.length && !employee) {
+        throw createHttpError("Select an active Per-Beam Knotting Worker.", 400);
+      }
+      const loadOnly = perBeamWorkers.length === 0;
+
+      const beams = await getSessionQuery(
+        WeavingBeam.find({
+          userId,
+          beamSetId: set._id,
+          status: "available",
+          knottingJobId: null,
+        })
+          .sort({ beamIndex: 1, _id: 1 })
+          .limit(quantity),
+        session,
+      );
+      if (beams.length !== quantity) {
+        throw createHttpError(
+          `Only ${beams.length} Beam${beams.length === 1 ? " is" : "s are"} currently available.`,
+          409,
+        );
+      }
+
+      const rate = loadOnly ? 0 : Number(
+        payload.rate === undefined || payload.rate === ""
+          ? employee.knottingDefaultRate || 0
+          : payload.rate,
+      );
+      if (!Number.isFinite(rate) || rate < 0) {
+        throw createHttpError("Knotting rate must be zero or greater.", 400);
+      }
+      const earning = calculateKnottingEarning({
+        paymentMethod: loadOnly ? "none" : "per_beam",
+        completedBeams: quantity,
+        rate,
+      });
+      const job = new WeavingKnottingJob({
+        userId,
+        moduleScope: WEAVING_SCOPE,
+        entryMode: "manual",
+        workType: loadOnly ? "load_only" : "knotting",
+        beamSetId: set._id,
+        sizingReceiptId: set.sizingReceiptId,
+        employeeId: employee?._id || null,
+        loomId: null,
+        beamIds: beams.map((beam) => beam._id),
+        beamAssignments: beams.map((beam) => ({
+          beamId: beam._id,
+          loomId: null,
+          loomNumber: "",
+        })),
+        workDate: clean(payload.workDate),
+        paymentMethod: loadOnly ? "none" : "per_beam",
+        completedBeams: quantity,
+        rate: roundMoney(rate),
+        ...earning,
+        notes: clean(payload.notes),
+        status: payload.approve ? "approved" : "draft",
+        approvedAt: payload.approve ? new Date() : null,
+        approvedBy: payload.approve ? actorId : null,
+      });
+      if (!job.workDate) throw createHttpError("Work Date is required.", 400);
+      await job.save({ session });
+
+      const allocation = await WeavingBeam.updateMany(
+        {
+          _id: { $in: beams.map((beam) => beam._id) },
+          userId,
+          beamSetId: set._id,
+          status: "available",
+          knottingJobId: null,
+        },
+        {
+          $set: {
+            status: "loaded",
+            knottingJobId: job._id,
+            activeLoomId: null,
+            loomNumber: "",
+            loadedAt: new Date(),
+          },
+        },
+        sessionOptions(session),
+      );
+      if (allocation.modifiedCount !== quantity) {
+        throw createHttpError("Beam availability changed. Refresh and try again.", 409);
+      }
+
+      if (!loadOnly && payload.approve && earning.amount > 0) {
+        const [employeeAccount, expenseAccount] = await Promise.all([
+          ensureEmployeeAccount({ userId, moduleScope: WEAVING_SCOPE, employee, session }),
+          ensureSalaryExpenseAccount({ userId, moduleScope: WEAVING_SCOPE, session }),
+        ]);
+        const journal = await createEmployeeJournal({
+          userId,
+          moduleScope: WEAVING_SCOPE,
+          employee,
+          date: job.workDate,
+          description: `Manual beam knotting ${set.setNo || set.receiptNo} - ${employee.name}`,
+          sourceType: "expense",
+          originModule: "weaving.knotting",
+          referenceId: job._id,
+          lines: [
+            { account: expenseAccount._id, type: "debit", amount: earning.amount },
+            { account: employeeAccount._id, type: "credit", amount: earning.amount },
+          ],
+          session,
+        });
+        job.journalEntryId = journal._id;
+        await job.save({ session });
+        touched.push(...collectAccountIdsFromJournal(journal));
+      }
+
+      await refreshSetStatus(set._id, session);
+      result = { job, loadedBeamIds: beams.map((beam) => beam._id) };
+    });
+  } finally {
+    await session.endSession();
+  }
+  await recalculateTouchedAccounts(touched);
+  return result;
 };
 
 const voidJob = async ({ userId, actorId, jobId, reason }) => {
@@ -259,4 +422,4 @@ const completeBeam = async ({ userId, beamId }) => {
 
 const hasCostingKnottingEarning = (job) => ["piece", "bonus"].includes(job?.earningKind);
 
-module.exports = { completeBeam, completeBeamInSession, reopenBeamInSession, calculateKnottingEarning, createJob: costing.withCostingInvalidation(createJob, "knotting", hasCostingKnottingEarning), getMeta, getSet, listSets, syncPostedReceipts, syncReceiptBeams, voidJob: costing.withCostingInvalidation(voidJob, "knotting", hasCostingKnottingEarning), _test: { calculateKnottingEarning } };
+module.exports = { completeBeam, completeBeamInSession, reopenBeamInSession, calculateKnottingEarning, createJob: costing.withCostingInvalidation(createJob, "knotting", hasCostingKnottingEarning), createManualJob: costing.withCostingInvalidation(createManualJob, "knotting", hasCostingKnottingEarning), getMeta, getSet, listSets, syncPostedReceipts, syncReceiptBeams, voidJob: costing.withCostingInvalidation(voidJob, "knotting", hasCostingKnottingEarning), _test: { calculateKnottingEarning } };

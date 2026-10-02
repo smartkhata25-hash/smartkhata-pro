@@ -18,6 +18,8 @@ export const bulkCreateWeavingLooms = async (payload) => data(await axios.post(`
 export const listWeavingGodowns = async () => data(await axios.get(`${API_URL}/godowns`, config()));
 export const createWeavingGodown = async (payload) => data(await axios.post(`${API_URL}/godowns`, payload, config()));
 export const updateWeavingGodown = async (id, payload) => data(await axios.put(`${API_URL}/godowns/${id}`, payload, config()));
+export const getWeavingSettings = async () => data(await axios.get(`${API_URL}/settings`, config()));
+export const updateWeavingSettings = async (payload) => data(await axios.put(`${API_URL}/settings`, payload, config()));
 export const listWeavingParties = async (params = {}) => data(await axios.get(`${API_URL}/parties`, config(params)));
 export const createWeavingParty = async (payload) => data(await axios.post(`${COMMERCIAL_URL}/parties`, payload, config()));
 const contractConfig = () => ({ ...config(), timeout: 30000 });

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const lineSchema = new mongoose.Schema({
   yarnId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingYarn", required: true },
   quantityKg: { type: Number, min: 0.000001, required: true },
+  quantityLbs: { type: Number, min: 0, default: 0 },
   bags: { type: Number, min: 0, default: 0 },
   packageType: { type: String, trim: true, lowercase: true, default: "" },
   packageQty: { type: Number, min: 0, default: 0 },
@@ -12,6 +13,10 @@ const lineSchema = new mongoose.Schema({
   totalCones: { type: Number, min: 0, default: 0 },
   smallCones: { type: Number, min: 0, default: 0 },
   largeCones: { type: Number, min: 0, default: 0 },
+  packageWeight: { type: Number, min: 0, default: 0 },
+  packageWeightUnit: { type: String, enum: ["LBS"], default: "LBS" },
+  smallConesPerPackage: { type: Number, min: 0, default: 0 },
+  largeConesPerPackage: { type: Number, min: 0, default: 0 },
   lotReference: { type: String, trim: true, default: "" },
   sourceGodownId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingGodown", default: null },
   sourcePurchaseLineId: { type: mongoose.Schema.Types.ObjectId, default: null },

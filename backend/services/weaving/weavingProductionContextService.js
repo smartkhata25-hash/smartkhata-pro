@@ -77,7 +77,7 @@ const productionIdentity = async (userId, payload, { source = null, existing = n
   if (requireIdentity && !existing && (!fabricQualityId || !ownershipType)) throw fail("Select one Fabric Quality and Own Production or a production Party");
   return { contractId, fabricQualityId, ownershipType, ownerPartyId };
 };
-const receiptIdentity = (userId, payload, issue, session, existing = null) => productionIdentity(userId, payload, { source: issue, session, existing });
+const receiptIdentity = (userId, payload, issue, session, existing = null) => productionIdentity(userId, payload, { source: issue, session, existing, requireIdentity: false });
 
 // The same resolver supplies defaults to the UI and validates them on save.
 const attachProductionContexts = (contracts, issues = []) => {
@@ -174,7 +174,10 @@ const assertContractIdentityEdit = async (userId, existing, next) => {
 const runningContexts = async (userId, { completedLoomNumber, beamId } = {}) => {
   const historical = completedLoomNumber !== undefined;
   let query = WeavingBeam.find({ userId, status: historical ? "completed" : "loaded",
-    ...(historical ? { loomNumber: completedLoomNumber } : {}), ...(beamId ? { _id: beamId } : {}) });
+    ...(historical
+      ? { loomNumber: completedLoomNumber }
+      : { $or: [{ activeLoomId: { $type: "objectId" } }, { loomNumber: { $gt: "" } }] }),
+    ...(beamId ? { _id: beamId } : {}) });
   if (historical) query = query.sort({ completedAt: -1, loadedAt: -1 }).limit(20);
   const beams = await query.lean();
   if (!beams.length) return [];

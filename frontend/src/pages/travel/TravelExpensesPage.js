@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
+import {
+useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   FaCalendarAlt,
   FaEdit,
@@ -16,7 +17,8 @@ import { formatDateWithOptionalTime } from '../../utils/localDateTime';
 import { buildTravelRouteState } from '../../utils/travelContext';
 import { hasPermission } from '../../utils/permissionHelper';
 import {
-  TravelFilterSelect,
+    TravelErrorModal,
+TravelFilterSelect,
   TravelMasterPageFrame,
   TravelMasterToolbar,
   buildTravelConfirmMessage,
@@ -503,11 +505,11 @@ const TravelExpensesPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <section className="mb-3 grid grid-cols-2 gap-3 md:max-w-xl">
         <SummaryCard

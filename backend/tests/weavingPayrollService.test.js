@@ -170,6 +170,17 @@ const scheduledRecoveries = ({
   });
 
 (() => {
+  const fixed = calc({
+    employeeData: employee({ knottingPaymentMethod: "fixed_monthly" }),
+    rows: periodRows("2026-09-H1", "absent"),
+  });
+  assert.strictEqual(fixed.baseSalaryAmount, 15000);
+  assert.strictEqual(fixed.absentDeductionAmount, 0);
+  assert.strictEqual(fixed.unpaidLeaveDeductionAmount, 0);
+  assert.strictEqual(fixed.attendanceIncomplete, false);
+})();
+
+(() => {
   const h1 = resolvePayrollCycle("2026-09-H1");
   assert.strictEqual(h1.periodStart, "2026-09-01");
   assert.strictEqual(h1.periodEnd, "2026-09-15");

@@ -8,3 +8,8 @@ export const updateFoldingEntry=async(id,body)=>unwrap(await axios.put(`${URL}/e
 export const voidFoldingEntry=async(id,reason)=>unwrap(await axios.post(`${URL}/entries/${id}/void`,{reason},cfg()));
 export const getFabricStock=async(params={})=>unwrap(await axios.get(`${URL}/stock`,cfg(params)));
 export const foldingParchiUrl=(params='')=>`${URL}/parchi?${params}`;
+export const getAggregateProductionMeta=async()=>unwrap(await axios.get(`${URL}/aggregate/meta`,cfg()));
+export const listAggregateProduction=async(params={})=>unwrap(await axios.get(`${URL}/aggregate`,cfg(params)));
+export const createAggregateProduction=async(body)=>unwrap(await axios.post(`${URL}/aggregate`,body,cfg()));
+export const updateAggregateProduction=async(id,body)=>unwrap(await axios.put(`${URL}/aggregate/${id}`,body,cfg()));
+export const voidAggregateProduction=async(id,reason)=>unwrap(await axios.post(`${URL}/aggregate/${id}/void`,{reason},cfg()));

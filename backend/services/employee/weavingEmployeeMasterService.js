@@ -85,7 +85,7 @@ function validateEmployee(payload, designation, department, existing) {
   const knotting = designation.name === "Beam Knotting Worker";
   const method = knotting ? payload.knottingPaymentMethod || "monthly" : "monthly";
   if (!["per_beam", "per_set"].includes(method) && !(Number.isFinite(Number(payload.baseSalary)) && Number(payload.baseSalary) >= 0.01)) throw fail("Salary / Rate must be greater than zero.");
-  if (knotting && method !== "monthly" && !(Number.isFinite(Number(payload.knottingDefaultRate)) && Number(payload.knottingDefaultRate) >= 0.01)) throw fail("Default Knotting Rate must be greater than zero.");
+  if (knotting && !["monthly", "fixed_monthly"].includes(method) && !(Number.isFinite(Number(payload.knottingDefaultRate)) && Number(payload.knottingDefaultRate) >= 0.01)) throw fail("Default Knotting Rate must be greater than zero.");
 }
 
 const pendingSeeds = new Map();

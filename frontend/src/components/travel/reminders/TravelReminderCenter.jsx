@@ -19,7 +19,7 @@ import {
   getReminderLeadPreset,
   normalizeReminderSettingsForForm,
 } from '../bookings/travelBookingConfig';
-import { TravelActionButton } from '../master/TravelMasterUI';
+import { TravelActionButton, TravelErrorModal } from '../master/TravelMasterUI';
 import {
   fetchTravelReminderSettings,
   fetchTravelReminders,
@@ -1095,7 +1095,6 @@ const TravelReminderCenter = ({
 
   const [actionId, setActionId] = useState('');
   const [centerError, setCenterError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
 
   const canManageSettings = hasPermission('travel.settings');
 
@@ -1141,7 +1140,6 @@ const TravelReminderCenter = ({
     try {
       setSavingSettings(true);
       setCenterError('');
-      setSuccessMessage('');
 
       const englishTemplate = normalizeTemplate(
         settingsDraft.englishTemplate,
@@ -1165,7 +1163,6 @@ const TravelReminderCenter = ({
 
       setSettingsDraft(normalizeSettingsDraft(saved));
 
-      setSuccessMessage('Reminder settings saved successfully.');
 
       await onSummaryRefresh?.({
         forceRefresh: true,
@@ -1192,11 +1189,9 @@ const TravelReminderCenter = ({
     try {
       setActionId(reminder._id);
       setCenterError('');
-      setSuccessMessage('');
 
       await sendTravelReminderEmail(reminder._id);
 
-      setSuccessMessage('Reminder email sent successfully.');
 
       await refreshAfterAction();
     } catch (error) {
@@ -1212,7 +1207,6 @@ const TravelReminderCenter = ({
     try {
       setActionId(reminder._id);
       setCenterError('');
-      setSuccessMessage('');
 
       await markTravelReminderRead(reminder._id, true);
 
@@ -1230,7 +1224,6 @@ const TravelReminderCenter = ({
     try {
       setActionId(reminder._id);
       setCenterError('');
-      setSuccessMessage('');
 
       const payload = await fetchTravelReminderWhatsAppMessage(reminder._id, getCurrentLanguage());
 
@@ -1328,17 +1321,7 @@ const TravelReminderCenter = ({
         {/* BODY */}
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-3 sm:p-4">
-          {(centerError || successMessage) && (
-            <div
-              className={`mb-3 rounded-xl border px-3 py-2.5 text-sm font-bold ${
-                centerError
-                  ? 'border-rose-200 bg-rose-50 text-rose-700'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              }`}
-            >
-              {centerError || successMessage}
-            </div>
-          )}
+          <TravelErrorModal open={Boolean(centerError)} message={centerError} onClose={() => setCenterError('')} />
 
           {/* SUMMARY */}
 

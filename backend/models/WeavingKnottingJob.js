@@ -1,13 +1,15 @@
 const mongoose = require("mongoose");
 
-const PAYMENT_METHODS = ["monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"];
+const PAYMENT_METHODS = ["none", "monthly", "fixed_monthly", "per_beam", "per_set", "monthly_per_beam", "monthly_per_set"];
 const schema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     moduleScope: { type: String, enum: ["weaving"], default: "weaving", immutable: true },
+    entryMode: { type: String, enum: ["detailed", "manual"], default: "detailed" },
+    workType: { type: String, enum: ["knotting", "load_only"], default: "knotting" },
     beamSetId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeamSet", required: true },
     sizingReceiptId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingSizingReceipt", required: true },
-    employeeId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true },
+    employeeId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
     loomId: { type: mongoose.Schema.Types.ObjectId, ref: "WeavingLoom", default: null },
     beamIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "WeavingBeam" }],
     beamAssignments: [{

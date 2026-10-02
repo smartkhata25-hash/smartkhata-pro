@@ -195,16 +195,6 @@ const assertConfirmedInvoiceIsPostable = (booking) => {
     throw createHttpError(400, "Discount cannot exceed gross sale");
   }
 
-  if (receivedAmount > netSale) {
-    throw createHttpError(400, "Received amount cannot exceed net invoice");
-  }
-
-  if (vendorPaidTotal > totalCost) {
-    throw createHttpError(
-      400,
-      "Vendor paid amount cannot exceed total travel cost",
-    );
-  }
 
   if (receivedAmount > 0) {
     if (!booking.accountId) {
@@ -355,15 +345,6 @@ const pushVendorCostRow = ({
     throw createHttpError(
       400,
       `Vendor is required for cost row: ${description || "Travel service"}`,
-    );
-  }
-
-  if (paid > cost) {
-    throw createHttpError(
-      400,
-      `Vendor paid amount cannot exceed cost for ${
-        description || "Travel service"
-      }`,
     );
   }
 
@@ -524,9 +505,6 @@ const groupVendorCosts = async ({ booking, userId, session }) => {
       row.paymentType = payment?.paymentType || "credit";
       row.paymentAccountId = payment?.accountId || null;
 
-      if (row.paidAmount > roundMoney(row.amount)) {
-        throw createHttpError(400, "Vendor paid amount cannot exceed allocated vendor cost");
-      }
     });
   }
 
@@ -975,15 +953,6 @@ const postTravelInvoiceAccounting = async ({
 
         if (paidAmount <= 0) {
           continue;
-        }
-
-        if (paidAmount > roundMoney(vendorCost.amount)) {
-          throw createHttpError(
-            400,
-            `Vendor paid amount cannot exceed cost for ${
-              vendorCost.vendor?.name || "vendor"
-            }`,
-          );
         }
 
         const paymentAccount = usesVendorPayments

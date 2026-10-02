@@ -10,4 +10,9 @@ router.put("/entries/:id",requirePermission("weaving.folding.edit"),ctrl.update)
 router.post("/entries/:id/void",requirePermission("weaving.folding.void"),ctrl.voidEntry);
 router.get("/stock",requirePermission("weaving.fabric_stock.view"),ctrl.stock);
 router.get("/production",requirePermission("weaving.folding.view"),ctrl.production);
+router.get("/aggregate/meta",requirePermission("weaving.folding.view"),ctrl.aggregateMeta);
+router.get("/aggregate",requirePermission("weaving.folding.view"),ctrl.listAggregate);
+router.post("/aggregate",requirePermission("weaving.folding.create"),ctrl.createAggregate);
+router.put("/aggregate/:id",requirePermission("weaving.folding.edit"),ctrl.updateAggregate);
+router.post("/aggregate/:id/void",requirePermission("weaving.folding.void"),ctrl.voidAggregate);
 module.exports=router;

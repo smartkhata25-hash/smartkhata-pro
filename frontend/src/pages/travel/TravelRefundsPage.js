@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useNavigate, useSearchParams } from 'react-router-dom';
 import { FaCalendarAlt, FaEye, FaPlus, FaSyncAlt, FaTimes, FaTrash } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
@@ -7,7 +8,8 @@ import { deleteTravelRefund, fetchTravelRefunds } from '../../services/travelMas
 import { formatDateWithOptionalTime } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelCardLine,
   TravelFilterSelect,
   TravelMasterList,
@@ -266,7 +268,7 @@ const TravelRefundsPage = () => {
       event?.stopPropagation?.();
 
       if (!canDelete) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -291,7 +293,7 @@ const TravelRefundsPage = () => {
       } catch (error) {
         console.error('Travel refund delete failed:', error);
 
-        alert(error?.response?.data?.message || t('travel.refund.alerts.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFailed'));
       } finally {
         setDeletingId('');
       }
@@ -550,11 +552,11 @@ const TravelRefundsPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <div className="mb-2 flex items-center gap-3 text-xs font-bold text-slate-500">
         <span>

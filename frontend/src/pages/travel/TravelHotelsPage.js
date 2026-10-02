@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaSyncAlt, FaTimes } from 'react-icons/fa';
+import {
+FaSyncAlt, FaTimes } from 'react-icons/fa';
 
 import {
   createTravelHotel,
@@ -19,7 +20,8 @@ import { t } from '../../i18n/i18n';
 import usePageMemory from '../../hooks/usePageMemory';
 
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelFilterSelect,
   TravelMasterPageFrame,
   TravelMasterToolbar,
@@ -254,7 +256,7 @@ const TravelHotelsPage = () => {
 
   const openHotelDetails = (hotel = null, draftName = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -283,7 +285,7 @@ const TravelHotelsPage = () => {
 
   const openQuickHotel = (draftName = '') => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -298,7 +300,7 @@ const TravelHotelsPage = () => {
 
   const openVendorDetails = (vendor = null, draftName = '', target = 'hotelDetails') => {
     if (!canManageVendors) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -324,7 +326,7 @@ const TravelHotelsPage = () => {
 
   const openQuickVendor = (draftName = '', target = 'hotelDetails') => {
     if (!canManageVendors) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -462,13 +464,13 @@ const TravelHotelsPage = () => {
     } catch (error) {
       console.error('Hotel status update failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
+setPageError(error?.response?.data?.message || t('travel.alerts.statusUpdateFailed'));
     }
   };
 
   const handleDeleteHotel = async (hotel) => {
     if (!canManage) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
 
@@ -495,7 +497,7 @@ const TravelHotelsPage = () => {
     } catch (error) {
       console.error('Travel hotel delete failed:', error);
 
-      alert(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
     } finally {
       setDeletingId('');
     }
@@ -564,11 +566,11 @@ const TravelHotelsPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <TravelHotelList
         hotels={visibleHotels}

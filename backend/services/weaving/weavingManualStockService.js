@@ -26,7 +26,7 @@ const calculateManualStock = (movements) => {
       }
       for (const field of fields) pool[field] = qty(Math.max(0, pool[field] - Number(row[field] || 0)));
     } else if (row.direction === "in" && !exact) {
-      const proven = ["purchase_in", "rejection_recovery"].includes(row.movementType) || (row.movementType === "quality_transfer_in" && provenTransfers.has(id(row.stockAdjustmentId))) || (["sale_return", "kacchi_return"].includes(row.movementType) && row.stockIdentity === "untracked");
+      const proven = ["production_in", "purchase_in", "rejection_recovery"].includes(row.movementType) || (row.movementType === "quality_transfer_in" && provenTransfers.has(id(row.stockAdjustmentId))) || (["sale_return", "kacchi_return"].includes(row.movementType) && row.stockIdentity === "untracked");
       if (proven) for (const field of fields) pool[field] = qty(pool[field] + Number(row[field] || 0));
     }
   }

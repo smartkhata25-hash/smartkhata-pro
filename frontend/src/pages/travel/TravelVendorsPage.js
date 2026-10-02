@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+useNavigate, useSearchParams } from 'react-router-dom';
 import {
   FaBookOpen,
   FaBolt,
@@ -29,7 +30,8 @@ import { getCurrentLanguage, t } from '../../i18n/i18n';
 import { sendWhatsAppReminder } from '../../utils/whatsapp';
 import usePageMemory from '../../hooks/usePageMemory';
 import {
-  TravelCardLine,
+    TravelErrorModal,
+TravelCardLine,
   TravelFilterSelect,
   TravelFormModal,
   TravelMasterList,
@@ -401,7 +403,7 @@ const TravelVendorsPage = () => {
   const openDetails = useCallback(
     (vendor = null, draftName = '') => {
       if (!canManage) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -430,7 +432,7 @@ const TravelVendorsPage = () => {
   const openQuickAdd = useCallback(
     (draftName = '') => {
       if (!canManage) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -528,7 +530,7 @@ const TravelVendorsPage = () => {
       event?.stopPropagation?.();
 
       if (!canManage) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
@@ -551,7 +553,7 @@ const TravelVendorsPage = () => {
       } catch (error) {
         console.error('Travel vendor delete failed:', error);
 
-        alert(error?.response?.data?.message || t('travel.vendors.deleteFailed'));
+setPageError(error?.response?.data?.message || t('travel.vendors.deleteFailed'));
       } finally {
         setDeletingId('');
       }
@@ -564,12 +566,12 @@ const TravelVendorsPage = () => {
       event?.stopPropagation?.();
 
       if (!canManage) {
-        alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
         return;
       }
 
       if (!isDeletedHiddenRecord(vendor)) {
-        alert(t('travel.common.notRestorable'));
+setPageError(t('travel.common.notRestorable'));
         return;
       }
 
@@ -589,7 +591,7 @@ const TravelVendorsPage = () => {
         }
       } catch (error) {
         console.error('Travel vendor restore failed:', error);
-        alert(error?.response?.data?.message || t('travel.vendors.restoreFailed'));
+setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed'));
       } finally {
         setRestoringId('');
       }
@@ -631,7 +633,7 @@ const TravelVendorsPage = () => {
         return;
       }
 
-      navigate(`/travel/vendor-payments/new?vendorId=${vendor._id}`);
+      navigate(`/travel/payments?mode=vendor&vendorId=${vendor._id}`);
     },
     [canPayVendor, navigate]
   );
@@ -1063,11 +1065,11 @@ const TravelVendorsPage = () => {
         </TravelMasterToolbar>
       }
     >
-      {pageError && (
-        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       <TravelMasterList
         columns={columns}

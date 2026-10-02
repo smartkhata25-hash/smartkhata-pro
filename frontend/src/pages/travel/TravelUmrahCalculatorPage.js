@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import {
+useLocation, useNavigate } from 'react-router-dom';
 import {
   FaCalculator,
   FaCalendarAlt,
@@ -23,7 +24,8 @@ import {
   createInitialBookingForm,
 } from '../../components/travel/bookings/travelBookingConfig';
 import {
-  TravelActionButton,
+    TravelErrorModal,
+TravelActionButton,
   TravelCompactAutocomplete,
   TravelMasterPageFrame,
 } from '../../components/travel/master/TravelMasterUI';
@@ -836,7 +838,7 @@ const TravelUmrahCalculatorPage = () => {
 
   const handleSendToBooking = () => {
     if (!canCreateBooking) {
-      alert(t('travel.alerts.permissionDenied'));
+setPageError(t('travel.alerts.permissionDenied'));
 
       return;
     }
@@ -875,11 +877,11 @@ const TravelUmrahCalculatorPage = () => {
         </div>
       }
     >
-      {pageError && (
-        <div className="mb-4 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-3 text-sm font-bold text-rose-700 shadow-sm">
-          {pageError}
-        </div>
-      )}
+      <TravelErrorModal
+        open={Boolean(pageError)}
+        message={pageError}
+        onClose={() => setPageError('')}
+      />
 
       {loading && (
         <div className="mb-4 rounded-xl border border-cyan-200 bg-gradient-to-r from-cyan-50 via-sky-50 to-blue-50 px-4 py-3 text-sm font-bold text-cyan-800 shadow-sm">

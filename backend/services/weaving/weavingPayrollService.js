@@ -786,6 +786,7 @@ const calculateEmployeePayroll = ({
   const salaryRate = roundMoney(employee.baseSalary);
   const knottingPaymentMethod = employee.knottingPaymentMethod || "monthly";
   const pieceOnlyKnotting = ["per_beam", "per_set"].includes(knottingPaymentMethod);
+  const fixedMonthlyKnotting = knottingPaymentMethod === "fixed_monthly";
   const dutyHours = Number(employee.dutyHours || 0);
   const weeklyOffDays = normalizeWeeklyOffDays(employee.weeklyOffDays);
   const otAllowed = employee.otAllowed !== false;
@@ -892,9 +893,9 @@ const calculateEmployeePayroll = ({
   const proratedBaseSalary =
     salaryType === "monthly" && totals.eligibleDays < cycle.halfDays ? baseSalaryAmount : 0;
   const absentDeductionAmount =
-    !pieceOnlyKnotting && salaryType === "monthly" ? roundMoney(totals.absentDays * monthlyDayRate) : 0;
+    !pieceOnlyKnotting && !fixedMonthlyKnotting && salaryType === "monthly" ? roundMoney(totals.absentDays * monthlyDayRate) : 0;
   const unpaidLeaveDeductionAmount =
-    !pieceOnlyKnotting && salaryType === "monthly" ? roundMoney(totals.unpaidLeaveDays * monthlyDayRate) : 0;
+    !pieceOnlyKnotting && !fixedMonthlyKnotting && salaryType === "monthly" ? roundMoney(totals.unpaidLeaveDays * monthlyDayRate) : 0;
   const offDayWorkedAmount = pieceOnlyKnotting ? 0 : roundMoney(totals.offDayWorkedDays * rateForDay);
   const doubleDutyAmount = pieceOnlyKnotting ? 0 : roundMoney(totals.doubleDutyCount * rateForDay);
 
@@ -946,9 +947,11 @@ const calculateEmployeePayroll = ({
       openingReceivableAmount,
   );
   const netSalary = Math.max(0, roundMoney(grossSalary - totalDeductions));
-  const attendanceIncomplete = !attendanceFound || totals.missingAttendanceDates.length > 0;
+  const attendanceIncomplete = fixedMonthlyKnotting
+    ? false
+    : !attendanceFound || totals.missingAttendanceDates.length > 0;
 
-  if (attendanceFound && totals.missingAttendanceDates.length > 0 && !pieceOnlyKnotting) {
+  if (attendanceFound && totals.missingAttendanceDates.length > 0 && !pieceOnlyKnotting && !fixedMonthlyKnotting) {
     totals.finalizeBlockedReasons.push("Attendance Incomplete");
   }
 
@@ -1415,7 +1418,7 @@ const buildPayrollContext = async ({
     WeavingKnottingJob.find({
       userId,
       moduleScope: WEAVING_SCOPE,
-      status: "approved",
+      status: "approved", earningKind: { $in: ["piece", "bonus"] }, employeeId: { $ne: null },
       workDate: { $gte: selectedSegmentStart, $lte: selectedCalculationThroughDate },
     }).select("employeeId amount"),
     session,

@@ -15,6 +15,10 @@ router.post("/jobs", requirePermission(PERMISSIONS.WEAVING_BEAMS.CREATE, PERMISS
   (req, res, next) => req.body.approve ? requirePermission(PERMISSIONS.WEAVING_BEAMS.APPROVE)(req, res, next) : next(),
   (req, res, next) => req.body.load || req.body.loomId ? requirePermission(PERMISSIONS.WEAVING_BEAMS.LOAD)(req, res, next) : next(),
   ctrl.createJob);
+router.post("/jobs/manual", requirePermission(PERMISSIONS.WEAVING_BEAMS.CREATE, PERMISSIONS.WEAVING_BEAMS.APPROVE),
+  (req, res, next) => req.body.approve ? requirePermission(PERMISSIONS.WEAVING_BEAMS.APPROVE)(req, res, next) : next(),
+  requirePermission(PERMISSIONS.WEAVING_BEAMS.LOAD),
+  ctrl.createManualJob);
 router.post("/jobs/:id/void", requirePermission(PERMISSIONS.WEAVING_BEAMS.VOID), ctrl.voidJob);
 router.post("/beams/:id/complete", requirePermission(PERMISSIONS.WEAVING_BEAMS.LOAD), ctrl.completeBeam);
 module.exports = router;

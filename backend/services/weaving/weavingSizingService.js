@@ -14,9 +14,10 @@ const WeavingKnottingJob = require("../../models/WeavingKnottingJob");
 const Account = require("../../models/Account");
 const commercial = require("./weavingCommercialService");
 const costing = require("./weavingCostingService");
-const { normalizePacking } = require("./weavingPacking");
+const { normalizePacking, calculateYarnPacking } = require("./weavingPacking");
 const { syncReceiptBeams } = require("./weavingBeamService");
 const { getGodownBalance } = require("./weavingYarnStockService");
+const { lbsFromKg } = require("./weavingOperationsUtils");
 
 const { round } = commercial;
 const fail = (message, statusCode = 400) =>
@@ -36,7 +37,7 @@ const atomicSave = (mutation) => async (userId, ...args) => {
 const createReceiptBundle = async (userId, payload, session) => {
   const receipt = await createReceipt(userId, payload.receipt || payload, session);
   const yarnReturn = payload.return
-    ? await createReturn(userId, { ...payload.return, receiptId: receipt._id }, session)
+    ? await createReturn(userId, { ...payload.return, receiptId: receipt._id, issueId: receipt.issueId, sizingPartyId: receipt.sizingPartyId }, session)
     : null;
   const bill = payload.bill
     ? await createBill(userId, { ...payload.bill, receiptId: receipt._id }, session)
@@ -56,27 +57,41 @@ const requireSizingParty = async (userId, id, session = null) => {
   return party;
 };
 
-const createIssue = async (userId, payload) => {
-  await requireSizingParty(userId, payload.sizingPartyId);
+const resolveReceiptIssue = async (userId, sizingPartyId, requestedIssueId = null, session = null, existingIssueId = null) => {
+  const fixedId = existingIssueId || requestedIssueId;
+  if (fixedId) {
+    const issue = await WeavingSizingIssue.findOne({ _id: fixedId, userId, sizingPartyId, status: "posted" }).session(session);
+    if (!issue) throw fail("Linked Sizing Issue is invalid for this Party");
+    return issue;
+  }
+  const used = await WeavingSizingReceipt.find({ userId, sizingPartyId, status: "posted", issueId: { $ne: null } }).session(session).distinct("issueId");
+  const issue = await WeavingSizingIssue.findOne({ userId, sizingPartyId, status: "posted", _id: { $nin: used } })
+    .sort({ date: 1, createdAt: 1, _id: 1 }).session(session);
+  if (!issue) throw fail("No open Sizing Issue is available for this Sizing");
+  return issue;
+};
+
+const createIssue = async (userId, payload, session = null) => {
+  await requireSizingParty(userId, payload.sizingPartyId, session);
   if (!Array.isArray(payload.lines) || !payload.lines.length)
     throw fail("Add at least one yarn line");
-  const identity = await productionIdentity(userId, payload);
+  const identity = { contractId: null, fabricQualityId: null, ownershipType: "own", ownerPartyId: null };
   const lines = [];
   const reservedByStockKey = new Map();
   for (const source of payload.lines) {
-    const quantityKg = round(source.quantityKg);
-    if (quantityKg <= 0) throw fail("Yarn quantity must be greater than zero");
     const [yarn, godown] = await Promise.all([
-      WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }),
+      WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }).session(session),
       WeavingGodown.findOne({
         _id: source.sourceGodownId,
         userId,
         isActive: true,
-      }),
+      }).session(session),
     ]);
     if (!yarn || !godown)
       throw fail("Valid Yarn and Source Godown are required");
-    const packing = normalizePacking(source, yarn);
+    let packing;
+    try { packing = calculateYarnPacking(source, yarn); } catch (error) { throw fail(error.message); }
+    const quantityKg = packing.quantityKg;
     if (identity.ownershipType && ((source.ownershipType && source.ownershipType !== identity.ownershipType) ||
       (source.ownerPartyId && String(source.ownerPartyId) !== String(identity.ownerPartyId || "")))) throw fail("Yarn stock ownership must match the production context");
     const ownershipType = identity.ownershipType || source.ownershipType || "own";
@@ -89,6 +104,7 @@ const createIssue = async (userId, payload) => {
       godownId: godown._id,
       ownershipType,
       ownerPartyId,
+      session,
     });
     const stockKey = [
       yarn._id,
@@ -124,8 +140,9 @@ const createIssue = async (userId, payload) => {
     userId,
     "issueNo",
     "SI",
+    session,
   );
-  const issue = await WeavingSizingIssue.create({
+  const [issue] = await WeavingSizingIssue.create([{
     userId,
     issueNo,
     date: payload.date,
@@ -134,7 +151,7 @@ const createIssue = async (userId, payload) => {
     gatePassNo: clean(payload.gatePassNo),
     notes: clean(payload.notes),
     lines,
-  });
+  }], { session });
   const movements = await WeavingYarnMovement.insertMany(
     lines.map((line) => ({
       userId,
@@ -146,6 +163,8 @@ const createIssue = async (userId, payload) => {
       sizingIssueId: issue._id,
       contractId: issue.contractId,
       quantityKg: line.quantityKg,
+      quantityLbs: line.quantityLbs,
+      sourceEntryUnit: "LBS",
       destinationType: "direct_sizing",
       sizingPartyId: issue.sizingPartyId,
       sourceGodownId: line.sourceGodownId,
@@ -157,27 +176,22 @@ const createIssue = async (userId, payload) => {
       totalCones: line.totalCones,
       smallCones: line.smallCones,
       largeCones: line.largeCones,
+      packageWeight: line.packageWeight,
+      packageWeightUnit: line.packageWeightUnit,
+      smallConesPerPackage: line.smallConesPerPackage,
+      largeConesPerPackage: line.largeConesPerPackage,
       lotReference: line.lotReference,
       notes: issue.notes,
-    })),
+    })), { session },
   );
   issue.movementIds = movements.map((row) => row._id);
-  await issue.save();
+  await issue.save({ session });
   return issue;
 };
 
 const createReceipt = async (userId, payload, session = null) => {
   await requireSizingParty(userId, payload.sizingPartyId, session);
-  const issue = payload.issueId
-    ? await WeavingSizingIssue.findOne({
-        _id: payload.issueId,
-        userId,
-        sizingPartyId: payload.sizingPartyId,
-        status: "posted",
-      }).session(session)
-    : null;
-  if (payload.issueId && !issue)
-    throw fail("Selected Sizing Issue is invalid for this Party");
+  const issue = await resolveReceiptIssue(userId, payload.sizingPartyId, payload.issueId, session);
   const beamCount = Number(payload.beamCount) || 0;
   if (beamCount < 1) throw fail("Beam count is required");
   const gross = round(payload.yarnGrossWeightKg);
@@ -186,9 +200,8 @@ const createReceipt = async (userId, payload, session = null) => {
       Number(payload.packingWeightKg || 0) +
       Number(payload.bardanaWeightKg || 0),
   );
-  const netWeightKg = round(
-    payload.netWeightKg || Math.max(0, gross - deductions),
-  );
+  if (deductions > gross) throw fail("Weight deductions cannot exceed Gross KG");
+  const netWeightKg = round(Math.max(0, gross - deductions));
   const receiptNo = await commercial.nextNo(
     WeavingSizingReceipt,
     userId,
@@ -257,6 +270,8 @@ const createReceipt = async (userId, payload, session = null) => {
 
 const createBill = async (userId, payload, session = null) => {
   const party = await requireSizingParty(userId, payload.sizingPartyId, session);
+  const linkedReceipt = payload.receiptId ? await WeavingSizingReceipt.findOne({ _id: payload.receiptId, userId, sizingPartyId: party._id, status: "posted" }).session(session) : null;
+  if (payload.receiptId && !linkedReceipt) throw fail("Linked Sizing Receiving is invalid for this Sizing");
   const weight = round(payload.billableWeightKg);
   const rate = round(payload.ratePerKg);
   if (weight <= 0 || rate < 0)
@@ -284,7 +299,7 @@ const createBill = async (userId, payload, session = null) => {
     partyInvoiceNo: clean(payload.partyInvoiceNo),
     billDate: payload.billDate,
     sizingPartyId: party._id,
-    receiptId: payload.receiptId || null,
+    receiptId: linkedReceipt?._id || null,
     billableWeightKg: weight,
     ratePerKg: rate,
     grossAmount,
@@ -343,17 +358,6 @@ const createBill = async (userId, payload, session = null) => {
 
 const createReturn = async (userId, payload, session = null) => {
   await requireSizingParty(userId, payload.sizingPartyId, session);
-  const [yarn, godown] = [
-    await (WeavingYarn.findOne({ _id: payload.yarnId, userId, isActive: true }).session(session)),
-    await (WeavingGodown.findOne({
-      _id: payload.destinationGodownId,
-      userId,
-      isActive: true,
-    }).session(session)),
-  ];
-  const quantityKg = round(payload.returnedKg);
-  if (!yarn || !godown || quantityKg <= 0)
-    throw fail("Yarn, Destination Godown and Returned KG are required");
   const source = payload.issueId
     ? await WeavingSizingIssue.findOne({
         _id: payload.issueId,
@@ -362,17 +366,20 @@ const createReturn = async (userId, payload, session = null) => {
         status: "posted",
       }).session(session)
     : null;
-  const sourceLine = source?.lines?.find(
-    (line) => String(line.yarnId) === String(yarn._id),
-  );
-  const packing = normalizePacking(
-    {
+  const derivedYarnId = source?.lines?.[0]?.yarnId || payload.yarnId;
+  const [yarn, godown] = await Promise.all([
+    WeavingYarn.findOne({ _id: derivedYarnId, userId, isActive: true }).session(session),
+    WeavingGodown.findOne({ _id: payload.destinationGodownId, userId, isActive: true }).session(session),
+  ]);
+  if (!yarn || !godown) throw fail("Yarn and Destination Godown are required");
+  if (source?.lines?.length > 1) throw fail("This legacy Issue contains multiple Yarns; save the Return from its original record");
+  const sourceLine = source?.lines?.[0];
+  let packing;
+  try { packing = calculateYarnPacking({
       ...payload,
       smallCones: payload.returnedSmallCones,
       largeCones: payload.returnedLargeCones,
-    },
-    yarn,
-  );
+    }, yarn); } catch (error) { throw fail(error.message); }
   if (!clean(payload.partyReturnNo))
     throw fail("Party Return / Challan No. is required");
   return new WeavingYarnMovement({
@@ -387,7 +394,9 @@ const createReturn = async (userId, payload, session = null) => {
     sizingIssueId: source?._id || null,
     sizingReceiptId: payload.receiptId || null,
     contractId: payload.contractId || source?.contractId || null,
-    quantityKg,
+    quantityKg: packing.quantityKg,
+    quantityLbs: packing.quantityLbs,
+    sourceEntryUnit: "LBS",
     destinationType: "godown",
     godownId: godown._id,
     sizingPartyId: payload.sizingPartyId,
@@ -550,20 +559,22 @@ const voidReceiptBundle = async (userId, id, reason = "") => {
   return receipt;
 };
 
-const updateIssue = async (userId, id, payload) => {
+const updateIssue = async (userId, id, payload, session = null) => {
   const issue = await WeavingSizingIssue.findOne({
     _id: id,
     userId,
     status: "posted",
-  });
+  }).session(session);
   if (!issue) throw fail("Posted Sizing issue not found", 404);
-  const identity = await productionIdentity(userId, payload, { existing: issue });
+  const identityPayload = { ...payload };
+  for (const field of ["contractId", "fabricQualityId", "ownershipType", "ownerPartyId"]) if (!Object.prototype.hasOwnProperty.call(identityPayload, field)) identityPayload[field] = issue[field];
+  const identity = await productionIdentity(userId, identityPayload, { existing: issue, session, requireIdentity: false });
   if (
     await WeavingSizingReceipt.exists({
       userId,
       issueId: issue._id,
       status: "posted",
-    })
+    }).session(session)
   )
     throw dependencyError("it is linked to a Sizing Receiving");
   if (
@@ -572,25 +583,34 @@ const updateIssue = async (userId, id, payload) => {
       sizingIssueId: issue._id,
       movementType: "sizing_return",
       isVoided: { $ne: true },
-    })
+    }).session(session)
   )
     throw dependencyError("it is linked to a Yarn Return");
-  await requireSizingParty(userId, payload.sizingPartyId);
+  await requireSizingParty(userId, payload.sizingPartyId, session);
   if (!Array.isArray(payload.lines) || payload.lines.length < 1)
     throw fail("Add at least one yarn line");
   const lines = [];
   for (const source of payload.lines) {
-    const quantityKg = round(source.quantityKg);
     const [yarn, godown] = await Promise.all([
-      WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }),
+      WeavingYarn.findOne({ _id: source.yarnId, userId, isActive: true }).session(session),
       WeavingGodown.findOne({
         _id: source.sourceGodownId,
         userId,
         isActive: true,
-      }),
+      }).session(session),
     ]);
-    if (!yarn || !godown || quantityKg <= 0)
-      throw fail("Valid Yarn, Source Godown and KG are required");
+    if (!yarn || !godown) throw fail("Valid Yarn and Source Godown are required");
+    let packing;
+    const priorLine = issue.lines.find((line) => String(line.yarnId) === String(yarn._id) && String(line.sourceGodownId) === String(godown._id));
+    const isLegacyWeightOnly = priorLine && !Number(source.packageQty || 0) && !Number(source.smallCones || 0) && !Number(source.largeCones || 0) && Number(priorLine.quantityKg || 0) > 0;
+    if (isLegacyWeightOnly) {
+      packing = { ...normalizePacking(source, yarn), quantityKg: round(priorLine.quantityKg), quantityLbs: Number(priorLine.quantityLbs || lbsFromKg(priorLine.quantityKg)),
+        packageWeight: Number(priorLine.packageWeight || 0), packageWeightUnit: priorLine.packageWeightUnit || "LBS",
+        smallConesPerPackage: Number(priorLine.smallConesPerPackage || 0), largeConesPerPackage: Number(priorLine.largeConesPerPackage || 0) };
+    } else {
+      try { packing = calculateYarnPacking(source, yarn); } catch (error) { throw fail(error.message); }
+    }
+    const quantityKg = packing.quantityKg;
     if (identity.ownershipType && ((source.ownershipType && source.ownershipType !== identity.ownershipType) ||
       (source.ownerPartyId && String(source.ownerPartyId) !== String(identity.ownerPartyId || "")))) throw fail("Yarn stock ownership must match the production context");
     const ownershipType = identity.ownershipType || source.ownershipType || "own";
@@ -610,6 +630,7 @@ const updateIssue = async (userId, id, payload) => {
       godownId: godown._id,
       ownershipType,
       ownerPartyId,
+      session,
     });
     if (quantityKg > round(available.kg + oldAvailable))
       throw fail(
@@ -618,7 +639,7 @@ const updateIssue = async (userId, id, payload) => {
     lines.push({
       yarnId: yarn._id,
       quantityKg,
-      ...normalizePacking(source, yarn),
+      ...packing,
       lotReference: clean(source.lotReference),
       sourceGodownId: godown._id,
       ownershipType,
@@ -632,7 +653,7 @@ const updateIssue = async (userId, id, payload) => {
       movementType: "sizing_issue",
       isVoided: { $ne: true },
     },
-    { $set: { isVoided: true } },
+    { $set: { isVoided: true } }, { session },
   );
   Object.assign(issue, {
     date: payload.date,
@@ -653,6 +674,8 @@ const updateIssue = async (userId, id, payload) => {
       sizingIssueId: issue._id,
       contractId: issue.contractId,
       quantityKg: line.quantityKg,
+      quantityLbs: line.quantityLbs,
+      sourceEntryUnit: "LBS",
       destinationType: "direct_sizing",
       sizingPartyId: issue.sizingPartyId,
       sourceGodownId: line.sourceGodownId,
@@ -664,12 +687,16 @@ const updateIssue = async (userId, id, payload) => {
       totalCones: line.totalCones,
       smallCones: line.smallCones,
       largeCones: line.largeCones,
+      packageWeight: line.packageWeight,
+      packageWeightUnit: line.packageWeightUnit,
+      smallConesPerPackage: line.smallConesPerPackage,
+      largeConesPerPackage: line.largeConesPerPackage,
       lotReference: line.lotReference,
       notes: issue.notes,
-    })),
+    })), { session },
   );
   issue.movementIds.push(...movements.map((row) => row._id));
-  await issue.save();
+  await issue.save({ session });
   return issue;
 };
 
@@ -690,8 +717,7 @@ const updateReturn = async (userId, id, payload, session = null) => {
       isActive: true,
     }).session(session)),
   ];
-  if (!yarn || !godown || round(payload.returnedKg) <= 0)
-    throw fail("Yarn, Destination Godown and Returned KG are required");
+  if (!yarn || !godown) throw fail("Yarn and Destination Godown are required");
   const source = payload.issueId
     ? await WeavingSizingIssue.findOne({
         _id: payload.issueId,
@@ -702,6 +728,10 @@ const updateReturn = async (userId, id, payload, session = null) => {
   const sourceLine = source?.lines?.find(
     (line) => String(line.yarnId) === String(yarn._id),
   );
+  let packing;
+  const legacyWeightOnly = !Number(payload.packageQty || 0) && !Number(payload.returnedSmallCones || 0) && !Number(payload.returnedLargeCones || 0) && Number(old.quantityKg || 0) > 0;
+  if (legacyWeightOnly) packing = { ...normalizePacking(payload, yarn), quantityKg: round(old.quantityKg), quantityLbs: Number(old.quantityLbs || lbsFromKg(old.quantityKg)) };
+  else try { packing = calculateYarnPacking({ ...payload, smallCones: payload.returnedSmallCones, largeCones: payload.returnedLargeCones }, yarn); } catch (error) { throw fail(error.message); }
   old.isVoided = true;
   old.notes = `${old.notes || ""}${old.notes ? " | " : ""}VOID: edited and replaced`;
   await old.save({ session });
@@ -715,20 +745,15 @@ const updateReturn = async (userId, id, payload, session = null) => {
     sizingIssueId: source?._id || old.sizingIssueId,
     sizingReceiptId: payload.receiptId || old.sizingReceiptId,
     contractId: payload.contractId || source?.contractId || old.contractId,
-    quantityKg: round(payload.returnedKg),
+    quantityKg: packing.quantityKg,
+    quantityLbs: packing.quantityLbs,
+    sourceEntryUnit: "LBS",
     destinationType: "godown",
     godownId: godown._id,
     sizingPartyId: payload.sizingPartyId,
     returnNo: old.returnNo,
     partyReturnNo: clean(payload.partyReturnNo),
-    ...normalizePacking(
-      {
-        ...payload,
-        smallCones: payload.returnedSmallCones,
-        largeCones: payload.returnedLargeCones,
-      },
-      yarn,
-    ),
+    ...packing,
     lotReference: clean(payload.lotReference),
     notes: clean(payload.notes),
   }).save({ session });
@@ -870,29 +895,13 @@ const updateReceiptBundle = async (userId, id, payload, session = null) => {
   if (!receipt) throw fail("Posted Sizing receiving not found", 404);
   await assertReceiptUnused(userId, receipt._id, session);
   await requireSizingParty(userId, payload.receipt.sizingPartyId, session);
-  const issue = payload.receipt.issueId
-    ? await WeavingSizingIssue.findOne({
-        _id: payload.receipt.issueId,
-        userId,
-        sizingPartyId: payload.receipt.sizingPartyId,
-        status: "posted",
-      }).session(session)
-    : null;
-  if (payload.receipt.issueId && !issue)
-    throw fail("Selected Sizing Issue is invalid for this Party");
+  const issue = await resolveReceiptIssue(userId, payload.receipt.sizingPartyId, payload.receipt.issueId, session, receipt.issueId);
   const beamCount = Number(payload.receipt.beamCount) || 0;
   if (beamCount < 1) throw fail("Beam count is required");
   const gross = round(payload.receipt.yarnGrossWeightKg);
-  const netWeightKg = round(
-    payload.receipt.netWeightKg ||
-      Math.max(
-        0,
-        gross -
-          Number(payload.receipt.gullaWeightKg || 0) -
-          Number(payload.receipt.packingWeightKg || 0) -
-          Number(payload.receipt.bardanaWeightKg || 0),
-      ),
-  );
+  const deductions = round(Number(payload.receipt.gullaWeightKg || 0) + Number(payload.receipt.packingWeightKg || 0) + Number(payload.receipt.bardanaWeightKg || 0));
+  if (deductions > gross) throw fail("Weight deductions cannot exceed Gross KG");
+  const netWeightKg = round(Math.max(0, gross - deductions));
   const existingReturn = await WeavingYarnMovement.findOne({
     userId,
     sizingReceiptId: receipt._id,
@@ -1076,7 +1085,7 @@ const materialLedger = async (userId, query = {}) => {
 
 module.exports = {
   requireSizingParty,
-  createIssue: costing.withCostingInvalidation(createIssue, "sizing"),
+  createIssue: costing.withCostingInvalidation(atomicSave(createIssue), "sizing"),
   createReceipt: costing.withCostingInvalidation(atomicSave(createReceipt), "sizing"),
   createReceiptBundle: costing.withCostingInvalidation(atomicSave(createReceiptBundle), "sizing"),
   createBill: costing.withCostingInvalidation(atomicSave(createBill), "sizing"),
@@ -1088,7 +1097,7 @@ module.exports = {
     voidReceiptBundle,
     "sizing",
   ),
-  updateIssue: costing.withCostingInvalidation(updateIssue, "sizing"),
+  updateIssue: costing.withCostingInvalidation(atomicSave(updateIssue), "sizing"),
   updateReturn: costing.withCostingInvalidation(atomicSave(updateReturn), "sizing"),
   updateBill: costing.withCostingInvalidation(atomicSave(updateBill), "sizing"),
   updateReceiptBundle: costing.withCostingInvalidation(

@@ -7,6 +7,7 @@ export const getBeamSet = async (id) => unwrap(await axios.get(`${URL}/sets/${id
 export const getBeamMeta = async () => unwrap(await axios.get(`${URL}/meta`, cfg()));
 export const syncBeamReceipts = async () => unwrap(await axios.post(`${URL}/sync`, {}, cfg()));
 export const createKnottingJob = async (body) => unwrap(await axios.post(`${URL}/jobs`, body, cfg()));
+export const createManualKnottingJob = async (body) => unwrap(await axios.post(`${URL}/jobs/manual`, body, cfg()));
 export const voidKnottingJob = async (id, reason = '') => unwrap(await axios.post(`${URL}/jobs/${id}/void`, { reason }, cfg()));
 
 export const completeBeam = async (id) => unwrap(await axios.post(`${URL}/beams/${id}/complete`, {}, cfg()));

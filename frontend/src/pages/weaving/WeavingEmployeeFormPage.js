@@ -871,7 +871,7 @@ const WeavingEmployeeFormPage = () => {
 
     const paidLeaveAllowanceText = String(form.paidLeaveAllowance ?? '').trim();
     if (!isPieceOnlyKnotting && !(Number.isFinite(Number(form.baseSalary)) && Number(form.baseSalary) >= 0.01)) nextErrors.baseSalary = employeeText('Salary / Rate must be greater than zero.', 'تنخواہ یا ریٹ صفر سے زیادہ درج کریں۔');
-    if (isKnottingWorker && form.knottingPaymentMethod !== 'monthly' && !(Number.isFinite(Number(form.knottingDefaultRate)) && Number(form.knottingDefaultRate) >= 0.01)) nextErrors.knottingDefaultRate = employeeText('Knotting Rate must be greater than zero.', 'ناٹنگ ریٹ صفر سے زیادہ درج کریں۔');
+    if (isKnottingWorker && !['monthly', 'fixed_monthly'].includes(form.knottingPaymentMethod) && !(Number.isFinite(Number(form.knottingDefaultRate)) && Number(form.knottingDefaultRate) >= 0.01)) nextErrors.knottingDefaultRate = employeeText('Knotting Rate must be greater than zero.', 'ناٹنگ ریٹ صفر سے زیادہ درج کریں۔');
     if (form.designationId && !designationOptions.some((row) => row.value === form.designationId)) nextErrors.designationId = employeeText('Select a Designation for this Department.', 'اس شعبے کا عہدہ منتخب کریں۔');
     const paidLeaveAllowance = Number(paidLeaveAllowanceText || 0);
 
@@ -1171,6 +1171,7 @@ const WeavingEmployeeFormPage = () => {
                   className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
                 >
                   <option value="monthly">{t('weaving.beams.methods.monthly')}</option>
+                  <option value="fixed_monthly">{t('weaving.beams.methods.fixed_monthly')}</option>
                   <option value="per_beam">{t('weaving.beams.methods.per_beam')}</option>
                   <option value="per_set">{t('weaving.beams.methods.per_set')}</option>
                   <option value="monthly_per_beam">{t('weaving.beams.methods.monthly_per_beam')}</option>
@@ -1178,7 +1179,7 @@ const WeavingEmployeeFormPage = () => {
                 </select>
               </label>
             )}
-            {isKnottingWorker && form.knottingPaymentMethod !== 'monthly' && (
+            {isKnottingWorker && !['monthly', 'fixed_monthly'].includes(form.knottingPaymentMethod) && (
               <label className="block min-w-0 xl:col-span-2">
                 <span className="mb-1 block text-xs font-extrabold text-slate-500">
                   {t(form.knottingPaymentMethod.includes('per_beam') ? 'weaving.beams.defaultPerBeam' : 'weaving.beams.defaultPerSet')}

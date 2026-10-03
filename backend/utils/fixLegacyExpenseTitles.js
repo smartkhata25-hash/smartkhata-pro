@@ -1,74 +1,52 @@
+const mongoose = require("mongoose");
 const ExpenseTitle = require("../models/ExpenseTitle");
-const Expense = require("../models/Expense");
 const Account = require("../models/Account");
-const { MODULE_SCOPES } = require("./moduleScope");
+const { MODULE_SCOPES, normalizeModuleScope } = require("./moduleScope");
+const { accountBelongsToScope, getDefinition, getExpectedCode, isValidDefaultAccount } = require("./expenseTitleDefaults");
 
-const DEFAULT_TITLE_CATEGORIES = new Map([
-  ["electricity bill", "utility"], ["gas bill", "utility"], ["water bill", "utility"], ["internet bill", "utility"], ["mobile load", "utility"], ["telephone bill", "utility"],
-  ["office rent", "rent"], ["shop rent", "rent"], ["warehouse rent", "rent"], ["salary expense", "salary"], ["wages", "salary"], ["staff salary", "salary"],
-  ["petrol", "transport"], ["fuel expense", "transport"], ["delivery charges", "transport"], ["transport expense", "transport"], ["rickshaw / loader", "transport"],
-  ["office maintenance", "maintenance"], ["repair expense", "maintenance"], ["equipment repair", "maintenance"], ["marketing expense", "marketing"], ["advertisement", "marketing"],
-  ["facebook ads", "marketing"], ["google ads", "marketing"], ["printing & banners", "marketing"], ["packing material", "purchase"], ["office supplies", "purchase"], ["stationery", "purchase"],
-  ["tea expense", "other_expense"], ["lunch expense", "other_expense"], ["staff food", "other_expense"], ["bank charges", "other_expense"], ["transaction fee", "other_expense"],
-  ["tax payment", "other_expense"], ["government fee", "other_expense"], ["general expense", "other_expense"], ["misc expense", "other_expense"], ["other expense", "other_expense"],
-]);
-const normalizeName = (name = "") => String(name || "").trim().toLowerCase();
-const validScopes = new Set([MODULE_SCOPES.TRADING, MODULE_SCOPES.TRAVEL, MODULE_SCOPES.WEAVING]);
-const getAccountScope = (account) => validScopes.has(account?.moduleScope) ? account.moduleScope : null;
+const repairExpenseTitles = async (userId) => {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("A valid userId is required to repair Expense Titles.");
+  }
 
-const findDefaultAccount = (accounts, scope, normalizedName) => {
-  const category = DEFAULT_TITLE_CATEGORIES.get(normalizedName);
-  return category && accounts.find((account) => getAccountScope(account) === scope && account.category === category);
-};
-
-const repairExpenseTitles = async (userId = null) => {
-  const userFilter = userId ? { userId } : {};
   const [titles, accounts] = await Promise.all([
-    ExpenseTitle.find(userFilter).sort({ createdAt: 1, _id: 1 }).lean(),
-    Account.find({ ...userFilter, type: "Expense", isActive: { $ne: false } }).lean(),
+    ExpenseTitle.find({ userId, isDeleted: { $ne: true } }).sort({ createdAt: 1, _id: 1 }),
+    Account.find({ userId, type: "Expense", isActive: { $ne: false } }).lean(),
   ]);
-  const originalById = new Map(titles.map((title) => [String(title._id), title]));
   const accountsById = new Map(accounts.map((account) => [String(account._id), account]));
-  const resolved = titles.map((title) => {
-    const normalizedName = normalizeName(title.name);
-    const category = accountsById.get(String(title.categoryId || ""));
-    const scope = getAccountScope(category) || (validScopes.has(title.moduleScope) ? title.moduleScope : null) || MODULE_SCOPES.TRADING;
-    const replacement = (!category || getAccountScope(category) !== scope) && title.isDefault
-      ? findDefaultAccount(accounts, scope, normalizedName)
-      : null;
-    return { ...title, normalizedName, moduleScope: scope, categoryId: replacement?._id || title.categoryId };
-  });
-  const groups = new Map();
-  for (const title of resolved) {
-    if (title.isDeleted !== true) {
-      const key = `${title.userId}:${title.moduleScope}:${title.normalizedName}`;
-      groups.set(key, [...(groups.get(key) || []), title]);
-    }
-  }
-  for (const titlesInGroup of groups.values()) {
-    titlesInGroup.sort((left, right) => {
-      const leftIsValid = getAccountScope(accountsById.get(String(left.categoryId || ""))) === left.moduleScope;
-      const rightIsValid = getAccountScope(accountsById.get(String(right.categoryId || ""))) === right.moduleScope;
-      if (leftIsValid !== rightIsValid) return leftIsValid ? -1 : 1;
-      return String(left._id).localeCompare(String(right._id));
-    });
-  }
-  const updates = [];
-  for (const title of resolved) {
-    if (title.isDeleted === true) continue;
-    const key = `${title.userId}:${title.moduleScope}:${title.normalizedName}`;
-    const canonical = (groups.get(key) || [])[0];
-    if (canonical && String(canonical._id) !== String(title._id)) {
-      await Expense.updateMany({ userId: title.userId, titleId: title._id }, { $set: { titleId: canonical._id } });
-      updates.push({ updateOne: { filter: { _id: title._id }, update: { $set: { isDeleted: true, normalizedName: `${title.normalizedName}__retired__${title._id}` } } } });
+  const summary = { scanned: titles.length, valid: 0, repaired: 0, unresolved: 0 };
+
+  for (const title of titles) {
+    const scope = normalizeModuleScope(title.moduleScope, MODULE_SCOPES.TRADING);
+    const current = accountsById.get(String(title.categoryId || ""));
+    const definition = getDefinition(title.name, scope);
+
+    if (title.isDefault === true && definition) {
+      if (isValidDefaultAccount({ account: current, userId, scope, definition })) {
+        summary.valid += 1;
+        continue;
+      }
+      const replacement = accounts.find((account) => account.code === getExpectedCode(definition, scope) && isValidDefaultAccount({ account, userId, scope, definition }));
+      if (isValidDefaultAccount({ account: replacement, userId, scope, definition })) {
+        title.categoryId = replacement._id;
+        await title.save();
+        summary.repaired += 1;
+      } else {
+        summary.unresolved += 1;
+        console.warn("Default Expense Title requires manual category review", { titleId: String(title._id), userId: String(userId), moduleScope: scope });
+      }
       continue;
     }
-    const original = originalById.get(String(title._id));
-    if (title.normalizedName !== original.normalizedName || title.moduleScope !== original.moduleScope || String(title.categoryId || "") !== String(original.categoryId || "") || original.isDeleted !== false) {
-      updates.push({ updateOne: { filter: { _id: title._id }, update: { $set: { normalizedName: title.normalizedName, moduleScope: title.moduleScope, categoryId: title.categoryId, isDeleted: false } } } });
+
+    const currentIsSafe = current && String(current.userId) === String(userId) && current.type === "Expense" && current.isActive !== false && accountBelongsToScope(current, scope);
+    if (currentIsSafe) summary.valid += 1;
+    else {
+      summary.unresolved += 1;
+      console.warn("Custom Expense Title requires manual category review", { titleId: String(title._id), userId: String(userId), moduleScope: scope });
     }
   }
-  if (updates.length) await ExpenseTitle.bulkWrite(updates, { ordered: true });
+
+  return summary;
 };
 
 module.exports = repairExpenseTitles;

@@ -260,6 +260,15 @@ const createBaseAccountsForUser = async (userId, options = {}) => {
       moduleScope: "travel",
     },
     {
+      name: "Travel Purchase Expense",
+      type: "Expense",
+      category: "purchase",
+      code: "TRAVEL_PURCHASE_EXP",
+      normalBalance: "debit",
+      isSystem: false,
+      moduleScope: "travel",
+    },
+    {
       name: "Transport Expense",
       type: "Expense",
       category: "transport",

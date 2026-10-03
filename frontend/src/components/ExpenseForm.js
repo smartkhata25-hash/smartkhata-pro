@@ -14,6 +14,7 @@ import jsPDF from 'jspdf';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { getBusinessDateInputValue, getBusinessTimeInputValue } from '../utils/localDateTime';
+import { hasKnownExactExpenseTitle } from '../utils/expenseTitleUi';
 
 const ExpenseForm = () => {
   const [accounts, setAccounts] = useState([]);
@@ -240,15 +241,7 @@ const ExpenseForm = () => {
     }, 250);
   };
 
-  const hasExactTitleMatch = titles.some(
-    (item) =>
-      String(item?.name || '')
-        .trim()
-        .toLowerCase() ===
-      String(search || '')
-        .trim()
-        .toLowerCase()
-  );
+  const hasExactTitleMatch = hasKnownExactExpenseTitle({ selectedTitleId: formData.titleId, search, searchResults: titles, knownTitles: allTitles });
   const resetForm = () => {
     setFormData({
       title: '',

@@ -8,6 +8,11 @@ const {
 const {
   normalizeExpenseTitleScope,
 } = require("./expenseTitleScope");
+const {
+  getDefinition: getDefaultDefinition,
+  getExpectedCode,
+  isValidDefaultAccount,
+} = require("./expenseTitleDefaults");
 
 const DEFAULT_TITLE_SCOPE = MODULE_SCOPES.TRADING;
 
@@ -85,39 +90,6 @@ const getDefinitionsForScope = (scope) =>
 const getAccountScopeForTitleScope = (scope) =>
   scope;
 
-const accountMatchesTitleScope = (account, moduleScope) =>
-  account.moduleScope === moduleScope ||
-  (moduleScope === MODULE_SCOPES.TRADING && !account.moduleScope);
-
-const findAccountForTitle = (accounts, definition, moduleScope) => {
-  if (definition.code) {
-    return accounts.find(
-      (account) =>
-        account.code === definition.code &&
-        accountMatchesTitleScope(account, moduleScope),
-    );
-  }
-
-  if (definition.match === "other") {
-    const otherExpenseCode =
-      moduleScope === MODULE_SCOPES.TRAVEL
-        ? "TRAVEL_OTHER_EXP"
-        : "OTHER_EXP";
-
-    return accounts.find(
-      (account) =>
-        account.code === otherExpenseCode &&
-        accountMatchesTitleScope(account, moduleScope),
-    );
-  }
-
-  return accounts.find(
-    (account) =>
-      account.category === definition.match &&
-      accountMatchesTitleScope(account, moduleScope),
-  );
-};
-
 const createDefaultExpenseTitlesForUser = async (userId, options = {}) => {
   const moduleScope = normalizeExpenseTitleScope(
     options.moduleScope || DEFAULT_TITLE_SCOPE,
@@ -144,7 +116,10 @@ const createDefaultExpenseTitlesForUser = async (userId, options = {}) => {
     const seedingErrors = [];
 
     for (const definition of definitions) {
-      const account = findAccountForTitle(accounts, definition, moduleScope);
+      const defaultDefinition = getDefaultDefinition(definition.name, moduleScope);
+      const account = accounts.find((candidate) =>
+        candidate.code === getExpectedCode(defaultDefinition, moduleScope) &&
+        isValidDefaultAccount({ account: candidate, userId, scope: moduleScope, definition: defaultDefinition }));
 
       if (!account) {
         console.log("No account found for default expense title:", {
@@ -167,9 +142,18 @@ const createDefaultExpenseTitlesForUser = async (userId, options = {}) => {
         });
 
         if (activeTitle) {
-          if (activeTitle.isDeleted !== false) {
-            activeTitle.isDeleted = false;
+          if (activeTitle.isDefault === true) {
+            const linkedAccount = accounts.find((candidate) => String(candidate._id) === String(activeTitle.categoryId || ""));
+            if (!isValidDefaultAccount({ account: linkedAccount, userId, scope: moduleScope, definition: defaultDefinition })) {
+              activeTitle.categoryId = account._id;
+            }
+            if (activeTitle.isDeleted !== false) activeTitle.isDeleted = false;
             await activeTitle.save();
+          } else {
+            const linkedAccount = accounts.find((candidate) => String(candidate._id) === String(activeTitle.categoryId || ""));
+            if (!linkedAccount || String(linkedAccount.userId) !== String(userId) || linkedAccount.type !== "Expense" || linkedAccount.isActive === false) {
+              console.warn("Custom Expense Title requires manual category review", { titleId: String(activeTitle._id), userId: String(userId), moduleScope });
+            }
           }
 
           continue;

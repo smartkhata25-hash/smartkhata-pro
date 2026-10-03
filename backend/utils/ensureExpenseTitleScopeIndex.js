@@ -1,5 +1,4 @@
 const ExpenseTitle = require("../models/ExpenseTitle");
-const repairExpenseTitles = require("./fixLegacyExpenseTitles");
 
 const SCOPED_TITLE_INDEX_NAME = "expense_title_scope_normalized_unique";
 let ensurePromise = null;
@@ -24,16 +23,14 @@ const ensureExpenseTitleScopeIndex = async () => {
   }
 
   ensurePromise = (async () => {
-    // Clean legacy records before indexing; never collapse all legacy titles into "both".
-    await repairExpenseTitles();
-
-    await ExpenseTitle.collection.createIndex(
-      { userId: 1, moduleScope: 1, normalizedName: 1 },
-      {
-        unique: true,
-        name: SCOPED_TITLE_INDEX_NAME,
-      },
-    );
+    try {
+      await ExpenseTitle.collection.createIndex(
+        { userId: 1, moduleScope: 1, normalizedName: 1 },
+        { unique: true, name: SCOPED_TITLE_INDEX_NAME },
+      );
+    } catch (error) {
+      throw new Error(`Expense Title index could not be ensured without a reviewed data repair: ${error.message}`);
+    }
 
     const indexes = await ExpenseTitle.collection.indexes();
     const legacyIndex = indexes.find(

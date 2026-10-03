@@ -198,6 +198,9 @@ const validateScopedExpenseAccounts = async ({
   }
 };
 
+// Test-only export; production request handling continues through create/update.
+exports._validateScopedExpenseAccounts = validateScopedExpenseAccounts;
+
 // ✅ Create Expense with Journal Entry (UPDATED WITH TITLE MAPPING)
 exports.createExpense = async (req, res) => {
   try {

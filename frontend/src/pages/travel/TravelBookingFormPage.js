@@ -665,8 +665,10 @@ const TravelBookingFormPage = () => {
   const [modalError, setModalError] = useState('');
   const [modalSaving, setModalSaving] = useState(false);
   const [advanceConfirmationStatus, setAdvanceConfirmationStatus] = useState('');
+  const [repostConfirmation, setRepostConfirmation] = useState(null);
 
-  const accountingLocked = Boolean(formState.accountingPosted);
+  const postedInvoiceEditing = Boolean(isEditMode && formState.accountingPosted);
+  const accountingLocked = Boolean(formState.accountingPosted && !isEditMode);
 
   const persistedDraftState = useMemo(() => sanitizeDraftState(formState), [formState]);
 
@@ -2586,7 +2588,7 @@ const TravelBookingFormPage = () => {
     return payload;
   };
 
-  const submitBooking = async (status, advanceConfirmed = false) => {
+  const submitBooking = async (status, advanceConfirmed = false, repostConfirmed = false) => {
     if (isEditMode && !canEdit) {
       setFormError(t('travel.alerts.permissionDenied'));
       return;
@@ -2613,11 +2615,21 @@ const TravelBookingFormPage = () => {
       return;
     }
 
+    if (postedInvoiceEditing && !repostConfirmed) {
+      setRepostConfirmation({ status, advanceConfirmed });
+      return;
+    }
+
     try {
       setSaving(true);
       setFormError('');
 
       const payload = buildPayload(status);
+
+      if (postedInvoiceEditing) {
+        payload.repostAccounting = true;
+        payload.expectedUpdatedAt = formState.updatedAt;
+      }
 
       const saved = isEditMode
         ? await updateTravelBooking(id, payload)
@@ -5069,6 +5081,37 @@ const TravelBookingFormPage = () => {
         </div>
       )}
 
+      {repostConfirmation && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="repost-confirmation-title">
+          <div className="w-full max-w-lg overflow-hidden rounded-xl border border-amber-200 bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-amber-600 to-orange-600 px-5 py-4 text-white">
+              <h2 id="repost-confirmation-title" className="text-lg font-black">Update Posted Invoice?</h2>
+            </div>
+            <div className="p-5">
+              <p className="text-sm font-semibold leading-6 text-slate-700">
+                This invoice has already been posted to accounting. The previous accounting entries will be safely reversed and the updated invoice will be posted again.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
+              <TravelActionButton variant="secondary" disabled={saving} onClick={() => setRepostConfirmation(null)}>
+                Cancel
+              </TravelActionButton>
+              <TravelActionButton
+                variant="success"
+                disabled={saving}
+                onClick={() => {
+                  const confirmation = repostConfirmation;
+                  setRepostConfirmation(null);
+                  void submitBooking(confirmation.status, confirmation.advanceConfirmed, true);
+                }}
+              >
+                Update &amp; Repost
+              </TravelActionButton>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && (
         <div className="mb-3 rounded-xl border border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 px-4 py-3 text-sm font-bold text-cyan-700">
           {t('travel.common.loading')}
@@ -5430,7 +5473,7 @@ const TravelBookingFormPage = () => {
 
             {/* ACTION BUTTONS UNDER INVOICE SUMMARY */}
             <div className="flex flex-wrap justify-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              {!accountingLocked && (
+              {!accountingLocked && !postedInvoiceEditing && (
                 <>
                   <TravelActionButton
                     icon={FaSave}
@@ -5463,7 +5506,31 @@ const TravelBookingFormPage = () => {
                 </>
               )}
 
-              {accountingLocked && (
+              {postedInvoiceEditing && (
+                <>
+                  <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-extrabold text-amber-800">
+                    <FaFileInvoiceDollar aria-hidden="true" />
+                    Posted Invoice — Editing will repost accounting
+                  </div>
+
+                  <TravelActionButton
+                    icon={FaSave}
+                    variant="success"
+                    disabled={saving || loading || !canSubmitFinal}
+                    onClick={() =>
+                      submitBooking(
+                        ['confirmed', 'processing', 'completed'].includes(formState.status)
+                          ? formState.status
+                          : 'confirmed'
+                      )
+                    }
+                  >
+                    {saving ? t('travel.common.saving') : 'Update & Repost'}
+                  </TravelActionButton>
+                </>
+              )}
+
+              {accountingLocked && !postedInvoiceEditing && (
                 <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
                   <FaSave aria-hidden="true" />
                   Accounting Posted

@@ -1,9 +1,12 @@
 const mongoose = require("mongoose");
 
 const TravelBooking = require("../../../models/TravelBooking");
+const TravelRefund = require("../../../models/TravelRefund");
+const TravelVendorReturn = require("../../../models/TravelVendorReturn");
 const { logActivity } = require("../../../utils/activityLogger");
 const {
   assertAccountingEditsAllowed,
+  hasAccountingChanges,
   postTravelInvoiceAccounting,
   recalculateTravelAccountingAccounts,
   TRAVEL_INVOICE_ORIGIN,
@@ -158,6 +161,8 @@ exports.updateTravelBooking = async (req, res) => {
   let booking = null;
   let before = null;
   let transactionCommitted = false;
+  let reposted = false;
+  let balancesRecalculatedInTransaction = false;
 
   try {
     const userId = getUserId(req);
@@ -181,7 +186,10 @@ exports.updateTravelBooking = async (req, res) => {
 
     before = booking.toObject();
     const payload = await buildBookingPayload(req.body, req, booking);
-    assertAccountingEditsAllowed(booking, payload);
+    const repostRequested = String(req.body?.repostAccounting || "").toLowerCase() === "true";
+    if (!repostRequested || payload.status === "cancelled") {
+      assertAccountingEditsAllowed(booking, payload);
+    }
 
     uploadedAttachments = await uploadTravelInvoiceFiles(req.files, userId);
 
@@ -194,6 +202,136 @@ exports.updateTravelBooking = async (req, res) => {
     removedAttachments = mergedAttachments.removed;
 
     await session.withTransaction(async () => {
+      if (booking.accountingPosted) {
+        const expectedUpdatedAt = req.body?.expectedUpdatedAt || booking.updatedAt;
+        const lockQuery = {
+          _id: req.params.id,
+          userId,
+          isActive: true,
+          isDeleted: false,
+          isVoided: { $ne: true },
+          accountingPosted: true,
+          accountingStatus: { $ne: "posting" },
+        };
+
+        if (expectedUpdatedAt) {
+          const parsedExpectedUpdatedAt = new Date(expectedUpdatedAt);
+
+          if (Number.isNaN(parsedExpectedUpdatedAt.getTime())) {
+            throw Object.assign(new Error("Invalid invoice edit version"), {
+              statusCode: 400,
+            });
+          }
+
+          lockQuery.updatedAt = parsedExpectedUpdatedAt;
+        }
+
+        booking = await TravelBooking.findOneAndUpdate(
+          lockQuery,
+          { $set: { accountingStatus: "posting" } },
+          { new: true, session },
+        );
+
+        if (!booking) {
+          throw Object.assign(
+            new Error(
+              "This invoice was changed or is already being reposted. Reload it before trying again.",
+            ),
+            { statusCode: 409 },
+          );
+        }
+
+        before = booking.toObject();
+        before.accountingStatus = "posted";
+      } else {
+        booking = await TravelBooking.findOne({
+          _id: req.params.id,
+          userId,
+          isActive: true,
+          isDeleted: false,
+          isVoided: { $ne: true },
+        }).session(session);
+
+        if (!booking) {
+          throw Object.assign(new Error("Travel booking not found"), {
+            statusCode: 404,
+          });
+        }
+      }
+
+      const financialChanges =
+        booking.accountingPosted && hasAccountingChanges(booking, payload);
+
+      if (financialChanges && !repostRequested) {
+        assertAccountingEditsAllowed(booking, payload);
+      }
+
+      if (financialChanges) {
+        const [customerRefund, vendorReturn] = await Promise.all([
+          TravelRefund.findOne({
+            userId,
+            originalInvoiceId: booking._id,
+            isDeleted: false,
+            isReversed: { $ne: true },
+          })
+            .select("refundNumber")
+            .session(session),
+          TravelVendorReturn.findOne({
+            userId,
+            originalInvoiceId: booking._id,
+            isDeleted: false,
+            isReversed: { $ne: true },
+          })
+            .select("returnNumber")
+            .session(session),
+        ]);
+
+        const dependencies = [
+          customerRefund && `Customer Return ${customerRefund.refundNumber || ""}`.trim(),
+          vendorReturn && `Vendor Return ${vendorReturn.returnNumber || ""}`.trim(),
+        ].filter(Boolean);
+
+        if (dependencies.length > 0) {
+          throw Object.assign(
+            new Error(
+              `Financial changes cannot be reposted because this invoice has active downstream records: ${dependencies.join(
+                ", ",
+              )}. Reverse those records first, or save only non-financial changes.`,
+            ),
+            { statusCode: 409 },
+          );
+        }
+
+        const reversalResult = await reverseTravelJournals({
+          userId,
+          referenceId: booking._id,
+          originModule: TRAVEL_INVOICE_ORIGIN,
+          sourceTypes: [
+            "travel_booking",
+            "travel_vendor_cost",
+            "receive_payment",
+            "pay_bill",
+          ],
+          session,
+          reason: "Travel invoice updated and reposted",
+        });
+
+        if (reversalResult.journals.length === 0) {
+          throw Object.assign(
+            new Error("Posted travel invoice journals were not found for reversal"),
+            { statusCode: 409 },
+          );
+        }
+
+        accountingAccountIds = reversalResult.accountIds;
+        booking.reversalJournalEntryIds = [
+          ...new Set([
+            ...(booking.reversalJournalEntryIds || []).map((id) => String(id)),
+            ...reversalResult.reversalIds.map((id) => String(id)),
+          ]),
+        ];
+      }
+
       if (payload.status !== booking.status) {
         booking.statusHistory.push({
           status: payload.status,
@@ -206,6 +344,23 @@ exports.updateTravelBooking = async (req, res) => {
       Object.assign(booking, payload);
       applyPrimaryAttachmentFields(booking, mergedAttachments.attachments);
 
+      if (financialChanges) {
+        const invoiceNumber = booking.invoiceNumber || booking.bookingNumber;
+
+        booking.invoiceNumber = invoiceNumber;
+        booking.bookingNumber = invoiceNumber;
+        booking.accountingPosted = false;
+        booking.accountingStatus = "unposted";
+        booking.accountingPostedAt = null;
+        booking.accountingPostedBy = null;
+        booking.journalEntryId = null;
+        booking.paymentJournalEntryId = null;
+        booking.vendorCostJournalEntryIds = [];
+        booking.vendorPaymentJournalEntryIds = [];
+      } else if (booking.accountingPosted) {
+        booking.accountingStatus = "posted";
+      }
+
       await booking.save({ session });
 
       const accountingResult = await postTravelInvoiceAccounting({
@@ -215,11 +370,30 @@ exports.updateTravelBooking = async (req, res) => {
         session,
       });
 
-      accountingAccountIds = accountingResult.accountIds;
+      if (financialChanges && !accountingResult.posted) {
+        throw Object.assign(
+          new Error("Updated travel invoice accounting could not be reposted"),
+          { statusCode: 409 },
+        );
+      }
+
+      accountingAccountIds = [
+        ...new Set([...accountingAccountIds, ...accountingResult.accountIds]),
+      ];
+      reposted = financialChanges && accountingResult.posted;
+
+      if (financialChanges) {
+        await recalculateTravelAccountingAccounts(accountingAccountIds, session, {
+          throwOnError: true,
+        });
+        balancesRecalculatedInTransaction = true;
+      }
     });
     transactionCommitted = true;
 
-    await recalculateTravelAccountingAccounts(accountingAccountIds);
+    if (!balancesRecalculatedInTransaction) {
+      await recalculateTravelAccountingAccounts(accountingAccountIds);
+    }
     clearTravelReportCache(userId);
     await cleanupTravelInvoiceAttachments(removedAttachments);
     await runReminderTask(
@@ -242,7 +416,9 @@ exports.updateTravelBooking = async (req, res) => {
         entityId: booking._id,
         title: `Booking ${booking.bookingNumber}`,
         billNo: booking.bookingNumber,
-        description: `Booking ${booking.bookingNumber} updated`,
+        description: reposted
+          ? `Booking ${booking.bookingNumber} updated with accounting reversal and repost`
+          : `Booking ${booking.bookingNumber} updated`,
         before,
         after: booking,
       });

@@ -4,10 +4,10 @@ import ProductModal from '../components/ProductModal';
 import ProductTable from '../components/ProductTable';
 import LowStockModal from '../components/LowStockModal';
 import MultipleProductForm from '../components/MultipleProductForm';
+import DeletedProductsTable from '../components/DeletedProductsTable';
 
-import { useLocation } from 'react-router-dom';
-import { fetchProducts, fetchInventoryVersion } from '../services/inventoryService';
-import { t } from '../i18n/i18n';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { fetchProducts, fetchDeletedProducts, fetchInventoryVersion } from '../services/inventoryService';
 import { hasPermission } from '../utils/permissionHelper';
 
 import {
@@ -28,9 +28,12 @@ const InventoryPage = () => {
   const [editProduct, setEditProduct] = useState(null);
   const [showLowStock, setShowLowStock] = useState(false);
   const [showMultipleForm, setShowMultipleForm] = useState(false);
+  const [deletedProducts, setDeletedProducts] = useState([]);
   const isMobile = window.innerWidth <= 768;
 
   const location = useLocation();
+  const navigate = useNavigate();
+  const showDeletedItems = new URLSearchParams(location.search).get('deleted') === 'true';
 
   const canViewInventory = hasPermission('inventory.view');
 
@@ -94,7 +97,9 @@ const InventoryPage = () => {
       }
     };
 
-    prepareInventory();
+    if (showDeletedItems) {
+      fetchDeletedProducts().then(setDeletedProducts).catch((error) => alert(error.response?.data?.message || 'Could not load Deleted Items.'));
+    } else prepareInventory();
 
     const query = new URLSearchParams(location.search);
 
@@ -110,7 +115,7 @@ const InventoryPage = () => {
     if (query.get('lowstock') === 'true' && canViewInventory) {
       setShowLowStock(true);
     }
-  }, [location, canBulkCreateProducts, canCreateProducts, canViewInventory]);
+  }, [location, canBulkCreateProducts, canCreateProducts, canViewInventory, showDeletedItems]);
 
   // ➕ Add Product
   const handleAdd = async (closeModal = true) => {
@@ -131,9 +136,6 @@ const InventoryPage = () => {
 
   // ❌ Delete Product
   const handleDelete = (id) => {
-    const confirm = window.confirm(t('alerts.deleteProductConfirm'));
-    if (!confirm) return;
-
     const updatedProducts = products.filter((p) => p._id !== id);
 
     setProducts(updatedProducts);
@@ -165,6 +167,7 @@ const InventoryPage = () => {
     >
       {!showMultipleForm && (
         <>
+          {showDeletedItems ? <DeletedProductsTable products={deletedProducts} onRestored={(id) => setDeletedProducts((current) => current.filter((product) => product._id !== id))} /> : <>
           {/* ⚠️ Low Stock Modal */}
           <LowStockModal
             open={showLowStock}
@@ -206,7 +209,9 @@ const InventoryPage = () => {
 
               setShowMultipleForm((prev) => !prev);
             }}
+            onDeletedItemsClick={() => navigate('/inventory?deleted=true')}
           />
+          </>}
         </>
       )}
 

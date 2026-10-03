@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { FaEdit, FaWarehouse } from 'react-icons/fa';
+import { useNavigate } from 'react-router-dom';
 import { t } from '../../i18n/i18n';
 import WeavingFormActions from '../../components/weaving/WeavingFormActions';
-import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
+import { requestWeavingConfirmation, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 import { createWeavingGodown, getWeavingSettings, listWeavingGodowns, listWeavingParties, updateWeavingGodown, updateWeavingSettings } from '../../services/weavingOperationsService';
 
 const blank = { name: '', note: '', isActive: true };
@@ -15,6 +16,7 @@ const modes = [
 const input = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
 
 export default function WeavingSettingsPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]); const [parties, setParties] = useState([]); const [settings, setSettings] = useState(defaults);
   const [form, setForm] = useState(blank); const [editingId, setEditingId] = useState(''); const [saving, setSaving] = useState(false); const [settingsSaving, setSettingsSaving] = useState(false); const [notice, setNotice] = useState(null);
   useWeavingFeedback(notice, setNotice);
@@ -23,7 +25,21 @@ export default function WeavingSettingsPage() {
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const reset = () => { setForm(blank); setEditingId(''); };
   const saveGodown = async () => { setSaving(true); try { editingId ? await updateWeavingGodown(editingId, form) : await createWeavingGodown(form); setNotice({ text: t('weaving.operations.saved') }); reset(); await load(); } catch (e) { setNotice({ error: true, text: e.response?.data?.message || t('weaving.operations.saveFailed') }); } finally { setSaving(false); } };
-  const saveSettings = async () => { setSettingsSaving(true); try { setSettings(normalize(await updateWeavingSettings(settings))); setNotice({ text: 'Production settings saved.' }); } catch (e) { setNotice({ error: true, text: e.response?.data?.message || 'Could not save production settings.' }); } finally { setSettingsSaving(false); } };
+  const saveSettings = async () => { setSettingsSaving(true); try { setSettings(normalize(await updateWeavingSettings(settings))); setNotice({ text: 'Production settings saved.' }); } catch (e) {
+    const response = e.response?.data;
+    if (response?.code === 'ACTIVE_DETAILED_LOOM_RUNS') {
+      const runs = Array.isArray(response.details?.activeRuns) ? response.details.activeRuns : [];
+      const lines = runs.map((run) => `Loom ${run.loomNumber || '-'} · Beam ${run.beamNo || '-'} · ${run.reference || '-'} · ${run.qualityName || '-'}`);
+      const goToBeams = await requestWeavingConfirmation({
+        type: 'warning',
+        title: 'Active Detailed Loom Runs',
+        message: `${response.message}\n\n${lines.join('\n')}\n\nComplete / unload these runs before changing the Production Tracking Method.`,
+        cancelLabel: 'Close',
+        confirmLabel: 'Go to Beams / Knotting',
+      });
+      if (goToBeams) navigate('/weaving/beams?resolveActiveRuns=1');
+    } else setNotice({ error: true, text: response?.message || 'Could not save production settings.' });
+  } finally { setSettingsSaving(false); } };
   return <div className="min-h-full bg-slate-50 p-3 sm:p-6"><div className="mx-auto max-w-[1400px] space-y-5">
     <header><h1 className="text-2xl font-bold text-slate-900">{t('weaving.operations.settings')}</h1><p className="mt-1 text-sm text-slate-500">{t('weaving.operations.settingsSubtitle')}</p></header>
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-black">Production Tracking Method</h2><p className="mt-1 text-sm text-slate-500">This one setting controls both Knotting and Folding for new entries. Historical records are unchanged.</p><div className="mt-4 grid gap-3 lg:grid-cols-3">{modes.map(([value, title, subtitle, detail]) => <button key={value} type="button" onClick={() => setSettings({ ...settings, productionTrackingMode: value })} className={`rounded-xl border-2 p-4 text-left ${settings.productionTrackingMode === value ? 'border-teal-600 bg-teal-50 ring-2 ring-teal-100' : 'border-slate-200'}`}><div className="font-black">{title}</div><div className="mt-1 text-sm font-semibold text-teal-800">{subtitle}</div><div className="mt-2 text-xs leading-5 text-slate-600">{detail}</div></button>)}</div>

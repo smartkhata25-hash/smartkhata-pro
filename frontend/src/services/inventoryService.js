@@ -89,6 +89,16 @@ export const deleteProduct = async (id) => {
   return res.data;
 };
 
+export const fetchDeletedProducts = async () => {
+  const res = await axios.get(`${API_URL}/deleted`, getAuthHeader());
+  return res.data;
+};
+
+export const restoreProduct = async (id) => {
+  const res = await axios.patch(`${API_URL}/${id}/restore`, {}, getAuthHeader());
+  return res.data;
+};
+
 // 📦 INVENTORY TRANSACTIONS
 
 export const createTransaction = async (transactionData) => {

@@ -13,7 +13,7 @@ import {
 
 const API = process.env.REACT_APP_API_BASE_URL;
 
-const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick }) => {
+const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick, onBulkClick, onDeletedItemsClick }) => {
   const [filters, setFilters] = useState({
     search: '',
     categoryId: '',
@@ -83,7 +83,13 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
       return;
     }
 
-    const confirm = window.confirm(`${t('inventory.deleteProduct')} "${product.name}"?`);
+    if (Number(product.stock || 0) !== 0) {
+      const openAdjust = window.confirm('Stock must be zero before deleting this item. Please use Inventory Adjust first.\n\nOpen Inventory Adjust now?');
+      if (openAdjust) navigate('/inventory-adjust');
+      return;
+    }
+
+    const confirm = window.confirm('Delete Item?\n\nThis item will be hidden from new Sales, Purchases and active Item lists.\nHistorical invoices and stock history will remain محفوظ.\nYou can restore it later from Deleted Items.');
     if (!confirm) return;
 
     try {
@@ -236,6 +242,14 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
             }}
           >
             {isMobile ? 'Add' : t('inventory.addProduct')}
+          </button>
+        )}
+        {canDeleteProducts && (
+          <button
+            onClick={onDeletedItemsClick}
+            style={{ background: 'linear-gradient(135deg,#475569,#1e293b)', color: '#fff', padding: isMobile ? '5px 6px' : '7px 14px', fontSize: isMobile ? 12 : 14, borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: isMobile ? 700 : 600 }}
+          >
+            {isMobile ? 'Deleted' : 'Deleted Items'}
           </button>
         )}
         {/* 🔴 Low Stock Alerts */}

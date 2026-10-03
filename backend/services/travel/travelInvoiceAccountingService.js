@@ -527,6 +527,8 @@ const collectJournalAccountIds = (journals = []) => {
 
 const buildAccountingSnapshot = (source = {}) =>
   JSON.stringify({
+    invoiceDate: source.invoiceDate ? new Date(source.invoiceDate).toISOString() : "",
+
     customerType: source.customerType || "customer",
 
     customerId: String(source.customerId || ""),
@@ -635,6 +637,9 @@ const buildAccountingSnapshot = (source = {}) =>
     })),
   });
 
+const hasAccountingChanges = (booking, payload) =>
+  buildAccountingSnapshot(booking) !== buildAccountingSnapshot(payload);
+
 const assertAccountingEditsAllowed = (booking, payload) => {
   if (!booking?.accountingPosted) {
     return;
@@ -647,7 +652,7 @@ const assertAccountingEditsAllowed = (booking, payload) => {
     );
   }
 
-  if (buildAccountingSnapshot(booking) !== buildAccountingSnapshot(payload)) {
+  if (hasAccountingChanges(booking, payload)) {
     throw createHttpError(
       400,
       "Confirmed travel invoice accounting is locked. Use adjustment/refund flow for financial changes.",
@@ -684,6 +689,7 @@ const postTravelInvoiceAccounting = async ({
       referenceId: booking._id,
       sourceType: "travel_booking",
       isDeleted: false,
+      isReversed: { $ne: true },
     }).select("_id billNo lines"),
     session,
   );
@@ -1106,14 +1112,22 @@ const postTravelInvoiceAccounting = async ({
   };
 };
 
-const recalculateTravelAccountingAccounts = async (accountIds = []) => {
+const recalculateTravelAccountingAccounts = async (
+  accountIds = [],
+  session = null,
+  { throwOnError = false } = {},
+) => {
   try {
-    await recalculateAccountBalances(accountIds);
+    await recalculateAccountBalances(accountIds, session);
   } catch (error) {
     console.error(
       "Travel accounting balance recalculation failed:",
       error.message,
     );
+
+    if (throwOnError) {
+      throw error;
+    }
   }
 };
 
@@ -1122,6 +1136,8 @@ module.exports = {
   TRAVEL_INVOICE_ORIGIN,
 
   assertAccountingEditsAllowed,
+
+  hasAccountingChanges,
 
   getServiceSummary,
 

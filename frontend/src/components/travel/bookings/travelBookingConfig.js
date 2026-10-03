@@ -1001,6 +1001,8 @@ export const prepareBookingForForm = (booking = null) => {
 
     accountingStatus: booking.accountingStatus || 'unposted',
 
+    updatedAt: booking.updatedAt || '',
+
     customerId: getRecordId(booking.customerId),
 
     customerType: booking.customerType === 'party' || booking.customerPartyId ? 'party' : 'customer',

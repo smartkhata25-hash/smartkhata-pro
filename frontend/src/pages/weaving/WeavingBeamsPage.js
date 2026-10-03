@@ -6,6 +6,7 @@ import {
   FaRedo as RefreshCw,
   FaTimes as X,
 } from 'react-icons/fa';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   requestWeavingConfirmation,
   showWeavingError,
@@ -56,6 +57,9 @@ const Status = ({ value }) => (
 );
 
 export default function WeavingBeamsPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const resolvingActiveRuns = searchParams.get('resolveActiveRuns') === '1';
   const canApprove = hasPermission('weaving.beams.approve');
   const canCreate = hasPermission('weaving.beams.create');
   const canSave = canCreate || canApprove;
@@ -91,6 +95,9 @@ export default function WeavingBeamsPage() {
     [meta.employees]
   );
   const mode = meta.productionTrackingMode === 'detailed' ? 'detailed' : 'manual';
+  const activeRuns = useMemo(() => (meta.currentRuns || []).slice().sort((left, right) =>
+    String(left.beam?.loomNumber || '').localeCompare(String(right.beam?.loomNumber || ''), undefined, { numeric: true, sensitivity: 'base' })
+  ), [meta.currentRuns]);
   useEffect(() => {
     setManualEmployeeId((current) => {
       if (manualEmployees.length === 1) return manualEmployees[0]._id;
@@ -148,26 +155,39 @@ export default function WeavingBeamsPage() {
     if (dirty && !await requestWeavingConfirmation({ message: tr('discardChanges') })) return;
     setSelected(null);
   };
-  const unload = async (beam) => {
+  const completeLoadedBeam = async ({ beam, context = {}, qualityName = '', reference = '', selectedId = '' }) => {
     if (saving || !canLoad) return;
-    const context = selected.productionContext || {};
     const details = [
       t('weaving.folding.loom') + ': ' + (beam.activeLoomId?.loomNumber || beam.loomNumber || '-'),
       t('weaving.production.beam') + ': ' + beam.beamNo,
+      'Sizing / Set Reference: ' + (reference || '-'),
       t('weaving.production.contract') + ': ' + (context.contractNo || '-'),
       t('weaving.production.customer') + ': ' + (context.customerName || context.ownerName || '-'),
-      t('weaving.folding.quality') + ': ' + (context.qualityName || selected.fabricQualityId?.name || '-'),
+      t('weaving.folding.quality') + ': ' + (qualityName || context.qualityName || '-'),
     ].join('\n');
     if (!await requestWeavingConfirmation({ message: tr('completeConfirm') + '\n\n' + details })) return;
     setSaving(true);
     try {
       await completeBeam(beam._id);
-      setSelected(await getBeamSet(selected._id));
+      await load();
+      if (selectedId) setSelected(await getBeamSet(selectedId));
       showWeavingSuccess(tr('completedSuccess'));
-      load();
     } catch (error) { showWeavingError(error, tr('saveError')); }
     finally { setSaving(false); }
   };
+  const unload = (beam) => completeLoadedBeam({
+    beam,
+    context: selected.productionContext || {},
+    qualityName: selected.fabricQualityId?.name,
+    reference: selected.setNo || selected.receiptNo,
+    selectedId: selected._id,
+  });
+  const completeActiveRun = (run) => completeLoadedBeam({
+    beam: run.beam,
+    context: { contractNo: run.contract?.contractNo, customerName: run.customerName, ownerName: run.ownerParty?.name },
+    qualityName: run.quality?.name,
+    reference: run.beamSet?.setNo || run.beamSet?.receiptNo,
+  });
   const toggleBeam = (id) =>
     setJob((current) => ({
       ...current,
@@ -322,6 +342,19 @@ export default function WeavingBeamsPage() {
       <div className="mb-5 inline-flex rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-800">
         Production Mode: {meta.productionTrackingMode === 'loom_wise' ? 'Loom-wise' : meta.productionTrackingMode === 'quality_total' ? 'Total Production' : 'Detailed'}
       </div>
+      {mode === 'detailed' && (activeRuns.length > 0 || resolvingActiveRuns) && (
+        <section className={`mb-5 rounded-xl border bg-white p-4 shadow-sm ${resolvingActiveRuns ? 'border-amber-400 ring-2 ring-amber-100' : 'border-slate-200'}`}>
+          {activeRuns.length ? <>
+            <div className="mb-3"><h2 className="font-black text-slate-900">Active Loom Runs</h2><p className="mt-1 text-sm text-slate-600">Complete / unload active Detailed runs before changing the Production Tracking Method.</p></div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {activeRuns.map((run) => <div key={run.beam?._id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <div className="min-w-0 text-sm"><div className="font-black text-slate-900">Loom {run.beam?.loomNumber || '-'} · Beam {run.beam?.beamNo || '-'}</div><div className="mt-1 text-slate-600">{run.beamSet?.setNo || run.beamSet?.receiptNo || '-'} · {run.quality?.name || '-'}</div></div>
+                {canLoad && <button type="button" disabled={saving} onClick={() => completeActiveRun(run)} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Complete / Unload</button>}
+              </div>)}
+            </div>
+          </> : <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-50 p-4"><div><h2 className="font-black text-emerald-900">All active Detailed Loom runs are cleared</h2><p className="mt-1 text-sm text-emerald-700">You can now change the Production Tracking Method.</p></div><button type="button" onClick={() => navigate('/weaving/settings')} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white">Back to Settings</button></div>}
+        </section>
+      )}
       {mode === 'detailed' && <>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {['available', 'knotting', 'loaded', 'completed'].map((status) => (

@@ -31,7 +31,12 @@ const number = (value, label, { positive = false } = {}) => {
 const userId = (req) => req.user?.id || req.userId;
 const fail = (res, error, fallback) => {
   if (error?.code === 11000) return res.status(409).json({ message: "A record with this number or name already exists." });
-  return res.status(error.statusCode || 500).json({ message: error.message || fallback });
+  const payload = { message: error.message || fallback };
+  if (error?.code === "ACTIVE_DETAILED_LOOM_RUNS") {
+    payload.code = error.code;
+    payload.details = error.details;
+  }
+  return res.status(error.statusCode || 500).json(payload);
 };
 const required = (value, label) => {
   const result = clean(value);

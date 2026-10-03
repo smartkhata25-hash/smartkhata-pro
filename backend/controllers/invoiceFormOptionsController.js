@@ -271,6 +271,7 @@ const getParties = async (userId) => {
 const getProducts = async (userId) => {
   const products = await Product.find({
     userId,
+    isDeleted: { $ne: true },
   })
     .select(
       [

@@ -309,6 +309,7 @@ exports.createInvoice = async (req, res) => {
 
       const products = await Product.find({
         _id: { $in: productIds },
+        isDeleted: { $ne: true },
       }).lean();
 
       const productMap = new Map(
@@ -1441,6 +1442,7 @@ exports.updateInvoice = async (req, res) => {
 
       const products = await Product.find({
         _id: { $in: productIds },
+        isDeleted: { $ne: true },
       }).lean();
 
       const productMap = new Map(

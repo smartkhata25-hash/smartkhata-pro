@@ -238,6 +238,18 @@ const applyPurchaseStockBatch = async ({
     };
   });
 
+  const activeProductCount = await Product.countDocuments({
+    _id: { $in: safeItems.map((item) => item.productId) },
+    userId,
+    isDeleted: { $ne: true },
+  }).session(session || null);
+  const uniqueProductCount = new Set(safeItems.map((item) => String(item.productId))).size;
+  if (activeProductCount !== uniqueProductCount) {
+    const error = new Error("One or more purchase items are deleted or unavailable.");
+    error.statusCode = 409;
+    throw error;
+  }
+
   const productOperations = safeItems.map((item) => ({
     updateOne: {
       filter: {
@@ -389,6 +401,7 @@ const getPurchaseInvoiceFormOptions = asyncHandler(async (req, res) => {
     tasks.push(
       Product.find({
         userId,
+        isDeleted: { $ne: true },
       })
         .select(
           "name description unit uom unitCost salePrice lowStockThreshold categoryId",

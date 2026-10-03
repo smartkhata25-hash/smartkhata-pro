@@ -62,6 +62,7 @@ const getFilteredProductsForPrint = async (req) => {
 
   const query = {
     userId,
+    isDeleted: { $ne: true },
   };
   const normalizedStockFilter = String(stockFilter || "").trim().toLowerCase();
 

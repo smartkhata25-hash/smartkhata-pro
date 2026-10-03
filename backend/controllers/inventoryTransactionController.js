@@ -42,7 +42,7 @@ exports.createTransaction = async (req, res) => {
       return res.status(400).json({ message: "Invalid quantity" });
     }
 
-    const product = await Product.findById(productId);
+    const product = await Product.findOne({ _id: productId, userId: req.user.id, isDeleted: { $ne: true } });
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
@@ -99,6 +99,7 @@ exports.adjustInventory = async (req, res) => {
     const product = await Product.findOne({
       _id: productId,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!product) {
@@ -159,6 +160,7 @@ exports.adjustInventoryBulk = async (req, res) => {
       const product = await Product.findOne({
         _id: productId,
         userId,
+        isDeleted: { $ne: true },
       });
 
       if (!product) continue;

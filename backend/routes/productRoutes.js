@@ -21,6 +21,13 @@ router.get(
   productController.getProducts,
 );
 
+router.get(
+  "/deleted",
+  authMiddleware,
+  requirePermission("products.delete"),
+  productController.getDeletedProducts,
+);
+
 // Create Multiple Products
 router.post(
   "/bulk",
@@ -52,6 +59,13 @@ router.put(
   requirePermission("products.edit"),
   upload.single("image"),
   productController.updateProduct,
+);
+
+router.patch(
+  "/:id/restore",
+  authMiddleware,
+  requirePermission("products.delete"),
+  productController.restoreProduct,
 );
 
 // Delete Product

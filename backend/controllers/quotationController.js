@@ -24,7 +24,7 @@ const normalizePayload = async (body, userId) => {
     throw badRequest("One or more selected products are invalid.");
   }
 
-  const products = await Product.find({ _id: { $in: productIds }, userId }).lean();
+  const products = await Product.find({ _id: { $in: productIds }, userId, isDeleted: { $ne: true } }).lean();
   const productMap = new Map(products.map((product) => [String(product._id), product]));
   if (productMap.size !== productIds.length) {
     throw badRequest("One or more selected products are no longer available.");

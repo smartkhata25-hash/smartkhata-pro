@@ -73,6 +73,9 @@ const productSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
   {
     timestamps: true,
@@ -84,6 +87,7 @@ productSchema.index({ name: 1, userId: 1 }, { unique: true });
 
 // ⚡ Faster queries
 productSchema.index({ userId: 1 });
+productSchema.index({ userId: 1, isDeleted: 1 });
 productSchema.index({ categoryId: 1 });
 
 module.exports = mongoose.model("Product", productSchema);

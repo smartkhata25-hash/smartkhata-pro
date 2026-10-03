@@ -1,10 +1,10 @@
 const WeavingSettings = require("../../models/WeavingSettings");
-const WeavingBeam = require("../../models/WeavingBeam");
 const WeavingParty = require("../../models/WeavingParty");
 const WeavingGodown = require("../../models/WeavingGodown");
+const { runningContexts } = require("./weavingProductionContextService");
 
 const defaults = Object.freeze({ productionTrackingMode: "detailed", simpleProductionOwnershipType: "own", simpleProductionOwnerPartyId: null, simpleProductionGodownId: null });
-const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+const fail = (message, statusCode = 400, extra = {}) => Object.assign(new Error(message), { statusCode, ...extra });
 
 const getSettings = async (userId) => (await WeavingSettings.findOne({ userId }).lean()) || { userId, moduleScope: "weaving", ...defaults };
 const getMode = async (userId) => (await WeavingSettings.findOne({ userId }).select("productionTrackingMode").lean())?.productionTrackingMode || "detailed";
@@ -19,8 +19,21 @@ const updateSettings = async (userId, body) => {
   const mode = body.productionTrackingMode || existing.productionTrackingMode;
   if (!["detailed", "loom_wise", "quality_total"].includes(mode)) throw fail("Select a valid Production Tracking Method.");
   if (existing.productionTrackingMode === "detailed" && mode !== "detailed") {
-    const active = await WeavingBeam.exists({ userId, status: "loaded", $or: [{ activeLoomId: { $ne: null } }, { loomNumber: { $gt: "" } }] });
-    if (active) throw fail("Complete or unload all active Detailed Loom runs before changing the Production Tracking Method.", 409);
+    const runs = await runningContexts(userId);
+    if (runs.length) {
+      const activeRuns = runs.map((run) => ({
+        beamId: run.beam._id,
+        beamNo: run.beam.beamNo || "",
+        loomId: run.beam.activeLoomId || null,
+        loomNumber: run.beam.loomNumber || "",
+        reference: run.beamSet?.setNo || run.beamSet?.receiptNo || "",
+        qualityName: run.quality?.name || "",
+      })).sort((left, right) => String(left.loomNumber).localeCompare(String(right.loomNumber), undefined, { numeric: true, sensitivity: "base" }));
+      throw fail("Complete or unload all active Detailed Loom runs before changing the Production Tracking Method.", 409, {
+        code: "ACTIVE_DETAILED_LOOM_RUNS",
+        details: { activeRuns },
+      });
+    }
   }
   const ownershipType = body.simpleProductionOwnershipType || existing.simpleProductionOwnershipType || "own";
   if (!["own", "party"].includes(ownershipType)) throw fail("Select a valid simple-production ownership type.");

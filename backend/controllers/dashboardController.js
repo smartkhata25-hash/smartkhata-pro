@@ -799,6 +799,7 @@ const getDashboardAlerts = async (req, res) => {
 
     let productFilter = {
       userId,
+      isDeleted: { $ne: true },
     };
 
     if (categoryId) {

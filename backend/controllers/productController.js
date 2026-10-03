@@ -8,6 +8,7 @@ const {
 
 const mongoose = require("mongoose");
 const { logActivity } = require("../utils/activityLogger");
+const { getProductStock } = require("../utils/stockHelper");
 
 // 🧾 Bulk Create Products
 exports.bulkCreateProducts = async (req, res) => {
@@ -31,6 +32,9 @@ exports.bulkCreateProducts = async (req, res) => {
     const names = products.map((p) => p.name);
     const existing = await Product.find({ userId, name: { $in: names } });
     if (existing.length > 0) {
+      if (existing.some((product) => product.isDeleted === true)) {
+        return res.status(409).json({ error: "One or more items exist in Deleted Items. Restore them instead." });
+      }
       const existingNames = existing.map((e) => e.name);
       return res
         .status(400)
@@ -97,7 +101,7 @@ exports.createProduct = async (req, res) => {
     // ✅ Duplicate check
     const exists = await Product.findOne({ name, userId });
     if (exists) {
-      return res.status(400).json({ error: "Product already exists." });
+      return res.status(exists.isDeleted ? 409 : 400).json({ error: exists.isDeleted ? "This item exists in Deleted Items. Restore it instead." : "Product already exists." });
     }
 
     let imageData = null;
@@ -193,7 +197,7 @@ exports.getProducts = async (req, res) => {
 
     const { search = "", page = 1, limit = 0 } = req.query;
 
-    const query = { userId };
+    const query = { userId, isDeleted: { $ne: true } };
     if (search) {
       query.name = { $regex: search, $options: "i" };
     }
@@ -286,6 +290,7 @@ exports.updateProduct = async (req, res) => {
     const existingProduct = await Product.findOne({
       _id: productId,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!existingProduct) {
@@ -492,6 +497,7 @@ exports.deleteProduct = async (req, res) => {
     const product = await Product.findOne({
       _id: productId,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!product) {
@@ -500,14 +506,12 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-    const used = await InventoryTransaction.findOne({
-      productId,
-      userId,
-    });
-
-    if (used) {
-      return res.status(400).json({
-        message: "Product is already used. Cannot delete.",
+    const currentStock = await getProductStock(productId, userId);
+    if (currentStock !== 0) {
+      return res.status(409).json({
+        code: "PRODUCT_STOCK_NOT_ZERO",
+        stock: currentStock,
+        message: "Stock must be zero before deleting this item. Please use Inventory Adjust first.",
       });
     }
 
@@ -523,14 +527,10 @@ exports.deleteProduct = async (req, res) => {
       imageKey: product.image?.key || "",
     };
 
-    await Product.deleteOne({
-      _id: productId,
-      userId,
-    });
-
-    if (product.image?.key) {
-      await deleteFile(product.image.key);
-    }
+    product.isDeleted = true;
+    product.deletedAt = new Date();
+    product.deletedBy = req.user?._id || req.user?.id || req.userId;
+    await product.save();
 
     await logActivity({
       req,
@@ -559,6 +559,49 @@ exports.deleteProduct = async (req, res) => {
 };
 
 // ✏️ Update Stock via Purchase or Sale
+exports.getDeletedProducts = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const products = await Product.find({ userId, isDeleted: true })
+      .populate("categoryId", "name")
+      .populate("deletedBy", "name email")
+      .sort({ deletedAt: -1, _id: -1 });
+    const result = await Promise.all(products.map(async (product) => ({
+      ...product.toObject(),
+      stock: await getProductStock(product._id, userId),
+    })));
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.restoreProduct = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    const product = await Product.findOne({ _id: req.params.id, userId, isDeleted: true });
+    if (!product) return res.status(404).json({ message: "Deleted item not found" });
+    product.isDeleted = false;
+    product.deletedAt = null;
+    product.deletedBy = null;
+    await product.save();
+    await logActivity({
+      req,
+      action: "restore",
+      module: "products",
+      entityType: "Product",
+      entityId: product._id,
+      title: `Product ${product.name}`,
+      description: `${product.name} Product restored`,
+      before: { isDeleted: true },
+      after: { isDeleted: false },
+    });
+    return res.json({ message: "Product restored successfully", product });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+};
+
 exports.updateStock = async (req, res) => {
   try {
     const { productId, quantity, action, note = "" } = req.body;
@@ -582,6 +625,7 @@ exports.updateStock = async (req, res) => {
     const product = await Product.findOne({
       _id: productId,
       userId,
+      isDeleted: { $ne: true },
     });
 
     if (!product) {

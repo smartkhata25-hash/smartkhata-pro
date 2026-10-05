@@ -8,6 +8,7 @@ const WeavingFabricQuality = require("../../models/WeavingFabricQuality");
 const WeavingFoldingEntry = require("../../models/WeavingFoldingEntry");
 const WeavingGodown = require("../../models/WeavingGodown");
 const WeavingKacchiParchi = require("../../models/WeavingKacchiParchi");
+const WeavingItem = require("../../models/WeavingItem");
 const WeavingMoneyTransaction = require("../../models/WeavingMoneyTransaction");
 const WeavingPakkiSettlement = require("../../models/WeavingPakkiSettlement");
 const WeavingParty = require("../../models/WeavingParty");
@@ -23,6 +24,8 @@ const yarnStock = require("./weavingYarnStockService");
 const costing = require("./weavingCostingService");
 const thanLocation = require("./weavingThanLocationService");
 const manualStock = require("./weavingManualStockService");
+const settingsService = require("./weavingSettingsService");
+const { calculateYarnPacking } = require("./weavingPacking");
 const { recalculateAccountBalances } = require("../../utils/accountHelper");
 
 const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
@@ -215,6 +218,11 @@ const saveManualKacchi = async (userId, payload, session, current = null) => {
   const bucket = { fabricQualityId: quality._id, godownId: payload.godownId, category: "normal", ownershipType: contract.contractType === "conversion" ? "party" : "own", ownerPartyId: contract.contractType === "conversion" ? party._id : null };
   if (current) await WeavingFabricMovement.updateMany({ userId, kacchiId: current._id, isVoided: false }, { $set: { isVoided: true } }, sessionOptions(session));
   const values = { meter: qty(payload.totalMeter), weightKg: qty(payload.totalKg), thanCount: qty(payload.totalThan) };
+  const available = await assertManualStock(userId, bucket, values, session);
+  if (payload.totalKg === undefined || payload.totalKg === null || payload.totalKg === "") {
+    values.weightKg = available.meter > 0 ? qty(values.meter * available.weightKg / available.meter) : 0;
+  }
+  if (payload.totalThan === undefined || payload.totalThan === null || payload.totalThan === "") values.thanCount = 0;
   await assertManualStock(userId, bucket, values, session);
   const document = { ...bucket, entryMode: "manual", dispatchDate: clean(payload.dispatchDate), partyId: party._id, contractId: contract._id, qualitySnapshot: qualitySnapshot(quality), lines: [], totalMeter: values.meter, totalKg: values.weightKg, totalThan: values.thanCount, totalLbs: qty(values.weightKg * 2.2046226218), notes: clean(payload.notes) };
   let kacchi = current;
@@ -468,16 +476,27 @@ const createDirectDraft = async (userId, payload, actorId, session = null) => {
   if (lines.length) { quantity = 1; finalRate = round(lines.reduce((sum, row) => sum + row.amount, 0)); }
   if (entryMode === "than") { const exact = await exactSaleThans(userId, payload, session); quantity = exact.totals.meter; payload = { ...payload, weightKg: exact.totals.weightKg, thanCount: exact.totals.thanCount }; }
   if (quantity <= 0 || finalRate <= 0) throw fail("Valid quantity and rate are required");
-  let quality = null; let yarn = null; let godown = null; let description = clean(payload.description); let uom = clean(payload.uom);
+  let quality = null; let yarn = null; let yarnPacking = null; let godown = null; let description = clean(payload.description); let uom = clean(payload.uom);
   const stockBackedFabric = saleNature === "fabric" || (saleNature === "other" && !accountingOnly && otherSubtype !== "other");
-  if (saleNature === "yarn") { yarn = await setSession(WeavingYarn.findOne({ _id: payload.yarnId, userId, isActive: true }), session); if (!yarn) throw fail("Yarn is required"); description ||= [yarn.name, yarn.count, yarn.millBrand].filter(Boolean).join(" / "); uom = "KG"; }
+  if (saleNature === "yarn") {
+    yarn = await setSession(WeavingYarn.findOne({ _id: payload.yarnId, userId, isActive: true }), session);
+    if (!yarn) throw fail("Yarn is required");
+    const packingEntry = payload.sourceEntryUnit === "LBS" || payload.uom === "LBS" || payload.packageQty !== undefined || payload.smallCones !== undefined || payload.largeCones !== undefined;
+    if (packingEntry) {
+      try { yarnPacking = calculateYarnPacking(payload, yarn); } catch (error) { throw fail(error.message); }
+      quantity = yarnPacking.quantityLbs;
+      payload = { ...payload, weightKg: yarnPacking.quantityKg };
+      uom = "LBS";
+    } else uom = "KG";
+    description ||= [yarn.name, yarn.count, yarn.millBrand].filter(Boolean).join(" / ");
+  }
   else if (stockBackedFabric) { quality = await setSession(WeavingFabricQuality.findOne({ _id: payload.fabricQualityId, userId, isActive: true }), session); if (!quality) throw fail("Fabric Quality is required"); description ||= quality.name; uom = "Meter"; }
   else { if (!description) throw fail("Description is required for General / Other Sale"); uom = ["Meter", "KG", "Piece", "Nos", "Job", "Other"].includes(uom) ? uom : "Job"; }
   if (saleNature === "yarn" || stockBackedFabric) { godown = await validateSource(userId, payload.godownId, session); if (saleNature === "yarn" && !godown) throw fail("Select a Yarn Godown."); }
   const originalRate = round(payload.originalRate ?? finalRate); if (originalRate !== finalRate && !clean(payload.rateOverrideReason)) throw fail("Rate override reason is required");
   const totals = calculateInvoiceTotals({ quantity, rate: finalRate, discountAmount: payload.discountAmount, taxAmount: payload.taxAmount });
   const creditDays = Math.max(0, Math.trunc(Number(payload.creditDays) || 0)); const invoiceDate = clean(payload.invoiceDate); const terms = normalizeSaleTerms(payload, totals.grandTotal);
-  return createOne(WeavingSalesInvoice, { userId, requestKey: clean(payload.requestKey) || null, accountingOnly, lines, entryMode, foldingEntryIds: entryMode === "than" ? payload.foldingEntryIds : [], invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS", 5, session), invoiceDate, partyId: party._id, partyName: party.name, saleSource: "direct", saleNature, fabricCategory: payload.fabricCategory === "b" ? "b" : "normal", otherSubtype, fabricQualityId: quality?._id || null, yarnId: yarn?._id || null, godownId: godown?._id || null, ownershipType: "own", description, qualitySnapshot: quality ? qualitySnapshot(quality) : { name: yarn?.name, count: yarn?.count, brand: yarn?.millBrand }, quantity, weightKg: qty(payload.weightKg), thanCount: qty(payload.thanCount), pieceCount: qty(payload.pieceCount), uom, originalRate, finalRate, rateOverrideReason: clean(payload.rateOverrideReason), rateChangedBy: originalRate !== finalRate ? actorId : null, rateChangedAt: originalRate !== finalRate ? new Date() : null, ...totals, ...terms, paymentAccountId: terms.receivedNowRequested > 0 ? payload.paymentAccountId : null, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || "cash") : "", receiptRequestKey: terms.receivedNowRequested > 0 ? clean(payload.receiptRequestKey) || `sale:${Date.now()}:${Math.random()}` : "", creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), balanceDue: totals.grandTotal, notes: clean(payload.notes) }, session);
+  return createOne(WeavingSalesInvoice, { userId, requestKey: clean(payload.requestKey) || null, accountingOnly, lines, entryMode, foldingEntryIds: entryMode === "than" ? payload.foldingEntryIds : [], invoiceNo: await allocateNo(userId, "weaving_sales_invoice", "WS", 5, session), invoiceDate, partyId: party._id, partyName: party.name, saleSource: "direct", saleNature, fabricCategory: payload.fabricCategory === "b" ? "b" : "normal", otherSubtype, fabricQualityId: quality?._id || null, yarnId: yarn?._id || null, godownId: godown?._id || null, ownershipType: "own", description, qualitySnapshot: quality ? qualitySnapshot(quality) : { name: yarn?.name, count: yarn?.count, brand: yarn?.millBrand }, quantity, weightKg: qty(payload.weightKg), thanCount: qty(payload.thanCount), pieceCount: qty(payload.pieceCount), ...(yarnPacking ? { ...yarnPacking, sourceEntryUnit: "LBS" } : {}), uom, originalRate, finalRate, rateOverrideReason: clean(payload.rateOverrideReason), rateChangedBy: originalRate !== finalRate ? actorId : null, rateChangedAt: originalRate !== finalRate ? new Date() : null, ...totals, ...terms, paymentAccountId: terms.receivedNowRequested > 0 ? payload.paymentAccountId : null, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || "cash") : "", receiptRequestKey: terms.receivedNowRequested > 0 ? clean(payload.receiptRequestKey) || `sale:${Date.now()}:${Math.random()}` : "", creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), balanceDue: totals.grandTotal, notes: clean(payload.notes) }, session);
 };
 
 const stockCategory = (invoice) => invoice.accountingOnly ? null : invoice.saleNature === "fabric" ? (invoice.fabricCategory || "normal") : invoice.otherSubtype === "other" ? null : invoice.otherSubtype;
@@ -495,7 +514,7 @@ const postInvoiceInSession = async (userId, invoiceId, actorId, session, touched
       if (stockBacked) {
         if (locked.saleNature === "yarn") {
           let movement = await setSession(WeavingYarnMovement.findOne({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }), session);
-          if (!movement) { const balance = await yarnStock.getGodownBalance({ userId, yarnId: locked.yarnId, godownId: locked.godownId, ownershipType: "own", session }); if (locked.quantity > balance.kg) throw fail(`Only ${balance.kg} KG Own Yarn is available`, 409); movement = await WeavingYarnMovement.findOneAndUpdate({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }, { $setOnInsert: { userId, yarnId: locked.yarnId, date: locked.invoiceDate, movementType: "sale_out", ownershipType: "own", salesInvoiceId: locked._id, quantityKg: locked.quantity, sourceGodownId: locked.godownId, rate: locked.finalRate, notes: locked.invoiceNo } }, { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOptions(session) }); }
+          if (!movement) { const balance = await yarnStock.getGodownBalance({ userId, yarnId: locked.yarnId, godownId: locked.godownId, ownershipType: "own", session }); const quantityKg = locked.uom === "LBS" ? locked.weightKg : locked.quantity; if (quantityKg > balance.kg) throw fail(`Only ${balance.kg} KG Own Yarn is available`, 409); movement = await WeavingYarnMovement.findOneAndUpdate({ userId, salesInvoiceId: locked._id, movementType: "sale_out" }, { $setOnInsert: { userId, yarnId: locked.yarnId, date: locked.invoiceDate, movementType: "sale_out", ownershipType: "own", salesInvoiceId: locked._id, quantityKg, quantityLbs: locked.uom === "LBS" ? locked.quantity : 0, sourceEntryUnit: locked.uom === "LBS" ? "LBS" : "KG", packageType: locked.packageType, packageQty: locked.packageQty, smallCones: locked.smallCones, largeCones: locked.largeCones, packageWeight: locked.packageWeight, packageWeightUnit: locked.packageWeightUnit || "LBS", smallConesPerPackage: locked.smallConesPerPackage, largeConesPerPackage: locked.largeConesPerPackage, sourceGodownId: locked.godownId, rate: locked.finalRate, notes: locked.invoiceNo } }, { upsert: true, new: true, setDefaultsOnInsert: true, ...sessionOptions(session) }); }
           locked.stockMovementId = movement._id; locked.stockMovementModel = "WeavingYarnMovement";
         } else if (locked.entryMode === "than") {
           const exact = await exactSaleThans(userId, locked, session);
@@ -674,7 +693,7 @@ const getManagementMetrics = async (userId) => {
 
 const getWorkspace = async (userId, query = {}) => {
   const invoiceFilter = { userId }; if (query.from || query.to) invoiceFilter.invoiceDate = { ...(query.from ? { $gte: query.from } : {}), ...(query.to ? { $lte: query.to } : {}) };
-  const [kacchis, pakkis, ready, invoices, pending, receipts, parties, contracts, qualities, yarns, godowns, paymentAccounts, availableThans, invoicePreview, fabricStock, yarnSummary, manualStockRows] = await Promise.all([
+  const [kacchis, pakkis, ready, invoices, pending, receipts, parties, contracts, qualities, yarns, items, godowns, paymentAccounts, availableThans, invoicePreview, fabricStock, yarnSummary, manualStockRows, productionTrackingMode] = await Promise.all([
     WeavingKacchiParchi.find({ userId }).populate("contractId", "contractNo rate creditDays").populate("partyId", "name").populate("fabricQualityId", "name code").populate("godownId", "name").sort({ dispatchDate: -1, createdAt: -1 }).limit(250).lean(),
     WeavingPakkiSettlement.find({ userId }).populate("godownId", "name").populate("invoiceId", "invoiceNo grandTotal paidAmount balanceDue paymentStatus status").populate("contractId", "contractNo").populate("partyId", "name").sort({ pakkiDate: -1, createdAt: -1 }).limit(250).lean(),
     WeavingPakkiSettlement.find({ userId, status: "finalized", invoiceId: null }).populate("partyId", "name").sort({ pakkiDate: -1 }).lean(),
@@ -684,11 +703,12 @@ const getWorkspace = async (userId, query = {}) => {
     WeavingParty.find({ userId, isActive: true, isHidden: false, role: { $in: ["customer", "both"] } }).select("name role").sort({ name: 1 }).lean(),
     WeavingContract.find({ userId, type: "sales", status: "active" }).select("contractNo contractType partyId itemId rate creditDays").sort({ contractDate: -1 }).lean(),
     WeavingFabricQuality.find({ userId, isActive: true }).select("name code construction width warpCount weftCount brand").sort({ name: 1 }).lean(),
-    WeavingYarn.find({ userId, isActive: true }).select("name count millBrand quality").sort({ name: 1 }).lean(),
+    WeavingYarn.find({ userId, isActive: true }).select("name count millBrand quality defaultPackageType packagingProfiles packageWeight packageWeightUnit smallConesPerPackage largeConesPerPackage").sort({ name: 1 }).lean(),
+    WeavingItem.find({ userId, isActive: true, category: "other" }).select("name normalizedName category unit description").sort({ name: 1 }).lean(),
     WeavingGodown.find({ userId, isActive: true }).select("name").sort({ name: 1 }).lean(),
     Account.find({ userId, isActive: true, moduleScope: { $in: ["shared", "weaving"] }, category: { $in: ["cash", "bank", "online", "cheque"] } }).select("name code category").sort({ name: 1 }).lean(),
     thanLocation.resolveCurrentThans(userId),
-    previewNo(userId, "weaving_sales_invoice", "WS"), foldingStock.stockSummary(userId), yarnStock.getSummary(userId), manualStock.getManualStock(userId),
+    previewNo(userId, "weaving_sales_invoice", "WS"), foldingStock.stockSummary(userId), yarnStock.getSummary(userId), manualStock.getManualStock(userId), settingsService.getMode(userId),
   ]);
   const pendingKacchis = await WeavingKacchiParchi.find({ userId, $or: [{ status: "confirmed" }, { _id: { $in: ready.map((row) => row.kacchiId || row.sourceKacchiId).filter(Boolean) } }] }).populate("partyId", "name").populate("contractId", "contractNo rate creditDays").sort({ dispatchDate: 1 }).lean();
   const safeManualStock = manualStockRows.map((pool) => {
@@ -699,7 +719,7 @@ const getWorkspace = async (userId, query = {}) => {
       return [field, Math.max(0, qty(Math.min(pool[field], Number(aggregate?.[aggregateField] || 0) - reserved)))];
     })) };
   });
-  return { kacchis, pakkis, ready, invoices, pending, receipts, meta: { parties, contracts, qualities, yarns, godowns, paymentAccounts, pendingKacchis, availableThans: availableThans.filter((row) => row.locationState === "known"), unknownThans: availableThans.filter((row) => row.locationState !== "known"), nextInvoiceNo: invoicePreview, fabricStock: fabricStock.rows.filter((row) => row.ownershipType === "own" && (row.meter > 0 || row.kg > 0)), yarnStock: yarnSummary.stockRows, manualStock: safeManualStock }, metrics: buildManagementMetrics({ readyCount: ready.length, pending, invoices, receipts }) };
+  return { kacchis, pakkis, ready, invoices, pending, receipts, meta: { parties, contracts, qualities, yarns, items, godowns, paymentAccounts, pendingKacchis, productionTrackingMode, availableThans: availableThans.filter((row) => row.locationState === "known"), unknownThans: availableThans.filter((row) => row.locationState !== "known"), nextInvoiceNo: invoicePreview, fabricStock: fabricStock.rows.filter((row) => row.ownershipType === "own" && (row.meter > 0 || row.kg > 0)), yarnStock: yarnSummary.stockRows, manualStock: safeManualStock }, metrics: buildManagementMetrics({ readyCount: ready.length, pending, invoices, receipts }) };
 };
 
 const reverseJournalInSession = async ({ userId, journalId, date, reason, session }) => {
@@ -725,6 +745,21 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId, outerSes
   if (!party) throw fail("Customer / Party is required");
   const invoiceDate = clean(payload.invoiceDate) || seed.invoiceDate;
   let quantity = qty(payload.quantity ?? seed.quantity);
+  const targetYarnId = payload.yarnId || seed.yarnId;
+  let yarnPacking = null;
+  if (seed.saleNature === "yarn" && (payload.sourceEntryUnit === "LBS" || payload.uom === "LBS" || seed.uom === "LBS")) {
+    const yarn = await setSession(WeavingYarn.findOne({ _id: targetYarnId, userId, isActive: true }), outerSession);
+    if (!yarn) throw fail("Yarn is required");
+    try {
+      yarnPacking = calculateYarnPacking({
+        packageType: payload.packageType ?? seed.packageType,
+        packageQty: payload.packageQty ?? seed.packageQty,
+        smallCones: payload.smallCones ?? seed.smallCones,
+        largeCones: payload.largeCones ?? seed.largeCones,
+      }, yarn);
+    } catch (error) { throw fail(error.message); }
+    quantity = yarnPacking.quantityLbs;
+  }
   const finalRate = round(payload.finalRate ?? seed.finalRate);
   if (!seed.accountingOnly && finalRate !== seed.originalRate && !clean(payload.rateOverrideReason || seed.rateOverrideReason)) throw fail("Rate override reason is required.");
   if (quantity <= 0 || finalRate <= 0) throw fail("Valid quantity and rate are required");
@@ -736,7 +771,6 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId, outerSes
   const stockBacked = seed.saleSource === "direct" && (seed.saleNature === "yarn" || stockCategory(seed));
   if (payload.saleNature && payload.saleNature !== seed.saleNature) throw fail("Sale Type cannot be changed after posting", 409);
   const targetGodownId = payload.godownId !== undefined ? payload.godownId : seed.godownId;
-  const targetYarnId = payload.yarnId || seed.yarnId;
   const targetQualityId = payload.fabricQualityId || seed.fabricQualityId;
   const targetCategory = seed.saleNature === "fabric" ? (payload.fabricCategory === "b" ? "b" : payload.fabricCategory === "normal" ? "normal" : seed.fabricCategory) : (payload.otherSubtype || seed.otherSubtype);
   const targetGodown = stockBacked ? await WeavingGodown.findOne({ _id: targetGodownId, userId, isActive: true }) : null;
@@ -763,8 +797,9 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId, outerSes
         invoice.editHistory[invoice.editHistory.length - 1].movement = movement.toObject();
         const balance = await yarnStock.getGodownBalance({ userId, yarnId: targetYarnId, godownId: targetGodownId, ownershipType: "own", session });
         const reusable = String(movement.yarnId) === String(targetYarnId) && String(movement.sourceGodownId) === String(targetGodownId) ? movement.quantityKg : 0;
-        if (quantity > round(balance.kg + reusable)) throw fail(`Only ${round(balance.kg + reusable)} KG Own Yarn is available`, 409);
-        Object.assign(movement, { yarnId: targetYarnId, date: invoiceDate, quantityKg: quantity, sourceGodownId: targetGodownId, rate: finalRate });
+        const quantityKg = yarnPacking?.quantityKg || quantity;
+        if (quantityKg > round(balance.kg + reusable)) throw fail(`Only ${round(balance.kg + reusable)} KG Own Yarn is available`, 409);
+        Object.assign(movement, { yarnId: targetYarnId, date: invoiceDate, quantityKg, quantityLbs: yarnPacking?.quantityLbs || 0, sourceEntryUnit: yarnPacking ? "LBS" : "KG", ...(yarnPacking || {}), sourceGodownId: targetGodownId, rate: finalRate });
         await movement.save(sessionOptions(session));
       } else if (stockBacked && invoice.entryMode === "than") {
         const oldMovements = await setSession(WeavingFabricMovement.find({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: false }), session);
@@ -822,7 +857,7 @@ const updatePostedInvoice = async (userId, invoiceId, payload, actorId, outerSes
         touched.push(...receiptJournal.lines.map((line) => line.account)); paidAmount = Math.min(totals.grandTotal, terms.receivedNowRequested);
       }
       const creditDays = Math.max(0, Math.trunc(Number(payload.creditDays ?? invoice.creditDays) || 0));
-      Object.assign(invoice, totals, terms, { partyId: party._id, partyName: party.name, invoiceDate, quantity, finalRate, fabricCategory: invoice.saleNature === "fabric" ? targetCategory : invoice.fabricCategory, otherSubtype: invoice.saleNature === "other" ? targetCategory : invoice.otherSubtype, yarnId: targetYarnId || null, fabricQualityId: targetQualityId || null, godownId: targetGodownId || null, description: clean(payload.description) || invoice.description, paymentAccountId, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || invoice.paymentMethod || paymentAccount.category) : "", receiptRequestKey, paidAmount, balanceDue: round(totals.grandTotal - paidAmount), paymentStatus: paidAmount >= totals.grandTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid", journalEntryId: journal._id, creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), notes: clean(payload.notes), rateOverrideReason: clean(payload.rateOverrideReason || invoice.rateOverrideReason), rateChangedBy: finalRate !== invoice.originalRate ? actorId : null, rateChangedAt: finalRate !== invoice.originalRate ? new Date() : null });
+      Object.assign(invoice, totals, terms, { partyId: party._id, partyName: party.name, invoiceDate, quantity, finalRate, ...(yarnPacking ? { ...yarnPacking, weightKg: yarnPacking.quantityKg, sourceEntryUnit: "LBS", uom: "LBS" } : {}), fabricCategory: invoice.saleNature === "fabric" ? targetCategory : invoice.fabricCategory, otherSubtype: invoice.saleNature === "other" ? targetCategory : invoice.otherSubtype, yarnId: targetYarnId || null, fabricQualityId: targetQualityId || null, godownId: targetGodownId || null, description: clean(payload.description) || invoice.description, paymentAccountId, paymentMethod: terms.receivedNowRequested > 0 ? (payload.paymentMethod || invoice.paymentMethod || paymentAccount.category) : "", receiptRequestKey, paidAmount, balanceDue: round(totals.grandTotal - paidAmount), paymentStatus: paidAmount >= totals.grandTotal ? "paid" : paidAmount > 0 ? "partial" : "unpaid", journalEntryId: journal._id, creditDays, dueDate: clean(payload.dueDate) || dueDateFromCreditDays(invoiceDate, creditDays), notes: clean(payload.notes), rateOverrideReason: clean(payload.rateOverrideReason || invoice.rateOverrideReason), rateChangedBy: finalRate !== invoice.originalRate ? actorId : null, rateChangedAt: finalRate !== invoice.originalRate ? new Date() : null });
       invoice.markModified("editHistory");
       await invoice.save(sessionOptions(session));
       await recalculateAccountBalances([...new Set(touched.map(String))], session);
@@ -888,7 +923,7 @@ const voidInvoice = async (userId, invoiceId, actorId, reason) => {
     const reversal = await reverseJournalInSession({ userId, journalId: invoice.journalEntryId, date: new Date().toISOString().slice(0, 10), reason: `Void ${invoice.invoiceNo}: ${clean(reason)}`, session });
     if (reversal) touched.push(...reversal.lines.map((line) => line.account));
     if (invoice.saleSource === "direct" && invoice.stockMovementId) {
-      if (invoice.stockMovementModel === "WeavingYarnMovement") await createOne(WeavingYarnMovement, { userId, yarnId: invoice.yarnId, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", ownershipType: "own", salesInvoiceId: invoice._id, quantityKg: invoice.quantity, godownId: invoice.godownId, rate: invoice.finalRate, notes: `Void ${invoice.invoiceNo}` }, session);
+      if (invoice.stockMovementModel === "WeavingYarnMovement") await createOne(WeavingYarnMovement, { userId, yarnId: invoice.yarnId, date: new Date().toISOString().slice(0, 10), movementType: "sale_return", ownershipType: "own", salesInvoiceId: invoice._id, quantityKg: invoice.uom === "LBS" ? invoice.weightKg : invoice.quantity, quantityLbs: invoice.uom === "LBS" ? invoice.quantity : 0, sourceEntryUnit: invoice.uom === "LBS" ? "LBS" : "KG", packageType: invoice.packageType, packageQty: invoice.packageQty, smallCones: invoice.smallCones, largeCones: invoice.largeCones, packageWeight: invoice.packageWeight, packageWeightUnit: invoice.packageWeightUnit || "LBS", smallConesPerPackage: invoice.smallConesPerPackage, largeConesPerPackage: invoice.largeConesPerPackage, godownId: invoice.godownId, rate: invoice.finalRate, notes: `Void ${invoice.invoiceNo}` }, session);
       else {
         const movements = await setSession(WeavingFabricMovement.find({ userId, salesInvoiceId: invoice._id, movementType: "sale_out", isVoided: false }).lean(), session);
         for (const movement of movements) {

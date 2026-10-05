@@ -41,6 +41,7 @@ const {
   parseEntryDateTime,
   recalculateTouchedAccounts,
   recreatePayrollPaymentJournals,
+  reconcileEmployeeOpeningBalance,
   reverseJournals,
   reversePayrollRecoveries,
   roundMoney,
@@ -328,7 +329,17 @@ const normalizeKnottingPaymentMethod = (value) =>
     ? normalizeText(value).toLowerCase()
     : "monthly";
 
-const normalizeOpeningBalance = (payload = {}) => {
+const normalizeOpeningBalance = (payload = {}, existingOpeningBalance = null) => {
+  const hasOpeningInput = Object.prototype.hasOwnProperty.call(payload, "openingBalance")
+    || Object.prototype.hasOwnProperty.call(payload, "openingBalanceAmount")
+    || Object.prototype.hasOwnProperty.call(payload, "openingBalanceType")
+    || Object.prototype.hasOwnProperty.call(payload, "openingBalanceDeductionIntent")
+    || Object.prototype.hasOwnProperty.call(payload, "openingBalanceTargetCycleKey");
+  if (!hasOpeningInput && existingOpeningBalance) {
+    return existingOpeningBalance.toObject
+      ? existingOpeningBalance.toObject()
+      : { ...existingOpeningBalance };
+  }
   const source = payload.openingBalance || {};
   const amount = roundMoney(source.amount ?? payload.openingBalanceAmount);
 
@@ -366,11 +377,17 @@ const normalizeOpeningBalance = (payload = {}) => {
       ? deriveSalaryCycleTarget(source.targetCycleKey ?? payload.openingBalanceTargetCycleKey)
       : { targetCycleKey: "", targetPayDate: null };
 
+  const unchangedAmountAndType = existingOpeningBalance
+    && roundMoney(existingOpeningBalance.amount) === amount
+    && normalizeText(existingOpeningBalance.type).toLowerCase() === type;
+
   return {
     amount,
     type,
     deductionIntent,
-    recordedAt: new Date(),
+    recordedAt: unchangedAmountAndType && existingOpeningBalance.recordedAt
+      ? existingOpeningBalance.recordedAt
+      : new Date(),
     ...target,
   };
 };
@@ -773,7 +790,7 @@ const buildEmployeePayload = async ({
     weeklyOffDays: normalizeWeeklyOffDays(payload.weeklyOffDays),
     paidLeaveAllowance: normalizePaidLeaveAllowance(payload.paidLeaveAllowance),
     otAllowed: normalizeOtAllowed(payload.otAllowed),
-    openingBalance: normalizeOpeningBalance(payload),
+    openingBalance: normalizeOpeningBalance(payload, existing?.openingBalance),
   };
 };
 
@@ -1729,6 +1746,14 @@ exports.createEmployee = async (req, res) => {
         employee: createdEmployee,
         session,
       });
+      await reconcileEmployeeOpeningBalance({
+        userId,
+        moduleScope,
+        employee: createdEmployee,
+        previousOpeningBalance: { amount: 0, type: "" },
+        isNew: true,
+        session,
+      });
     });
 
     await logActivity({
@@ -1769,10 +1794,19 @@ exports.updateEmployee = async (req, res) => {
         employeeId: employee._id,
         existing: employee,
       });
-
+      const previousOpeningBalance = employee.openingBalance?.toObject
+        ? employee.openingBalance.toObject()
+        : { ...(employee.openingBalance || {}) };
       Object.assign(employee, payload);
       updatedEmployee = await employee.save({ session });
       await syncEmployeeAccountName({ employee: updatedEmployee, session });
+      await reconcileEmployeeOpeningBalance({
+        userId,
+        moduleScope,
+        employee: updatedEmployee,
+        previousOpeningBalance,
+        session,
+      });
     });
 
     await logActivity({
@@ -2342,7 +2376,7 @@ exports.precheckPayrollRange = async (req, res) => {
     const userId = getUserId(req);
     const moduleScope = getModuleScopeFromRequest(req);
     if (!isWeavingScope(moduleScope)) throw createHttpError("Payroll range is only available for Weaving.", 404);
-    const data = await precheckWeavingPayrollRange({ userId, fromDate: req.body.fromDate, toDate: req.body.toDate, employeeId: req.body.employeeId, finalSettlement: req.body.finalSettlement === true });
+    const data = await precheckWeavingPayrollRange({ userId, fromDate: req.body.fromDate, toDate: req.body.toDate, employeeId: req.body.employeeId, finalSettlement: req.body.finalSettlement === true, markInactive: req.body.markInactive === true, payAfterFinalize: req.body.payAfterFinalize === true, paymentAccountId: req.body.paymentAccountId });
     return res.json({ data });
   } catch (error) {
     return sendError(res, error, "Failed to calculate payroll range");
@@ -2354,7 +2388,26 @@ exports.finalizePayrollRange = async (req, res) => {
     const userId = getUserId(req);
     const moduleScope = getModuleScopeFromRequest(req);
     if (!isWeavingScope(moduleScope)) throw createHttpError("Payroll range is only available for Weaving.", 404);
-    const data = await finalizeWeavingPayrollRange({ userId, fromDate: req.body.fromDate, toDate: req.body.toDate, note: req.body.note, employeeId: req.body.employeeId, finalSettlement: req.body.finalSettlement === true, markInactive: req.body.markInactive === true, actorId: req.actorId || userId });
+    const data = await finalizeWeavingPayrollRange({
+      userId,
+      fromDate: req.body.fromDate,
+      toDate: req.body.toDate,
+      note: req.body.note,
+      employeeId: req.body.employeeId,
+      finalSettlement: req.body.finalSettlement === true,
+      markInactive: req.body.markInactive === true,
+      payAfterFinalize: req.body.payAfterFinalize === true,
+      paymentAccountId: req.body.paymentAccountId,
+      paymentDate: req.body.paymentDate,
+      paymentTime: req.body.paymentTime,
+      receivedBy: req.body.receivedBy,
+      receiverName: req.body.receiverName,
+      receiverPhone: req.body.receiverPhone,
+      paymentNote: req.body.paymentNote,
+      operationKey: req.body.operationKey,
+      reviewToken: req.body.reviewToken,
+      actorId: req.actorId || userId,
+    });
     clearModuleCaches(userId, moduleScope);
     return res.json({ data });
   } catch (error) {

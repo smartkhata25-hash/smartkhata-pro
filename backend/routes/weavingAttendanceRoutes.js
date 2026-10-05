@@ -32,6 +32,15 @@ router.get(
   ctrl.getAttendanceSession,
 );
 
+router.patch(
+  "/order/swap",
+  requirePermission(
+    PERMISSIONS.WEAVING_ATTENDANCE.MANAGE,
+    PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE,
+  ),
+  ctrl.swapAttendanceOrder,
+);
+
 router.get("/work-period", requirePermission(PERMISSIONS.WEAVING_ATTENDANCE.VIEW, PERMISSIONS.WEAVING_ATTENDANCE.MANAGE, PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE), ctrl.getWorkPeriodState);
 router.post("/work-period/start", requirePermission(PERMISSIONS.WEAVING_ATTENDANCE.MANAGE, PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE), ctrl.startWorkPeriod);
 

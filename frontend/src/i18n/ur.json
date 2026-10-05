@@ -3239,6 +3239,7 @@
   "weaving.payroll.adjustment.bonus": "بونس",
   "weaving.payroll.adjustment.commission": "کمیشن",
   "weaving.payroll.adjustment.overtime": "اوور ٹائم",
+  "weaving.payroll.attendanceOvertimeAlreadyApplied": "اوور ٹائم حاضری سے پہلے ہی شمار ہو چکا ہے۔ دستی اوور ٹائم ایڈجسٹمنٹ ہٹائیں یا حاضری درست کریں۔",
   "weaving.payroll.adjustment.other": "دیگر",
   "weaving.payroll.noEmployeeNo": "ملازم نمبر نہیں",
   "weaving.payroll.unit": "یونٹ",

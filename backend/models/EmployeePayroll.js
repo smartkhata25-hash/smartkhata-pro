@@ -87,6 +87,15 @@ const recoveryApplicationSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    scheduledAmount: { type: Number, default: 0, min: 0 },
+    cycleKey: { type: String, trim: true, default: "" },
+    frequency: {
+      type: String,
+      enum: ["one_time", "carry_forward", "every_payroll_cycle", "monthly", ""],
+      default: "",
+    },
+    isSkipped: { type: Boolean, default: false },
+    isManualOverride: { type: Boolean, default: false },
     description: {
       type: String,
       trim: true,
@@ -103,6 +112,11 @@ const paymentHistorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    payrollAppliedAmount: { type: Number, default: 0, min: 0 },
+    settlementOffsetAmount: { type: Number, default: 0, min: 0 },
+    broughtForwardPayableApplied: { type: Number, default: 0, min: 0 },
+    broughtForwardReceivableApplied: { type: Number, default: 0, min: 0 },
+    isLedgerSettlement: { type: Boolean, default: false },
     paymentAccountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
@@ -503,6 +517,20 @@ const employeePayrollSchema = new mongoose.Schema(
     ],
     paymentHistory: {
       type: [paymentHistorySchema],
+      default: [],
+    },
+    idempotencyKeys: { type: [String], default: [] },
+    revisionHistory: {
+      type: [{
+        attendanceDate: { type: String, default: "" },
+        oldNetSalary: { type: Number, default: 0 },
+        newNetSalary: { type: Number, default: 0 },
+        oldJournalEntryId: { type: mongoose.Schema.Types.ObjectId, ref: "JournalEntry", default: null },
+        reversalJournalEntryIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "JournalEntry" }],
+        newJournalEntryId: { type: mongoose.Schema.Types.ObjectId, ref: "JournalEntry", default: null },
+        revisedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        revisedAt: { type: Date, default: Date.now },
+      }],
       default: [],
     },
     reversalJournalEntryIds: [

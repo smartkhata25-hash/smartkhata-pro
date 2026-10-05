@@ -3,9 +3,20 @@ const assert = require("assert");
 const {
   _test: {
     buildEmployeeLedgerSummaryRow,
+    buildOpeningBalanceReconciliationPlan,
     summarizeEmployeeLedgerRows,
   },
 } = require("../services/employee/employeeAccountingService");
+
+const unchangedOpening = buildOpeningBalanceReconciliationPlan({ current: { amount: 5000, type: "payable" }, previous: { amount: 5000, type: "payable" }, openingJournalId: "journal-1" });
+assert.strictEqual(unchangedOpening.changed, false);
+assert.strictEqual(unchangedOpening.reverseExisting, false);
+const changedOpening = buildOpeningBalanceReconciliationPlan({ current: { amount: 6000, type: "payable" }, previous: { amount: 5000, type: "payable" }, openingJournalId: "journal-1" });
+assert.strictEqual(changedOpening.reverseExisting, true);
+assert.strictEqual(changedOpening.postReplacement, true);
+const clearedOpening = buildOpeningBalanceReconciliationPlan({ current: { amount: 0, type: "" }, previous: { amount: 5000, type: "payable" }, openingJournalId: "journal-1" });
+assert.strictEqual(clearedOpening.reverseExisting, true);
+assert.strictEqual(clearedOpening.postReplacement, false);
 
 const employee = (overrides = {}) => ({
   _id: overrides._id || "64f000000000000000000001",

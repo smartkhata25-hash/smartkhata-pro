@@ -10,6 +10,7 @@ const normalizeSearchValue = (value = '') =>
 
 const SearchableCreatableSelect = ({
   label,
+  hideLabel = false,
   placeholder,
   options = [],
   value,
@@ -105,14 +106,14 @@ const SearchableCreatableSelect = ({
 
   return (
     <div ref={root} className="relative block min-w-0 text-sm font-medium text-slate-700">
-      <label
+      {!hideLabel && <label
         htmlFor={inputId}
         className="block min-h-[18px] text-xs font-semibold leading-[18px] text-slate-600"
       >
         {label}
 
         {required && <span className="ml-0.5 text-rose-500">*</span>}
-      </label>
+      </label>}
 
       <div className="relative mt-1">
         <FaSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-xs text-slate-400" />

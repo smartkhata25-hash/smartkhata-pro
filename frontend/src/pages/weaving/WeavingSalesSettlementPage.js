@@ -213,6 +213,7 @@ export default function WeavingSalesSettlementPage() {
       contracts: [],
       qualities: [],
       yarns: [],
+      items: [],
       godowns: [],
       paymentAccounts: [],
       availableThans: [],
@@ -1201,6 +1202,15 @@ export default function WeavingSalesSettlementPage() {
           key={modal.kind || 'fabric'}
           kind={modal.kind || 'fabric'}
           meta={data.meta}
+          onItemCreated={(item) =>
+            setData((value) => ({
+              ...value,
+              meta: {
+                ...value.meta,
+                items: [...(value.meta.items || []).filter((row) => row._id !== item._id), item],
+              },
+            }))
+          }
           saving={saving}
           onClose={() => setModal(null)}
           onSave={(form) =>
@@ -1218,6 +1228,15 @@ export default function WeavingSalesSettlementPage() {
       {modal?.type === 'direct-edit' && (
         <WeavingDirectSaleModal
           meta={data.meta}
+          onItemCreated={(item) =>
+            setData((value) => ({
+              ...value,
+              meta: {
+                ...value.meta,
+                items: [...(value.meta.items || []).filter((row) => row._id !== item._id), item],
+              },
+            }))
+          }
           current={modal.row}
           saving={saving}
           onClose={() => setModal(null)}
@@ -1432,9 +1451,11 @@ const KacchiOutputOptions = ({ row, onOpen }) => {
 
 const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
   const [validation, setValidation] = useState('');
+  const productionMode = meta.productionTrackingMode || 'detailed';
+  const preferredEntryMode = productionMode === 'detailed' ? 'than' : 'manual';
 
   const [form, setForm] = useState({
-    entryMode: current?.entryMode || 'than',
+    entryMode: current?.entryMode || preferredEntryMode,
 
     totalMeter: current?.totalMeter || '',
 
@@ -1493,15 +1514,32 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
 
   const chooseContract = (contractId) => {
     const row = meta.contracts.find((item) => String(item._id) === String(contractId));
+    const partyId = row?.partyId?._id || row?.partyId || '';
+    const fabricQualityId = row?.itemId?._id || row?.itemId || '';
+    const ownership = row?.contractType === 'conversion' ? 'party' : 'own';
+    const sourceIds = new Set(
+      (preferredEntryMode === 'manual' ? meta.manualStock || [] : meta.availableThans || [])
+        .filter(
+          (stock) =>
+            String(stock.fabricQualityId?._id || stock.fabricQualityId || '') === String(fabricQualityId) &&
+            (preferredEntryMode === 'manual' || !stock.contractId || String(stock.contractId?._id || stock.contractId) === String(contractId)) &&
+            stock.ownershipType === ownership &&
+            (ownership !== 'party' || String(stock.ownerPartyId?._id || stock.ownerPartyId || '') === String(partyId)) &&
+            (preferredEntryMode !== 'manual' || Number(stock.meter || 0) > 0)
+        )
+        .map((stock) => String(stock.godownId?._id || stock.godownId || '') || '__folding__')
+    );
 
     setForm((value) => ({
       ...value,
 
       contractId,
 
-      partyId: row?.partyId?._id || row?.partyId || '',
+      partyId,
 
-      fabricQualityId: row?.itemId?._id || row?.itemId || '',
+      fabricQualityId,
+
+      godownId: sourceIds.size === 1 ? [...sourceIds][0] : '',
 
       foldingEntryIds: [],
     }));
@@ -1514,6 +1552,28 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
   const sourceId = form.godownId === '__folding__' ? '' : form.godownId;
 
   const ownershipType = contract?.contractType === 'conversion' ? 'party' : 'own';
+
+  const matchingThans = contract
+    ? available.filter(
+        (row) =>
+          (!row.grade || row.grade === 'a') &&
+          (!row.contractId || String(row.contractId?._id || row.contractId) === String(form.contractId)) &&
+          String(row.fabricQualityId?._id || row.fabricQualityId || '') === String(form.fabricQualityId) &&
+          row.ownershipType === ownershipType &&
+          (ownershipType !== 'party' || String(row.ownerPartyId?._id || row.ownerPartyId || '') === String(form.partyId))
+      )
+    : [];
+
+  const matchingMeterPools = contract
+    ? (meta.manualStock || []).filter(
+        (row) =>
+          String(row.fabricQualityId) === String(form.fabricQualityId) &&
+          row.category === 'normal' &&
+          row.ownershipType === ownershipType &&
+          (ownershipType !== 'party' || String(row.ownerPartyId) === String(form.partyId)) &&
+          Number(row.meter || 0) > 0
+      )
+    : [];
 
   const thans =
     contract && sourceSelected
@@ -1539,6 +1599,14 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
       row.ownershipType === ownershipType &&
       (ownershipType !== 'party' || String(row.ownerPartyId) === String(form.partyId))
   );
+
+  const availableMeter =
+    Number(manualAvailable?.meter || 0) +
+    (current?.entryMode === 'manual' &&
+    String(current.fabricQualityId?._id || current.fabricQualityId) === form.fabricQualityId &&
+    String(current.godownId?._id || current.godownId || '') === sourceId
+      ? Number(current.totalMeter || 0)
+      : 0);
 
   const selected = thans.filter((row) => form.foldingEntryIds.includes(String(row._id)));
 
@@ -1572,6 +1640,12 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
       return;
     }
 
+    if (form.entryMode === 'manual' && Number(form.totalMeter) > availableMeter) {
+      setValidation(`Only ${money(availableMeter)} M meter stock is available.`);
+
+      return;
+    }
+
     if (form.entryMode !== 'manual' && !form.foldingEntryIds.length) {
       setValidation('Select at least one available Than.');
 
@@ -1592,11 +1666,16 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
 
     setValidation('');
 
-    return onSave({
+    const payload = {
       ...form,
 
       godownId: form.godownId === '__folding__' ? null : form.godownId,
-    });
+    };
+    if (form.entryMode === 'manual') {
+      delete payload.totalKg;
+      delete payload.totalThan;
+    }
+    return onSave(payload);
   };
   const save = useSaleSaveOutput(performSave, (record, format) => parchiOutputUrl('kacchi', record._id, format, 'quick'), saving);
 
@@ -1607,32 +1686,12 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
       wide
     >
       <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="col-span-full flex rounded-xl bg-slate-100 p-1">
-          {[
-            ['than', 'thanWise'],
-            ['manual', 'manualMeter'],
-          ].map(([value, label]) => (
-            <button
-              type="button"
-              key={value}
-              disabled={Boolean(current)}
-              className={`flex-1 rounded-lg p-2.5 text-sm font-bold ${
-                form.entryMode === value ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-500'
-              }`}
-              onClick={() =>
-                setForm({
-                  ...form,
-
-                  entryMode: value,
-
-                  foldingEntryIds: [],
-                })
-              }
-            >
-              {t(`weaving.salesPro.${label}`)}
-            </button>
-          ))}
-        </div>
+        {!current && form.entryMode !== preferredEntryMode && (
+          <div className="col-span-full rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            Using historical {form.entryMode === 'than' ? 'Than' : 'Meter'} stock.{' '}
+            <button type="button" className="font-bold underline" onClick={() => setForm({ ...form, entryMode: preferredEntryMode, foldingEntryIds: [], godownId: '' })}>Return to current production flow</button>
+          </div>
+        )}
 
         <Field label={t('weaving.sales.dispatchDate')}>
           <input
@@ -1664,120 +1723,86 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
           </select>
         </Field>
 
-        <Field label={t('weaving.sales.party')}>
-          <select disabled className={input} value={form.partyId}>
-            <option value="">-</option>
+        {contract && <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="block text-xs font-bold text-slate-500">{t('weaving.sales.party')}</span><b>{meta.parties.find((row) => String(row._id) === String(form.partyId))?.name || '-'}</b></div>}
 
-            {meta.parties.map((row) => (
-              <option key={row._id} value={row._id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {contract && <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="block text-xs font-bold text-slate-500">{t('weaving.sales.quality')}</span><b>{meta.qualities.find((row) => String(row._id) === String(form.fabricQualityId))?.name || '-'}</b></div>}
 
-        <Field label={t('weaving.sales.quality')}>
-          <select disabled className={input} value={form.fabricQualityId}>
-            <option value="">-</option>
+        {form.entryMode !== 'manual' && (
+          <Field label={t('weaving.salesPro.sourceLocation')}>
+            <select
+              className={input}
+              value={form.godownId}
+              onChange={(event) =>
+                setForm({
+                  ...form,
 
-            {meta.qualities.map((row) => (
-              <option key={row._id} value={row._id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+                  godownId: event.target.value,
 
-        <Field label={t('weaving.salesPro.sourceLocation')}>
-          <select
-            className={input}
-            value={form.godownId}
-            onChange={(event) =>
-              setForm({
-                ...form,
+                  foldingEntryIds: [],
+                })
+              }
+            >
+              <option value="">{t('weaving.salesPro.selectSource')}</option>
 
-                godownId: event.target.value,
+              <option value="__folding__">{t('weaving.salesPro.folding')}</option>
 
-                foldingEntryIds: [],
-              })
-            }
-          >
-            <option value="">{t('weaving.salesPro.selectSource')}</option>
-
-            <option value="__folding__">{t('weaving.salesPro.folding')}</option>
-
-            {meta.godowns
-              .filter((row) => row.isActive !== false)
-              .map((row) => (
-                <option key={row._id} value={row._id}>
-                  {row.name}
-                </option>
-              ))}
-          </select>
-        </Field>
-
-        <div className="rounded-xl bg-teal-50 p-3 text-sm lg:col-span-3">
-          <b>{contract?.contractNo || t('weaving.sales.selectContract')}</b>
-
-          <div className="mt-1 text-slate-600">
-            {form.entryMode === 'manual' ? money(form.totalThan) : selected.length}{' '}
-            {t('weaving.salesPro.thanCount')}
-            {' · '}
-            {money(
-              form.entryMode === 'manual'
-                ? form.totalMeter
-                : selected.reduce((sum, row) => sum + Number(row.meter || 0), 0)
-            )}{' '}
-            M{' · '}
-            {money(
-              form.entryMode === 'manual'
-                ? form.totalKg
-                : selected.reduce((sum, row) => sum + Number(row.weightKg || 0), 0)
-            )}{' '}
-            KG
-          </div>
-        </div>
+              {meta.godowns
+                .filter((row) => row.isActive !== false)
+                .map((row) => (
+                  <option key={row._id} value={row._id}>
+                    {row.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
 
         {form.entryMode === 'manual' ? (
-          <>
-            <div className="col-span-full rounded-xl bg-cyan-50 px-3 py-2 text-sm">
-              <b>
-                {t('weaving.sales.available')}:{' '}
-                {money(
-                  Number(manualAvailable?.meter || 0) +
-                    (current?.entryMode === 'manual' &&
-                    String(current.fabricQualityId?._id || current.fabricQualityId) ===
-                      form.fabricQualityId &&
-                    String(current.godownId?._id || current.godownId || '') === sourceId
-                      ? current.totalMeter
-                      : 0)
-                )}{' '}
-                M
-              </b>
-            </div>
-
-            {[
-              ['totalMeter', 'saleMeter'],
-              ['totalKg', 'optionalKg'],
-              ['totalThan', 'optionalThan'],
-            ].map(([field, label]) => (
-              <input
-                key={field}
-                type="number"
-                min="0"
-                step="any"
+          <div className="col-span-full flex flex-wrap items-end gap-3">
+            <Field label={t('weaving.salesPro.sourceLocation')} className="min-w-48 flex-1">
+              <select
                 className={input}
-                placeholder={t(`weaving.salesPro.${label}`)}
-                value={form[field]}
+                value={form.godownId}
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    [field]: event.target.value,
+
+                    godownId: event.target.value,
+
+                    foldingEntryIds: [],
                   })
                 }
-              />
-            ))}
-          </>
+              >
+                <option value="">{t('weaving.salesPro.selectSource')}</option>
+
+                <option value="__folding__">{t('weaving.salesPro.folding')}</option>
+
+                {meta.godowns
+                  .filter((row) => row.isActive !== false)
+                  .map((row) => (
+                    <option key={row._id} value={row._id}>
+                      {row.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+
+            <Field label="Dispatch Meter" className="min-w-48 flex-1">
+              <input type="number" min="0.000001" step="any" className={input} value={form.totalMeter} onChange={(event) => setForm({ ...form, totalMeter: event.target.value })} />
+            </Field>
+
+            <div className="flex h-10 min-w-36 flex-col justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-emerald-800">
+              <span className="text-[10px] font-bold uppercase tracking-wide">Available Meter</span>
+              <b className="text-sm">{money(availableMeter)} M</b>
+            </div>
+
+            {!current && productionMode !== 'detailed' && matchingThans.length > 0 && <button type="button" className="h-10 whitespace-nowrap text-sm font-bold text-teal-700 underline" onClick={() => {
+              const locations = [...new Set(matchingThans.map((row) => String(row.godownId?._id || row.godownId || '') || '__folding__'))];
+              setForm({ ...form, entryMode: 'than', totalMeter: '', foldingEntryIds: [], godownId: locations.length === 1 ? locations[0] : '' });
+            }}>Old Than Stock ({matchingThans.length})</button>}
+
+            {Number(form.totalMeter) > 0 && <div className={`w-full rounded-xl px-3 py-2 text-sm font-bold ${Number(form.totalMeter) > availableMeter ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>{Number(form.totalMeter) > availableMeter ? `Only ${money(availableMeter)} M is available` : `After Dispatch: ${money(availableMeter - Number(form.totalMeter))} M remaining`}</div>}
+          </div>
         ) : (
           <div className="col-span-full overflow-hidden rounded-xl border border-slate-200">
             <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2.5">
@@ -1849,6 +1874,15 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
               {!thans.length && <Empty />}
             </div>
           </div>
+        )}
+
+        {!current && productionMode === 'detailed' && form.entryMode === 'than' && matchingMeterPools.length > 0 && (
+          <button type="button" className="col-span-full text-left text-sm font-bold text-teal-700 underline" onClick={() => {
+            const locations = [...new Set(matchingMeterPools.map((row) => String(row.godownId || '') || '__folding__'))];
+            setForm({ ...form, entryMode: 'manual', foldingEntryIds: [], totalMeter: '', godownId: locations.length === 1 ? locations[0] : '' });
+          }}>
+            Use historical Meter Stock ({money(matchingMeterPools.reduce((sum, row) => sum + Number(row.meter || 0), 0))} M)
+          </button>
         )}
 
         <textarea
@@ -2031,14 +2065,26 @@ const PakkiModal = ({
 
   const subtotal = Math.round(billable * rate * 100) / 100;
 
-  const total = Math.round((subtotal - Number(form.amountDeduction || 0)) * 100) / 100;
+  const meterDeductionAmount = Math.round(deductions * rate * 100) / 100;
+
+  const amountDeduction = Number(form.amountDeduction || 0);
+
+  const calculatedTotal = Math.round((subtotal - amountDeduction) * 100) / 100;
+
+  const total = Math.max(0, calculatedTotal);
 
   const performSave = async () => {
     if (saving) return;
 
     let message = !kacchi ? t('weaving.salesPro.selectKacchi') : '';
 
-    if (billable <= 0 || total <= 0 || deductions < 0) {
+    if (
+      billable <= 0 ||
+      calculatedTotal <= 0 ||
+      deductions < 0 ||
+      amountDeduction < 0 ||
+      amountDeduction > subtotal
+    ) {
       message = t('weaving.salesPro.validSettlement');
     }
 
@@ -2122,31 +2168,39 @@ const PakkiModal = ({
               </Field>
 
               {[
-                ['oilKamiMeter', 'oilKami'],
-                ['shortageMeter', 'shortage'],
-                ['rejectionMeter', 'rejection'],
-                ['otherMeterDeduction', 'otherDeduction'],
-                ['amountDeduction', 'amountDeduction'],
-              ].map(([field, label]) => (
-                <input
-                  key={field}
-                  disabled={Boolean(historical) && !current}
-                  type="number"
-                  min="0"
-                  step="any"
-                  className={input}
-                  placeholder={t(`weaving.salesPro.${label}`)}
-                  value={form[field]}
-                  onChange={(event) =>
-                    patch({
-                      [field]: event.target.value,
-                    })
-                  }
-                />
+                ['oilKamiMeter', 'oilKami', 'Enter Oil Kami Meter'],
+                ['shortageMeter', 'shortage', 'Enter Shortage Meter'],
+                ['rejectionMeter', 'rejection', 'Enter Rejection Meter'],
+                ['otherMeterDeduction', 'otherDeduction', 'Enter Other Meter'],
+              ].map(([field, label, placeholder]) => (
+                <Field key={field} label={t(`weaving.salesPro.${label}`)}>
+                  <input
+                    disabled={Boolean(historical) && !current}
+                    type="number"
+                    min="0"
+                    step="any"
+                    className={input}
+                    placeholder={placeholder}
+                    value={form[field]}
+                    onChange={(event) =>
+                      patch({
+                        [field]: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
               ))}
+
+              <Field label={t('weaving.salesPro.amountDeduction')}>
+                <input
+                  readOnly
+                  className={`${input} bg-slate-100 font-bold text-slate-700`}
+                  value={`Rs. ${money(meterDeductionAmount)}`}
+                />
+              </Field>
             </div>
 
-            <div className="grid gap-2 rounded-xl bg-teal-50 p-3 sm:grid-cols-3 lg:grid-cols-7">
+            <div className="grid gap-2 rounded-xl bg-teal-50 p-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
                 ['grossMeter', `${money(kacchi.totalMeter)} M`],
 
@@ -2158,13 +2212,11 @@ const PakkiModal = ({
 
                 ['contractRate', `Rs. ${money(rate)}`],
 
-                ['subtotal', `Rs. ${money(subtotal)}`],
-
-                ['finalAmount', `Rs. ${money(total)}`],
-              ].map(([label, value]) => (
+                ['finalAmount', `Rs. ${money(total)}`, 'Total Amount'],
+              ].map(([label, value, displayLabel]) => (
                 <div key={label}>
                   <small className="text-[10px] font-semibold text-teal-700">
-                    {t(`weaving.salesPro.${label}`)}
+                    {displayLabel || t(`weaving.salesPro.${label}`)}
                   </small>
 
                   <b className="block text-base text-teal-950">{value}</b>
@@ -2172,24 +2224,33 @@ const PakkiModal = ({
               ))}
             </div>
 
-            <WeavingSalePaymentSection
-              form={form}
-              onChange={patch}
-              total={total}
-              accounts={meta.paymentAccounts}
-              date={form.pakkiDate}
-            />
+            <details className="rounded-xl border border-slate-200 bg-white">
+              <summary className="cursor-pointer select-none px-4 py-3 text-sm font-bold text-slate-700">
+                Payment / Credit Details
+              </summary>
 
-            <input
-              className={input}
-              placeholder={t('weaving.sales.remarks')}
-              value={form.commercialRemarks}
-              onChange={(event) =>
-                patch({
-                  commercialRemarks: event.target.value,
-                })
-              }
-            />
+              <div className="space-y-3 border-t border-slate-100 p-3">
+                <WeavingSalePaymentSection
+                  form={form}
+                  onChange={patch}
+                  total={total}
+                  accounts={meta.paymentAccounts}
+                  date={form.pakkiDate}
+                />
+
+                <Field label={t('weaving.sales.remarks')}>
+                  <input
+                    className={input}
+                    value={form.commercialRemarks}
+                    onChange={(event) =>
+                      patch({
+                        commercialRemarks: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+            </details>
           </>
         )}
 

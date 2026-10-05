@@ -417,9 +417,9 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
           <FaSpinner className="animate-spin text-2xl text-teal-700" />
         </div>
       ) : ledger ? (
-        <div className="overflow-x-auto">
+        <div className="max-h-[calc(100vh-22rem)] overflow-x-auto overflow-y-auto">
           <table className="w-full min-w-[760px] border-collapse text-sm">
-            <thead className="bg-slate-900 text-[11px] font-bold uppercase text-white">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] font-bold uppercase text-white">
               <tr>
                 {['Date', 'Ref', 'Type', 'Description', 'Debit', 'Credit', 'Balance'].map(
                   (heading) => (

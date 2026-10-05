@@ -97,6 +97,16 @@ export const saveWeavingAttendanceSession = async ({ date, unitId, shiftId, rows
   return unwrap(response);
 };
 
+export const swapWeavingAttendanceOrder = async ({ employeeAId, employeeBId }) => {
+  const response = await axios.patch(
+    `${API_URL}/order/swap`,
+    { employeeAId, employeeBId },
+    getConfig()
+  );
+
+  return unwrap(response);
+};
+
 export const getWeavingAttendanceHistory = async (params = {}) => {
   const response = await axios.get(`${API_URL}/history`, getConfig(params));
   return unwrap(response);
@@ -142,6 +152,7 @@ const weavingAttendanceService = {
   getWeavingWorkPeriodState,
   startWeavingWorkPeriod,
   saveWeavingAttendanceSession,
+  swapWeavingAttendanceOrder,
 };
 
 export default weavingAttendanceService;

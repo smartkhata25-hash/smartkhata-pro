@@ -42,7 +42,7 @@ const controller = load("../controllers/employeeController.js", (name) => {
   if (name.endsWith("weavingEmployeeMasterService")) return master;
   if (name.endsWith("employeeAccountingService")) return { createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }), getSessionQuery: (q) => q, roundMoney: (v) => Math.round((Number(v) || 0) * 100) / 100 };
   return {};
-}, "\nmodule.exports.testPayload = buildEmployeePayload; module.exports.testShift = buildShiftPayload;");
+}, "\nmodule.exports.testPayload = buildEmployeePayload; module.exports.testShift = buildShiftPayload; module.exports.testOpening = normalizeOpeningBalance;");
 (async () => {
   rows.WeavingDepartment = [{ _id: nextId(), userId: uid, moduleScope: "weaving", name: "  wEAVING  ", normalizedName: "weaving", isActive: false, isDeleted: true }];
   await Promise.all([master.seed(uid), master.seed(uid)]);
@@ -85,6 +85,12 @@ const controller = load("../controllers/employeeController.js", (name) => {
   designation.departmentIds = []; designation.isActive = false; department.isActive = false; shift.isActive = false; unit.isActive = false;
   const existing = { ...valid, _id: nextId(), employeeNo: "EMP-099", account: "original-account" };
   assert.strictEqual((await build(form, existing)).employeeNo, "EMP-099");
+  const originalRecordedAt = new Date("2025-01-02T03:04:05.000Z");
+  const existingOpening = { amount: 5000, type: "payable", deductionIntent: "", recordedAt: originalRecordedAt, targetCycleKey: "", targetPayDate: null };
+  assert.strictEqual(controller.testOpening({}, existingOpening).recordedAt, originalRecordedAt, "unrelated detail edit preserves opening date");
+  assert.strictEqual(controller.testOpening({ openingBalance: { amount: 5000, type: "payable" } }, existingOpening).recordedAt, originalRecordedAt, "unrelated payroll settings preserve opening date");
+  assert.notStrictEqual(controller.testOpening({ openingBalance: { amount: 6000, type: "payable" } }, existingOpening).recordedAt, originalRecordedAt, "changed amount receives a new accounting date");
+  assert.strictEqual(controller.testOpening({ openingBalance: { amount: 0, type: "" } }, existingOpening).recordedAt, null, "zero keeps the reversal path and clears the opening date");
   await assert.rejects(build(form), /not found/);
   for (const row of [designation, department, shift, unit]) row.isActive = true;
   designation.departmentIds = [department._id];

@@ -55,6 +55,10 @@ const employeeSchema = new mongoose.Schema(
       min: 0,
       index: true,
     },
+    attendanceListOrder: {
+      type: Number,
+      min: 0,
+    },
     fatherName: {
       type: String,
       trim: true,
@@ -214,6 +218,16 @@ const employeeSchema = new mongoose.Schema(
         type: Date,
         default: null,
       },
+    },
+    openingJournalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "JournalEntry",
+      default: null,
+    },
+    openingBalanceMigrationStatus: {
+      type: String,
+      enum: ["", "posted", "pending_review"],
+      default: "",
     },
     notes: {
       type: String,

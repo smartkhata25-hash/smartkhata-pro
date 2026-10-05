@@ -67,29 +67,6 @@ export const updateWeavingPayroll = async (payrollId, data = {}) => {
   return unwrap(response);
 };
 
-export const finalizeWeavingPayroll = async (payrollId) => {
-  const response = await axios.post(`${API_URL}/${payrollId}/finalize`, {}, getConfig());
-
-  clearAccountsCache();
-
-  return unwrap(response);
-};
-
-export const finalizeWeavingPayrollCycle = async ({ cycleKey, segmentNo } = {}) => {
-  const response = await axios.post(
-    `${API_URL}/finalize-all`,
-    {
-      cycleKey: normalizeCycleKey(cycleKey),
-      segmentNo,
-    },
-    getConfig()
-  );
-
-  clearAccountsCache();
-
-  return unwrap(response);
-};
-
 export const precheckWeavingPayrollRange = async (data = {}) => {
   const response = await axios.post(`${API_URL}/range/precheck`, data, getConfig());
   return unwrap(response);
@@ -98,44 +75,6 @@ export const precheckWeavingPayrollRange = async (data = {}) => {
 export const finalizeWeavingPayrollRange = async (data = {}) => {
   const response = await axios.post(`${API_URL}/range/finalize`, data, getConfig());
   clearAccountsCache();
-  return unwrap(response);
-};
-
-export const earlyCloseWeavingPayrollCycle = async ({ cycleKey, segmentNo, reason } = {}) => {
-  const response = await axios.post(
-    `${API_URL}/early-close`,
-    {
-      cycleKey: normalizeCycleKey(cycleKey),
-      segmentNo,
-      reason,
-    },
-    getConfig()
-  );
-
-  clearAccountsCache();
-
-  return unwrap(response);
-};
-
-export const resumeWeavingPayrollCycle = async ({
-  cycleKey,
-  resumeFrom,
-  calculateThrough,
-  note,
-} = {}) => {
-  const response = await axios.post(
-    `${API_URL}/resume`,
-    {
-      cycleKey: normalizeCycleKey(cycleKey),
-      resumeFrom,
-      calculateThrough,
-      note,
-    },
-    getConfig()
-  );
-
-  clearAccountsCache();
-
   return unwrap(response);
 };
 
@@ -164,16 +103,12 @@ export const restoreWeavingPayroll = async (payrollId) => {
 };
 
 const weavingPayrollService = {
-  earlyCloseWeavingPayrollCycle,
-  finalizeWeavingPayroll,
-  finalizeWeavingPayrollCycle,
   finalizeWeavingPayrollRange,
   generateWeavingPayrollCycle,
   getWeavingPayrollCycle,
   getWeavingPayrollSummary,
   precheckWeavingPayrollRange,
   payWeavingPayroll,
-  resumeWeavingPayrollCycle,
   restoreWeavingPayroll,
   updateWeavingPayroll,
   voidWeavingPayroll,

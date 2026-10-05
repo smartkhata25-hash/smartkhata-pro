@@ -1,12 +1,16 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 const {
   getCycleOptions,
   _test: {
     aggregateAttendanceByEmployeeDate,
+    assertNoDuplicateOvertime,
     assertCycleCanFinalize,
     buildSegmentStorageKey,
     buildRecoveryApplicationsForPayroll,
+    buildRecoveryIndicators,
     calculateEmployeePayroll,
     collectHistoricalPayrollEmployeeIds,
     derivePayrollDisplayStatus,
@@ -19,8 +23,21 @@ const {
   },
 } = require("../services/weaving/weavingPayrollService");
 
+const payrollServiceSource = fs.readFileSync(
+  path.join(__dirname, "../services/weaving/weavingPayrollService.js"),
+  "utf8",
+);
+
 const EMPLOYEE_ID = "64f000000000000000000001";
 const USER_ID = "64f000000000000000000100";
+
+(() => {
+  const indicators = buildRecoveryIndicators([
+    { advanceLoanId: "64f000000000000000000091", kind: "loan", amount: 250, isManualOverride: true },
+    { advanceLoanId: "64f000000000000000000092", kind: "advance", amount: 0, isSkipped: true },
+  ]);
+  assert.deepStrictEqual(Array.from(indicators, (entry) => entry.label), ["Manual Recovery", "Recovery Skipped"]);
+})();
 
 (() => {
   const inactiveWithAttendance = "64f000000000000000000011";
@@ -266,7 +283,8 @@ const scheduledRecoveries = ({
   assert.strictEqual(result.weeklyOffDaysInPeriod, 2);
   assert.strictEqual(result.offDayWorkedDays, 1);
   assert.strictEqual(result.offDayWorkedAmount, 1000);
-  assert.strictEqual(result.netSalary, 16000);
+  assert.strictEqual(result.doubleDutyCount, 1);
+  assert.strictEqual(result.netSalary, 17000);
 })();
 
 (() => {
@@ -289,6 +307,54 @@ const scheduledRecoveries = ({
 })();
 
 (() => {
+  const attendanceRows = periodRows("2026-09-H1");
+  attendanceRows[0] = row("2026-09-01", "present", { otHours: 2 });
+
+  assert.throws(
+    () => calc({
+      rows: attendanceRows,
+      additions: [{ type: "overtime", amount: 250, reason: "Manual OT" }],
+    }),
+    /Overtime is already calculated from Attendance/,
+  );
+
+  const manualOnly = calc({
+    rows: periodRows("2026-09-H1"),
+    additions: [{ type: "overtime", amount: 250, reason: "Manual OT fallback" }],
+  });
+  assert.strictEqual(manualOnly.otAmount, 0);
+  assert.strictEqual(manualOnly.manualAdditionAmount, 250);
+  assert.strictEqual(manualOnly.netSalary, 15250);
+
+  const otherEarnings = calc({
+    rows: attendanceRows,
+    additions: [
+      { type: "bonus", amount: 100, reason: "Bonus" },
+      { type: "commission", amount: 200, reason: "Commission" },
+      { type: "other", amount: 300, reason: "Other" },
+    ],
+  });
+  assert.strictEqual(otherEarnings.manualAdditionAmount, 600);
+
+  assert.throws(
+    () => assertNoDuplicateOvertime({
+      otAmount: 250,
+      additions: [{ type: "overtime", amount: 250 }],
+    }),
+    /Remove the manual overtime adjustment/,
+  );
+
+  const finalizationSource = payrollServiceSource.slice(
+    payrollServiceSource.indexOf("const finalizePayrollDocument"),
+    payrollServiceSource.indexOf("const finalizeWeavingPayroll ="),
+  );
+  assert.ok(
+    finalizationSource.includes("assertNoDuplicateOvertime"),
+    "finalization must independently reject duplicate Attendance and manual OT",
+  );
+})();
+
+(() => {
   const rows = [
     ...nonSundayRowsForH1().map((item) => ({ ...item, status: "absent" })),
     row("2026-09-06", "present", { isDoubleDuty: true }),
@@ -303,8 +369,19 @@ const scheduledRecoveries = ({
   });
 
   assert.strictEqual(result.offDayWorkedDays, 1);
-  assert.strictEqual(result.doubleDutyCount, 1);
-  assert.strictEqual(result.netSalary, 3600);
+  assert.strictEqual(result.doubleDutyCount, 0, "a stale flag cannot create double duty");
+  assert.strictEqual(result.netSalary, 2400);
+
+  const twoShifts = calc({
+    rows: [...rows, row("2026-09-06", "present")],
+    employeeData: employee({
+      salaryType: "daily",
+      baseSalary: 1200,
+      weeklyOffDays: ["sunday"],
+    }),
+  });
+  assert.strictEqual(twoShifts.doubleDutyCount, 1);
+  assert.strictEqual(twoShifts.netSalary, 3600);
 })();
 
 (() => {
@@ -378,8 +455,8 @@ const scheduledRecoveries = ({
     rows: periodRows("2026-09-H1"),
     employeeData: employee({ openingBalance: { type: "payable", amount: 5000 } }),
   });
-  assert.strictEqual(payable.openingBalanceRecovery.applied, true);
-  assert.strictEqual(payable.netSalary, 20000);
+  assert.strictEqual(payable.openingBalanceRecovery.applied, false);
+  assert.strictEqual(payable.netSalary, 15000);
 
   const receivable = calc({
     rows: periodRows("2026-09-H1"),
@@ -391,8 +468,8 @@ const scheduledRecoveries = ({
       },
     }),
   });
-  assert.strictEqual(receivable.openingBalanceRecovery.applied, true);
-  assert.strictEqual(receivable.netSalary, 14400);
+  assert.strictEqual(receivable.openingBalanceRecovery.applied, false);
+  assert.strictEqual(receivable.netSalary, 15000);
 
   const unmatchedManualReview = calc({
     rows: periodRows("2026-09-H1"),
@@ -415,6 +492,21 @@ const scheduledRecoveries = ({
   });
   assert.strictEqual(alreadyApplied.openingBalanceRecovery.applied, false);
   assert.strictEqual(alreadyApplied.netSalary, 15000);
+})();
+
+(() => {
+  const rangeSource = payrollServiceSource.slice(
+    payrollServiceSource.indexOf("const calculatePayrollRange"),
+    payrollServiceSource.indexOf("const precheckWeavingPayrollRange"),
+  );
+  assert.ok(rangeSource.includes("recoveryApplications: sourceDraft?.recoveryApplications"));
+
+  const finalizeRangeSource = payrollServiceSource.slice(
+    payrollServiceSource.indexOf("const finalizeWeavingPayrollRange"),
+    payrollServiceSource.indexOf("const loadSingleDraftContext"),
+  );
+  assert.ok(finalizeRangeSource.includes("applyPayrollPaymentInSession"));
+  assert.ok(finalizeRangeSource.includes("WeavingPayrollOperation.create"));
 })();
 
 (() => {

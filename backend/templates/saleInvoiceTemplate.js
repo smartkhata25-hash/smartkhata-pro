@@ -236,8 +236,9 @@ body {
 
 table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
   border: 2px solid black;
 }
 
@@ -260,10 +261,46 @@ td.left {
   padding-left: 6px;
 }
 
+.item-cell,
+.description-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.numeric-cell,
+.numeric-heading {
+  box-sizing: border-box;
+  min-width: 6ch;
+  padding-left: 3px;
+  padding-right: 3px;
+  white-space: nowrap;
+}
+
+.rate-cell,
+.amount-cell {
+  min-width: 8ch;
+}
+
+${
+  page?.pageWidth === "thermal"
+    ? `
+.numeric-cell,
+.numeric-heading {
+  font-size: 10px;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+`
+    : ""
+}
+
 /* ================= TOTALS ================= */
 .totals {
   margin-top: ${blockSpacing}px;
   width: 325px;
+  max-width: 100%;
+  box-sizing: border-box;
   margin-left: ${lang === "ur" ? "0" : "auto"};
   margin-right: ${lang === "ur" ? "auto" : "0"};
   font-weight: 700;
@@ -337,7 +374,7 @@ ${page?.isQuotation ? `<h1 style="text-align:center;font-size:22px;margin:8px 0 
 <table>
 <thead>
 <tr>
-  <th style="width:5%">#</th>
+  <th class="numeric-heading" style="width:5%">#</th>
   <th style="${widthStyle("name")}; text-align:${lang === "ur" ? "right" : "left"};">${t("item", lang)}</th>
   ${
     columns?.showDescription
@@ -345,9 +382,9 @@ ${page?.isQuotation ? `<h1 style="text-align:center;font-size:22px;margin:8px 0 
       : ""
   }
   ${columns?.showUOM ? `<th style="${widthStyle("uom")}">${t("print.showUom", lang)}</th>` : ""}
-  <th style="${widthStyle("quantity")}">${t("qty", lang)}</th>
-  <th style="${widthStyle("price")}">${t("rate", lang)}</th>
-  <th style="${widthStyle("total")}">${t("amount", lang)}</th>
+  <th class="numeric-heading" style="${widthStyle("quantity")}">${t("qty", lang)}</th>
+  <th class="numeric-heading rate-cell" style="${widthStyle("price")}">${t("rate", lang)}</th>
+  <th class="numeric-heading amount-cell" style="${widthStyle("total")}">${t("amount", lang)}</th>
 </tr>
 </thead>
 
@@ -358,8 +395,9 @@ ${
         .map(
           (item, index) => `
 <tr>
-  <td>${index + 1}</td>
+  <td class="numeric-cell">${index + 1}</td>
   <td
+  class="item-cell"
   style="
     text-align:${lang === "ur" ? "right" : "left"};
     padding-right:${lang === "ur" ? "6px" : "0"};
@@ -368,11 +406,11 @@ ${
 >
   ${item.name || "-"}
 </td>
-  ${columns?.showDescription ? `<td>${item.description || "-"}</td>` : ""}
+  ${columns?.showDescription ? `<td class="description-cell">${item.description || "-"}</td>` : ""}
   ${columns?.showUOM ? `<td>${item.uom || "-"}</td>` : ""}
-  <td>${item.quantity || 0}</td>
-  <td>${formatMoney(item.price)}</td>
-  <td>${formatMoney(item.total)}</td>
+  <td class="numeric-cell">${item.quantity || 0}</td>
+  <td class="numeric-cell rate-cell">${formatMoney(item.price)}</td>
+  <td class="numeric-cell amount-cell">${formatMoney(item.total)}</td>
 </tr>`,
         )
         .join("")

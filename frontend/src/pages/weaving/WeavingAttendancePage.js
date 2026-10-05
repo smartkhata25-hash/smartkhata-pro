@@ -25,6 +25,7 @@ import {
   getWeavingWorkPeriodState,
   saveWeavingAttendanceSession,
   startWeavingWorkPeriod,
+  swapWeavingAttendanceOrder,
 } from '../../services/weavingAttendanceService';
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
@@ -39,6 +40,7 @@ const EMPTY_LOCK = {
   canManage: false,
   canOverride: false,
   reason: 'open',
+  affectsFinalizedPayroll: false,
 };
 
 const STATUS_CONFIG = {
@@ -128,6 +130,11 @@ const shiftDate = (date, days) => {
   const month = String(value.getMonth() + 1).padStart(2, '0');
   const day = String(value.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const formatMobileDate = (date) => {
+  const [, month = '', day = ''] = String(date || '').split('-');
+  return day && month ? `${day}/${month}` : '—';
 };
 
 const StatChip = ({ labelKey, value, tone = 'slate' }) => {
@@ -668,7 +675,9 @@ const AttendanceHistory = ({ meta, filterClass }) => {
 };
 
 const WeavingAttendancePage = () => {
+  const mobileDateInputRef = useRef(null);
   const [view, setView] = useState('mark');
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const [date, setDate] = useState(getBusinessDateInputValue());
 
   const [unitId, setUnitId] = useState('');
@@ -684,6 +693,7 @@ const WeavingAttendancePage = () => {
   });
 
   const [rows, setRows] = useState([]);
+  const savedRowsRef = useRef([]);
 
   const [replacementOptions, setReplacementOptions] = useState([]);
 
@@ -694,6 +704,9 @@ const WeavingAttendancePage = () => {
   const [loadingRows, setLoadingRows] = useState(false);
 
   const [saving, setSaving] = useState(false);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [dragEmployeeId, setDragEmployeeId] = useState('');
+  const [dragOverEmployeeId, setDragOverEmployeeId] = useState('');
   const [workPeriod, setWorkPeriod] = useState(null);
 
   const [error, setError] = useState('');
@@ -705,6 +718,9 @@ const WeavingAttendancePage = () => {
   const canEdit = lock.canEdit && localCanManage && !saving && !loadingRows;
 
   const hasSelection = Boolean(date && unitId && shiftId);
+  const reorderFiltered = Boolean(departmentId || search.trim());
+  const canReorder =
+    localCanManage && hasSelection && !loadingRows && !saving && !reorderSaving && !reorderFiltered;
 
   useEffect(() => {
     let cancelled = false;
@@ -717,13 +733,30 @@ const WeavingAttendancePage = () => {
   const startAttendancePeriod = async () => {
     setSaving(true);
     try {
-      await startWeavingWorkPeriod({ startDate: date });
-      setWorkPeriod(await getWeavingWorkPeriodState(date));
+      const state = await startWeavingWorkPeriod({ startDate: date });
+      setWorkPeriod(state);
     } catch (startError) {
       setError(getErrorMessage(startError, 'weaving.attendance.messages.saveFailed'));
     } finally {
       setSaving(false);
     }
+  };
+
+  const openMobileDatePicker = () => {
+    const input = mobileDateInputRef.current;
+    if (!input) return;
+
+    try {
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+        return;
+      }
+    } catch {
+      // Fall through to the native click fallback.
+    }
+
+    input.focus();
+    input.click();
   };
 
   useEffect(() => {
@@ -792,7 +825,9 @@ const WeavingAttendancePage = () => {
         shiftId,
       });
 
-      setRows(normalizeRows(result?.rows || []));
+      const loadedRows = normalizeRows(result?.rows || []);
+      setRows(loadedRows);
+      savedRowsRef.current = loadedRows;
 
       setReplacementOptions(
         Array.isArray(result?.replacementOptions) ? result.replacementOptions : []
@@ -888,6 +923,71 @@ const WeavingAttendancePage = () => {
       isFactoryHoliday: false,
       otHours: replacementEmployeeId ? '' : current.otHours,
     }));
+  };
+
+  const swapDisplayedRows = (currentRows, employeeAId, employeeBId) => {
+    const next = [...currentRows];
+    const employeeAIndex = next.findIndex(
+      (row) => !row.generatedByReplacement && row.employeeId === employeeAId
+    );
+    const employeeBIndex = next.findIndex(
+      (row) => !row.generatedByReplacement && row.employeeId === employeeBId
+    );
+
+    if (employeeAIndex < 0 || employeeBIndex < 0) return currentRows;
+
+    [next[employeeAIndex], next[employeeBIndex]] = [next[employeeBIndex], next[employeeAIndex]];
+    return next;
+  };
+
+  const swapAttendanceRows = async (employeeAId, employeeBId) => {
+    if (!canReorder || !employeeAId || !employeeBId || employeeAId === employeeBId) return;
+
+    setRows((current) => swapDisplayedRows(current, employeeAId, employeeBId));
+    setReorderSaving(true);
+
+    try {
+      await swapWeavingAttendanceOrder({ employeeAId, employeeBId });
+    } catch (swapError) {
+      setRows((current) => swapDisplayedRows(current, employeeAId, employeeBId));
+      setError(getErrorMessage(swapError, 'weaving.attendance.messages.loadFailed'));
+    } finally {
+      setReorderSaving(false);
+      setDragEmployeeId('');
+      setDragOverEmployeeId('');
+    }
+  };
+
+  const beginRowReorder = (event, row) => {
+    if (!canReorder || row.generatedByReplacement) return;
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragEmployeeId(row.employeeId);
+    setDragOverEmployeeId(row.employeeId);
+  };
+
+  const moveRowReorder = (event) => {
+    if (!dragEmployeeId) return;
+
+    const targetRow = document.elementFromPoint(event.clientX, event.clientY)?.closest(
+      'tr[data-reorder-employee-id]'
+    );
+    const targetEmployeeId = targetRow?.dataset?.reorderEmployeeId || '';
+    if (targetEmployeeId) setDragOverEmployeeId(targetEmployeeId);
+  };
+
+  const finishRowReorder = (event) => {
+    if (!dragEmployeeId) return;
+
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const sourceEmployeeId = dragEmployeeId;
+    const targetRow = document.elementFromPoint(event.clientX, event.clientY)?.closest(
+      'tr[data-reorder-employee-id]'
+    );
+    const targetEmployeeId = targetRow?.dataset?.reorderEmployeeId || dragOverEmployeeId;
+    setDragEmployeeId('');
+    setDragOverEmployeeId('');
+    swapAttendanceRows(sourceEmployeeId, targetEmployeeId);
   };
 
   const isVisible = useCallback(
@@ -1005,6 +1105,22 @@ const WeavingAttendancePage = () => {
       return;
     }
 
+    const comparable = (items) => JSON.stringify(items.map((row) => ({
+      employeeId: row.employeeId,
+      status: row.status || '',
+      otHours: Number(row.otHours || 0),
+      replacementEmployeeId: row.replacementEmployeeId || '',
+      note: row.note || '',
+      isFactoryHoliday: row.isFactoryHoliday === true,
+    })));
+    if (
+      lock.affectsFinalizedPayroll &&
+      comparable(rows) !== comparable(savedRowsRef.current) &&
+      !(await requestWeavingConfirmation({
+        message: "This attendance is part of a finalized payroll. Saving this correction will automatically revise the employee's payroll and accounts.",
+      }))
+    ) return;
+
     try {
       setSaving(true);
       setError('');
@@ -1016,7 +1132,9 @@ const WeavingAttendancePage = () => {
         rows: buildPayloadRows(),
       });
 
-      setRows(normalizeRows(result?.rows || []));
+      const savedRows = normalizeRows(result?.rows || []);
+      setRows(savedRows);
+      savedRowsRef.current = savedRows;
 
       setReplacementOptions(
         Array.isArray(result?.replacementOptions) ? result.replacementOptions : []
@@ -1034,12 +1152,72 @@ const WeavingAttendancePage = () => {
     'h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 md:h-10 md:text-sm';
 
   return (
-    <div className="min-h-full min-w-0 space-y-3 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-2.5 sm:p-3 md:p-4 lg:p-5">
-      <header className="overflow-visible rounded-xl border border-cyan-100 bg-white shadow-sm">
+    <div
+      className={`${
+        view === 'mark'
+          ? 'flex h-full min-h-0 flex-col gap-3 overflow-hidden'
+          : 'min-h-full space-y-3 overflow-x-hidden'
+      } min-w-0 bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-2.5 sm:p-3 md:block md:h-auto md:min-h-full md:space-y-3 md:overflow-x-hidden md:overflow-y-visible md:p-4 lg:p-5`}
+    >
+      <header className="flex-shrink-0 overflow-visible rounded-xl border border-cyan-100 bg-white shadow-sm">
         <div className="h-1 w-full bg-gradient-to-r from-slate-800 via-cyan-500 to-emerald-500" />
 
         <div className="space-y-3 px-3 py-3 md:px-4 md:py-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden md:hidden">
+            <div className="flex flex-shrink-0 items-center gap-0.5 border-r border-slate-200 pr-1">
+              <button
+                type="button"
+                title={t('weaving.attendance.markAttendance')}
+                aria-label={t('weaving.attendance.markAttendance')}
+                onClick={() => setView('mark')}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs transition ${
+                  view === 'mark'
+                    ? 'bg-cyan-700 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                <FaCalendarCheck />
+              </button>
+              <button
+                type="button"
+                title={t('weaving.attendance.attendanceList')}
+                aria-label={t('weaving.attendance.attendanceList')}
+                onClick={() => setView('list')}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs transition ${
+                  view === 'list'
+                    ? 'bg-cyan-700 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                <FaList />
+              </button>
+            </div>
+
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-0.5 text-[9px] font-black">
+              <span className="whitespace-nowrap rounded border border-slate-200 bg-white px-1 py-1 text-slate-700">T {summary.total}</span>
+              <span className="whitespace-nowrap rounded border border-emerald-200 bg-emerald-50 px-1 py-1 text-emerald-700">P {summary.present}</span>
+              <span className="whitespace-nowrap rounded border border-rose-200 bg-rose-50 px-1 py-1 text-rose-700">A {summary.absent}</span>
+              <span className="whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-1 py-1 text-amber-800">L {summary.leave}</span>
+              <span className="whitespace-nowrap rounded border border-cyan-200 bg-cyan-50 px-1 py-1 text-cyan-700">OT {summary.ot}</span>
+              <span className="whitespace-nowrap rounded border border-indigo-200 bg-indigo-50 px-1 py-1 text-indigo-700">D {summary.double}</span>
+              <span
+                title={t(
+                  pending === 0 && rows.length
+                    ? 'weaving.attendance.complete'
+                    : 'weaving.attendance.pending'
+                )}
+                className={`inline-flex min-w-6 items-center justify-center whitespace-nowrap rounded border px-1 py-1 ${
+                  pending === 0 && rows.length
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-800'
+                }`}
+              >
+                {pending === 0 && rows.length ? <FaCheck /> : `!${pending}`}
+              </span>
+            </div>
+          </div>
+
+          <div className="hidden flex-wrap items-center justify-between gap-2.5 md:flex">
             <div className="flex min-w-0 items-center gap-3">
               <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 via-slate-700 to-cyan-700 text-base text-white shadow-sm ring-1 ring-cyan-200 md:h-11 md:w-11 md:text-lg">
                 <FaCalendarCheck />
@@ -1113,7 +1291,97 @@ const WeavingAttendancePage = () => {
             <AttendanceHistory meta={meta} filterClass={filterClass} />
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-[220px_165px_165px_190px_300px] md:justify-start">
+              <div className="flex min-w-0 items-center gap-1 md:hidden">
+                <div className="relative flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={openMobileDatePicker}
+                    className="h-8 w-[52px] rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-black text-slate-700 shadow-sm"
+                  >
+                    {formatMobileDate(date)}
+                  </button>
+                  <input
+                    ref={mobileDateInputRef}
+                    type="date"
+                    value={date}
+                    onChange={(event) => setDate(event.target.value)}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute h-px w-px opacity-0"
+                  />
+                </div>
+
+                <select
+                  aria-label={t('weaving.attendance.selectUnit')}
+                  value={unitId}
+                  onChange={(event) => setUnitId(event.target.value)}
+                  disabled={loadingMeta}
+                  className="h-8 w-[52px] min-w-0 rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700"
+                >
+                  <option value="">U</option>
+                  {meta.units.map((unit) => (
+                    <option key={unit._id} value={unit._id}>
+                      {unit.unitNo ? `U${unit.unitNo}` : unit.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  aria-label={t('weaving.attendance.selectShift')}
+                  value={shiftId}
+                  onChange={(event) => setShiftId(event.target.value)}
+                  disabled={loadingMeta}
+                  className="h-8 w-[64px] min-w-0 rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700"
+                >
+                  <option value="">Shift</option>
+                  {meta.shifts.map((shift) => (
+                    <option key={shift._id} value={shift._id}>
+                      {shift.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  aria-label={t('weaving.attendance.department')}
+                  value={departmentId}
+                  onChange={(event) => setDepartmentId(event.target.value)}
+                  disabled={loadingMeta}
+                  className="h-8 w-[52px] min-w-0 rounded-md border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700"
+                >
+                  <option value="">All</option>
+                  {meta.departments.map((department) => (
+                    <option key={department._id} value={department._id}>
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex h-8 min-w-0 flex-1 items-center rounded-md border border-slate-200 bg-white px-1.5 shadow-sm focus-within:border-cyan-500">
+                  <FaSearch className="h-2.5 w-2.5 flex-shrink-0 text-slate-400" />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t('weaving.attendance.search')}
+                    className="h-full min-w-0 flex-1 border-0 bg-transparent px-1 text-[10px] font-bold text-slate-700 outline-none placeholder:text-slate-400"
+                  />
+                </div>
+
+                {workPeriod?.canStart && workPeriod?.needsStart && localCanManage ? (
+                  <button
+                    type="button"
+                    title="Start Attendance"
+                    aria-label="Start Attendance"
+                    disabled={!date || saving}
+                    onClick={startAttendancePeriod}
+                    className="inline-flex h-8 w-7 flex-shrink-0 items-center justify-center rounded-md bg-cyan-700 text-xs text-white shadow-sm disabled:opacity-50"
+                  >
+                    <FaCalendarCheck />
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="hidden grid-cols-[220px_165px_165px_190px_300px] gap-2 md:grid md:justify-start">
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1139,14 +1407,14 @@ const WeavingAttendancePage = () => {
                   </button>
                 </div>
 
-                {workPeriod?.needsStart && localCanManage ? (
+                {workPeriod?.canStart && workPeriod?.needsStart && localCanManage ? (
                   <button
                     type="button"
                     disabled={!date || saving}
                     onClick={startAttendancePeriod}
                     className="h-10 rounded-lg bg-cyan-700 px-3 text-xs font-black text-white disabled:opacity-50"
                   >
-                    Start / Continue Attendance
+                    Start Attendance
                   </button>
                 ) : null}
 
@@ -1208,7 +1476,67 @@ const WeavingAttendancePage = () => {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+              <div className="flex min-w-0 flex-nowrap items-center justify-between gap-0.5 border-t border-slate-100 pt-2 md:hidden">
+                <button
+                  type="button"
+                  onClick={markBlankVisiblePresent}
+                  disabled={!canEdit || visibleRows.length === 0}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-1.5 text-[9px] font-black text-emerald-700 shadow-sm disabled:opacity-40"
+                >
+                  <FaCheck className="h-2.5 w-2.5 flex-shrink-0" />
+                  All P
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => overwriteVisible('absent')}
+                  disabled={!canEdit || visibleRows.length === 0}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 whitespace-nowrap rounded-md border border-rose-200 bg-rose-50 px-1.5 text-[9px] font-black text-rose-700 shadow-sm disabled:opacity-40"
+                >
+                  <FaTimes className="h-2.5 w-2.5 flex-shrink-0" />
+                  All A
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => overwriteVisible('leave')}
+                  disabled={!canEdit || visibleRows.length === 0}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[9px] font-black text-amber-800 shadow-sm disabled:opacity-40"
+                >
+                  <FaBan className="h-2.5 w-2.5 flex-shrink-0" />
+                  All L
+                </button>
+
+                <button
+                  type="button"
+                  onClick={markHoliday}
+                  disabled={!canEdit || rows.length === 0}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 whitespace-nowrap rounded-md border border-orange-200 bg-orange-50 px-1.5 text-[9px] font-black text-orange-800 shadow-sm disabled:opacity-40"
+                >
+                  <FaCalendarDay className="h-2.5 w-2.5 flex-shrink-0" />
+                  H-Day
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDate(getBusinessDateInputValue())}
+                  className="inline-flex h-8 min-w-0 items-center justify-center whitespace-nowrap rounded-md border bg-white px-1.5 text-[9px] font-black text-slate-600 shadow-sm"
+                >
+                  Today
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveAttendance}
+                  disabled={!canEdit || !hasSelection || rows.length === 0}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-0.5 whitespace-nowrap rounded-md bg-gradient-to-r from-slate-900 to-cyan-800 px-1.5 text-[9px] font-black text-white shadow-md disabled:opacity-40"
+                >
+                  <FaSave className="h-2.5 w-2.5 flex-shrink-0" />
+                  {saving ? '...' : 'Save'}
+                </button>
+              </div>
+
+              <div className="hidden flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 md:flex">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -1304,21 +1632,28 @@ const WeavingAttendancePage = () => {
 
       {/*
         TABLE:
-        Horizontal scrolling belongs to this table area only.
-        There is deliberately NO vertical max-height / overflow-y-auto
-        wrapper, so the scrollbar is not attached to the table header.
+        Mobile keeps the real header sticky while employee rows scroll.
+        Expanded mobile mode also allows horizontal table scrolling.
       */}
       {view === 'mark' && (
-        <section className="relative rounded-xl border border-slate-200 bg-white shadow-md">
-          <div className="w-full overflow-x-auto overflow-y-hidden">
-            <table className="w-full min-w-[760px] border-collapse text-[10px] sm:text-[11px] md:min-w-[1000px] md:text-sm">
-              <thead className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 text-white">
+        <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md md:block md:overflow-visible">
+          <div
+            className={`min-h-0 w-full flex-1 overflow-y-auto ${
+              mobileDetailsOpen ? 'overflow-x-auto' : 'overflow-x-hidden'
+            } md:overflow-x-auto md:overflow-y-hidden`}
+          >
+            <table
+              className={`w-full border-collapse text-[10px] sm:text-[11px] md:min-w-[1000px] md:table-auto md:text-sm ${
+                mobileDetailsOpen ? 'min-w-[760px]' : 'min-w-0 table-fixed'
+              }`}
+            >
+              <thead className="sticky top-0 z-10 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 text-white md:static">
                 <tr>
-                  <th className="w-10 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'w-10' : 'w-[7%]'} border-r border-white/10 px-1 py-3 text-center text-xs font-black md:w-10 md:px-2 md:text-sm`}>
                     #
                   </th>
 
-                  <th className="min-w-[155px] border-r border-white/10 px-3 py-3 text-left text-xs font-black md:min-w-[215px] md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'min-w-[155px]' : 'w-[43%]'} border-r border-white/10 px-2 py-3 text-left text-xs font-black md:min-w-[215px] md:w-auto md:px-3 md:text-sm`}>
                     {t('weaving.attendance.employee')}
                   </th>
 
@@ -1326,22 +1661,34 @@ const WeavingAttendancePage = () => {
                     {t('weaving.attendance.department')}
                   </th>
 
-                  <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-28 md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'w-20' : 'w-[15%]'} border-r border-white/10 px-1 py-3 text-center text-xs font-black md:w-28 md:px-2 md:text-sm`}>
                     <span className="md:hidden">OT</span>
 
                     <span className="hidden md:inline">Overtime</span>
                   </th>
 
-                  <th className="w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:w-32 md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'table-cell' : 'hidden'} w-20 border-r border-white/10 px-2 py-3 text-center text-xs font-black md:table-cell md:w-32 md:text-sm`}>
                     {t('weaving.attendance.duty')}
                   </th>
 
-                  <th className="min-w-[150px] border-r border-white/10 px-2 py-3 text-left text-xs font-black md:min-w-[235px] md:px-3 md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'table-cell' : 'hidden'} min-w-[150px] border-r border-white/10 px-2 py-3 text-left text-xs font-black md:table-cell md:min-w-[235px] md:px-3 md:text-sm`}>
                     {t('weaving.attendance.replacement')}
                   </th>
 
-                  <th className="min-w-[120px] px-2 py-3 text-center text-xs font-black md:min-w-[150px] md:text-sm">
+                  <th className={`${mobileDetailsOpen ? 'min-w-[120px]' : 'w-[35%]'} relative px-1 py-3 text-center text-xs font-black md:min-w-[150px] md:w-auto md:px-2 md:text-sm`}>
                     {t('weaving.attendance.attendance')}
+                    <button
+                      type="button"
+                      title={mobileDetailsOpen ? 'Hide Duty and Replacement' : 'Show Duty and Replacement'}
+                      aria-label={mobileDetailsOpen ? 'Hide Duty and Replacement' : 'Show Duty and Replacement'}
+                      aria-expanded={mobileDetailsOpen}
+                      onClick={() => setMobileDetailsOpen((current) => !current)}
+                      className="absolute right-1 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-white/30 bg-white/10 text-[9px] text-white md:hidden"
+                    >
+                      <FaChevronDown
+                        className={`transition-transform ${mobileDetailsOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
                   </th>
                 </tr>
               </thead>
@@ -1350,9 +1697,12 @@ const WeavingAttendancePage = () => {
                 {!hasSelection && (
                   <tr>
                     <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
+                      colSpan={mobileDetailsOpen ? 6 : 4}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500 md:hidden"
                     >
+                      {t('weaving.attendance.messages.selectRequired')}
+                    </td>
+                    <td colSpan={7} className="hidden px-4 py-10 text-center text-sm font-bold text-slate-500 md:table-cell">
                       {t('weaving.attendance.messages.selectRequired')}
                     </td>
                   </tr>
@@ -1361,9 +1711,12 @@ const WeavingAttendancePage = () => {
                 {hasSelection && loadingRows && (
                   <tr>
                     <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
+                      colSpan={mobileDetailsOpen ? 6 : 4}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500 md:hidden"
                     >
+                      {t('common.loading')}
+                    </td>
+                    <td colSpan={7} className="hidden px-4 py-10 text-center text-sm font-bold text-slate-500 md:table-cell">
                       {t('common.loading')}
                     </td>
                   </tr>
@@ -1372,9 +1725,12 @@ const WeavingAttendancePage = () => {
                 {hasSelection && !loadingRows && visibleRows.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-sm font-bold text-slate-500"
+                      colSpan={mobileDetailsOpen ? 6 : 4}
+                      className="px-4 py-10 text-center text-sm font-bold text-slate-500 md:hidden"
                     >
+                      {t('weaving.attendance.messages.empty')}
+                    </td>
+                    <td colSpan={7} className="hidden px-4 py-10 text-center text-sm font-bold text-slate-500 md:table-cell">
                       {t('weaving.attendance.messages.empty')}
                     </td>
                   </tr>
@@ -1394,14 +1750,43 @@ const WeavingAttendancePage = () => {
                     return (
                       <tr
                         key={`${row.employeeId}-${row.attendanceId || 'draft'}`}
-                        className="bg-white transition-colors even:bg-slate-50/50 hover:bg-cyan-50/60"
+                        data-reorder-employee-id={row.generatedByReplacement ? undefined : row.employeeId}
+                        className={`bg-white transition-colors even:bg-slate-50/50 hover:bg-cyan-50/60 ${
+                          dragOverEmployeeId === row.employeeId && dragEmployeeId !== row.employeeId
+                            ? 'ring-2 ring-inset ring-cyan-400'
+                            : ''
+                        }`}
                       >
-                        <td className="border-r border-slate-100 px-2 py-2.5 text-center align-middle text-xs font-black text-slate-500 md:text-sm">
-                          {index + 1}
+                        <td className="border-r border-slate-100 px-1 py-2.5 text-center align-middle text-xs font-black text-slate-500 md:px-2 md:text-sm">
+                          <button
+                            type="button"
+                            title={
+                              reorderFiltered
+                                ? 'Clear Department and Search filters to reorder'
+                                : 'Drag to swap attendance position'
+                            }
+                            aria-label={`Attendance position ${index + 1}. Drag to swap.`}
+                            disabled={!canReorder || row.generatedByReplacement}
+                            onPointerDown={(event) => beginRowReorder(event, row)}
+                            onPointerMove={moveRowReorder}
+                            onPointerUp={finishRowReorder}
+                            onPointerCancel={() => {
+                              setDragEmployeeId('');
+                              setDragOverEmployeeId('');
+                            }}
+                            className="inline-flex h-8 w-full touch-none select-none flex-col items-center justify-center rounded text-slate-500 enabled:cursor-grab enabled:active:cursor-grabbing disabled:cursor-default disabled:opacity-60"
+                          >
+                            <span className="leading-none">{index + 1}</span>
+                            {!row.generatedByReplacement && (
+                              <span aria-hidden="true" className="mt-0.5 text-[8px] leading-none text-slate-400">
+                                ⋮⋮
+                              </span>
+                            )}
+                          </button>
                         </td>
 
-                        <td className="border-r border-slate-100 px-2.5 py-2.5 align-middle md:px-3">
-                          <div className="max-w-[155px] md:max-w-none">
+                        <td className="border-r border-slate-100 px-2 py-2.5 align-middle md:px-3">
+                          <div className={`${mobileDetailsOpen ? 'max-w-[155px]' : 'max-w-full'} md:max-w-none`}>
                             <div className="truncate text-xs font-black leading-tight text-slate-950 md:text-base">
                               {row.employeeName || '—'}
                             </div>
@@ -1416,7 +1801,7 @@ const WeavingAttendancePage = () => {
                           {row.departmentName || '—'}
                         </td>
 
-                        <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
+                        <td className="border-r border-slate-100 px-1 py-2.5 text-center align-middle md:px-1.5">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -1425,15 +1810,15 @@ const WeavingAttendancePage = () => {
                             disabled={otDisabled}
                             placeholder="0"
                             title="Overtime Hours"
-                            className="h-8 w-12 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-black text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100 disabled:text-slate-400 md:h-9 md:w-16 md:text-sm"
+                            className="h-8 w-10 rounded-lg border border-slate-200 bg-white px-1 text-center text-xs font-black text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100 disabled:text-slate-400 md:h-9 md:w-16 md:text-sm"
                           />
                         </td>
 
-                        <td className="border-r border-slate-100 px-1.5 py-2.5 text-center align-middle">
+                        <td className={`${mobileDetailsOpen ? 'table-cell' : 'hidden'} border-r border-slate-100 px-1.5 py-2.5 text-center align-middle md:table-cell`}>
                           <DutyBadge row={row} />
                         </td>
 
-                        <td className="border-r border-slate-100 px-1.5 py-2.5 align-middle md:px-3">
+                        <td className={`${mobileDetailsOpen ? 'table-cell' : 'hidden'} border-r border-slate-100 px-1.5 py-2.5 align-middle md:table-cell md:px-3`}>
                           <ReplacementSelect
                             row={row}
                             options={replacementOptions}
@@ -1444,8 +1829,8 @@ const WeavingAttendancePage = () => {
                           />
                         </td>
 
-                        <td className="px-2 py-2.5 text-center align-middle">
-                          <div className="inline-flex items-center gap-1 md:gap-1.5">
+                        <td className="px-1 py-2.5 text-center align-middle md:px-2">
+                          <div className="inline-flex items-center gap-0.5 md:gap-1.5">
                             {['present', 'absent', 'leave'].map((status) => (
                               <StatusButton
                                 key={status}

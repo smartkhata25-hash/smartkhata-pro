@@ -3,12 +3,16 @@ const mongoose = require("mongoose");
 const Employee = require("../models/Employee");
 const EmployeePayroll = require("../models/EmployeePayroll");
 const WeavingAttendance = require("../models/WeavingAttendance");
+const WeavingAttendanceCorrection = require("../models/WeavingAttendanceCorrection");
 const WeavingDepartment = require("../models/WeavingDepartment");
 const WeavingShift = require("../models/WeavingShift");
 const WeavingUnit = require("../models/WeavingUnit");
 const WeavingWorkPeriod = require("../models/WeavingWorkPeriod");
 const { logActivity } = require("../utils/activityLogger");
 const { PERMISSIONS } = require("../utils/permissionList");
+const { recalculateTouchedAccounts } = require("../services/employee/employeeAccountingService");
+const { reconcileEmployeeDateDutyState } = require("../services/weaving/weavingDutyStateService");
+const { reviseFinalizedPayrollsForAttendance } = require("../services/weaving/weavingPayrollService");
 
 const WEAVING_SCOPE = "weaving";
 const BUSINESS_TIME_ZONE = "Asia/Karachi";
@@ -172,13 +176,7 @@ const buildLockState = (dateKey, shift = {}) => {
 };
 
 const canOverrideAttendance = (req) => {
-  if (req.user?.accountRole === "owner") return true;
-
-  const permissions = Array.isArray(req.user?.permissions)
-    ? req.user.permissions
-    : [];
-
-  return permissions.includes(PERMISSIONS.WEAVING_ATTENDANCE.OVERRIDE);
+  return req.user?.accountRole === "owner";
 };
 
 const canManageAttendance = (req) => {
@@ -202,6 +200,83 @@ const assertEditable = ({ req, lockState }) => {
   if (lockState.locked && !canOverrideAttendance(req)) {
     throw createHttpError("Attendance is locked for this shift", 423);
   }
+};
+
+const assertPostedPayrollCorrectionAllowed = ({ req, affectsPostedPayroll }) => {
+  if (affectsPostedPayroll && !canOverrideAttendance(req)) {
+    throw createHttpError("Only Owner / Main Account may correct attendance included in finalized payroll", 403);
+  }
+};
+
+const assertNoUnauthorizedPostedPayrollEdit = async ({ req, context, preparedRows, session }) => {
+  if (canOverrideAttendance(req)) return;
+  const originalIds = preparedRows.map((row) => row.employee._id);
+  const requestedReplacementIds = preparedRows.map((row) => row.replacement?._id).filter(Boolean);
+  const existingReplacementRows = await WeavingAttendance.find({
+    userId: context.userId,
+    moduleScope: WEAVING_SCOPE,
+    attendanceDate: context.dateKey,
+    shiftId: context.shift._id,
+    replacementForEmployeeId: { $in: originalIds },
+    generatedByReplacement: true,
+  }).select("employeeId").session(session);
+  const employeeIds = [...new Set([
+    ...originalIds.map(idOf),
+    ...requestedReplacementIds.map(idOf),
+    ...existingReplacementRows.map((row) => idOf(row.employeeId)),
+  ].filter(Boolean))];
+  const affectsPostedPayroll = employeeIds.length > 0 && Boolean(await EmployeePayroll.exists({
+    userId: context.userId,
+    moduleScope: WEAVING_SCOPE,
+    employeeId: { $in: employeeIds },
+    isDeleted: false,
+    status: { $in: ["posted", "finalized", "partially_paid", "paid"] },
+    $and: [
+      { $or: [{ segmentStart: { $lte: context.dateKey } }, { periodStart: { $lte: context.dateKey } }] },
+      { $or: [
+        { calculationThroughDate: { $gte: context.dateKey } },
+        { segmentEnd: { $gte: context.dateKey } },
+        { periodEnd: { $gte: context.dateKey } },
+      ] },
+    ],
+  }).session(session));
+  assertPostedPayrollCorrectionAllowed({ req, affectsPostedPayroll });
+};
+
+const buildAttendanceCorrectionDocument = ({ context, actorId, candidate, current, revision }) => {
+  if (!revision) return null;
+  const next = current || {};
+  const document = {
+    userId: context.userId,
+    employeeId: candidate.employeeId,
+    attendanceId: candidate.attendanceId,
+    attendanceDate: context.dateKey,
+    shiftId: context.shift._id,
+    previousStatus: candidate.previousStatus || "",
+    newStatus: next.status || "",
+    previousOtHours: Number(candidate.previousOtHours || 0),
+    newOtHours: Number(next.otHours || 0),
+    previousIsDoubleDuty: Boolean(candidate.previousIsDoubleDuty),
+    newIsDoubleDuty: Boolean(next.isDoubleDuty),
+    previousReplacementEmployeeId: candidate.previousReplacementEmployeeId || null,
+    newReplacementEmployeeId: next.replacementEmployeeId || null,
+    previousReplacementForEmployeeId: candidate.previousReplacementForEmployeeId || null,
+    newReplacementForEmployeeId: next.replacementForEmployeeId || null,
+    actorId,
+    payrollId: revision.payrollId,
+    payrollIds: [revision.payrollId],
+    oldPayrollNetAmount: revision.oldNetSalary,
+    revisedPayrollNetAmount: revision.newNetSalary,
+    oldJournalEntryId: revision.oldJournalEntryId || null,
+    reversalJournalEntryIds: revision.reversalJournalEntryIds,
+    newJournalEntryId: revision.newJournalEntryId || null,
+  };
+  const changed = document.previousStatus !== document.newStatus
+    || document.previousOtHours !== document.newOtHours
+    || document.previousIsDoubleDuty !== document.newIsDoubleDuty
+    || idOf(document.previousReplacementEmployeeId) !== idOf(document.newReplacementEmployeeId)
+    || idOf(document.previousReplacementForEmployeeId) !== idOf(document.newReplacementForEmployeeId);
+  return changed ? document : null;
 };
 
 const resolveUnit = async (userId, unitId) => {
@@ -296,6 +371,17 @@ const normalizeOtHours = (value) => {
 
 const normalizeNote = (value) => normalizeText(value).slice(0, 200);
 
+const getAttendanceListOrder = (employee = {}) =>
+  Number.isFinite(employee.attendanceListOrder)
+    ? employee.attendanceListOrder
+    : Number(employee.listOrder || 0);
+
+const compareAttendanceEmployees = (left = {}, right = {}) =>
+  getAttendanceListOrder(left) - getAttendanceListOrder(right) ||
+  Number(left.listOrder || 0) - Number(right.listOrder || 0) ||
+  String(left.name || "").localeCompare(String(right.name || "")) ||
+  idOf(left).localeCompare(idOf(right));
+
 const joinedByDateQuery = (dateKey) => ({
   $or: [
     { joiningDate: null },
@@ -303,19 +389,6 @@ const joinedByDateQuery = (dateKey) => ({
     { joiningDate: { $lte: new Date(`${dateKey}T23:59:59${BUSINESS_UTC_OFFSET}`) } },
   ],
 });
-
-const hasOtherPresentShift = async ({ userId, dateKey, employeeId, shiftId, session }) => {
-  const existing = await WeavingAttendance.exists({
-    userId,
-    moduleScope: WEAVING_SCOPE,
-    attendanceDate: dateKey,
-    employeeId,
-    shiftId: { $ne: shiftId },
-    status: "present",
-  }).session(session || null);
-
-  return Boolean(existing);
-};
 
 const serializeRow = ({ record = null, employee = null, locked = false }) => {
   const source = toPlain(record) || {};
@@ -327,6 +400,7 @@ const serializeRow = ({ record = null, employee = null, locked = false }) => {
     employeeName: source.employeeName || employeeRow.name || "",
     employeeNo: source.employeeNo || employeeRow.employeeNo || "",
     listOrder: employeeRow.listOrder || 0,
+    attendanceListOrder: getAttendanceListOrder(employeeRow),
     departmentId: idOf(source.departmentId || employeeRow.departmentId),
     departmentName: source.departmentName || employeeRow.departmentName || "",
     designationName: source.designationName || employeeRow.designationName || "",
@@ -386,9 +460,9 @@ const getSessionRows = async ({ userId, dateKey, unit, shift, lockState }) => {
     status: "active",
     isDeleted: false,
     ...joinedByDateQuery(dateKey),
-  })
-    .sort({ listOrder: 1, name: 1 })
-    .lean();
+  }).lean();
+
+  baseEmployees.sort(compareAttendanceEmployees);
 
   const records = await WeavingAttendance.find({
     userId,
@@ -446,6 +520,7 @@ const getSessionRows = async ({ userId, dateKey, unit, shift, lockState }) => {
     }
 
     return (
+      Number(left.attendanceListOrder || 0) - Number(right.attendanceListOrder || 0) ||
       Number(left.listOrder || 0) - Number(right.listOrder || 0) ||
       left.employeeName.localeCompare(right.employeeName)
     );
@@ -483,6 +558,20 @@ const buildSessionPayload = async ({ req, context }) => {
   const replacementOptions = await getReplacementOptions(context);
   const canOverride = canOverrideAttendance(req);
   const canManage = canManageAttendance(req);
+  const employeeIds = rows.map((row) => row.employeeId).filter(Boolean);
+  const affectsFinalizedPayroll = employeeIds.length > 0
+    ? Boolean(await EmployeePayroll.exists({
+        userId: context.userId,
+        moduleScope: WEAVING_SCOPE,
+        employeeId: { $in: employeeIds },
+        isDeleted: false,
+        status: { $in: ["posted", "finalized", "partially_paid", "paid"] },
+        $and: [
+          { $or: [{ segmentStart: { $lte: context.dateKey } }, { periodStart: { $lte: context.dateKey } }] },
+          { $or: [{ calculationThroughDate: { $gte: context.dateKey } }, { segmentEnd: { $gte: context.dateKey } }, { periodEnd: { $gte: context.dateKey } }] },
+        ],
+      }))
+    : false;
 
   return {
     date: context.dateKey,
@@ -506,7 +595,10 @@ const buildSessionPayload = async ({ req, context }) => {
       reason: context.lockState.reason,
       canOverride,
       canManage,
-      canEdit: canManage && (!context.lockState.locked || canOverride),
+      canEdit: canManage
+        && (!context.lockState.locked || canOverride)
+        && (!affectsFinalizedPayroll || canOverride),
+      affectsFinalizedPayroll,
     },
   };
 };
@@ -676,6 +768,8 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
   const actorId = context.actorId;
   let replacementChangeCount = 0;
   let savedCount = 0;
+  const affectedEmployeeIds = new Set();
+  const correctionCandidates = [];
 
   for (const row of preparedRows) {
     const staleGeneratedQuery = {
@@ -693,23 +787,38 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
       staleGeneratedQuery.employeeId = { $ne: row.replacement._id };
     }
 
+    const staleGeneratedRows = await WeavingAttendance.find(staleGeneratedQuery)
+      .select("employeeId status otHours isDoubleDuty replacementEmployeeId replacementForEmployeeId")
+      .session(session);
+    staleGeneratedRows.forEach((record) => {
+      affectedEmployeeIds.add(idOf(record.employeeId));
+      correctionCandidates.push({
+        attendanceId: record._id,
+        employeeId: record.employeeId,
+        previousStatus: record.status,
+        previousOtHours: Number(record.otHours || 0),
+        previousIsDoubleDuty: Boolean(record.isDoubleDuty),
+        previousReplacementEmployeeId: record.replacementEmployeeId || null,
+        previousReplacementForEmployeeId: record.replacementForEmployeeId || null,
+      });
+    });
     const deleted = await WeavingAttendance.deleteMany(staleGeneratedQuery).session(session);
     if (deleted.deletedCount > 0) {
       replacementChangeCount += deleted.deletedCount;
     }
-
-    const isDoubleDuty = await hasOtherPresentShift({
-      userId: context.userId,
-      dateKey: context.dateKey,
-      employeeId: row.employee._id,
-      shiftId: context.shift._id,
-      session,
-    });
+    affectedEmployeeIds.add(idOf(row.employee._id));
     const snapshot = buildEmployeeSnapshot({
       employee: row.employee,
       unit: context.unit,
       shift: context.shift,
     });
+    const existingOriginal = await WeavingAttendance.findOne({
+      userId: context.userId,
+      moduleScope: WEAVING_SCOPE,
+      attendanceDate: context.dateKey,
+      shiftId: context.shift._id,
+      employeeId: row.employee._id,
+    }).session(session);
     const originalRecord = await WeavingAttendance.findOneAndUpdate(
       {
         userId: context.userId,
@@ -725,9 +834,8 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
           note: row.note,
           isFactoryHoliday: row.isFactoryHoliday,
           otHours: row.otHours,
-          dutyType:
-            row.status === "present" && isDoubleDuty ? "double" : "normal",
-          isDoubleDuty: row.status === "present" && isDoubleDuty,
+          dutyType: "normal",
+          isDoubleDuty: false,
           replacementEmployeeId: row.replacement?._id || null,
           replacementEmployeeNo: row.replacement?.employeeNo || "",
           replacementEmployeeName: row.replacement?.name || "",
@@ -757,6 +865,15 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
         session,
       },
     );
+    correctionCandidates.push({
+      attendanceId: originalRecord._id,
+      employeeId: row.employee._id,
+      previousStatus: existingOriginal?.status || "",
+      previousOtHours: Number(existingOriginal?.otHours || 0),
+      previousIsDoubleDuty: Boolean(existingOriginal?.isDoubleDuty),
+      previousReplacementEmployeeId: existingOriginal?.replacementEmployeeId || null,
+      previousReplacementForEmployeeId: existingOriginal?.replacementForEmployeeId || null,
+    });
     savedCount += 1;
 
     if (!row.replacement) {
@@ -765,13 +882,14 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
 
     replacementChangeCount += 1;
 
-    const replacementIsDouble = await hasOtherPresentShift({
+    affectedEmployeeIds.add(idOf(row.replacement._id));
+    const existingGenerated = await WeavingAttendance.findOne({
       userId: context.userId,
-      dateKey: context.dateKey,
-      employeeId: row.replacement._id,
+      moduleScope: WEAVING_SCOPE,
+      attendanceDate: context.dateKey,
       shiftId: context.shift._id,
-      session,
-    });
+      employeeId: row.replacement._id,
+    }).session(session);
     const generatedRecord = await WeavingAttendance.findOneAndUpdate(
       {
         userId: context.userId,
@@ -791,8 +909,8 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
           note: "",
           isFactoryHoliday: false,
           otHours: 0,
-          dutyType: replacementIsDouble ? "double_replacement" : "replacement",
-          isDoubleDuty: replacementIsDouble,
+          dutyType: "replacement",
+          isDoubleDuty: false,
           replacementEmployeeId: null,
           replacementEmployeeNo: "",
           replacementEmployeeName: "",
@@ -822,12 +940,56 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
         session,
       },
     );
+    correctionCandidates.push({
+      attendanceId: generatedRecord._id,
+      employeeId: row.replacement._id,
+      previousStatus: existingGenerated?.status || "",
+      previousOtHours: Number(existingGenerated?.otHours || 0),
+      previousIsDoubleDuty: Boolean(existingGenerated?.isDoubleDuty),
+      previousReplacementEmployeeId: existingGenerated?.replacementEmployeeId || null,
+      previousReplacementForEmployeeId: existingGenerated?.replacementForEmployeeId || null,
+    });
 
     await WeavingAttendance.updateOne(
       { _id: originalRecord._id },
       { $set: { replacementAttendanceId: generatedRecord._id } },
     ).session(session);
     savedCount += 1;
+  }
+
+  for (const employeeId of affectedEmployeeIds) {
+    await reconcileEmployeeDateDutyState({
+      userId: context.userId,
+      attendanceDate: context.dateKey,
+      employeeId,
+      session,
+    });
+  }
+
+  const payrollRevisionResult = await reviseFinalizedPayrollsForAttendance({
+    userId: context.userId,
+    attendanceDate: context.dateKey,
+    employeeIds: [...affectedEmployeeIds],
+    actorId,
+    session,
+  });
+  if (payrollRevisionResult.revisions.length && correctionCandidates.length) {
+    const revisedByEmployee = new Map(
+      payrollRevisionResult.revisions.map((revision) => [revision.employeeId, revision]),
+    );
+    const finalRows = await WeavingAttendance.find({
+      _id: { $in: correctionCandidates.map((candidate) => candidate.attendanceId) },
+    }).session(session);
+    const finalById = new Map(finalRows.map((record) => [idOf(record._id), record]));
+    const correctionDocuments = correctionCandidates.flatMap((candidate) => {
+      const current = finalById.get(idOf(candidate.attendanceId));
+      const revision = revisedByEmployee.get(idOf(candidate.employeeId));
+      const document = buildAttendanceCorrectionDocument({ context, actorId, candidate, current, revision });
+      return document ? [document] : [];
+    });
+    if (correctionDocuments.length) {
+      await WeavingAttendanceCorrection.insertMany(correctionDocuments, { session });
+    }
   }
 
   if (context.lockState.locked || replacementChangeCount > 0) {
@@ -853,6 +1015,8 @@ const savePreparedRows = async ({ req, context, preparedRows, session }) => {
   return {
     savedCount,
     replacementChangeCount,
+    payrollRevisions: payrollRevisionResult.revisions,
+    touchedAccountIds: payrollRevisionResult.touchedAccountIds,
   };
 };
 
@@ -922,29 +1086,86 @@ exports.getAttendanceSession = async (req, res) => {
   }
 };
 
-exports.getWorkPeriodState = async (req, res) => {
+exports.swapAttendanceOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const userId = getUserId(req);
-    const requestedDate = normalizeText(req.query.date);
-    const fromDate = normalizeText(req.query.fromDate) || requestedDate;
-    const toDate = normalizeText(req.query.toDate) || requestedDate;
-    const validRange = DATE_KEY_PATTERN.test(fromDate) && DATE_KEY_PATTERN.test(toDate) && fromDate <= toDate;
-    const coverageQuery = validRange
-      ? { startDate: { $lte: toDate }, $or: [{ endDate: "" }, { endDate: { $gte: fromDate } }] }
-      : {};
-    const activePeriod = await WeavingWorkPeriod.findOne({
-      userId,
-      moduleScope: WEAVING_SCOPE,
-      status: "active",
-      ...coverageQuery,
-    }).sort({ startDate: -1 }).lean();
-    const covered = activePeriod || await WeavingWorkPeriod.findOne({ userId, moduleScope: WEAVING_SCOPE, ...coverageQuery }).sort({ startDate: -1 }).lean();
-    const latest = covered || await WeavingWorkPeriod.findOne({ userId, moduleScope: WEAVING_SCOPE }).sort({ startDate: -1 }).lean();
-    const attendanceQuery = { userId, moduleScope: WEAVING_SCOPE };
-    let latestAttendance = null;
-    let latestFinalizedDate = "";
-    if (validRange) {
-      const finalizedRows = await EmployeePayroll.find({
+    const employeeAId = normalizeObjectId(req.body.employeeAId, "First employee", true);
+    const employeeBId = normalizeObjectId(req.body.employeeBId, "Second employee", true);
+
+    if (employeeAId === employeeBId) {
+      throw createHttpError("Select two different employees", 400);
+    }
+
+    let result;
+    await session.withTransaction(async () => {
+      const employees = await Employee.find({
+        _id: { $in: [employeeAId, employeeBId] },
+        userId,
+        moduleScope: WEAVING_SCOPE,
+        status: "active",
+        isDeleted: false,
+      }).session(session);
+
+      if (employees.length !== 2) {
+        throw createHttpError("Attendance employee not found", 404);
+      }
+
+      const employeeA = employees.find((employee) => idOf(employee) === employeeAId);
+      const employeeB = employees.find((employee) => idOf(employee) === employeeBId);
+
+      if (!sameId(employeeA.unitId, employeeB.unitId) || !sameId(employeeA.shiftId, employeeB.shiftId)) {
+        throw createHttpError("Employees must belong to the same Unit and Shift", 400);
+      }
+
+      const employeeAOrder = getAttendanceListOrder(employeeA);
+      const employeeBOrder = getAttendanceListOrder(employeeB);
+
+      employeeA.attendanceListOrder = employeeBOrder;
+      employeeB.attendanceListOrder = employeeAOrder;
+
+      await employeeA.save({ session });
+      await employeeB.save({ session });
+
+      result = {
+        employeeAId,
+        employeeBId,
+        employeeAOrder: employeeA.attendanceListOrder,
+        employeeBOrder: employeeB.attendanceListOrder,
+      };
+    });
+
+    return res.json({ message: "Attendance order updated", data: result });
+  } catch (error) {
+    return sendError(res, error, "Failed to update attendance order");
+  } finally {
+    await session.endSession();
+  }
+};
+
+const buildWorkPeriodState = async ({ userId, source = {} }) => {
+  const requestedDate = normalizeText(source.date);
+  const fromDate = normalizeText(source.fromDate) || requestedDate;
+  const toDate = normalizeText(source.toDate) || requestedDate;
+  const validRange = DATE_KEY_PATTERN.test(fromDate) && DATE_KEY_PATTERN.test(toDate) && fromDate <= toDate;
+  const coverageQuery = validRange
+    ? { startDate: { $lte: toDate }, $or: [{ endDate: "" }, { endDate: { $gte: fromDate } }] }
+    : {};
+  const activePeriod = await WeavingWorkPeriod.findOne({
+    userId,
+    moduleScope: WEAVING_SCOPE,
+    status: "active",
+    ...coverageQuery,
+  }).sort({ startDate: -1 }).lean();
+  const covered = activePeriod || await WeavingWorkPeriod.findOne({ userId, moduleScope: WEAVING_SCOPE, ...coverageQuery }).sort({ startDate: -1 }).lean();
+  const latest = covered || await WeavingWorkPeriod.findOne({ userId, moduleScope: WEAVING_SCOPE }).sort({ startDate: -1 }).lean();
+  const attendanceQuery = { userId, moduleScope: WEAVING_SCOPE };
+  let latestAttendance = null;
+  let latestFinalizedDate = "";
+  let hasFinalizedCoverage = false;
+  if (validRange) {
+    const finalizedRows = await EmployeePayroll.find({
         userId,
         moduleScope: WEAVING_SCOPE,
         isDeleted: { $ne: true },
@@ -953,33 +1174,44 @@ exports.getWorkPeriodState = async (req, res) => {
           { $or: [{ segmentStart: { $lte: toDate } }, { periodStart: { $lte: toDate } }] },
           { $or: [{ calculationThroughDate: { $gte: fromDate } }, { segmentEnd: { $gte: fromDate } }, { periodEnd: { $gte: fromDate } }] },
         ],
-      }).select("calculationThroughDate segmentEnd periodEnd").lean();
-      latestFinalizedDate = finalizedRows
-        .map((row) => row.calculationThroughDate || row.segmentEnd || row.periodEnd || "")
-        .filter((dateKey) => dateKey >= fromDate && dateKey <= toDate)
-        .sort()
-        .pop() || "";
-    }
-    const suggestedFromDate = activePeriod?.startDate
-      ? (validRange && activePeriod.startDate < fromDate ? fromDate : activePeriod.startDate)
-      : (latestFinalizedDate ? nextDateKey(latestFinalizedDate) : fromDate);
-    if (activePeriod) {
-      const attendanceFrom = validRange && suggestedFromDate < fromDate ? fromDate : suggestedFromDate;
-      const attendanceTo = validRange ? toDate : (activePeriod.endDate || "9999-12-31");
-      attendanceQuery.attendanceDate = { $gte: attendanceFrom, $lte: attendanceTo };
-      latestAttendance = await WeavingAttendance.findOne(attendanceQuery).sort({ attendanceDate: -1 }).select("attendanceDate").lean();
-    }
-    return res.json({
-      data: {
-        active: Boolean(activePeriod),
-        period: activePeriod || latest,
-        latestAttendanceDate: latestAttendance?.attendanceDate || "",
-        suggestedFromDate: validRange && suggestedFromDate <= toDate ? suggestedFromDate : "",
-        suggestedToDate: latestAttendance?.attendanceDate || "",
-        latestFinalizedDate,
-        needsStart: !activePeriod,
-      },
+    }).select("calculationThroughDate segmentEnd periodEnd").lean();
+    const finalizedThroughDates = finalizedRows
+      .map((row) => row.calculationThroughDate || row.segmentEnd || row.periodEnd || "");
+    hasFinalizedCoverage = finalizedThroughDates.some((dateKey) => dateKey >= fromDate);
+    latestFinalizedDate = finalizedThroughDates
+      .filter((dateKey) => dateKey >= fromDate && dateKey <= toDate)
+      .sort()
+      .pop() || "";
+  }
+  const suggestedFromDate = activePeriod?.startDate
+    ? (validRange && activePeriod.startDate < fromDate ? fromDate : activePeriod.startDate)
+    : (latestFinalizedDate ? nextDateKey(latestFinalizedDate) : fromDate);
+  if (activePeriod) {
+    const attendanceFrom = validRange && suggestedFromDate < fromDate ? fromDate : suggestedFromDate;
+    const attendanceTo = validRange ? toDate : (activePeriod.endDate || "9999-12-31");
+    attendanceQuery.attendanceDate = { $gte: attendanceFrom, $lte: attendanceTo };
+    latestAttendance = await WeavingAttendance.findOne(attendanceQuery).sort({ attendanceDate: -1 }).select("attendanceDate").lean();
+  }
+  const canStart = validRange && !activePeriod && !covered && !hasFinalizedCoverage;
+  return {
+    active: Boolean(activePeriod),
+    period: activePeriod || latest,
+    latestAttendanceDate: latestAttendance?.attendanceDate || "",
+    suggestedFromDate: validRange && suggestedFromDate <= toDate ? suggestedFromDate : "",
+    suggestedToDate: latestAttendance?.attendanceDate || "",
+    latestFinalizedDate,
+    canStart,
+    needsStart: canStart,
+  };
+};
+
+exports.getWorkPeriodState = async (req, res) => {
+  try {
+    const data = await buildWorkPeriodState({
+      userId: getUserId(req),
+      source: req.query,
     });
+    return res.json({ data });
   } catch (error) {
     return sendError(res, error, "Failed to load attendance work period");
   }
@@ -991,18 +1223,22 @@ exports.startWorkPeriod = async (req, res) => {
     const actorId = getActorId(req);
     const startDate = normalizeText(req.body.startDate);
     if (!DATE_KEY_PATTERN.test(startDate)) throw createHttpError("Start Date is invalid", 400);
-    const covered = await WeavingWorkPeriod.findOne({ userId, moduleScope: WEAVING_SCOPE, startDate: { $lte: startDate }, $or: [{ endDate: "" }, { endDate: { $gte: startDate } }] });
-    if (covered) return res.json({ data: covered });
+    const currentState = await buildWorkPeriodState({ userId, source: { date: startDate } });
+    if (currentState.active) return res.json({ data: currentState });
+    if (!currentState.canStart) {
+      throw createHttpError("Attendance cannot be started for this closed or finalized date.", 409);
+    }
     await WeavingWorkPeriod.updateMany(
       { userId, moduleScope: WEAVING_SCOPE, status: "active", startDate: { $lt: startDate } },
       { $set: { status: "closed", endDate: previousDateKey(startDate), closedAt: new Date(), closedBy: actorId } },
     );
-    const period = await WeavingWorkPeriod.findOneAndUpdate(
+    await WeavingWorkPeriod.findOneAndUpdate(
       { userId, moduleScope: WEAVING_SCOPE, startDate },
       { $setOnInsert: { userId, moduleScope: WEAVING_SCOPE, startDate, createdBy: actorId }, $set: { status: "active", endDate: "", note: normalizeText(req.body.note) } },
       { new: true, upsert: true, setDefaultsOnInsert: true },
     );
-    return res.status(201).json({ data: period });
+    const data = await buildWorkPeriodState({ userId, source: { date: startDate } });
+    return res.status(201).json({ data });
   } catch (error) {
     return sendError(res, error, "Failed to start attendance work period");
   }
@@ -1022,7 +1258,7 @@ exports.saveAttendanceSession = async (req, res) => {
       startDate: { $lte: context.dateKey },
       $or: [{ endDate: "" }, { endDate: { $gte: context.dateKey } }],
     }).lean();
-    if (!workPeriod) throw createHttpError("Start / Continue Attendance for this date before saving.", 409);
+    if (!workPeriod) throw createHttpError("Start Attendance for this date before saving.", 409);
 
     assertEditable({ req, lockState: context.lockState });
 
@@ -1033,8 +1269,10 @@ exports.saveAttendanceSession = async (req, res) => {
     });
     let result;
     await session.withTransaction(async () => {
+      await assertNoUnauthorizedPostedPayrollEdit({ req, context, preparedRows, session });
       result = await savePreparedRows({ req, context, preparedRows, session });
     });
+    await recalculateTouchedAccounts(result.touchedAccountIds || []);
     const data = await buildSessionPayload({ req, context });
 
     return res.json({
@@ -1043,6 +1281,7 @@ exports.saveAttendanceSession = async (req, res) => {
         ...data,
         savedCount: result.savedCount,
         replacementChangeCount: result.replacementChangeCount,
+        payrollRevisions: result.payrollRevisions,
       },
     });
   } catch (error) {

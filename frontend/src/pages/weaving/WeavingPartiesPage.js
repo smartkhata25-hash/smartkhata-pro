@@ -607,14 +607,14 @@ export default function WeavingPartiesPage() {
   };
 
   return (
-    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-teal-50/60 px-3 pb-3 pt-0 sm:px-5 sm:pb-5 sm:pt-0">
-      <div className="mx-auto max-w-[1700px]">
-        <div className="grid gap-3 lg:grid-cols-[390px_minmax(0,1fr)]">
+    <div className="h-full min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-white to-teal-50/60 px-3 pb-3 pt-0 sm:px-5 sm:pb-5 sm:pt-0">
+      <div className="mx-auto h-full min-h-0 max-w-[1700px]">
+        <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[390px_minmax(0,1fr)]">
           {/* LEFT SIDE */}
           <section
             className={`${
-              mobileDetail ? 'hidden lg:block' : 'block'
-            } overflow-visible rounded-b-md border-x border-b bg-white shadow-sm`}
+              mobileDetail ? 'hidden lg:flex' : 'flex'
+            } min-h-0 flex-col overflow-hidden rounded-b-md border-x border-b bg-white shadow-sm`}
           >
             {/* FILTERS */}
             <div className="border-b p-2">
@@ -729,7 +729,7 @@ export default function WeavingPartiesPage() {
             </div>
 
             {/* LIST */}
-            <div className="max-h-[76vh] overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto">
               {loading ? (
                 <FaSpinner className="mx-auto my-12 animate-spin text-2xl text-teal-700" />
               ) : shownRows.length ? (
@@ -844,7 +844,11 @@ export default function WeavingPartiesPage() {
           </section>
 
           {/* RIGHT SIDE */}
-          <div className={`min-w-0 ${mobileDetail ? 'block' : 'hidden lg:block'}`}>
+          <div
+            className={`min-h-0 min-w-0 flex-col overflow-hidden ${
+              mobileDetail ? 'flex' : 'hidden lg:flex'
+            }`}
+          >
             {/* TABS + ADD NEW */}
             <div className="mb-2 flex h-11 min-w-0 items-center gap-2 overflow-visible rounded-md border bg-white px-2 shadow-sm">
               <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap">
@@ -893,15 +897,17 @@ export default function WeavingPartiesPage() {
               )}
             </div>
 
-            <WeavingPartyLedgerPanel
-              party={selected}
-              onBack={() => setMobileDetail(false)}
-              onEdit={
-                selected && !selected.isHidden && canEdit
-                  ? (options) => edit(selected, options)
-                  : null
-              }
-            />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <WeavingPartyLedgerPanel
+                party={selected}
+                onBack={() => setMobileDetail(false)}
+                onEdit={
+                  selected && !selected.isHidden && canEdit
+                    ? (options) => edit(selected, options)
+                    : null
+                }
+              />
+            </div>
           </div>
         </div>
       </div>

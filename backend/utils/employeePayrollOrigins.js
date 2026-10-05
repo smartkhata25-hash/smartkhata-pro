@@ -6,6 +6,7 @@ const EMPLOYEE_ORIGINS = Object.freeze({
   LOAN: "employee_loan",
   LOAN_RECOVERY: "employee_loan_recovery",
   ADJUSTMENT: "employee_adjustment",
+  OPENING_BALANCE: "employee_opening_balance",
 });
 
 const TRAVEL_EMPLOYEE_ORIGINS = Object.freeze({
@@ -16,6 +17,7 @@ const TRAVEL_EMPLOYEE_ORIGINS = Object.freeze({
   LOAN: "travel_employee_loan",
   LOAN_RECOVERY: "travel_employee_loan_recovery",
   ADJUSTMENT: "travel_employee_adjustment",
+  OPENING_BALANCE: "travel_employee_opening_balance",
 });
 
 const WEAVING_EMPLOYEE_ORIGINS = Object.freeze({
@@ -26,6 +28,7 @@ const WEAVING_EMPLOYEE_ORIGINS = Object.freeze({
   LOAN: "weaving_employee_loan",
   LOAN_RECOVERY: "weaving_employee_loan_recovery",
   ADJUSTMENT: "weaving_employee_adjustment",
+  OPENING_BALANCE: "weaving_employee_opening_balance",
 });
 
 const TRADING_EMPLOYEE_ORIGIN_VALUES = Object.freeze(

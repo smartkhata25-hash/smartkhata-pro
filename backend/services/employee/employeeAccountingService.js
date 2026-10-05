@@ -149,6 +149,31 @@ const ensureSalaryExpenseAccount = async ({ userId, moduleScope, session }) => {
   );
 };
 
+const ensureEmployeeOpeningEquityAccount = async ({ userId, moduleScope, session }) => {
+  const scope = normalizeEmployeeModuleScope(moduleScope);
+  const code = scope === MODULE_SCOPES.WEAVING
+    ? "WEAVING_OPENING_BALANCE"
+    : scope === MODULE_SCOPES.TRAVEL
+      ? "TRAVEL_OPENING_BALANCE"
+      : "OPENING_BALANCE";
+  return getSessionQuery(Account.findOneAndUpdate(
+    { userId, moduleScope: scope, code },
+    { $setOnInsert: {
+      userId,
+      moduleScope: scope,
+      code,
+      name: scope === MODULE_SCOPES.WEAVING ? "Weaving Opening Balance Equity" : "Opening Balance Equity",
+      type: "Equity",
+      category: "capital",
+      normalBalance: "credit",
+      openingBalance: 0,
+      isSystem: true,
+      isActive: true,
+    } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ), session);
+};
+
 const buildEmployeeAccountCode = (employee, moduleScope) => {
   const prefix =
     moduleScope === MODULE_SCOPES.WEAVING
@@ -462,6 +487,94 @@ const createSalaryPaymentJournal = async ({
   });
 };
 
+const buildOpeningBalanceReconciliationPlan = ({ current = {}, previous = {}, openingJournalId = null }) => {
+  const amount = roundMoney(current?.amount);
+  const balanceType = current?.type || "";
+  const previousAmount = roundMoney(previous?.amount);
+  const previousType = previous?.type || "";
+  const changed = amount !== previousAmount || balanceType !== previousType;
+  return {
+    amount,
+    balanceType,
+    previousAmount,
+    changed,
+    reverseExisting: Boolean(openingJournalId && changed),
+    postReplacement: changed && amount > 0 && ["payable", "receivable"].includes(balanceType),
+  };
+};
+
+const reconcileEmployeeOpeningBalance = async ({
+  userId,
+  moduleScope,
+  employee,
+  previousOpeningBalance = null,
+  isNew = false,
+  allowLegacyBackfill = false,
+  session,
+}) => {
+  const { amount, balanceType, previousAmount, changed } = buildOpeningBalanceReconciliationPlan({
+    current: employee.openingBalance,
+    previous: previousOpeningBalance,
+    openingJournalId: employee.openingJournalId,
+  });
+
+  if (!isNew && !allowLegacyBackfill && !employee.openingJournalId && previousAmount > 0) {
+    employee.openingBalanceMigrationStatus = "pending_review";
+    await employee.save(session ? { session } : undefined);
+    return { journal: null, pendingReview: true, changed };
+  }
+
+  if (!changed && employee.openingJournalId) return { journal: null, pendingReview: false, changed: false };
+
+  if (employee.openingJournalId) {
+    await reverseJournals({
+      journalIds: [employee.openingJournalId],
+      userId,
+      date: getCurrentBusinessDateKey(),
+      time: "",
+      session,
+    });
+    employee.openingJournalId = null;
+  }
+
+  if (amount <= 0 || !["payable", "receivable"].includes(balanceType)) {
+    employee.openingBalanceMigrationStatus = "";
+    await employee.save(session ? { session } : undefined);
+    return { journal: null, pendingReview: false, changed };
+  }
+
+  const [employeeAccount, openingEquity] = await Promise.all([
+    ensureEmployeeAccount({ userId, moduleScope, employee, session }),
+    ensureEmployeeOpeningEquityAccount({ userId, moduleScope, session }),
+  ]);
+  const journal = await createEmployeeJournal({
+    userId,
+    moduleScope,
+    employee,
+    date: employee.openingBalance?.recordedAt || getCurrentBusinessDateKey(),
+    time: "",
+    description: `Opening balance - ${employee.name}`,
+    sourceType: "opening_balance",
+    originModule: getOriginsForScope(moduleScope).OPENING_BALANCE,
+    referenceId: employee._id,
+    billNo: `EMP-OPEN-${String(employee._id).slice(-6).toUpperCase()}`,
+    lines: balanceType === "receivable"
+      ? [
+          { account: employeeAccount._id, type: "debit", amount },
+          { account: openingEquity._id, type: "credit", amount },
+        ]
+      : [
+          { account: openingEquity._id, type: "debit", amount },
+          { account: employeeAccount._id, type: "credit", amount },
+        ],
+    session,
+  });
+  employee.openingJournalId = journal._id;
+  employee.openingBalanceMigrationStatus = "posted";
+  await employee.save(session ? { session } : undefined);
+  return { journal, pendingReview: false, changed };
+};
+
 const getPayrollPaymentJournals = async ({ userId, payroll, session }) => {
   const ids = (payroll?.paymentJournalEntryIds || []).filter(Boolean);
   if (ids.length === 0) return [];
@@ -494,11 +607,25 @@ const getActivePayrollPaymentState = async ({ userId, payroll, session }) => {
       journal.isReversal !== true,
   );
 
+  const historyByJournalId = new Map(
+    (payroll.paymentHistory || [])
+      .filter((entry) => entry.journalEntryId)
+      .map((entry) => [String(entry.journalEntryId), entry]),
+  );
+  const journalSettledAmount = journals.reduce((sum, journal) => {
+    const history = historyByJournalId.get(String(journal._id));
+    if (history?.isLedgerSettlement === true) {
+      return sum + Number(history.payrollAppliedAmount || 0) + Number(history.settlementOffsetAmount || 0);
+    }
+    return sum + getSalaryPaymentAmount(journal);
+  }, 0);
+  const offsetOnlySettledAmount = (payroll.paymentHistory || [])
+    .filter((entry) => entry.isLedgerSettlement === true && !entry.journalEntryId)
+    .reduce((sum, entry) => sum + Number(entry.payrollAppliedAmount || 0) + Number(entry.settlementOffsetAmount || 0), 0);
+
   return {
     journals,
-    paidAmount: roundMoney(
-      journals.reduce((sum, journal) => sum + getSalaryPaymentAmount(journal), 0),
-    ),
+    paidAmount: roundMoney(journalSettledAmount + offsetOnlySettledAmount),
   };
 };
 
@@ -553,10 +680,21 @@ const recreatePayrollPaymentJournals = async ({
 
     paymentJournalEntryIds.push(journal._id);
     accountIds.push(...collectAccountIdsFromJournal(journal));
-    paidAmount = roundMoney(paidAmount + amount);
+    const payrollAppliedAmount = oldHistory?.isLedgerSettlement === true
+      ? roundMoney(oldHistory.payrollAppliedAmount)
+      : amount;
+    const settlementOffsetAmount = oldHistory?.isLedgerSettlement === true
+      ? roundMoney(oldHistory.settlementOffsetAmount)
+      : 0;
+    paidAmount = roundMoney(paidAmount + payrollAppliedAmount + settlementOffsetAmount);
     lastPaymentAccount = paymentAccount;
     paymentHistory.push({
       amount,
+      payrollAppliedAmount,
+      settlementOffsetAmount,
+      broughtForwardPayableApplied: oldHistory?.isLedgerSettlement === true ? roundMoney(oldHistory.broughtForwardPayableApplied) : 0,
+      broughtForwardReceivableApplied: oldHistory?.isLedgerSettlement === true ? roundMoney(oldHistory.broughtForwardReceivableApplied) : 0,
+      isLedgerSettlement: oldHistory?.isLedgerSettlement === true,
       paymentAccountId: paymentAccount._id,
       paymentType: getPaymentTypeFromAccount(paymentAccount),
       paymentDate: oldHistory?.paymentDate || original.date,
@@ -570,6 +708,14 @@ const recreatePayrollPaymentJournals = async ({
       paidBy: oldHistory?.paidBy || actorId || userId,
     });
   }
+
+  (payroll.paymentHistory || [])
+    .filter((entry) => entry.isLedgerSettlement === true && !entry.journalEntryId)
+    .forEach((entry) => {
+      const copy = entry.toObject ? entry.toObject() : { ...entry };
+      paymentHistory.push(copy);
+      paidAmount = roundMoney(paidAmount + Number(copy.payrollAppliedAmount || 0) + Number(copy.settlementOffsetAmount || 0));
+    });
 
   return {
     accountIds,
@@ -947,7 +1093,7 @@ const reversePayrollRecoveries = async ({ payroll, session }) => {
   }
 };
 
-const buildEmployeeBalanceMap = async ({ userId, moduleScope, employees }) => {
+const buildEmployeeBalanceMap = async ({ userId, moduleScope, employees, session }) => {
   const employeeAccountIds = employees
     .map((employee) => employee.account)
     .filter(Boolean)
@@ -955,7 +1101,7 @@ const buildEmployeeBalanceMap = async ({ userId, moduleScope, employees }) => {
 
   if (employeeAccountIds.length === 0) return new Map();
 
-  const summary = await JournalEntry.aggregate([
+  const aggregation = JournalEntry.aggregate([
     {
       $match: {
         createdBy: new mongoose.Types.ObjectId(userId),
@@ -987,6 +1133,8 @@ const buildEmployeeBalanceMap = async ({ userId, moduleScope, employees }) => {
       },
     },
   ]);
+  if (session) aggregation.session(session);
+  const summary = await aggregation;
 
   return new Map(
     summary.map((entry) => [
@@ -1631,6 +1779,7 @@ module.exports = {
   EMPLOYEE_ACCOUNT_CATEGORY,
   PAYMENT_ACCOUNT_CATEGORIES,
   appendEmployeeBalances,
+  buildEmployeeBalanceMap,
   applyPayrollRecoveries,
   calculatePayrollTotals,
   collectAccountIdsFromJournal,
@@ -1651,6 +1800,7 @@ module.exports = {
   getPaymentTypeFromAccount,
   getActivePayrollPaymentState,
   recreatePayrollPaymentJournals,
+  reconcileEmployeeOpeningBalance,
   getSessionQuery,
   normalizeEmployeeModuleScope,
   parseEntryDateTime,
@@ -1663,6 +1813,7 @@ module.exports = {
   validatePaymentAccount,
   _test: {
     buildEmployeeLedgerSummaryRow,
+    buildOpeningBalanceReconciliationPlan,
     summarizeEmployeeLedgerRows,
   },
 };

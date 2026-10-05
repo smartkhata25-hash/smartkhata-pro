@@ -7,7 +7,6 @@ import {
   FaCheck,
   FaChevronDown,
   FaCoins,
-  FaFileInvoiceDollar,
   FaEye,
   FaHistory,
   FaInfoCircle,
@@ -20,7 +19,6 @@ import {
   FaSave,
   FaStepBackward,
   FaStepForward,
-  FaSync,
   FaTimes,
   FaUserCheck,
   FaUsers,
@@ -30,15 +28,11 @@ import { t } from '../../i18n/i18n';
 import { requestWeavingConfirmation, showWeavingSuccess, useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 import { getValidPaymentAccounts } from '../../services/accountService';
 import {
-  earlyCloseWeavingPayrollCycle,
-  finalizeWeavingPayroll,
-  finalizeWeavingPayrollCycle,
   finalizeWeavingPayrollRange,
   generateWeavingPayrollCycle,
   getWeavingPayrollCycle,
   payWeavingPayroll,
   precheckWeavingPayrollRange,
-  resumeWeavingPayrollCycle,
   restoreWeavingPayroll,
   updateWeavingPayroll,
   voidWeavingPayroll,
@@ -52,6 +46,7 @@ import {
   getBusinessTimeInputValue,
 } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
+import { getPayrollActionState, getSimplePayrollStatus, invalidatePayrollReview } from '../../utils/weavingPayrollUi';
 
 const CYCLE_KEY_PATTERN = /^(\d{4})-(\d{2})-H([12])$/;
 
@@ -207,6 +202,8 @@ const getEmployee = (payroll = {}) =>
 
 const getEmployeeName = (payroll = {}) => getEmployee(payroll)?.name || t('weaving.payroll.none');
 const getId = (value) => String(value?._id || value || '');
+const createOperationKey = () =>
+  window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
 const getEmployeeNo = (payroll = {}) =>
   getEmployee(payroll)?.employeeNo || payroll.employeeNo || t('weaving.payroll.noEmployeeNo');
@@ -618,194 +615,6 @@ const PaymentHistory = ({ payments = [] }) => {
   );
 };
 
-const EarlyCloseModal = ({
-  cycle,
-  draftCount,
-  throughDate,
-  reason,
-  saving,
-  error,
-  onReasonChange,
-  onClose,
-  onConfirm,
-}) => (
-  <ModalShell
-    title={t('weaving.payroll.earlyClose.title')}
-    subtitle={t('weaving.payroll.earlyClose.subtitle')}
-    onClose={onClose}
-    size="max-w-2xl"
-    footer={
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={saving}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('common.cancel')}
-        </button>
-
-        <button
-          type="button"
-          onClick={onConfirm}
-          disabled={saving || !String(reason || '').trim()}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 px-4 text-sm font-black text-white shadow-md shadow-amber-950/10 transition hover:from-amber-600 hover:to-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FaRegClock />
-          {t('weaving.payroll.earlyClose.confirm')}
-        </button>
-      </div>
-    }
-  >
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <DetailLine
-          label={t('weaving.payroll.earlyClose.originalCycle')}
-          value={formatPeriodRange(cycle?.periodStart, cycle?.periodEnd) || cycle?.key || '-'}
-        />
-
-        <DetailLine
-          label={t('weaving.payroll.earlyClose.closeThrough')}
-          value={formatBusinessDateForDisplay(throughDate)}
-          tone="amber"
-        />
-
-        <DetailLine
-          label={t('weaving.payroll.earlyClose.draftEmployees')}
-          value={numberLabel(draftCount)}
-          tone="cyan"
-        />
-      </div>
-
-      <p className="flex items-start gap-2 text-sm font-semibold text-slate-600">
-        <FaInfoCircle className="mt-0.5 shrink-0 text-amber-600" />
-        <span>{t('weaving.payroll.earlyClose.warning')}</span>
-      </p>
-
-      <label className="block">
-        <span className="mb-1 block text-xs font-black uppercase text-slate-500">
-          {t('weaving.payroll.earlyClose.reason')}
-        </span>
-
-        <textarea
-          value={reason}
-          onChange={(event) => onReasonChange(event.target.value)}
-          rows={4}
-          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
-          placeholder={t('weaving.payroll.earlyClose.reasonPlaceholder')}
-        />
-      </label>
-
-    </div>
-  </ModalShell>
-);
-
-const ResumePayrollModal = ({
-  cycle,
-  resume,
-  form,
-  saving,
-  error,
-  onChange,
-  onClose,
-  onConfirm,
-}) => (
-  <ModalShell
-    title={t('weaving.payroll.resume.title')}
-    subtitle={t('weaving.payroll.resume.subtitle')}
-    onClose={onClose}
-    size="max-w-2xl"
-    footer={
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={saving}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('common.cancel')}
-        </button>
-
-        <button
-          type="button"
-          onClick={onConfirm}
-          disabled={saving || !form.resumeFrom}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 px-4 text-sm font-black text-white shadow-md shadow-cyan-950/10 transition hover:from-cyan-700 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FaSync />
-          {t('weaving.payroll.resume.confirm')}
-        </button>
-      </div>
-    }
-  >
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <DetailLine
-          label={t('weaving.payroll.originalCycle')}
-          value={formatPeriodRange(cycle?.originalPeriodStart, cycle?.originalPeriodEnd)}
-        />
-
-        <DetailLine
-          label={t('weaving.payroll.resume.lastClosing')}
-          value={formatBusinessDateForDisplay(resume?.lastClosingThroughDate)}
-          tone="amber"
-        />
-
-        <DetailLine
-          label={t('weaving.payroll.resume.nextClosing')}
-          value={numberLabel(resume?.nextSegmentNo)}
-          tone="cyan"
-        />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1 block text-xs font-black uppercase text-slate-500">
-            {t('weaving.payroll.resume.from')}
-          </span>
-          <input
-            type="date"
-            value={form.resumeFrom}
-            min={resume?.resumeFromMin || ''}
-            max={resume?.maxResumeDate || ''}
-            onChange={(event) => onChange({ ...form, resumeFrom: event.target.value })}
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-black uppercase text-slate-500">
-            {t('weaving.payroll.resume.calculateThrough')}
-          </span>
-          <input
-            type="date"
-            value={form.calculateThrough}
-            min={form.resumeFrom || resume?.resumeFromMin || ''}
-            max={resume?.maxResumeDate || ''}
-            onChange={(event) => onChange({ ...form, calculateThrough: event.target.value })}
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-          />
-        </label>
-      </div>
-
-      <label className="block">
-        <span className="mb-1 block text-xs font-black uppercase text-slate-500">
-          {t('weaving.payroll.resume.note')}
-        </span>
-        <textarea
-          value={form.note}
-          onChange={(event) => onChange({ ...form, note: event.target.value })}
-          rows={3}
-          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-          placeholder={t('weaving.payroll.resume.notePlaceholder')}
-        />
-      </label>
-
-      <p className="text-sm font-semibold text-slate-600">{t('weaving.payroll.resume.warning')}</p>
-    </div>
-  </ModalShell>
-);
-
 const PayrollDetailsModal = ({ payroll, cycle, onClose }) => {
   if (!payroll) return null;
 
@@ -939,7 +748,7 @@ const PayrollDetailsModal = ({ payroll, cycle, onClose }) => {
 
             <DetailLine
               labelKey="weaving.payroll.openingBalance"
-              value={money(payroll.openingBalanceRecovery?.amount)}
+              value={money(payroll.openingBalanceRecovery?.sourceAmount)}
             />
 
             <DetailLine
@@ -1038,11 +847,19 @@ const AdjustmentModal = ({ payroll, saving, error, onClose, onSave }) => {
 
   if (!payroll) return null;
 
+  const hasAttendanceOvertime =
+    Number(payroll.otHours || 0) > 0 || Number(payroll.otAmount || 0) > 0;
+
   const addEarning = () => {
     const amount = Number(earningForm.amount || 0);
 
     if (amount <= 0 || !earningForm.description.trim()) {
       setLocalError(t('weaving.payroll.adjustmentRequired'));
+      return;
+    }
+
+    if (hasAttendanceOvertime && earningForm.type === 'overtime') {
+      setLocalError(t('weaving.payroll.attendanceOvertimeAlreadyApplied'));
       return;
     }
 
@@ -1202,9 +1019,17 @@ const AdjustmentModal = ({ payroll, saving, error, onClose, onSave }) => {
             >
               <option value="bonus">{t('weaving.payroll.adjustment.bonus')}</option>
               <option value="commission">{t('weaving.payroll.adjustment.commission')}</option>
-              <option value="overtime">{t('weaving.payroll.adjustment.overtime')}</option>
+              {!hasAttendanceOvertime ? (
+                <option value="overtime">{t('weaving.payroll.adjustment.overtime')}</option>
+              ) : null}
               <option value="other">{t('weaving.payroll.adjustment.other')}</option>
             </select>
+
+            {hasAttendanceOvertime ? (
+              <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800">
+                {t('weaving.payroll.attendanceOvertimeAlreadyApplied')}
+              </p>
+            ) : null}
 
             <input
               type="number"
@@ -1633,26 +1458,43 @@ const PayModal = ({ payroll, accounts, saving, error, onClose, onPay }) => {
   );
 };
 
-const FinalizeRangeModal = ({ form, setForm, employee, accounts, precheck, saving, error, onCheck, onFinalize, onClose }) => (
-  <ModalShell title={employee ? 'Final Pay' : 'Finalize Payroll'} subtitle={employee ? getEmployeeName(employee) : 'Confirm the attendance work period'} onClose={onClose}>
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <label className="text-xs font-black text-slate-600">From Date<input type="date" value={form.fromDate} onChange={(event) => setForm({ ...form, fromDate: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
-        <label className="text-xs font-black text-slate-600">To Date<input type="date" value={form.toDate} onChange={(event) => setForm({ ...form, toDate: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
+const FinalizeRangeModal = ({ form, setForm, employee, accounts, precheck, saving, error, onCheck, onFinalize, onClose }) => {
+  const summary = precheck?.summary || {};
+  const reviewRows = precheck?.reviewEmployees || [];
+  const settlement = reviewRows[0]?.settlement;
+  const finance = reviewRows[0]?.finance;
+  const setValue = (field, value) => setForm({ ...form, [field]: value });
+  return (
+    <ModalShell title={employee ? 'Final Pay' : 'Finalize Payroll'} subtitle={employee ? getEmployeeName(employee) : 'Review and finalize the selected attendance range'} onClose={onClose} size="max-w-5xl">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-xs font-black text-slate-600">From Date<input type="date" value={form.fromDate} onChange={(event) => setValue('fromDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
+          <label className="text-xs font-black text-slate-600">To Date<input type="date" value={form.toDate} onChange={(event) => setValue('toDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
+        </div>
+        <label className="block text-xs font-black text-slate-600">Note (Optional)<input value={form.note} onChange={(event) => setValue('note', event.target.value)} className="mt-1 h-10 w-full rounded-lg border px-3" placeholder="Factory closing, special wage payment..." /></label>
+        {employee ? <div className="flex flex-wrap gap-4"><label className="flex items-center gap-2 text-sm font-bold text-slate-700"><input type="checkbox" checked={form.markInactive} onChange={(event) => setValue('markInactive', event.target.checked)} />Mark employee inactive after successful settlement</label><label className="flex items-center gap-2 text-sm font-bold text-slate-700"><input type="checkbox" checked={form.payAfterFinalize} onChange={(event) => setValue('payAfterFinalize', event.target.checked)} />Finalize & Pay</label></div> : null}
+        {employee && form.payAfterFinalize ? <div className="grid gap-2 sm:grid-cols-3"><select value={form.paymentAccountId} onChange={(event) => setValue('paymentAccountId', event.target.value)} className="h-10 rounded-lg border px-2"><option value="">Payment Account</option>{accounts.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}</select><input type="date" value={form.paymentDate} onChange={(event) => setValue('paymentDate', event.target.value)} className="h-10 rounded-lg border px-2" /><input type="time" value={form.paymentTime} onChange={(event) => setValue('paymentTime', event.target.value)} className="h-10 rounded-lg border px-2" /></div> : null}
+        {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
+        {precheck ? <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            {[['Employees', summary.employees || 0], ['Ready', summary.ready || 0], ['Already Finalized', summary.alreadyFinalized || 0], ['Needs Attention', summary.needsAttention || 0], ['Gross', money(summary.grossSalary)], ['Recoveries', money((summary.loanRecovery || 0) + (summary.advanceRecovery || 0))], ['Net Payroll', money(summary.netPayable)]].map(([label, value]) => <div key={label} className="rounded-lg border border-slate-200 bg-white p-2"><p className="text-[10px] font-black uppercase text-slate-500">{label}</p><p className="mt-1 text-sm font-black text-slate-900">{value}</p></div>)}
+          </div>
+          {(precheck.warnings || []).map((warning) => <p key={warning.code} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">{warning.message}</p>)}
+          {precheck.message ? <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">{precheck.message}</p> : null}
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {reviewRows.map((row) => <details key={row.employeeId} className="rounded-lg border border-slate-200 bg-white p-3" open={reviewRows.length === 1 || row.outcome !== 'processed'}>
+              <summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-black text-slate-900">{row.employeeName} <span className="text-xs text-slate-500">{row.employeeNo}</span></span><span className={`rounded-md px-2 py-1 text-[10px] font-black ${row.outcome === 'processed' ? 'bg-emerald-50 text-emerald-700' : row.outcome === 'already_finalized' ? 'bg-slate-100 text-slate-700' : 'bg-rose-50 text-rose-700'}`}>{row.outcome === 'processed' ? 'Ready' : row.outcome === 'already_finalized' ? 'Already Finalized' : 'Needs Attention'}</span></div><p className="mt-1 text-xs font-semibold text-slate-500">{row.action}</p></summary>
+              {row.outcome === 'processed' ? <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><span>Days: <b>{row.attendance?.presentDays || 0} P / {row.attendance?.absentDays || 0} A / {row.attendance?.leaveDays || 0} L</b></span><span>OT: <b>{row.attendance?.otHours || 0}h / {money(row.earnings?.overtime)}</b></span><span>Double Duty: <b>{row.attendance?.doubleDutyCount || 0} / {money(row.earnings?.doubleDuty)}</b></span><span>Gross: <b>{money(row.earnings?.gross)}</b></span><span>Deductions: <b>{money(row.deductions?.total)}</b></span><span>Loan / Advance: <b>{money((row.deductions?.loanRecovery || 0) + (row.deductions?.advanceRecovery || 0))}</b></span><span>Brought Forward: <b>{money((row.broughtForward?.employeePayable || 0) - (row.broughtForward?.employeeReceivable || 0))}</b></span><span className="text-cyan-800">Net: <b>{money(row.settlement?.currentPayrollNet)}</b></span>{(row.recoveryIndicators || []).map((indicator) => <span key={indicator.advanceLoanId} className="rounded bg-amber-50 px-2 py-1 font-black text-amber-800">{indicator.label}</span>)}</div> : <div className="mt-3 space-y-1 text-xs text-slate-700">{(row.overlaps || []).map((overlap) => <p key={overlap.payrollId}><b>{overlap.overlapFromDate} → {overlap.overlapToDate}</b> · {overlap.status}{overlap.paidAmount > 0 ? ` · Paid ${money(overlap.paidAmount)}` : ''}{overlap.wasRevised ? ' · Revised' : ''}</p>)}</div>}
+            </details>)}
+          </div>
+          {employee && settlement ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3"><h3 className="font-black text-cyan-950">Settlement Position</h3><div className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4"><span>Current Payroll <b className="block">{money(settlement.currentPayrollNet)}</b></span><span>Paying Now <b className="block">{money(settlement.amountBeingPaidNow)}</b></span><span>Remaining Payable <b className="block text-emerald-800">{money(settlement.remainingEmployeePayable)}</b></span><span>Employee Receivable <b className="block text-rose-700">{money(settlement.remainingEmployeeReceivable)}</b></span></div>{finance && (finance.remainingLoan > 0 || finance.remainingAdvance > 0) ? <p className="mt-3 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-black text-rose-700">Remaining after settlement — Loan: {money(finance.remainingLoan)}, Advance: {money(finance.remainingAdvance)}. The employee may become inactive while this receivable remains in the ledger.</p> : null}</div> : null}
+          {employee && settlement?.priorPayrollOutstanding > 0 ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">Previous unpaid payroll: {money(settlement.priorPayrollOutstanding)}. It is excluded from this Final Settlement and remains payable on its original payroll record.</p> : null}
+        </div> : null}
+        <div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="h-10 rounded-lg border px-4 font-bold">Cancel</button>{!precheck ? <button type="button" disabled={saving} onClick={onCheck} className="h-10 rounded-lg bg-cyan-700 px-4 font-black text-white">Review</button> : <button type="button" disabled={saving || !precheck.ready || (form.payAfterFinalize && !form.paymentAccountId)} onClick={onFinalize} className="h-10 rounded-lg bg-emerald-700 px-4 font-black text-white disabled:opacity-40">{form.payAfterFinalize ? 'Confirm Finalize & Pay' : 'Confirm Finalize'}</button>}</div>
       </div>
-      <label className="block text-xs font-black text-slate-600">Note (Optional)<input value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3" placeholder="Factory closing, special wage payment..." /></label>
-      {employee ? <label className="flex items-center gap-2 text-sm font-bold text-slate-700"><input type="checkbox" checked={form.markInactive} onChange={(event) => setForm({ ...form, markInactive: event.target.checked })} />Mark employee inactive after Final Pay</label> : null}
-      {employee ? <><label className="flex items-center gap-2 text-sm font-bold text-slate-700"><input type="checkbox" checked={form.payAfterFinalize} onChange={(event) => setForm({ ...form, payAfterFinalize: event.target.checked })} />Finalize & Pay</label>{form.payAfterFinalize ? <div className="grid grid-cols-3 gap-2"><select value={form.paymentAccountId} onChange={(event) => setForm({ ...form, paymentAccountId: event.target.value })} className="h-10 rounded-lg border px-2"><option value="">Payment Account</option>{accounts.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}</select><input type="date" value={form.paymentDate} onChange={(event) => setForm({ ...form, paymentDate: event.target.value })} className="h-10 rounded-lg border px-2" /><input type="time" value={form.paymentTime} onChange={(event) => setForm({ ...form, paymentTime: event.target.value })} className="h-10 rounded-lg border px-2" /></div> : null}</> : null}
-      {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
-      {precheck ? <div className="rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-sm font-bold text-slate-700">
-        <div className="grid grid-cols-2 gap-2"><span>Employees: {precheck.employees}</span><span>Gross: {money(precheck.grossSalary)}</span><span>Kharcha / Advance: {money(precheck.advanceRecovery)}</span><span>Loan: {money(precheck.loanRecovery)}</span><span className="col-span-2 text-cyan-800">Net Payable: {money(precheck.netPayable)}</span></div>
-        {precheck.message ? <p className="mt-3 text-rose-700">{precheck.message}</p> : null}
-        {precheck.blockedEmployees?.length ? <div className="mt-3 text-rose-700"><p>{precheck.blockedEmployees.length} Employees Need Attention</p>{precheck.blockedEmployees.map((row) => <p key={row.employeeId}>{row.name}: {[...(row.missingDates || []), ...(row.reasons || [])].join(', ')}</p>)}</div> : null}
-      </div> : null}
-      <div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="h-10 rounded-lg border px-4 font-bold">Cancel</button>{!precheck ? <button type="button" disabled={saving} onClick={onCheck} className="h-10 rounded-lg bg-cyan-700 px-4 font-black text-white">Review</button> : <button type="button" disabled={saving || !precheck.ready || (form.payAfterFinalize && !form.paymentAccountId)} onClick={onFinalize} className="h-10 rounded-lg bg-emerald-700 px-4 font-black text-white disabled:opacity-40">Confirm Finalize</button>}</div>
-    </div>
-  </ModalShell>
-);
+    </ModalShell>
+  );
+};
 
 const SalaryBadge = ({ payroll }) => {
   const salaryType = payroll.salaryTypeSnapshot || '-';
@@ -1689,18 +1531,10 @@ const WeavingPayrollPage = () => {
   useWeavingFeedback(pageError, setPageError, { type: 'error' });
   useWeavingFeedback(modalError, setModalError, { type: 'error' });
   const [activePopover, setActivePopover] = useState('');
-  const [earlyCloseOpen, setEarlyCloseOpen] = useState(false);
-  const [earlyCloseReason, setEarlyCloseReason] = useState('');
-  const [resumeOpen, setResumeOpen] = useState(false);
   const [rangeFinalizeOpen, setRangeFinalizeOpen] = useState(false);
   const [rangeForm, setRangeForm] = useState({ fromDate: '', toDate: '', note: '' });
   const [rangePrecheck, setRangePrecheck] = useState(null);
   const [settlementEmployee, setSettlementEmployee] = useState(null);
-  const [resumeForm, setResumeForm] = useState({
-    resumeFrom: '',
-    calculateThrough: '',
-    note: '',
-  });
 
   const canCreate = hasPermission('payroll.create');
   const canEdit = hasPermission('payroll.edit');
@@ -1755,40 +1589,20 @@ const WeavingPayrollPage = () => {
   }, [cycleKey, segmentNo]);
 
   useEffect(() => {
-    if (detailsPayroll || adjustmentPayroll || paymentPayroll || earlyCloseOpen || resumeOpen) {
+    if (detailsPayroll || adjustmentPayroll || paymentPayroll) {
       setActivePopover('');
     }
-  }, [detailsPayroll, adjustmentPayroll, paymentPayroll, earlyCloseOpen, resumeOpen]);
+  }, [detailsPayroll, adjustmentPayroll, paymentPayroll]);
 
   const payrolls = Array.isArray(cycleData?.payrolls) ? cycleData.payrolls : [];
   const summary = cycleData?.summary || {};
   const cycle = cycleData?.cycle || {};
   const cycleOptions = Array.isArray(cycleData?.cycles) ? cycleData.cycles : [];
   const segments = Array.isArray(cycleData?.segments) ? cycleData.segments : [];
-  const resume = cycleData?.resume || {};
-
-  const draftRows = payrolls.filter((payroll) => payroll.status === 'draft');
-
-  const eligibleDraftRows = draftRows.filter(
-    (payroll) => !payroll.attendanceIncomplete && !(payroll.finalizeBlockedReasons || []).length
-  );
-
-  const hasDraftRows = draftRows.length > 0;
   const isFutureCycle = Boolean(cycle.isFuture);
-  const isProvisional = Boolean(cycle.isProvisional);
   const isEarlyClosed = Boolean(
     cycle.earlyClosed || payrolls.some((payroll) => payroll.earlyClosed)
   );
-  const effectiveProvisional = isProvisional && !isEarlyClosed;
-  const draftThroughDates = [
-    ...new Set(draftRows.map((payroll) => payroll.calculationThroughDate).filter(Boolean)),
-  ];
-  const earlyCloseThroughDate =
-    cycle.earlyCloseThroughDate ||
-    (draftThroughDates.length === 1 ? draftThroughDates[0] : cycle.calculationThroughDate || '');
-  const canFinalizeCycle = !isProvisional && !isFutureCycle && !isEarlyClosed;
-  const canEarlyClose = canEdit && effectiveProvisional && hasDraftRows && !isFutureCycle;
-  const canResumePayroll = canEdit && Boolean(resume.canResume);
 
   const fallbackCycle = useMemo(() => resolveCycleFromKey(cycleKey), [cycleKey]);
   const displayCycle = cycle.periodStart ? cycle : fallbackCycle;
@@ -1804,160 +1618,6 @@ const WeavingPayrollPage = () => {
 
     if (payload?.cycle?.segmentNo) {
       setSegmentNo(String(payload.cycle.segmentNo));
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (isFutureCycle || isEarlyClosed) {
-      return;
-    }
-
-    setSaving(true);
-    setPageError('');
-
-    try {
-      const payload = await generateWeavingPayrollCycle({
-        cycleKey,
-        segmentNo: cycle.segmentNo || segmentNo,
-      });
-
-      applyCyclePayload(payload);
-
-      showSuccess(
-        hasDraftRows ? t('weaving.payroll.recalculated') : t('weaving.payroll.generated')
-      );
-    } catch (error) {
-      setPageError(getErrorMessage(error, 'weaving.payroll.loadFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleFinalize = async (payroll) => {
-    if (isProvisional) {
-      setPageError(t('weaving.payroll.cannotFinalizeBeforeCycleEnd'));
-      return;
-    }
-
-    if (!await requestWeavingConfirmation({ message: t('weaving.payroll.confirmFinalize') })) {
-      return;
-    }
-
-    setSaving(true);
-    setPageError('');
-
-    try {
-      const payload = await finalizeWeavingPayroll(payroll._id);
-
-      applyCyclePayload(payload);
-      showSuccess(t('weaving.payroll.finalizedMessage'));
-    } catch (error) {
-      setPageError(getErrorMessage(error, 'weaving.payroll.loadFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleFinalizeAll = async () => {
-    if (isProvisional) {
-      setPageError(t('weaving.payroll.cannotFinalizeBeforeCycleEnd'));
-      return;
-    }
-
-    if (!await requestWeavingConfirmation({ message: t('weaving.payroll.finalizeAllConfirm') })) {
-      return;
-    }
-
-    setSaving(true);
-    setPageError('');
-
-    try {
-      const payload = await finalizeWeavingPayrollCycle({
-        cycleKey,
-        segmentNo: cycle.segmentNo || segmentNo,
-      });
-
-      applyCyclePayload(payload);
-      showSuccess(t('weaving.payroll.finalizedMessage'));
-    } catch (error) {
-      setPageError(getErrorMessage(error, 'weaving.payroll.loadFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const openEarlyCloseModal = () => {
-    setModalError('');
-    setEarlyCloseReason('');
-    setEarlyCloseOpen(true);
-  };
-
-  const handleEarlyClose = async () => {
-    const reason = earlyCloseReason.trim();
-
-    if (!reason) {
-      setModalError(t('weaving.payroll.earlyClose.reasonRequired'));
-      return;
-    }
-
-    setSaving(true);
-    setModalError('');
-    setPageError('');
-
-    try {
-      const payload = await earlyCloseWeavingPayrollCycle({
-        cycleKey,
-        segmentNo: cycle.segmentNo || segmentNo,
-        reason,
-      });
-
-      applyCyclePayload(payload);
-      setEarlyCloseOpen(false);
-      setEarlyCloseReason('');
-      showSuccess(
-        `${t('weaving.payroll.earlyClose.successPrefix')} ${formatBusinessDateForDisplay(
-          payload?.earlyCloseThroughDate ||
-            payload?.cycle?.earlyCloseThroughDate ||
-            earlyCloseThroughDate
-        )}`
-      );
-    } catch (error) {
-      setModalError(getErrorMessage(error, 'weaving.payroll.earlyClose.failed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const openResumeModal = () => {
-    setModalError('');
-    setResumeForm({
-      resumeFrom: resume.resumeFromDefault || resume.resumeFromMin || '',
-      calculateThrough: resume.calculateThroughDefault || '',
-      note: '',
-    });
-    setResumeOpen(true);
-  };
-
-  const handleResumePayroll = async () => {
-    setSaving(true);
-    setModalError('');
-    setPageError('');
-
-    try {
-      const payload = await resumeWeavingPayrollCycle({
-        cycleKey,
-        resumeFrom: resumeForm.resumeFrom,
-        calculateThrough: resumeForm.calculateThrough,
-        note: resumeForm.note,
-      });
-
-      applyCyclePayload(payload);
-      setResumeOpen(false);
-      showSuccess(t('weaving.payroll.resume.success'));
-    } catch (error) {
-      setModalError(getErrorMessage(error, 'weaving.payroll.resume.failed'));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -1991,7 +1651,10 @@ const WeavingPayrollPage = () => {
     setModalError('');
 
     try {
-      const result = await payWeavingPayroll(paymentPayroll._id, payload);
+      const result = await payWeavingPayroll(paymentPayroll._id, {
+        ...payload,
+        operationKey: createOperationKey(),
+      });
 
       applyCyclePayload(result);
       setPaymentPayroll(null);
@@ -2058,7 +1721,7 @@ const WeavingPayrollPage = () => {
       const fromDate = state?.suggestedFromDate || selectedStart;
       const toDate = state?.suggestedToDate || state?.latestAttendanceDate || fromDate;
       setSettlementEmployee(payroll);
-      setRangeForm({ fromDate, toDate, note: '', employeeId: payroll ? getId(payroll.employeeId) : '', finalSettlement: Boolean(payroll), markInactive: Boolean(payroll), payAfterFinalize: false, paymentAccountId: paymentAccounts[0]?._id || '', paymentDate: getBusinessDateInputValue(), paymentTime: getBusinessTimeInputValue() });
+      setRangeForm({ fromDate, toDate, note: '', employeeId: payroll ? getId(payroll.employeeId) : '', finalSettlement: Boolean(payroll), markInactive: Boolean(payroll), payAfterFinalize: false, paymentAccountId: paymentAccounts[0]?._id || '', paymentDate: getBusinessDateInputValue(), paymentTime: getBusinessTimeInputValue(), receivedBy: 'self', paymentNote: 'Final Pay', operationKey: createOperationKey() });
       setRangeFinalizeOpen(true);
     } catch (openError) {
       setPageError(getErrorMessage(openError, 'weaving.payroll.loadFailed'));
@@ -2075,10 +1738,10 @@ const WeavingPayrollPage = () => {
   const confirmRangeFinalize = async () => {
     setSaving(true); setModalError('');
     try {
-      const result = await finalizeWeavingPayrollRange(rangeForm);
-      if (rangeForm.payAfterFinalize) {
-        for (const payment of result.payrolls || []) if (Number(payment.amount || 0) > 0) await payWeavingPayroll(payment.payrollId, { amount: payment.amount, paymentAccountId: rangeForm.paymentAccountId, paymentDate: rangeForm.paymentDate, paymentTime: rangeForm.paymentTime, receivedBy: 'self', note: 'Final Pay' });
-      }
+      const result = await finalizeWeavingPayrollRange({
+        ...rangeForm,
+        reviewToken: rangePrecheck?.reviewToken,
+      });
       showSuccess(t('weaving.payroll.finalizedMessage'));
       setRangeFinalizeOpen(false);
       navigate(`/weaving/payroll/salary-closing?cycleKey=${result.cycleKey}&segmentNo=${result.segmentNo}&fromDate=${result.fromDate}&toDate=${result.toDate}${result.unitId ? `&unitId=${result.unitId}` : ''}`);
@@ -2123,27 +1786,12 @@ const WeavingPayrollPage = () => {
                     </span>
                   ) : null}
 
-                  {false && effectiveProvisional ? (
-                    <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-black text-amber-800">
-                      <FaRegClock />
-                      {t('weaving.payroll.provisional')}
-                    </span>
-                  ) : null}
-
                   {isEarlyClosed && cycle.earlyCloseThroughDate ? (
                     <span>
                       Finalized through{' '}
                       {formatBusinessDateForDisplay(cycle.earlyCloseThroughDate)}
                     </span>
                   ) : null}
-
-                  {false && effectiveProvisional && cycle.calculationThroughDate ? (
-                    <span>
-                      Calculated through{' '}
-                      {formatBusinessDateForDisplay(cycle.calculationThroughDate)}
-                    </span>
-                  ) : null}
-
 
                   {isFutureCycle ? (
                     <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 font-black text-slate-600">
@@ -2287,78 +1935,6 @@ const WeavingPayrollPage = () => {
                 </button>
               ))}
             </div>
-            <div className="hidden">
-            <button
-              type="button"
-              onClick={() =>
-                navigate(
-                  `/weaving/reports?cycleKey=${cycle.baseCycleKey || cycle.key || cycleKey}&segmentNo=${cycle.segmentNo || segmentNo || 1}`
-                )
-              }
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
-            >
-              <FaFileInvoiceDollar />
-              {t('weaving.reports.report')}
-            </button>
-
-            {recordState === 'active' ? (
-              <button
-                type="button"
-                disabled={saving || !canCreate || isFutureCycle || isEarlyClosed}
-                onClick={handleGenerate}
-                title={
-                  isEarlyClosed
-                    ? t('weaving.payroll.earlyClose.locked')
-                    : isFutureCycle
-                      ? t('weaving.payroll.futureCycleHelp')
-                      : undefined
-                }
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 px-4 text-sm font-black text-cyan-800 shadow-sm transition hover:border-cyan-300 hover:from-cyan-100 hover:to-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <FaSync />
-                Calculate / Refresh
-              </button>
-            ) : null}
-
-            {recordState === 'active' && canEarlyClose ? (
-              <button
-                type="button"
-                disabled={saving}
-                onClick={openEarlyCloseModal}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 text-sm font-black text-amber-800 shadow-sm transition hover:border-amber-300 hover:from-amber-100 hover:to-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <FaRegClock />
-                Finalize Payroll
-              </button>
-            ) : null}
-
-            {recordState === 'active' && canResumePayroll ? (
-              <button
-                type="button"
-                disabled={saving}
-                onClick={openResumeModal}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 text-sm font-black text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:from-emerald-100 hover:to-teal-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <FaSync />
-                Continue Payroll
-              </button>
-            ) : null}
-
-            {recordState === 'active' ? (
-              <button
-                type="button"
-                disabled={saving || !canEdit || !canFinalizeCycle || eligibleDraftRows.length === 0}
-                onClick={handleFinalizeAll}
-                title={
-                  effectiveProvisional ? t('weaving.payroll.cannotFinalizeBeforeCycleEnd') : undefined
-                }
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-4 text-sm font-black text-white shadow-md shadow-emerald-950/10 transition hover:from-emerald-700 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <FaCheck />
-                Finalize Payroll
-              </button>
-            ) : null}
-            </div>
             {recordState === 'active' ? (
               <button type="button" disabled={saving || !canEdit} onClick={() => openRangeFinalize()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-5 text-sm font-black text-white shadow-md disabled:opacity-50">
                 <FaCheck /> Finalize Payroll
@@ -2457,23 +2033,13 @@ const WeavingPayrollPage = () => {
                   const employeeName = getEmployeeName(payroll);
                   const rowKey = payroll._id || `${payroll.employeeId}-${index}`;
 
-                  const canFinalizeRow = false;
-
-                  const canAdjustRow =
-                    recordState === 'active' &&
-                    canEdit &&
-                    ((payroll.status === 'draft' && !isEarlyClosed) ||
-                      ['posted', 'finalized', 'partially_paid', 'paid'].includes(payroll.status));
-
-                  const canPayRow =
-                    recordState === 'active' &&
-                    canPay &&
-                    Number(payroll.remainingDue || 0) > 0 &&
-                    ['posted', 'finalized', 'partially_paid', 'paid'].includes(payroll.status);
-
-                  const canVoidRow =
-                    recordState === 'active' &&
-                    canDelete && payroll.status !== 'draft' && payroll.status !== 'void';
+                  const actionState = getPayrollActionState({
+                    payroll,
+                    recordState,
+                    isEarlyClosed,
+                    permissions: { canEdit, canPay, canDelete },
+                  });
+                  const { canAdjust: canAdjustRow, canPay: canPayRow, canVoid: canVoidRow } = actionState;
 
                   const palItems = [
                     {
@@ -2557,7 +2123,7 @@ const WeavingPayrollPage = () => {
                     },
                     {
                       label: t('weaving.payroll.openingBalance'),
-                      value: money(payroll.openingBalanceRecovery?.amount),
+                      value: money(payroll.openingBalanceRecovery?.sourceAmount),
                     },
                     {
                       label: t('weaving.payroll.manualAdjustment'),
@@ -2733,7 +2299,7 @@ const WeavingPayrollPage = () => {
                             getStatusTone(status)
                           )}
                         >
-                          {statusLabel(payroll)}
+                          {getSimplePayrollStatus(payroll)}
                         </span>
                       </td>
 
@@ -2748,7 +2314,7 @@ const WeavingPayrollPage = () => {
                             }}
                           />
 
-                          {recordState === 'active' && canEdit && payroll.status === 'draft' ? (
+                          {actionState.canFinalPay ? (
                             <IconButton title="Final Pay" icon={FaUserCheck} tone="emerald" disabled={saving} onClick={() => openRangeFinalize(payroll)} />
                           ) : null}
 
@@ -2762,19 +2328,6 @@ const WeavingPayrollPage = () => {
                                 setActivePopover('');
                                 setModalError('');
                                 setAdjustmentPayroll(payroll);
-                              }}
-                            />
-                          ) : null}
-
-                          {canFinalizeRow ? (
-                            <IconButton
-                              title={t('weaving.payroll.finalize')}
-                              icon={FaCheck}
-                              tone="emerald"
-                              disabled={saving}
-                              onClick={() => {
-                                setActivePopover('');
-                                handleFinalize(payroll);
                               }}
                             />
                           ) : null}
@@ -2806,7 +2359,7 @@ const WeavingPayrollPage = () => {
                             />
                           ) : null}
 
-                          {recordState === 'inactive' && canEdit ? (
+                          {actionState.canRestore ? (
                             <IconButton
                               title={t('weaving.payroll.restore')}
                               icon={FaRedo}
@@ -2839,17 +2392,6 @@ const WeavingPayrollPage = () => {
                         : t('weaving.payroll.cycleHelp')}
                     </div>
 
-                    {false && recordState === 'active' && !isFutureCycle && canCreate ? (
-                      <button
-                        type="button"
-                        disabled={saving || isEarlyClosed}
-                        onClick={handleGenerate}
-                        className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 px-4 text-sm font-black text-white shadow-md transition hover:from-cyan-700 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <FaSync />
-                        {t('weaving.payroll.generatePayroll')}
-                      </button>
-                    ) : null}
                   </td>
                 </tr>
               )}
@@ -2881,45 +2423,12 @@ const WeavingPayrollPage = () => {
         onPay={handlePay}
       />
 
-      {earlyCloseOpen ? (
-        <EarlyCloseModal
-          cycle={displayCycle}
-          draftCount={draftRows.length}
-          throughDate={earlyCloseThroughDate}
-          reason={earlyCloseReason}
-          saving={saving}
-          error={modalError}
-          onReasonChange={setEarlyCloseReason}
-          onClose={() => {
-            setEarlyCloseOpen(false);
-            setModalError('');
-          }}
-          onConfirm={handleEarlyClose}
-        />
-      ) : null}
-
-      {resumeOpen ? (
-        <ResumePayrollModal
-          cycle={cycle}
-          resume={resume}
-          form={resumeForm}
-          saving={saving}
-          error={modalError}
-          onChange={setResumeForm}
-          onClose={() => {
-            setResumeOpen(false);
-            setModalError('');
-          }}
-          onConfirm={handleResumePayroll}
-        />
-      ) : null}
-
       {rangeFinalizeOpen ? (
         <FinalizeRangeModal
           form={rangeForm}
           employee={settlementEmployee}
           accounts={paymentAccounts}
-          setForm={(next) => { setRangeForm(next); setRangePrecheck(null); }}
+          setForm={(next) => { const invalidated = invalidatePayrollReview(next); setRangeForm(invalidated.form); setRangePrecheck(invalidated.precheck); }}
           precheck={rangePrecheck}
           saving={saving}
           error={modalError}

@@ -119,3 +119,26 @@ export const normalizeCategoryIds = (categories = []) =>
   (categories || []).map((category) =>
     typeof category === 'object' ? String(category._id || category.id) : String(category)
   );
+
+const getOpeningBalanceAmount = (openingBalance = 0) => {
+  const amount = Math.abs(Number(openingBalance || 0));
+  return amount || '';
+};
+
+export const withVendorOpeningFormValues = (vendor = {}) => ({
+  ...vendor,
+  openingBalanceAmount: getOpeningBalanceAmount(vendor.openingBalance),
+  openingBalanceDirection: Number(vendor.openingBalance || 0) < 0 ? 'advance' : 'payable',
+});
+
+export const buildVendorOpeningPayload = (values = {}) => {
+  const amount = Math.abs(Number(values.openingBalanceAmount || 0));
+  const direction = values.openingBalanceDirection || 'payable';
+
+  return {
+    ...values,
+    openingBalance: direction === 'advance' ? -amount : amount,
+    openingBalanceAmount: amount,
+    openingBalanceDirection: direction,
+  };
+};

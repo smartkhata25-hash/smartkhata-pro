@@ -297,6 +297,16 @@ export default function WeavingSalesSettlementPage() {
     }
   }, []);
 
+  const rememberCounterparty = useCallback(async (party) => {
+    setData((value) => ({
+      ...value,
+      meta: {
+        ...value.meta,
+        parties: [...(value.meta.parties || []).filter((row) => row._id !== party._id), party],
+      },
+    }));
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -1202,6 +1212,8 @@ export default function WeavingSalesSettlementPage() {
           key={modal.kind || 'fabric'}
           kind={modal.kind || 'fabric'}
           meta={data.meta}
+          onPartySaved={rememberCounterparty}
+          onPartyError={(text) => setNotice({ error: true, text })}
           onItemCreated={(item) =>
             setData((value) => ({
               ...value,
@@ -1228,6 +1240,8 @@ export default function WeavingSalesSettlementPage() {
       {modal?.type === 'direct-edit' && (
         <WeavingDirectSaleModal
           meta={data.meta}
+          onPartySaved={rememberCounterparty}
+          onPartyError={(text) => setNotice({ error: true, text })}
           onItemCreated={(item) =>
             setData((value) => ({
               ...value,
@@ -1258,6 +1272,8 @@ export default function WeavingSalesSettlementPage() {
       {modal?.type === 'invoice-edit' && (
         <WeavingPostedSaleEditModal
           meta={data.meta}
+          onPartySaved={rememberCounterparty}
+          onPartyError={(text) => setNotice({ error: true, text })}
           invoice={modal.row}
           saving={saving}
           onClose={() =>

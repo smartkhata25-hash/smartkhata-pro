@@ -1926,6 +1926,8 @@
   "travel.booking.fields.returnDate": "Return Date",
   "travel.booking.fields.makkahHotel": "Makkah Hotel",
   "travel.booking.fields.madinahHotel": "Madinah Hotel",
+  "travel.booking.fields.makkahNights": "Makkah Nights",
+  "travel.booking.fields.madinahNights": "Madinah Nights",
   "travel.booking.fields.component": "Component",
   "travel.booking.fields.componentType": "Component Type",
   "travel.booking.fields.label": "Label",

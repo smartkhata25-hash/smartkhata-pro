@@ -1,11 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FaHistory, FaMoneyBillWave, FaReceipt, FaWallet } from 'react-icons/fa';
-import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
+import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
 import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 import {
-  createCounterparty,
   createMoneyTransaction,
   getCommercialMeta,
   getCounterpartyBalance,
@@ -168,15 +167,6 @@ export default function WeavingPaymentsPage() {
     setTransactionDetail(null);
   };
 
-  const parties = useMemo(
-    () =>
-      meta.parties.filter(
-        (party) =>
-          party.role === 'both' || party.role === (tab === 'receive' ? 'customer' : 'supplier')
-      ),
-    [meta.parties, tab]
-  );
-
   const chooseParty = async (partyId) => {
     setForm((value) => ({
       ...value,
@@ -188,18 +178,16 @@ export default function WeavingPaymentsPage() {
     setBalance(partyId ? (await getCounterpartyBalance(partyId)).balance : 0);
   };
 
-  const quickParty = async (name) => {
-    const party = await createCounterparty({
-      name,
-      role: tab === 'receive' ? 'customer' : 'supplier',
-    });
-
+  const refreshCounterparties = async (saved) => {
     setMeta((value) => ({
       ...value,
-      parties: [...value.parties, party],
+      parties: [...value.parties.filter((row) => row._id !== saved._id), saved],
     }));
-
-    await chooseParty(party._id);
+    try {
+      setMeta(await getCommercialMeta({ force: true }));
+    } catch {
+      setNotice({ error: true, text: 'Party was saved, but payment options could not be refreshed' });
+    }
   };
 
   const save = async () => {
@@ -294,15 +282,16 @@ export default function WeavingPaymentsPage() {
               </Field>
 
               <div>
-                <SearchableCreatableSelect
+                <WeavingCounterpartySelect
                   label={tab === 'receive' ? 'Customer / Party' : 'Supplier / Party'}
                   placeholder="Search or add counterparty"
-                  options={parties}
+                  parties={meta.parties}
+                  context={tab === 'receive' ? 'customer' : 'supplier'}
                   value={form.partyId}
                   required
                   onChange={chooseParty}
-                  onQuickAdd={quickParty}
-                  onAddDetails={quickParty}
+                  onPartySaved={refreshCounterparties}
+                  onError={(text) => setNotice({ error: true, text })}
                 />
               </div>
 

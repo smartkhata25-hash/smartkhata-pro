@@ -3,6 +3,7 @@ import { FaTimes } from 'react-icons/fa';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from './WeavingSaleSaveOutput';
 
 import SearchableCreatableSelect from './SearchableCreatableSelect';
+import WeavingCounterpartySelect from './WeavingCounterpartySelect';
 import WeavingSalePaymentSection, {
   paymentError,
   paymentReceived,
@@ -177,7 +178,7 @@ const restore = () => {
 
 export const clearDirectSaleRecovery = () => localStorage.removeItem(recoveryKey);
 
-function LegacyDirectSaleModal({ meta, current, saving, onClose, onSave }) {
+function LegacyDirectSaleModal({ meta, current, saving, onClose, onSave, onPartySaved, onPartyError }) {
   const [form, setForm] = useState(() => (current ? fromInvoice(current) : restore()));
 
   const [error, setError] = useState('');
@@ -286,16 +287,15 @@ function LegacyDirectSaleModal({ meta, current, saving, onClose, onSave }) {
               />
             </MiniField>
 
-            <SearchableCreatableSelect
+            <WeavingCounterpartySelect
               label={t('weaving.sales.party')}
-              options={meta.parties.filter(
-                (row) =>
-                  !row.serviceTypes?.includes('sizing') &&
-                  (row.role === 'customer' || row.role === 'both')
-              )}
+              parties={meta.parties}
+              context="customer"
               value={form.partyId}
               required
               onChange={(partyId) => patch({ partyId })}
+              onPartySaved={onPartySaved}
+              onError={onPartyError}
             />
 
             <MiniField label={t('weaving.sales.saleType')}>
@@ -563,6 +563,8 @@ function NewDirectSaleModal({
   onClose,
   onSave,
   onItemCreated,
+  onPartySaved,
+  onPartyError,
 }) {
   const productionMode = meta.productionTrackingMode || 'detailed';
   const preferredEntryMode = productionMode === 'detailed' ? 'than' : 'manual';
@@ -983,11 +985,14 @@ function NewDirectSaleModal({
               </MiniField>
 
               {/* PARTY */}
-              <SearchableCreatableSelect
+              <WeavingCounterpartySelect
                 label={t('weaving.sales.party')}
-                options={meta.parties}
+                parties={meta.parties}
+                context="customer"
                 value={form.partyId}
                 onChange={(partyId) => patch({ partyId })}
+                onPartySaved={onPartySaved}
+                onError={onPartyError}
               />
 
               {/* STOCK ITEM */}

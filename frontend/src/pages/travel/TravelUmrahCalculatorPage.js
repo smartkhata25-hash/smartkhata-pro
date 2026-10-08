@@ -15,9 +15,13 @@ import {
 import { DEFAULT_TRAVEL_CURRENCY } from '../../config/travelConfig';
 import { t } from '../../i18n/i18n';
 import {
+  createTravelHotel,
+  createTravelVendor,
   fetchTravelAirlines,
   fetchTravelCurrencySettings,
   fetchTravelHotels,
+  fetchTravelServiceCategories,
+  fetchTravelVendors,
 } from '../../services/travelMasterService';
 import {
   createEmptyBookingItem,
@@ -47,6 +51,15 @@ import {
   normalizeHotelForCalculator,
   splitHotelsByUmrahCity,
 } from '../../utils/umrahCalculator';
+import TravelHotelFormModal from '../../components/travel/hotels/TravelHotelFormModal';
+import { emptyHotelForm } from '../../components/travel/hotels/travelHotelConfig';
+import TravelVendorFormModal from '../../components/travel/vendors/TravelVendorFormModal';
+import {
+  buildVendorOpeningPayload,
+  emptyHotelVendorForm,
+} from '../../components/travel/vendors/travelVendorConfig';
+import { createUmrahHotelQuick } from '../../components/travel/quickAdd/travelQuickAdd';
+import { buildUmrahStayNightsPrefill } from '../../components/travel/umrah/umrahStayNights';
 
 const panelClass =
   'overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.07)]';
@@ -70,6 +83,15 @@ const formatMoney = (amount, currency = 'SAR') =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })}`;
+
+const upsertRecord = (records, record) => {
+  if (!record?._id) return records;
+  const index = records.findIndex((item) => String(item?._id) === String(record._id));
+  if (index === -1) return [record, ...records];
+  const next = [...records];
+  next[index] = { ...next[index], ...record };
+  return next;
+};
 
 const getAirlineLabel = (airline) =>
   [airline?.name, airline?.iataCode ? `(${airline.iataCode})` : ''].filter(Boolean).join(' ') ||
@@ -158,7 +180,17 @@ const SummaryTile = ({ labelKey, label, value, tone = 'cyan', large = false }) =
   );
 };
 
-const HotelCalculatorCard = ({ city, titleKey, hotels, value, rates, markWeekend, onChange }) => {
+const HotelCalculatorCard = ({
+  city,
+  titleKey,
+  hotels,
+  value,
+  rates,
+  markWeekend,
+  onChange,
+  onQuickAdd,
+  onAddDetails,
+}) => {
   const isMakkah = city === 'makkah';
 
   const selectedHotelId = value.hotelId || '';
@@ -235,6 +267,8 @@ const HotelCalculatorCard = ({ city, titleKey, hotels, value, rates, markWeekend
                   }
             )
           }
+          onQuickAdd={onQuickAdd}
+          onAddDetails={onAddDetails}
         />
 
         <div className="grid grid-cols-2 gap-2">
@@ -317,10 +351,19 @@ const TravelUmrahCalculatorPage = () => {
   const appliedPlanRef = useRef(false);
 
   const [hotels, setHotels] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [airlines, setAirlines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
   const [currencySettings, setCurrencySettings] = useState(null);
+  const [hotelModal, setHotelModal] = useState(null);
+  const [hotelValues, setHotelValues] = useState({ ...emptyHotelForm });
+  const [vendorModalOpen, setVendorModalOpen] = useState(false);
+  const [vendorValues, setVendorValues] = useState({ ...emptyHotelVendorForm });
+  const [formError, setFormError] = useState('');
+  const [modalSaving, setModalSaving] = useState(false);
+  const quickAddLocksRef = useRef(new Set());
 
   const [makkah, setMakkah] = useState(() => createEmptyCalculatorHotel('makkah'));
 
@@ -348,6 +391,8 @@ const TravelUmrahCalculatorPage = () => {
   });
 
   const canCreateBooking = hasPermission('travel.bookings.create');
+  const canManageHotels = hasPermission('travel.hotels.manage');
+  const canManageVendors = hasPermission('travel.vendors.manage');
 
   const loadReferences = useCallback(async () => {
     try {
@@ -381,6 +426,121 @@ const TravelUmrahCalculatorPage = () => {
   }, [loadReferences]);
 
   const { makkahHotels, madinahHotels } = useMemo(() => splitHotelsByUmrahCity(hotels), [hotels]);
+
+  const activeVendors = useMemo(
+    () => vendors.filter((vendor) => vendor?.isDeleted !== true && vendor?.isActive !== false),
+    [vendors]
+  );
+
+  const getCityLabel = (city) => (city === 'makkah' ? 'Makkah' : 'Madinah');
+  const getCitySetter = (city) => (city === 'makkah' ? setMakkah : setMadinah);
+
+  const selectCalculatorHotel = (city, hotel) => {
+    const setter = getCitySetter(city);
+    setter((current) => normalizeHotelForCalculator(hotel, city, rates, current));
+  };
+
+  const handleQuickAddHotel = async (city, query) => {
+    const name = String(query || '').trim();
+    if (!name) return null;
+    const lockKey = `${city}:${name.toLowerCase()}`;
+    if (quickAddLocksRef.current.has(lockKey)) return null;
+    quickAddLocksRef.current.add(lockKey);
+    try {
+      setFormError('');
+      const saved = await createUmrahHotelQuick({
+        query: name,
+        city: getCityLabel(city),
+        createHotel: createTravelHotel,
+      });
+      setHotels((current) => upsertRecord(current, saved));
+      selectCalculatorHotel(city, saved);
+      return saved;
+    } catch (error) {
+      setPageError(error?.response?.data?.message || error.message || t('travel.alerts.quickAddFailed'));
+      throw error;
+    } finally {
+      quickAddLocksRef.current.delete(lockKey);
+    }
+  };
+
+  const ensureHotelFormReferences = async () => {
+    if (vendors.length || categories.length) return;
+    const [vendorData, categoryData] = await Promise.all([
+      fetchTravelVendors(),
+      fetchTravelServiceCategories(),
+    ]);
+    setVendors(Array.isArray(vendorData) ? vendorData : []);
+    setCategories(Array.isArray(categoryData) ? categoryData : []);
+  };
+
+  const openHotelDetails = async (city, query) => {
+    setHotelValues({ ...emptyHotelForm, name: String(query || '').trim(), city: getCityLabel(city) });
+    setHotelModal({ city });
+    setFormError('');
+    try {
+      await ensureHotelFormReferences();
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.umrah.alerts.referencesFailed'));
+    }
+  };
+
+  const submitHotelDetails = async (event) => {
+    event.preventDefault();
+    if (!hotelModal) return;
+    try {
+      setModalSaving(true);
+      setFormError('');
+      const saved = await createTravelHotel(hotelValues);
+      setHotels((current) => upsertRecord(current, saved));
+      selectCalculatorHotel(hotelModal.city, saved);
+      setHotelModal(null);
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.alerts.saveFailed'));
+    } finally {
+      setModalSaving(false);
+    }
+  };
+
+  const quickAddHotelVendor = async (query) => {
+    const name = String(query || '').trim();
+    if (!name || modalSaving) return null;
+    try {
+      setModalSaving(true);
+      setFormError('');
+      const saved = await createTravelVendor({ name, moduleScope: 'travel' });
+      setVendors((current) => upsertRecord(current, saved));
+      setHotelValues((current) => ({ ...current, vendorId: saved._id }));
+      return saved;
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.alerts.quickAddFailed'));
+      throw error;
+    } finally {
+      setModalSaving(false);
+    }
+  };
+
+  const openHotelVendorDetails = (query) => {
+    setVendorValues({ ...emptyHotelVendorForm, name: String(query || '').trim() });
+    setVendorModalOpen(true);
+    setFormError('');
+  };
+
+  const submitHotelVendor = async (event) => {
+    event.preventDefault();
+    try {
+      setModalSaving(true);
+      setFormError('');
+      const saved = await createTravelVendor(buildVendorOpeningPayload(vendorValues));
+      setVendors((current) => upsertRecord(current, saved));
+      setHotelValues((current) => ({ ...current, vendorId: saved._id }));
+      setVendorModalOpen(false);
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.alerts.saveFailed'));
+    } finally {
+      setModalSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (makkah.hotelId || !makkahHotels.length) {
@@ -611,6 +771,7 @@ const TravelUmrahCalculatorPage = () => {
     const madinahBreakdown = getHotelNightBreakdown(madinah, {
       markWeekend,
     });
+    const stayNights = buildUmrahStayNightsPrefill(makkahBreakdown, madinahBreakdown);
 
     const calculatorRateSnapshot = {
       SAR_to_PKR: roundMoney(numberValue(rates.SAR_to_PKR, 0)),
@@ -741,6 +902,8 @@ const TravelUmrahCalculatorPage = () => {
             makkahHotelId: makkah.hotelId || '',
 
             madinahHotelId: madinah.hotelId || '',
+
+            ...stayNights,
 
             syncPassengerCountsToComponents: false,
 
@@ -1035,6 +1198,8 @@ setPageError(t('travel.alerts.permissionDenied'));
                 rates={rates}
                 markWeekend={markWeekend}
                 onChange={setMakkah}
+                onQuickAdd={canManageHotels ? (query) => handleQuickAddHotel('makkah', query) : null}
+                onAddDetails={canManageHotels ? (query) => openHotelDetails('makkah', query) : null}
               />
 
               <HotelCalculatorCard
@@ -1045,6 +1210,8 @@ setPageError(t('travel.alerts.permissionDenied'));
                 rates={rates}
                 markWeekend={markWeekend}
                 onChange={setMadinah}
+                onQuickAdd={canManageHotels ? (query) => handleQuickAddHotel('madinah', query) : null}
+                onAddDetails={canManageHotels ? (query) => openHotelDetails('madinah', query) : null}
               />
             </div>
           </div>
@@ -1209,6 +1376,37 @@ setPageError(t('travel.alerts.permissionDenied'));
           </aside>
         </div>
       </div>
+
+      <TravelHotelFormModal
+        open={Boolean(hotelModal)}
+        activeVendors={activeVendors}
+        canManageVendors={canManageVendors}
+        values={hotelValues}
+        onChange={(name, value) => setHotelValues((current) => ({ ...current, [name]: value }))}
+        onClose={() => {
+          setHotelModal(null);
+          setFormError('');
+        }}
+        onSubmit={submitHotelDetails}
+        submitting={modalSaving}
+        error={formError}
+        onQuickAddVendor={quickAddHotelVendor}
+        onAddVendorDetails={openHotelVendorDetails}
+      />
+
+      <TravelVendorFormModal
+        open={vendorModalOpen}
+        categories={categories}
+        values={vendorValues}
+        onChange={(name, value) => setVendorValues((current) => ({ ...current, [name]: value }))}
+        onClose={() => {
+          setVendorModalOpen(false);
+          setFormError('');
+        }}
+        onSubmit={submitHotelVendor}
+        submitting={modalSaving}
+        error={formError}
+      />
     </TravelMasterPageFrame>
   );
 };

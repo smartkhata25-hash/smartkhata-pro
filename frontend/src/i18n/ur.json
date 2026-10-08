@@ -1928,6 +1928,8 @@
   "travel.booking.fields.returnDate": "واپسی تاریخ",
   "travel.booking.fields.makkahHotel": "مکہ ہوٹل",
   "travel.booking.fields.madinahHotel": "مدینہ ہوٹل",
+  "travel.booking.fields.makkahNights": "مکہ کی راتیں",
+  "travel.booking.fields.madinahNights": "مدینہ کی راتیں",
   "travel.booking.fields.component": "کمپوننٹ",
   "travel.booking.fields.componentType": "کمپوننٹ قسم",
   "travel.booking.fields.label": "لیبل",

@@ -12,45 +12,24 @@ import {
 } from 'react-icons/fa';
 
 import WeavingPartyLedgerPanel from '../../components/weaving/WeavingPartyLedgerPanel';
+import WeavingCounterpartyFormModal, {
+  COUNTERPARTY_TYPES,
+} from '../../components/weaving/WeavingCounterpartyFormModal';
 import {
   requestWeavingConfirmation,
   useWeavingFeedback,
 } from '../../components/weaving/WeavingFeedbackModal';
 
 import {
-  createCounterparty,
   hideCounterparty,
   listCounterparties,
-  mergeCounterparties,
   restoreCounterparty,
-  updateCounterparty,
 } from '../../services/weavingCommercialService';
 
 import { hasPermission } from '../../utils/permissionHelper';
 import { sendWhatsAppReminder } from '../../utils/whatsapp';
 
-const types = {
-  customer: {
-    label: 'Customer',
-    role: 'customer',
-    serviceTypes: [],
-  },
-  supplier: {
-    label: 'Supplier',
-    role: 'supplier',
-    serviceTypes: [],
-  },
-  both: {
-    label: 'Party',
-    role: 'both',
-    serviceTypes: [],
-  },
-  sizing: {
-    label: 'Sizing Party',
-    role: 'supplier',
-    serviceTypes: ['sizing'],
-  },
-};
+const types = COUNTERPARTY_TYPES;
 
 const tabs = [
   ['customer', 'Customers'],
@@ -59,36 +38,13 @@ const tabs = [
   ['sizing', 'Sizing'],
 ];
 
-const field =
-  'mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
-
 const compactField =
   'h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-100';
-
-const blank = (type) => ({
-  ...types[type],
-  type,
-  name: '',
-  phone: '',
-  email: '',
-  address: '',
-  openingBalance: '',
-  balanceType: 'receivable',
-  openingDate: '',
-  notes: '',
-  isActive: true,
-});
 
 const balanceKind = (value) =>
   Number(value) > 0 ? 'receivable' : Number(value) < 0 ? 'payable' : 'settled';
 
 const money = (value) => `Rs. ${Math.abs(Number(value || 0)).toLocaleString('en-PK')}`;
-
-const normalizeName = (value) =>
-  String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
 
 export default function WeavingPartiesPage() {
   const [params, setParams] = useSearchParams();
@@ -115,10 +71,7 @@ export default function WeavingPartiesPage() {
   const [form, setForm] = useState(null);
   const [addMenu, setAddMenu] = useState(false);
 
-  const [duplicateMerge, setDuplicateMerge] = useState(null);
-
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const [errorNotice, setErrorNotice] = useState('');
   useWeavingFeedback(errorNotice, setErrorNotice, { type: 'error' });
@@ -126,7 +79,6 @@ export default function WeavingPartiesPage() {
   const requestKey = useRef('');
   const openedNewType = useRef('');
   const openedEditId = useRef('');
-  const openingInputRef = useRef(null);
 
   const canCreate = hasPermission('weaving.counterparties.create');
   const canEdit = hasPermission('weaving.counterparties.edit');
@@ -149,7 +101,7 @@ export default function WeavingPartiesPage() {
 
     if (canCreate && newType && openedNewType.current !== newType) {
       openedNewType.current = newType;
-      setForm(blank(newType));
+      setForm({ initialType: newType });
     }
 
     if (!newType) {
@@ -236,8 +188,7 @@ export default function WeavingPartiesPage() {
     openedEditId.current = editId;
     setSelected(row);
     setMobileDetail(true);
-    setForm({ ...row, type: row.serviceTypes?.includes('sizing') ? 'sizing' : row.role });
-    if (params.get('focus') === 'opening') setTimeout(() => openingInputRef.current?.focus(), 0);
+    setForm({ initialRecord: row, focusField: params.get('focus') === 'opening' ? 'opening' : '' });
   }, [canEdit, params, rows]);
 
   const shownRows = useMemo(
@@ -279,7 +230,7 @@ export default function WeavingPartiesPage() {
         return;
       }
 
-      if (form || duplicateMerge) {
+      if (form) {
         return;
       }
 
@@ -345,7 +296,7 @@ export default function WeavingPartiesPage() {
     window.addEventListener('keydown', handleKeyDown);
 
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [shownRows, form, duplicateMerge]);
+  }, [shownRows, form]);
 
   /*
    * Mouse سے select ہونے پر بھی
@@ -374,121 +325,6 @@ export default function WeavingPartiesPage() {
     setSelected(null);
     setSelectedIndex(-1);
     requestKey.current = '';
-  };
-
-  const findDuplicateByName = async (currentForm) => {
-    const activeParties = await listCounterparties({
-      status: 'active',
-    });
-
-    const wantedName = normalizeName(currentForm.name);
-
-    return activeParties.find((row) => {
-      if (currentForm._id && String(row._id) === String(currentForm._id)) {
-        return false;
-      }
-
-      return normalizeName(row.name) === wantedName;
-    });
-  };
-
-  const performNormalSave = async (currentForm) => {
-    const saved = currentForm._id
-      ? await updateCounterparty(currentForm._id, currentForm)
-      : await createCounterparty(currentForm);
-
-    setForm(null);
-    const next = new URLSearchParams(params);
-    next.delete('edit');
-    next.delete('focus');
-    setParams(next, { replace: true });
-
-    requestKey.current = '';
-
-    await load(true);
-
-    setSelected(saved);
-  };
-
-  const save = async () => {
-    if (form?._id ? !canEdit : !canCreate) {
-      setErrorNotice('You do not have permission for this action');
-      return;
-    }
-
-    if (!form?.name?.trim()) {
-      setErrorNotice('Name is required');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const duplicate = await findDuplicateByName(form);
-
-      if (duplicate) {
-        if (!canMerge) {
-          setErrorNotice(`"${duplicate.name}" already exists. Please use a different name.`);
-          return;
-        }
-
-        setDuplicateMerge({
-          target: duplicate,
-          pendingForm: {
-            ...form,
-          },
-          mode: form._id ? 'edit' : 'create',
-        });
-
-        return;
-      }
-
-      await performNormalSave(form);
-    } catch (error) {
-      setErrorNotice(error.response?.data?.message || 'Could not save party');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDuplicateMerge = async () => {
-    if (!duplicateMerge?.target || !duplicateMerge?.pendingForm) {
-      return;
-    }
-
-    if (!canMerge) {
-      setErrorNotice('You do not have permission to merge parties');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const { target, pendingForm, mode } = duplicateMerge;
-
-      let source;
-
-      if (mode === 'edit') {
-        source = await updateCounterparty(pendingForm._id, pendingForm);
-      } else {
-        source = await createCounterparty(pendingForm);
-      }
-
-      const result = await mergeCounterparties(source._id, target._id);
-
-      setDuplicateMerge(null);
-      setForm(null);
-
-      requestKey.current = '';
-
-      await load(true);
-
-      setSelected(result.target);
-    } catch (error) {
-      setErrorNotice(error.response?.data?.message || 'Could not merge parties');
-    } finally {
-      setSaving(false);
-    }
   };
 
   const hide = async (row) => {
@@ -544,12 +380,7 @@ export default function WeavingPartiesPage() {
       return;
     }
 
-    setForm({
-      ...row,
-
-      type: row.serviceTypes?.includes('sizing') ? 'sizing' : row.role,
-    });
-    if (options.focus === 'opening') setTimeout(() => openingInputRef.current?.focus(), 0);
+    setForm({ initialRecord: row, focusField: options.focus || '' });
   };
 
   const closeForm = () => {
@@ -599,7 +430,7 @@ export default function WeavingPartiesPage() {
     setSelectedIndex(-1);
     setMobileDetail(false);
 
-    setForm(blank(key));
+    setForm({ initialType: key });
 
     setAddMenu(false);
 
@@ -912,180 +743,25 @@ export default function WeavingPartiesPage() {
         </div>
       </div>
 
-      {/* ADD / EDIT FORM */}
       {form && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/45 sm:items-center sm:p-4">
-          <div className="max-h-[94vh] w-full overflow-y-auto rounded-t-md bg-white p-5 shadow-xl sm:max-w-2xl sm:rounded-md">
-            <h2 className="mb-4 text-lg font-bold">
-              {form._id ? 'Edit' : 'Add'} {types[form.type]?.label || 'Party'}
-            </h2>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-medium">
-                Party Type
-                <select
-                  className={field}
-                  value={form.type}
-                  onChange={(event) => {
-                    const type = event.target.value;
-
-                    setForm({
-                      ...form,
-                      type,
-                      role: types[type].role,
-                      serviceTypes: types[type].serviceTypes,
-                    });
-                  }}
-                >
-                  <option value="customer">Customer</option>
-
-                  <option value="supplier">Supplier</option>
-
-                  <option value="both">Party</option>
-
-                  <option value="sizing">Sizing Party</option>
-                </select>
-              </label>
-
-              {[
-                ['name', 'Name *'],
-                ['phone', 'Phone'],
-                ['email', 'Email'],
-                ['address', 'Address'],
-              ].map(([key, label]) => (
-                <label key={key} className="text-sm font-medium">
-                  {label}
-
-                  <input
-                    className={field}
-                    value={form[key] || ''}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        [key]: event.target.value,
-                      })
-                    }
-                  />
-                </label>
-              ))}
-
-              <label className="text-sm font-medium">
-                Opening Balance
-                <input
-                  ref={openingInputRef}
-                  type="number"
-                  min="0"
-                  className={field}
-                  value={form.openingBalance || ''}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      openingBalance: event.target.value,
-                    })
-                  }
-                />
-              </label>
-
-              <label className="text-sm font-medium">
-                Opening Date
-                <input
-                  type="date"
-                  className={field}
-                  value={form.openingDate || ''}
-                  onChange={(event) => setForm({ ...form, openingDate: event.target.value })}
-                />
-              </label>
-
-              <label className="text-sm font-medium">
-                Balance Type
-                <select
-                  className={field}
-                  value={form.balanceType}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      balanceType: event.target.value,
-                    })
-                  }
-                >
-                  <option value="receivable">Receivable</option>
-
-                  <option value="payable">Payable</option>
-                </select>
-              </label>
-
-              <label className="text-sm font-medium sm:col-span-2">
-                Notes
-                <textarea
-                  className={`${field} h-20 py-2`}
-                  value={form.notes || ''}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      notes: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={closeForm} className="h-10 rounded-md border px-4">
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                disabled={saving}
-                onClick={save}
-                className="h-10 rounded-md bg-teal-700 px-4 font-semibold text-white disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save & Close'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DUPLICATE / MERGE */}
-      {duplicateMerge && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45 p-4">
-          <div className="w-full max-w-md rounded-md bg-white p-5 shadow-xl">
-            <h2 className="text-lg font-bold text-slate-900">Same Name Already Exists</h2>
-
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              <strong>{duplicateMerge.target.name}</strong> پہلے سے موجود ہے۔
-            </p>
-
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              اگر یہ وہی Customer / Supplier / Party ہے تو آپ دونوں records کو Merge کر سکتے ہیں۔
-            </p>
-
-            <p className="mt-2 text-xs text-slate-500">
-              اگر یہ الگ record ہے تو Cancel کریں اور نام میں مناسب تبدیلی کر دیں۔
-            </p>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => setDuplicateMerge(null)}
-                className="h-10 rounded-md border px-4 text-sm font-medium"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                disabled={saving}
-                onClick={confirmDuplicateMerge}
-                className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {saving ? 'Merging...' : 'Merge'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <WeavingCounterpartyFormModal
+          key={form.initialRecord?._id || `new-${form.initialType || tab}`}
+          initialRecord={form.initialRecord || null}
+          initialType={form.initialType || tab}
+          allowedTypes={Object.keys(types)}
+          focusField={form.focusField || ''}
+          launchContext="parties"
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canMerge={canMerge}
+          onError={setErrorNotice}
+          onClose={closeForm}
+          onSaved={async (saved) => {
+            requestKey.current = '';
+            await load(true);
+            setSelected(saved);
+          }}
+        />
       )}
     </div>
   );

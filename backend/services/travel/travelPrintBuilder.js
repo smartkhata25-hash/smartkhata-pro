@@ -1,4 +1,8 @@
 const { formatBusinessDate } = require("../../utils/businessDate");
+const {
+  formatStayNights,
+  resolveUmrahCityNights,
+} = require("./umrahStayNights");
 
 const getLogoUrl = (header = {}) =>
   header.showLogo === true && header.logoUrl ? header.logoUrl : "";
@@ -202,8 +206,16 @@ const buildItemDetails = (booking, item) => {
     );
 
     details.push(
-      joinValues("Makkah", getName(umrah.makkahHotelId)),
-      joinValues("Madinah", getName(umrah.madinahHotelId)),
+      joinValues(
+        "Makkah",
+        getName(umrah.makkahHotelId),
+        formatStayNights(resolveUmrahCityNights(umrah, "makkah")),
+      ),
+      joinValues(
+        "Madinah",
+        getName(umrah.madinahHotelId),
+        formatStayNights(resolveUmrahCityNights(umrah, "madinah")),
+      ),
     );
 
     (umrah.components || []).forEach((component) => {
@@ -212,6 +224,9 @@ const buildItemDetails = (booking, item) => {
           humanize(component.componentType),
           component.label || getName(component.serviceId),
           getName(component.hotelId),
+          component.componentType === "hotel"
+            ? formatStayNights(component.hotelPricing?.nights)
+            : "",
         ),
       );
     });

@@ -44,12 +44,14 @@ TravelCardLine,
   normalizeSearch,
 } from '../../components/travel/master/TravelMasterUI';
 import {
+  buildVendorOpeningPayload,
   createEmptyQuickVendorForm,
   emptyVendorForm,
   normalizeCategoryIds,
   quickVendorFields,
-  vendorFields,
+  withVendorOpeningFormValues,
 } from '../../components/travel/vendors/travelVendorConfig';
+import TravelVendorFormModal from '../../components/travel/vendors/TravelVendorFormModal';
 
 const PAGE_MEMORY_DEFAULTS = {
   search: '',
@@ -84,36 +86,10 @@ const getVendorBalance = (vendor) => {
   return payable - credit;
 };
 
-const getVendorOpeningDirection = (openingBalance = 0) =>
-  Number(openingBalance || 0) < 0 ? 'advance' : 'payable';
-
 const isDeletedHiddenRecord = (record) => record?.hiddenReason === 'deleted';
 
 const getHiddenReasonLabel = (record) =>
   t(`travel.hiddenReasons.${record?.hiddenReason || 'hidden'}`);
-
-const getOpeningBalanceAmount = (openingBalance = 0) => {
-  const amount = Math.abs(Number(openingBalance || 0));
-  return amount || '';
-};
-
-const withVendorOpeningFormValues = (vendor = {}) => ({
-  ...vendor,
-  openingBalanceAmount: getOpeningBalanceAmount(vendor.openingBalance),
-  openingBalanceDirection: getVendorOpeningDirection(vendor.openingBalance),
-});
-
-const buildVendorOpeningPayload = (values = {}) => {
-  const amount = Math.abs(Number(values.openingBalanceAmount || 0));
-  const direction = values.openingBalanceDirection || 'payable';
-
-  return {
-    ...values,
-    openingBalance: direction === 'advance' ? -amount : amount,
-    openingBalanceAmount: amount,
-    openingBalanceDirection: direction,
-  };
-};
 
 const getBalanceTextClass = (balance) => {
   if (balance > 0) {
@@ -599,21 +575,6 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
     [canManage, loadData, setSelectedId]
   );
 
-  const toggleCategory = (categoryId) => {
-    setVendorValues((current) => {
-      const currentIds = normalizeCategoryIds(current.travelServiceCategories);
-
-      const exists = currentIds.includes(categoryId);
-
-      return {
-        ...current,
-        travelServiceCategories: exists
-          ? currentIds.filter((id) => id !== categoryId)
-          : [...currentIds, categoryId],
-      };
-    });
-  };
-
   const openLedger = useCallback(
     (vendor) => {
       if (!vendor?._id || !canViewLedger) {
@@ -992,11 +953,6 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
     ]
   );
 
-  const selectedCategoryIds = useMemo(
-    () => normalizeCategoryIds(vendorValues.travelServiceCategories),
-    [vendorValues.travelServiceCategories]
-  );
-
   return (
     <TravelMasterPageFrame
       titleKey="travel.vendors.title"
@@ -1084,11 +1040,10 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
         emptyKey="travel.vendors.empty"
       />
 
-      <TravelFormModal
+      <TravelVendorFormModal
         open={detailsOpen}
-        titleKey="travel.vendors.formTitle"
-        modeKey={editingVendor ? 'travel.common.edit' : 'travel.common.addWithDetails'}
-        fields={vendorFields}
+        editingVendor={editingVendor}
+        categories={categories}
         values={vendorValues}
         onChange={(name, value) =>
           setVendorValues((current) => ({
@@ -1104,39 +1059,7 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
         submitting={submitting}
         error={formError}
         submitIcon={FaEdit}
-      >
-        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-          <p className="text-xs font-extrabold text-slate-600">
-            {t('travel.fields.travelServiceCategories')}
-          </p>
-
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {categories
-              .filter((category) => category.isActive !== false)
-              .map((category) => (
-                <label
-                  key={category._id}
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedCategoryIds.includes(category._id)}
-                    onChange={() => toggleCategory(category._id)}
-                    className="h-4 w-4 rounded border-slate-300 text-cyan-600"
-                  />
-
-                  <span className="truncate">{category.name}</span>
-                </label>
-              ))}
-          </div>
-
-          {categories.length === 0 && (
-            <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-sm font-semibold text-slate-500">
-              {t('travel.services.emptyCategories')}
-            </div>
-          )}
-        </div>
-      </TravelFormModal>
+      />
 
       <TravelFormModal
         open={quickOpen}

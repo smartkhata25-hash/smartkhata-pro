@@ -13,6 +13,7 @@ import {
 } from 'react-icons/fa';
 
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
+import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
 import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
 import { getYarnStockSummary } from '../../services/weavingYarnStockService';
@@ -271,6 +272,27 @@ const WeavingSizingPage = () => {
       sizingPartyId: value.sizingPartyId || (sizingMeta.parties?.length === 1 ? sizingMeta.parties[0]._id : ''),
     }));
     return sizingMeta;
+  };
+
+  const refreshCounterparties = async (saved) => {
+    setMeta((value) => ({
+      ...value,
+      parties: [...value.parties.filter((row) => row._id !== saved._id), saved],
+    }));
+    setCommercial((value) => ({
+      ...value,
+      parties: [...(value.parties || []).filter((row) => row._id !== saved._id), saved],
+    }));
+    try {
+      const [sizingMeta, commercialMeta] = await Promise.all([
+        getSizingMeta(),
+        getCommercialMeta({ force: true }),
+      ]);
+      setMeta((value) => ({ ...value, parties: sizingMeta.parties || [] }));
+      setCommercial(commercialMeta);
+    } catch {
+      setNotice({ error: true, text: 'Sizing Party was saved, but options could not be refreshed' });
+    }
   };
 
   const dateParams = () => {
@@ -1264,11 +1286,12 @@ const WeavingSizingPage = () => {
                 />
               </Field>
 
-              <SearchableCreatableSelect
+              <WeavingCounterpartySelect
                 label="Sizing"
                 required
                 placeholder="Search sizing"
-                options={meta.parties}
+                parties={commercial.parties || []}
+                context="sizing"
                 value={issue.sizingPartyId}
                 onChange={(sizingPartyId) =>
                   setIssue({
@@ -1276,6 +1299,8 @@ const WeavingSizingPage = () => {
                     sizingPartyId,
                   })
                 }
+                onPartySaved={refreshCounterparties}
+                onError={(text) => setNotice({ error: true, text })}
               />
 
               <SearchableCreatableSelect
@@ -1903,13 +1928,16 @@ const WeavingSizingPage = () => {
                   />
                 </Field>
 
-                <SearchableCreatableSelect
+                <WeavingCounterpartySelect
                   label="Sizing"
                   required
                   placeholder="Search sizing party"
-                  options={meta.parties}
+                  parties={commercial.parties || []}
+                  context="sizing"
                   value={receipt.sizingPartyId}
                   onChange={chooseReceivingSizing}
+                  onPartySaved={refreshCounterparties}
+                  onError={(text) => setNotice({ error: true, text })}
                 />
                 <Field label="Receiving Challan No. *">
                   <input
@@ -2162,7 +2190,7 @@ const WeavingSizingPage = () => {
 
                     {tab === 'return' && <>
                       <Field label="Date *"><input type="date" className={control} value={yarnReturn.date} onChange={(e) => setYarnReturn({ ...yarnReturn, date: e.target.value })} /></Field>
-                      <SearchableCreatableSelect label="Sizing" required placeholder="Search sizing" options={meta.parties} value={yarnReturn.sizingPartyId} onChange={chooseStandaloneReturnSizing} />
+                      <WeavingCounterpartySelect label="Sizing" required placeholder="Search sizing" parties={commercial.parties || []} context="sizing" value={yarnReturn.sizingPartyId} onChange={chooseStandaloneReturnSizing} onPartySaved={refreshCounterparties} onError={(text) => setNotice({ error: true, text })} />
                     </>}
 
                     <Field
@@ -2406,7 +2434,7 @@ const WeavingSizingPage = () => {
                       />
                     </Field>
 
-                    {tab === 'bill' && <SearchableCreatableSelect label="Sizing" required placeholder="Search sizing" options={meta.parties} value={bill.sizingPartyId} onChange={chooseStandaloneBillSizing} />}
+                    {tab === 'bill' && <WeavingCounterpartySelect label="Sizing" required placeholder="Search sizing" parties={commercial.parties || []} context="sizing" value={bill.sizingPartyId} onChange={chooseStandaloneBillSizing} onPartySaved={refreshCounterparties} onError={(text) => setNotice({ error: true, text })} />}
                     {tab === 'bill' && standaloneBillReceipts.length > 1 && <Field label="Receiving"><select className={control} value={bill.receiptId} onChange={(e) => selectStandaloneBillReceipt(e.target.value)}><option value="">Select Receiving</option>{standaloneBillReceipts.map((row) => <option key={row._id} value={row._id}>{row.receiptNo} — {row.partyReceiptNo || row.date}</option>)}</select></Field>}
 
                     <Field

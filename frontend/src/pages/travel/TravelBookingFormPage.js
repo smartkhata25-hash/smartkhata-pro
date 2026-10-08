@@ -83,25 +83,32 @@ import {
 import {
   emptyHotelForm,
   emptyQuickHotel,
-  hotelFields,
   quickHotelFields,
 } from '../../components/travel/hotels/travelHotelConfig';
+import TravelHotelFormModal from '../../components/travel/hotels/TravelHotelFormModal';
 
 import {
-  createEmptyQuickVendorForm,
+  buildVendorOpeningPayload,
   emptyVendorForm,
-  quickVendorFields,
-  vendorFields,
 } from '../../components/travel/vendors/travelVendorConfig';
+import TravelVendorFormModal from '../../components/travel/vendors/TravelVendorFormModal';
+import TravelCustomerFormModal from '../../components/travel/customers/TravelCustomerFormModal';
+import {
+  buildCustomerOpeningPayload,
+  emptyCustomerForm,
+} from '../../components/travel/customers/travelCustomerFormConfig';
+import TravelTravelerFormModal from '../../components/travel/travelers/TravelTravelerFormModal';
+import {
+  cleanTravelerPayload,
+  emptyTravelerForm,
+} from '../../components/travel/travelers/travelTravelerFormConfig';
+import {
+  createBookingCustomerQuick,
+  createBookingTravelerQuick,
+  createBookingVendorQuick,
+} from '../../components/travel/quickAdd/travelQuickAdd';
 
 import BookingRelationModal from '../../components/travel/bookings/form/BookingRelationModal';
-
-import {
-  customerDetailFields,
-  customerQuickFields,
-  travelerDetailFields,
-  travelerQuickFields,
-} from '../../components/travel/bookings/form/bookingFormConfig';
 
 import {
   calculateBookingItemSourceTotals,
@@ -522,14 +529,26 @@ const FieldLabel = ({ children }) => (
   <span className="mb-1 block text-xs font-extrabold text-slate-500">{children}</span>
 );
 
-const TextField = ({ labelKey, value, onChange, type = 'text', disabled = false }) => (
+const TextField = ({
+  labelKey,
+  value,
+  onChange,
+  type = 'text',
+  disabled = false,
+  min,
+  step,
+  inputMode,
+}) => (
   <label className="min-w-0">
     <FieldLabel>{t(labelKey)}</FieldLabel>
 
     <input
       type={type}
-      value={value || ''}
+      value={value ?? ''}
       disabled={disabled}
+      min={min}
+      step={step}
+      inputMode={inputMode}
       onChange={(event) => onChange(event.target.value)}
       className={fieldClass}
     />
@@ -627,6 +646,8 @@ const TravelBookingFormPage = () => {
   const { id } = useParams();
   const routePrefillAppliedRef = useRef(false);
   const lazyReferenceLoadedRef = useRef({});
+  const quickAddLocksRef = useRef(new Set());
+  const hotelModalDraftRef = useRef(null);
 
   const isEditMode = Boolean(id);
 
@@ -1042,14 +1063,6 @@ const TravelBookingFormPage = () => {
       return [];
     }
 
-    if (modal.type === 'customer') {
-      return modal.mode === 'details' ? customerDetailFields : customerQuickFields;
-    }
-
-    if (modal.type === 'traveler') {
-      return modal.mode === 'details' ? travelerDetailFields : travelerQuickFields;
-    }
-
     if (modal.type === 'service') {
       return modal.mode === 'details' ? serviceFields : quickServiceFields;
     }
@@ -1059,11 +1072,7 @@ const TravelBookingFormPage = () => {
     }
 
     if (modal.type === 'hotel') {
-      return modal.mode === 'details' ? hotelFields : quickHotelFields;
-    }
-
-    if (modal.type === 'vendor') {
-      return modal.mode === 'details' ? vendorFields : quickVendorFields;
+      return modal.mode === 'details' ? [] : quickHotelFields;
     }
 
     return [];
@@ -2048,24 +2057,9 @@ const TravelBookingFormPage = () => {
   const openModal = (type, mode = 'quick', context = {}) => {
     const defaults = {
       customer:
-        mode === 'details'
-          ? {
-              name: context.query || '',
-              phone: '',
-              email: '',
-              address: '',
-              moduleScope: 'travel',
-            }
-          : {
-              name: context.query || '',
-              phone: '',
-            },
+        { ...emptyCustomerForm, name: context.query || '' },
 
-      traveler: {
-        fullName: context.query || '',
-        passportNumber: '',
-        mobile: '',
-      },
+      traveler: { ...emptyTravelerForm, fullName: context.query || '' },
 
       service:
         mode === 'details'
@@ -2099,12 +2093,7 @@ const TravelBookingFormPage = () => {
             },
 
       vendor:
-        mode === 'details'
-          ? {
-              ...emptyVendorForm,
-              name: context.query || '',
-            }
-          : createEmptyQuickVendorForm(context.query || ''),
+        { ...emptyVendorForm, name: context.query || '' },
     };
 
     setModal({
@@ -2131,15 +2120,15 @@ const TravelBookingFormPage = () => {
     }));
   };
 
-  const assignCreatedRecord = (type, record) => {
+  const assignCreatedRecord = (type, record, context = modal?.context || {}) => {
     if (!record?._id) {
       return;
     }
 
-    const itemIndex = modal?.context?.itemIndex;
+    const itemIndex = context.itemIndex;
 
-    const componentIndex = modal?.context?.componentIndex;
-    const rowIndex = modal?.context?.rowIndex;
+    const componentIndex = context.componentIndex;
+    const rowIndex = context.rowIndex;
 
     if (type === 'customer') {
       setCustomers((current) => upsertRecord(current, record));
@@ -2209,8 +2198,8 @@ const TravelBookingFormPage = () => {
       } else if (Number.isInteger(itemIndex)) {
         updateItemDetails(
           itemIndex,
-          modal?.context?.group || 'hotelDetails',
-          modal?.context?.field || 'hotelId',
+          context.group || 'hotelDetails',
+          context.field || 'hotelId',
           record._id
         );
       }
@@ -2219,7 +2208,14 @@ const TravelBookingFormPage = () => {
     if (type === 'vendor') {
       setVendors((current) => upsertRecord(current, record));
 
-      if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
+      if (Number.isInteger(itemIndex) && Number.isInteger(rowIndex)) {
+        updatePaxRowVendorCounterparty(
+          itemIndex,
+          rowIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
+      } else if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
         updateUmrahComponentVendorCounterparty(
           itemIndex,
           componentIndex,
@@ -2245,6 +2241,63 @@ const TravelBookingFormPage = () => {
     }
   };
 
+  const quickAddRecord = async (type, query, context = {}) => {
+    const name = String(query || '').trim();
+    if (!name) return null;
+
+    const lockKey = `${type}:${JSON.stringify(context)}:${name.toLowerCase()}`;
+    if (quickAddLocksRef.current.has(lockKey)) return null;
+
+    quickAddLocksRef.current.add(lockKey);
+    setFormError('');
+
+    try {
+      let saved;
+
+      if (type === 'customer') {
+        saved = await createBookingCustomerQuick({
+          query: name,
+          customers,
+          createCustomer: createTravelCustomer,
+          fetchCustomers: async (...args) => {
+            const refreshed = await fetchTravelCustomers(...args);
+            setCustomers(Array.isArray(refreshed) ? refreshed : []);
+            return refreshed;
+          },
+        });
+        if (!saved) throw new Error(t('travel.booking.alerts.customerDuplicate'));
+      } else if (type === 'traveler') {
+        saved = await createBookingTravelerQuick({ query: name, createTraveler });
+      } else if (type === 'vendor') {
+        saved = await createBookingVendorQuick({ query: name, createVendor: createTravelVendor });
+      } else {
+        return null;
+      }
+
+      assignCreatedRecord(type, saved, context);
+      return saved;
+    } catch (error) {
+      console.error(`Travel invoice ${type} quick add failed:`, error);
+      setFormError(error?.response?.data?.message || error.message || t('travel.alerts.quickAddFailed'));
+      throw error;
+    } finally {
+      quickAddLocksRef.current.delete(lockKey);
+    }
+  };
+
+  const quickAddHotelVendor = async (query) => {
+    const saved = await quickAddRecord('vendor', query);
+    if (saved?._id) {
+      setModalValues((current) => ({ ...current, vendorId: saved._id }));
+    }
+    return saved;
+  };
+
+  const openHotelVendorDetails = (query) => {
+    hotelModalDraftRef.current = { modal, values: modalValues };
+    openModal('vendor', 'details', { query, parentHotel: true });
+  };
+
   const submitModal = async (event) => {
     event.preventDefault();
 
@@ -2260,8 +2313,7 @@ const TravelBookingFormPage = () => {
 
       if (modal.type === 'customer') {
         saved = await createTravelCustomer({
-          ...modalValues,
-
+          ...buildCustomerOpeningPayload(modalValues),
           moduleScope: modalValues.moduleScope || 'travel',
         });
 
@@ -2272,7 +2324,7 @@ const TravelBookingFormPage = () => {
       }
 
       if (modal.type === 'traveler') {
-        saved = await createTraveler(modalValues);
+        saved = await createTraveler(cleanTravelerPayload(modalValues));
       }
 
       if (modal.type === 'service') {
@@ -2293,10 +2345,20 @@ const TravelBookingFormPage = () => {
       }
 
       if (modal.type === 'vendor') {
-        saved = await createTravelVendor(modalValues);
+        saved = await createTravelVendor(buildVendorOpeningPayload(modalValues));
       }
 
-      assignCreatedRecord(modal.type, saved);
+      if (modal.type === 'vendor' && modal.context?.parentHotel && hotelModalDraftRef.current) {
+        setVendors((current) => upsertRecord(current, saved));
+        const parent = hotelModalDraftRef.current;
+        hotelModalDraftRef.current = null;
+        setModal(parent.modal);
+        setModalValues({ ...parent.values, vendorId: saved._id });
+        setModalError('');
+        return;
+      }
+
+      assignCreatedRecord(modal.type, saved, modal.context);
 
       closeModal();
     } catch (error) {
@@ -2683,7 +2745,7 @@ const TravelBookingFormPage = () => {
           onQuickAdd={
             canManageTravelers
               ? (query) =>
-                  openModal('traveler', 'quick', {
+                  quickAddRecord('traveler', query, {
                     query,
                     itemIndex: index,
                   })
@@ -3227,7 +3289,7 @@ const TravelBookingFormPage = () => {
                       onQuickAdd={
                         canManageVendors
                           ? (query) =>
-                              openModal('vendor', 'quick', {
+                              quickAddRecord('vendor', query, {
                                 query,
                                 itemIndex,
                                 componentIndex,
@@ -4220,71 +4282,103 @@ const TravelBookingFormPage = () => {
             }
           />
 
-          <TravelCompactAutocomplete
-            labelKey="travel.booking.fields.makkahHotel"
-            value={getRecordId(details.makkahHotelId) || ''}
-            records={makkahHotels}
-            disabled={accountingLocked}
-            getLabel={getHotelLabel}
-            getMeta={(hotel) => hotel?.country || ''}
-            placeholderKey="travel.placeholders.hotelName"
-            onChange={(value) => updateItemDetails(index, 'umrahDetails', 'makkahHotelId', value)}
-            onQuickAdd={
-              canManageHotels
-                ? (query) =>
-                    openModal('hotel', 'quick', {
-                      query,
-                      itemIndex: index,
-                      group: 'umrahDetails',
-                      field: 'makkahHotelId',
-                    })
-                : null
-            }
-            onAddDetails={
-              canManageHotels
-                ? (query) =>
-                    openModal('hotel', 'details', {
-                      query,
-                      itemIndex: index,
-                      group: 'umrahDetails',
-                      field: 'makkahHotelId',
-                    })
-                : null
-            }
-          />
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_96px] items-end gap-2 lg:col-span-2">
+            <TravelCompactAutocomplete
+              labelKey="travel.booking.fields.makkahHotel"
+              value={getRecordId(details.makkahHotelId) || ''}
+              records={makkahHotels}
+              disabled={accountingLocked}
+              getLabel={getHotelLabel}
+              getMeta={(hotel) => hotel?.country || ''}
+              placeholderKey="travel.placeholders.hotelName"
+              onChange={(value) => updateItemDetails(index, 'umrahDetails', 'makkahHotelId', value)}
+              onQuickAdd={
+                canManageHotels
+                  ? (query) =>
+                      openModal('hotel', 'quick', {
+                        query,
+                        itemIndex: index,
+                        group: 'umrahDetails',
+                        field: 'makkahHotelId',
+                      })
+                  : null
+              }
+              onAddDetails={
+                canManageHotels
+                  ? (query) =>
+                      openModal('hotel', 'details', {
+                        query,
+                        itemIndex: index,
+                        group: 'umrahDetails',
+                        field: 'makkahHotelId',
+                      })
+                  : null
+              }
+            />
+            <TextField
+              labelKey="travel.booking.fields.makkahNights"
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              value={details.makkahNights}
+              disabled={accountingLocked}
+              onChange={(value) => {
+                if (value === '' || /^\d+$/.test(value)) {
+                  updateItemDetails(index, 'umrahDetails', 'makkahNights', value);
+                }
+              }}
+            />
+          </div>
 
-          <TravelCompactAutocomplete
-            labelKey="travel.booking.fields.madinahHotel"
-            value={getRecordId(details.madinahHotelId) || ''}
-            records={madinahHotels}
-            disabled={accountingLocked}
-            getLabel={getHotelLabel}
-            getMeta={(hotel) => hotel?.country || ''}
-            placeholderKey="travel.placeholders.hotelName"
-            onChange={(value) => updateItemDetails(index, 'umrahDetails', 'madinahHotelId', value)}
-            onQuickAdd={
-              canManageHotels
-                ? (query) =>
-                    openModal('hotel', 'quick', {
-                      query,
-                      itemIndex: index,
-                      group: 'umrahDetails',
-                      field: 'madinahHotelId',
-                    })
-                : null
-            }
-            onAddDetails={
-              canManageHotels
-                ? (query) =>
-                    openModal('hotel', 'details', {
-                      query,
-                      itemIndex: index,
-                      group: 'umrahDetails',
-                      field: 'madinahHotelId',
-                    })
-                : null
-            }
-          />
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_96px] items-end gap-2 lg:col-span-2">
+            <TravelCompactAutocomplete
+              labelKey="travel.booking.fields.madinahHotel"
+              value={getRecordId(details.madinahHotelId) || ''}
+              records={madinahHotels}
+              disabled={accountingLocked}
+              getLabel={getHotelLabel}
+              getMeta={(hotel) => hotel?.country || ''}
+              placeholderKey="travel.placeholders.hotelName"
+              onChange={(value) => updateItemDetails(index, 'umrahDetails', 'madinahHotelId', value)}
+              onQuickAdd={
+                canManageHotels
+                  ? (query) =>
+                      openModal('hotel', 'quick', {
+                        query,
+                        itemIndex: index,
+                        group: 'umrahDetails',
+                        field: 'madinahHotelId',
+                      })
+                  : null
+              }
+              onAddDetails={
+                canManageHotels
+                  ? (query) =>
+                      openModal('hotel', 'details', {
+                        query,
+                        itemIndex: index,
+                        group: 'umrahDetails',
+                        field: 'madinahHotelId',
+                      })
+                  : null
+              }
+            />
+            <TextField
+              labelKey="travel.booking.fields.madinahNights"
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              value={details.madinahNights}
+              disabled={accountingLocked}
+              onChange={(value) => {
+                if (value === '' || /^\d+$/.test(value)) {
+                  updateItemDetails(index, 'umrahDetails', 'madinahNights', value);
+                }
+              }}
+            />
+          </div>
 
           {renderUmrahComponents(item, index)}
         </div>
@@ -4426,7 +4520,7 @@ const TravelBookingFormPage = () => {
                 }
                 onQuickAdd={
                   canManageVendors
-                    ? (query) => openModal('vendor', 'quick', { query, itemIndex, rowIndex })
+                    ? (query) => quickAddRecord('vendor', query, { itemIndex, rowIndex })
                     : null
                 }
                 onAddDetails={
@@ -5001,7 +5095,7 @@ const TravelBookingFormPage = () => {
                   onChange={(value, record) => updateItemVendorCounterparty(index, value, record)}
                   onQuickAdd={
                     canManageVendors && !rowVendorsActive
-                      ? (query) => openModal('vendor', 'quick', { query, itemIndex: index })
+                      ? (query) => quickAddRecord('vendor', query, { itemIndex: index })
                       : null
                   }
                   onAddDetails={
@@ -5163,8 +5257,10 @@ const TravelBookingFormPage = () => {
                     customerPartyId: selection.type === 'party' ? selection.id : '',
                   }));
                 }}
-                onQuickAdd={(query) => openModal('customer', 'quick', { query })}
-                onAddDetails={(query) => openModal('customer', 'details', { query })}
+                onQuickAdd={canCreate ? (query) => quickAddRecord('customer', query) : null}
+                onAddDetails={
+                  canCreate ? (query) => openModal('customer', 'details', { query }) : null
+                }
               />
             </div>
 
@@ -5667,8 +5763,69 @@ const TravelBookingFormPage = () => {
         </section>
       </div>
 
+      <TravelCustomerFormModal
+        open={modal?.type === 'customer' && modal?.mode === 'details'}
+        values={modalValues}
+        onChange={handleModalChange}
+        onClose={closeModal}
+        onSubmit={submitModal}
+        submitting={modalSaving}
+        error={modalError}
+      />
+
+      <TravelTravelerFormModal
+        open={modal?.type === 'traveler' && modal?.mode === 'details'}
+        values={modalValues}
+        onChange={handleModalChange}
+        onClose={closeModal}
+        onSubmit={submitModal}
+        submitting={modalSaving}
+        error={modalError}
+      />
+
+      <TravelVendorFormModal
+        open={modal?.type === 'vendor' && modal?.mode === 'details'}
+        categories={categories}
+        values={modalValues}
+        onChange={handleModalChange}
+        onClose={() => {
+          if (modal?.context?.parentHotel && hotelModalDraftRef.current) {
+            const parent = hotelModalDraftRef.current;
+            hotelModalDraftRef.current = null;
+            setModal(parent.modal);
+            setModalValues(parent.values);
+            setModalError('');
+          } else {
+            closeModal();
+          }
+        }}
+        onSubmit={submitModal}
+        submitting={modalSaving}
+        error={modalError}
+      />
+
+      <TravelHotelFormModal
+        open={modal?.type === 'hotel' && modal?.mode === 'details'}
+        activeVendors={activeVendors}
+        canManageVendors={canManageVendors}
+        values={modalValues}
+        onChange={handleModalChange}
+        onClose={closeModal}
+        onSubmit={submitModal}
+        submitting={modalSaving}
+        error={modalError}
+        onQuickAddVendor={quickAddHotelVendor}
+        onAddVendorDetails={openHotelVendorDetails}
+      />
+
       <BookingRelationModal
-        modal={modal}
+        modal={
+          modal &&
+          (['service', 'category'].includes(modal.type) ||
+            (modal.type === 'hotel' && modal.mode === 'quick'))
+            ? modal
+            : null
+        }
         modalFields={modalFields}
         modalValues={modalValues}
         categories={categories}

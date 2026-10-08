@@ -42,6 +42,13 @@ TravelActionButton,
   getQuickAddAction,
   normalizeSearch,
 } from '../../components/travel/master/TravelMasterUI';
+import TravelCustomerFormModal from '../../components/travel/customers/TravelCustomerFormModal';
+import {
+  buildCustomerOpeningPayload,
+  emptyCustomerForm,
+  quickCustomerFields,
+  withCustomerOpeningFormValues,
+} from '../../components/travel/customers/travelCustomerFormConfig';
 
 const PAGE_DEFAULTS = Object.freeze({
   search: '',
@@ -49,83 +56,6 @@ const PAGE_DEFAULTS = Object.freeze({
   sort: 'name_asc',
 });
 
-const emptyCustomerForm = {
-  name: '',
-  phone: '',
-  email: '',
-  address: '',
-  moduleScope: 'travel',
-  openingBalanceAmount: '',
-  openingBalanceDirection: 'receivable',
-};
-
-const quickCustomerFields = [
-  {
-    name: 'name',
-    labelKey: 'travel.fields.customerName',
-    placeholderKey: 'travel.placeholders.customerName',
-    required: true,
-  },
-  {
-    name: 'phone',
-    labelKey: 'travel.fields.mobile',
-    placeholderKey: 'travel.placeholders.mobile',
-  },
-];
-
-const customerFields = [
-  ...quickCustomerFields,
-  {
-    name: 'moduleScope',
-    labelKey: 'travel.booking.fields.moduleScope',
-    type: 'select',
-    options: [
-      {
-        value: 'travel',
-        labelKey: 'travel.booking.moduleScope.travel',
-      },
-      {
-        value: 'both',
-        labelKey: 'travel.booking.moduleScope.both',
-      },
-    ],
-  },
-  {
-    name: 'openingBalanceAmount',
-    labelKey: 'travel.openingBalance.amount',
-    placeholderKey: 'travel.openingBalance.amountPlaceholder',
-    type: 'number',
-    step: '0.01',
-    min: '0',
-  },
-  {
-    name: 'openingBalanceDirection',
-    labelKey: 'travel.openingBalance.direction',
-    type: 'select',
-    options: [
-      {
-        value: 'receivable',
-        labelKey: 'travel.openingBalance.customerReceivable',
-      },
-      {
-        value: 'credit',
-        labelKey: 'travel.openingBalance.customerCredit',
-      },
-    ],
-  },
-  {
-    name: 'email',
-    labelKey: 'travel.fields.email',
-    placeholderKey: 'travel.placeholders.email',
-    type: 'email',
-  },
-  {
-    name: 'address',
-    labelKey: 'travel.fields.address',
-    placeholderKey: 'travel.placeholders.address',
-    type: 'textarea',
-  },
-];
 
 const getFiltersFromParams = (searchParams) => ({
   search: searchParams.get('search') || '',
@@ -143,36 +73,10 @@ const getCustomerBalance = (customer) => {
   return Number(customer?.currentReceivable || 0) - Number(customer?.customerCredit || 0);
 };
 
-const getCustomerOpeningDirection = (openingBalance = 0) =>
-  Number(openingBalance || 0) < 0 ? 'credit' : 'receivable';
-
 const isDeletedHiddenRecord = (record) => record?.hiddenReason === 'deleted';
 
 const getHiddenReasonLabel = (record) =>
   t(`travel.hiddenReasons.${record?.hiddenReason || 'hidden'}`);
-
-const getOpeningBalanceAmount = (openingBalance = 0) => {
-  const amount = Math.abs(Number(openingBalance || 0));
-  return amount || '';
-};
-
-const withCustomerOpeningFormValues = (customer = {}) => ({
-  ...customer,
-  openingBalanceAmount: getOpeningBalanceAmount(customer.openingBalance),
-  openingBalanceDirection: getCustomerOpeningDirection(customer.openingBalance),
-});
-
-const buildCustomerOpeningPayload = (values = {}) => {
-  const amount = Math.abs(Number(values.openingBalanceAmount || 0));
-  const direction = values.openingBalanceDirection || 'receivable';
-
-  return {
-    ...values,
-    openingBalance: direction === 'credit' ? -amount : amount,
-    openingBalanceAmount: amount,
-    openingBalanceDirection: direction,
-  };
-};
 
 const upsertCustomer = (records, record) => {
   const index = records.findIndex((item) => String(item?._id) === String(record?._id));
@@ -1061,11 +965,9 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
         emptyKey="travel.customers.empty"
       />
 
-      <TravelFormModal
+      <TravelCustomerFormModal
         open={detailsOpen}
-        titleKey="travel.customers.formTitle"
-        modeKey={editingCustomer ? 'travel.common.edit' : 'travel.common.addWithDetails'}
-        fields={customerFields}
+        editingCustomer={editingCustomer}
         values={customerValues}
         onChange={(name, value) =>
           setCustomerValues((current) => ({

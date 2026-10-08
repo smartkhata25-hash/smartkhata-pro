@@ -1,16 +1,16 @@
 import React from 'react';
-import { FaBed, FaHotel, FaUserTie } from 'react-icons/fa';
+import { FaBed } from 'react-icons/fa';
 
-import { t } from '../../../i18n/i18n';
+import { TravelFormModal } from '../master/TravelMasterUI';
 
-import { TravelFormModal, TravelRelationPicker } from '../master/TravelMasterUI';
+import TravelVendorFormModal from '../vendors/TravelVendorFormModal';
 
-import { quickVendorFields, vendorFields } from '../vendors/travelVendorConfig';
-
-import { hotelFields, quickHotelFields } from './travelHotelConfig';
+import { quickHotelFields } from './travelHotelConfig';
+import TravelHotelFormModal from './TravelHotelFormModal';
 
 const TravelHotelModals = ({
   activeVendors = [],
+  categories = [],
 
   editingHotel,
   editingVendor,
@@ -38,8 +38,6 @@ const TravelHotelModals = ({
   quickHotelOpen,
   quickHotelValues,
 
-  quickVendorOpen,
-
   submitting,
 
   vendorModalOpen,
@@ -47,18 +45,12 @@ const TravelHotelModals = ({
 
   canManageVendors,
 }) => {
-  const safeVendors = Array.isArray(activeVendors) ? activeVendors : [];
-
-  const handleHotelVendorChange = (value) => {
-    onHotelChange('vendorId', value);
-  };
-
   const handleQuickVendor = (query = '') => {
     if (!canManageVendors || !onOpenQuickVendor) {
       return;
     }
 
-    onOpenQuickVendor(query, 'hotelDetails');
+    return onOpenQuickVendor(query, 'hotelDetails');
   };
 
   const handleVendorDetails = (query = '') => {
@@ -69,58 +61,26 @@ const TravelHotelModals = ({
     onOpenVendorDetails(null, query, 'hotelDetails');
   };
 
-  const getVendorLabel = (vendor) => vendor?.name || '-';
-
-  const getVendorMeta = (vendor) => {
-    if (vendor?.travelVendorType) {
-      return t(`travel.vendorTypes.${vendor.travelVendorType}`);
-    }
-
-    return vendor?.phone || vendor?.email || '';
-  };
-
-  const vendorModalIsOpen = vendorModalOpen || quickVendorOpen;
-
-  const vendorIsQuickMode = Boolean(quickVendorOpen);
-
-  const vendorModeKey = vendorIsQuickMode
-    ? 'travel.common.quickAdd'
-    : editingVendor
-      ? 'travel.common.edit'
-      : 'travel.common.addWithDetails';
-
   return (
     <>
       {/* =========================================
           HOTEL — ADD / EDIT WITH DETAILS
       ========================================= */}
 
-      <TravelFormModal
+      <TravelHotelFormModal
         open={hotelModalOpen}
-        titleKey="travel.hotels.formTitle"
-        modeKey={editingHotel ? 'travel.common.edit' : 'travel.common.addWithDetails'}
-        fields={hotelFields}
+        editingHotel={editingHotel}
+        activeVendors={activeVendors}
+        canManageVendors={canManageVendors}
         values={hotelValues}
         onChange={onHotelChange}
         onClose={onHotelClose}
         onSubmit={onHotelSubmit}
         submitting={submitting}
         error={formError}
-        submitIcon={FaHotel}
-      >
-        <TravelRelationPicker
-          labelKey="travel.fields.vendor"
-          value={hotelValues?.vendorId || ''}
-          onChange={handleHotelVendorChange}
-          records={safeVendors}
-          getLabel={getVendorLabel}
-          getMeta={getVendorMeta}
-          searchPlaceholderKey="travel.vendors.search"
-          emptyKey="travel.vendors.empty"
-          onQuickAdd={canManageVendors ? handleQuickVendor : null}
-          onAddDetails={canManageVendors ? handleVendorDetails : null}
-        />
-      </TravelFormModal>
+        onQuickAddVendor={handleQuickVendor}
+        onAddVendorDetails={handleVendorDetails}
+      />
 
       {/* =========================================
           HOTEL — QUICK ADD
@@ -144,18 +104,16 @@ const TravelHotelModals = ({
           VENDOR — QUICK ADD / DETAILS / EDIT
       ========================================= */}
 
-      <TravelFormModal
-        open={vendorModalIsOpen}
-        titleKey={vendorIsQuickMode ? 'travel.vendors.quickTitle' : 'travel.vendors.formTitle'}
-        modeKey={vendorModeKey}
-        fields={vendorIsQuickMode ? quickVendorFields : vendorFields}
+      <TravelVendorFormModal
+        open={vendorModalOpen}
+        editingVendor={editingVendor}
+        categories={categories}
         values={vendorValues}
         onChange={onVendorChange}
         onClose={onVendorClose}
         onSubmit={onVendorSubmit}
         submitting={submitting}
         error={formError}
-        submitIcon={FaUserTie}
       />
     </>
   );

@@ -33,6 +33,14 @@ TravelActionButton,
   getQuickAddAction,
   normalizeSearch,
 } from '../../components/travel/master/TravelMasterUI';
+import TravelTravelerFormModal from '../../components/travel/travelers/TravelTravelerFormModal';
+import {
+  cleanTravelerPayload,
+  emptyQuickTraveler,
+  emptyTravelerForm,
+  prepareTravelerForm,
+  quickTravelerFields,
+} from '../../components/travel/travelers/travelTravelerFormConfig';
 
 const PAGE_MEMORY_DEFAULTS = {
   search: '',
@@ -54,60 +62,6 @@ const STATUS_OPTIONS = [
     labelKey: 'travel.common.all',
   },
 ];
-
-const emptyTravelerForm = {
-  fullName: '',
-  fatherOrHusbandName: '',
-  gender: '',
-  dateOfBirth: '',
-  nationality: '',
-  cnic: '',
-  passportNumber: '',
-  passportIssueDate: '',
-  passportExpiryDate: '',
-  passportCountry: '',
-  mobile: '',
-  email: '',
-  notes: '',
-  isActive: true,
-};
-
-const emptyQuickTraveler = {
-  fullName: '',
-  passportNumber: '',
-  mobile: '',
-};
-
-const normalizeDateForInput = (value) => {
-  if (!value) {
-    return '';
-  }
-
-  return String(value).slice(0, 10);
-};
-
-const prepareTravelerForm = (traveler = null) => ({
-  ...emptyTravelerForm,
-  ...traveler,
-
-  dateOfBirth: normalizeDateForInput(traveler?.dateOfBirth),
-
-  passportIssueDate: normalizeDateForInput(traveler?.passportIssueDate),
-
-  passportExpiryDate: normalizeDateForInput(traveler?.passportExpiryDate),
-
-  isActive: traveler?.isActive !== false,
-});
-
-const cleanTravelerPayload = (values) => ({
-  ...values,
-
-  dateOfBirth: values.dateOfBirth || null,
-
-  passportIssueDate: values.passportIssueDate || null,
-
-  passportExpiryDate: values.passportExpiryDate || null,
-});
 
 const upsertRecord = (records, record) => {
   const safeRecords = Array.isArray(records) ? records : [];
@@ -131,133 +85,6 @@ const upsertRecord = (records, record) => {
 
   return nextRecords;
 };
-
-const travelerFields = [
-  {
-    name: 'fullName',
-    labelKey: 'travel.fields.fullName',
-    placeholderKey: 'travel.placeholders.fullName',
-    required: true,
-  },
-
-  {
-    name: 'fatherOrHusbandName',
-    labelKey: 'travel.fields.fatherOrHusbandName',
-    placeholderKey: 'travel.placeholders.fatherOrHusbandName',
-  },
-
-  {
-    name: 'gender',
-    labelKey: 'travel.fields.gender',
-    type: 'select',
-    placeholderKey: 'travel.placeholders.gender',
-    options: [
-      {
-        value: 'male',
-        labelKey: 'travel.gender.male',
-      },
-      {
-        value: 'female',
-        labelKey: 'travel.gender.female',
-      },
-      {
-        value: 'other',
-        labelKey: 'travel.gender.other',
-      },
-    ],
-  },
-
-  {
-    name: 'dateOfBirth',
-    labelKey: 'travel.fields.dateOfBirth',
-    type: 'date',
-  },
-
-  {
-    name: 'nationality',
-    labelKey: 'travel.fields.nationality',
-    placeholderKey: 'travel.placeholders.nationality',
-  },
-
-  {
-    name: 'cnic',
-    labelKey: 'travel.fields.cnic',
-    placeholderKey: 'travel.placeholders.cnic',
-  },
-
-  {
-    name: 'passportNumber',
-    labelKey: 'travel.fields.passportNumber',
-    placeholderKey: 'travel.placeholders.passportNumber',
-  },
-
-  {
-    name: 'passportCountry',
-    labelKey: 'travel.fields.passportCountry',
-    placeholderKey: 'travel.placeholders.passportCountry',
-  },
-
-  {
-    name: 'passportIssueDate',
-    labelKey: 'travel.fields.passportIssueDate',
-    type: 'date',
-  },
-
-  {
-    name: 'passportExpiryDate',
-    labelKey: 'travel.fields.passportExpiryDate',
-    type: 'date',
-  },
-
-  {
-    name: 'mobile',
-    labelKey: 'travel.fields.mobile',
-    placeholderKey: 'travel.placeholders.mobile',
-  },
-
-  {
-    name: 'email',
-    labelKey: 'travel.fields.email',
-    placeholderKey: 'travel.placeholders.email',
-    type: 'email',
-  },
-
-  {
-    name: 'notes',
-    labelKey: 'travel.fields.notes',
-    placeholderKey: 'travel.placeholders.notes',
-    type: 'textarea',
-    fullWidth: true,
-  },
-
-  {
-    name: 'isActive',
-    labelKey: 'travel.fields.isActive',
-    type: 'checkbox',
-    fullWidth: true,
-  },
-];
-
-const quickTravelerFields = [
-  {
-    name: 'fullName',
-    labelKey: 'travel.fields.fullName',
-    placeholderKey: 'travel.placeholders.fullName',
-    required: true,
-  },
-
-  {
-    name: 'passportNumber',
-    labelKey: 'travel.fields.passportNumber',
-    placeholderKey: 'travel.placeholders.passportNumber',
-  },
-
-  {
-    name: 'mobile',
-    labelKey: 'travel.fields.mobile',
-    placeholderKey: 'travel.placeholders.mobile',
-  },
-];
 
 const IconActionButton = ({ icon: Icon, title, variant = 'edit', disabled = false, onClick }) => {
   const variants = {
@@ -812,11 +639,9 @@ setPageError(error?.response?.data?.message || t('travel.travelers.deleteFailed'
         emptyKey="travel.travelers.empty"
       />
 
-      <TravelFormModal
+      <TravelTravelerFormModal
         open={detailsOpen}
-        titleKey="travel.travelers.formTitle"
-        modeKey={editingTraveler ? 'travel.common.edit' : 'travel.common.addWithDetails'}
-        fields={travelerFields}
+        editingTraveler={editingTraveler}
         values={formValues}
         onChange={handleFormChange}
         onClose={closeDetails}

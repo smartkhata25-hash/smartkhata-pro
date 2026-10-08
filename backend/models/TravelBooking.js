@@ -891,6 +891,26 @@ const bookingItemSchema = new mongoose.Schema(
         default: null,
       },
 
+      makkahNights: {
+        type: Number,
+        min: 0,
+        default: undefined,
+        validate: {
+          validator: (value) => value == null || Number.isInteger(value),
+          message: "Makkah nights must be a whole number",
+        },
+      },
+
+      madinahNights: {
+        type: Number,
+        min: 0,
+        default: undefined,
+        validate: {
+          validator: (value) => value == null || Number.isInteger(value),
+          message: "Madinah nights must be a whole number",
+        },
+      },
+
       syncPassengerCountsToComponents: {
         type: Boolean,
         default: true,

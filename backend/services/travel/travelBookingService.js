@@ -161,6 +161,20 @@ const nonNegativeInteger = (value, fallback = 0, label = "Quantity") => {
   return Math.floor(numericValue);
 };
 
+const optionalNonNegativeInteger = (value, label = "Value") => {
+  if (value === "" || value === undefined || value === null) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || !Number.isInteger(numericValue) || numericValue < 0) {
+    throw createHttpError(400, `${label} must be a non-negative whole number`);
+  }
+
+  return numericValue;
+};
+
 const roundMoney = (value = 0) => Number(Number(value || 0).toFixed(2));
 
 const parseJsonField = (value, fallback) => {
@@ -1188,6 +1202,10 @@ const normalizeUmrahDetails = (details = {}) => {
 
     madinahHotelId:
       ensureObjectIdString(details.madinahHotelId, "Madinah hotel ID") || null,
+
+    makkahNights: optionalNonNegativeInteger(details.makkahNights, "Makkah nights"),
+
+    madinahNights: optionalNonNegativeInteger(details.madinahNights, "Madinah nights"),
 
     syncPassengerCountsToComponents:
       details.syncPassengerCountsToComponents !== false &&
@@ -2584,6 +2602,8 @@ module.exports = {
   getItemDateRange,
   getUserId,
   nullableDate,
+  normalizeUmrahDetails,
+  optionalNonNegativeInteger,
   normalizeStatus,
   normalizePaxPricing,
   normalizeVendorPayments,

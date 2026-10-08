@@ -7,6 +7,7 @@ import {
   createTravelVendor,
   deleteTravelHotel,
   fetchTravelHotels,
+  fetchTravelServiceCategories,
   fetchTravelVendors,
   updateTravelHotel,
   updateTravelHotelStatus,
@@ -41,7 +42,12 @@ import {
   getVendorId,
 } from '../../components/travel/hotels/travelHotelConfig';
 
-import { emptyHotelVendorForm as emptyVendorForm } from '../../components/travel/vendors/travelVendorConfig';
+import {
+  buildVendorOpeningPayload,
+  emptyHotelVendorForm as emptyVendorForm,
+  normalizeCategoryIds,
+  withVendorOpeningFormValues,
+} from '../../components/travel/vendors/travelVendorConfig';
 
 import { DEFAULT_TRAVEL_CURRENCY } from '../../config/travelConfig';
 
@@ -96,6 +102,7 @@ const TravelHotelsPage = () => {
   const [vendors, setVendors] = useState(() =>
     getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.VENDORS)
   );
+  const [categories, setCategories] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
@@ -104,8 +111,6 @@ const TravelHotelsPage = () => {
   const [quickHotelOpen, setQuickHotelOpen] = useState(false);
 
   const [vendorModalOpen, setVendorModalOpen] = useState(false);
-  const [quickVendorOpen, setQuickVendorOpen] = useState(false);
-
   const [editingHotel, setEditingHotel] = useState(null);
   const [editingVendor, setEditingVendor] = useState(null);
 
@@ -162,14 +167,16 @@ const TravelHotelsPage = () => {
         setLoading(true);
         setPageError('');
 
-        const [hotelData, vendorData] = await Promise.all([
+        const [hotelData, vendorData, categoryData] = await Promise.all([
           fetchTravelHotels({}, options),
           fetchTravelVendors({}, options),
+          fetchTravelServiceCategories({}, options),
         ]);
 
         setHotels(Array.isArray(hotelData) ? hotelData : []);
 
         setVendors(Array.isArray(vendorData) ? vendorData : []);
+        setCategories(Array.isArray(categoryData) ? categoryData : []);
       } catch (error) {
         console.error('Travel hotels load failed:', error);
 
@@ -310,7 +317,8 @@ setPageError(t('travel.alerts.permissionDenied'));
       vendor
         ? {
             ...emptyVendorForm,
-            ...vendor,
+            ...withVendorOpeningFormValues(vendor),
+            travelServiceCategories: normalizeCategoryIds(vendor.travelServiceCategories),
           }
         : {
             ...emptyVendorForm,
@@ -324,23 +332,27 @@ setPageError(t('travel.alerts.permissionDenied'));
     setVendorModalOpen(true);
   };
 
-  const openQuickVendor = (draftName = '', target = 'hotelDetails') => {
+  const openQuickVendor = async (draftName = '', target = 'hotelDetails') => {
     if (!canManageVendors) {
 setPageError(t('travel.alerts.permissionDenied'));
       return;
     }
-
-    setEditingVendor(null);
-
-    setVendorValues({
-      ...emptyVendorForm,
-      name: draftName,
-    });
-
-    setVendorCreateTarget(target);
-
-    setFormError('');
-    setQuickVendorOpen(true);
+    const name = String(draftName || '').trim();
+    if (!name || submitting) return;
+    try {
+      setSubmitting(true);
+      setFormError('');
+      const saved = await createTravelVendor({ name, moduleScope: 'travel' });
+      setVendors((current) => upsertRecord(current, saved));
+      if (target === 'hotelDetails') {
+        setHotelValues((current) => ({ ...current, vendorId: saved._id }));
+      }
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.alerts.quickAddFailed'));
+      throw error;
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const assignCreatedVendor = (vendor) => {
@@ -424,17 +436,16 @@ setPageError(t('travel.alerts.permissionDenied'));
       setSubmitting(true);
       setFormError('');
 
+      const payload = buildVendorOpeningPayload(vendorValues);
       const saved = editingVendor
-        ? await updateTravelVendor(editingVendor._id, vendorValues)
-        : await createTravelVendor(vendorValues);
+        ? await updateTravelVendor(editingVendor._id, payload)
+        : await createTravelVendor(payload);
 
       setVendors((current) => upsertRecord(current, saved));
 
       assignCreatedVendor(saved);
 
       setVendorModalOpen(false);
-      setQuickVendorOpen(false);
-
       setEditingVendor(null);
       setVendorCreateTarget('');
 
@@ -586,6 +597,7 @@ setPageError(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
 
       <TravelHotelModals
         activeVendors={activeVendors}
+        categories={categories}
         canManageVendors={canManageVendors}
         editingHotel={editingHotel}
         editingVendor={editingVendor}
@@ -635,8 +647,6 @@ setPageError(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
         }
         onVendorClose={() => {
           setVendorModalOpen(false);
-          setQuickVendorOpen(false);
-
           setEditingVendor(null);
           setVendorCreateTarget('');
 
@@ -649,7 +659,6 @@ setPageError(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
         onVendorSubmit={handleVendorSubmit}
         quickHotelOpen={quickHotelOpen}
         quickHotelValues={quickHotelValues}
-        quickVendorOpen={quickVendorOpen}
         submitting={submitting}
         vendorModalOpen={vendorModalOpen}
         vendorValues={vendorValues}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FaBolt,
   FaCheck,
@@ -629,6 +629,8 @@ export const TravelCompactAutocomplete = ({
 }) => {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [quickAddPending, setQuickAddPending] = useState(false);
+  const quickAddPendingRef = useRef(false);
 
   const selectedRecord = useMemo(
     () => records.find((record) => String(record?._id) === String(value)) || null,
@@ -668,6 +670,25 @@ export const TravelCompactAutocomplete = ({
     onChange(record._id, record);
     setQuery(getLabel(record));
     setOpen(false);
+  };
+
+  const runQuickAdd = async () => {
+    if (!onQuickAdd || quickAddPendingRef.current) {
+      return;
+    }
+
+    quickAddPendingRef.current = true;
+    setQuickAddPending(true);
+
+    try {
+      await onQuickAdd(query);
+      setOpen(false);
+    } catch (error) {
+      setOpen(true);
+    } finally {
+      quickAddPendingRef.current = false;
+      setQuickAddPending(false);
+    }
   };
 
   return (
@@ -749,13 +770,11 @@ export const TravelCompactAutocomplete = ({
                 <TravelActionButton
                   icon={FaBolt}
                   variant="soft"
+                  disabled={quickAddPending}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    onQuickAdd(query);
-                    setOpen(false);
-                  }}
+                  onClick={runQuickAdd}
                 >
-                  {t('travel.common.quickAdd')}
+                  {quickAddPending ? 'Saving...' : t('travel.common.quickAdd')}
                 </TravelActionButton>
               )}
               {onAddDetails && (

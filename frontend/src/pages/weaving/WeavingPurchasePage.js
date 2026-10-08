@@ -18,9 +18,17 @@ import {
 } from 'react-icons/fa';
 
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
+import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
+import WeavingYarnPackingInput from '../../components/weaving/WeavingYarnPackingInput';
 import WeightKgLbsInput from '../../components/weaving/WeightKgLbsInput';
 import { autoYarnWeight, defaultPackageProfileFor, packageProfilesFor } from '../../utils/weaving/yarnPackaging';
+import {
+  fullPackageConversion,
+  hydrateYarnPackingLine,
+  stripYarnPackingUiState,
+  validateYarnPackingLine,
+} from '../../utils/weaving/yarnPackingEntry';
 import {
   requestWeavingConfirmation,
   showWeavingFeedback,
@@ -52,6 +60,7 @@ const yarnRow = () => ({
 
   packageType: 'bag',
   packageQty: '',
+  packageQtyInput: '',
   packageWeight: 100,
   smallConesPerPackage: 40,
   largeConesPerPackage: 24,
@@ -64,6 +73,7 @@ const yarnRow = () => ({
 
   smallCones: 0,
   largeCones: 0,
+  coneRows: [{ qty: '', type: '' }],
 
   kg: '',
   lbs: '',
@@ -163,7 +173,10 @@ const recoveryKey = (kind) => `weaving:purchase:unsaved:${kind}`;
 const restorePurchase = (kind) => {
   try {
     const saved = JSON.parse(localStorage.getItem(recoveryKey(kind)) || 'null');
-    return saved?.purchaseType ? saved : initial(kind);
+    if (!saved?.purchaseType) return initial(kind);
+    return kind === 'yarn'
+      ? { ...saved, lines: (saved.lines || []).map(hydrateYarnPackingLine) }
+      : saved;
   } catch {
     return initial(kind);
   }
@@ -257,6 +270,18 @@ export default function WeavingPurchasePage() {
       })
       .catch(() => setNotice('Could not load purchase options'));
   }, []);
+
+  const refreshCounterparties = async (saved) => {
+    setMeta((value) => ({
+      ...value,
+      parties: [...value.parties.filter((row) => row._id !== saved._id), saved],
+    }));
+    try {
+      setMeta(await getCommercialMeta({ force: true }));
+    } catch {
+      setNotice('Party was saved, but purchase options could not be refreshed');
+    }
+  };
 
   // If there is only one active Godown,
   // select it immediately when the form/meta loads.
@@ -406,7 +431,7 @@ export default function WeavingPurchasePage() {
       attachments: row.attachments || [],
       lines: (row.lines || []).map((line) =>
         row.purchaseType === 'yarn'
-          ? {
+          ? hydrateYarnPackingLine({
               ...yarnRow(),
               ...line,
               yarnId: line.yarnId?._id || line.yarnId,
@@ -416,7 +441,7 @@ export default function WeavingPurchasePage() {
               ...contractLinks(line),
               godownId: line.godownId?._id || line.godownId || '',
               sizingPartyId: line.sizingPartyId?._id || line.sizingPartyId || '',
-            }
+            })
           : row.purchaseType === 'fabric'
             ? {
                 ...fabricRow(),
@@ -916,10 +941,6 @@ export default function WeavingPurchasePage() {
       ? Number(form.quickAmount || 0)
       : activeLines.reduce((sum, row) => sum + lineAmount(row), 0);
 
-  const sizing = meta.parties.filter(
-    (row) => row.serviceTypes?.includes('sizing') && !row.isHidden
-  );
-
   const debitAccounts = (nature) =>
     meta.debitAccounts.filter((row) => row.type === (nature === 'asset' ? 'Asset' : 'Expense'));
 
@@ -1122,14 +1143,83 @@ export default function WeavingPurchasePage() {
     }
   };
 
+  const prepareYarnLinesForSave = async (lines) => {
+    const prepared = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      const source = hydrateYarnPackingLine(lines[index]);
+      const validation = validateYarnPackingLine(source);
+      const prefix = `Yarn line ${index + 1}: `;
+      if (!validation.valid) {
+        setNotice(`${prefix}${validation.message}`);
+        return null;
+      }
+
+      let packageQty = validation.packageQty;
+      let smallCones = validation.smallCones;
+      let largeCones = validation.largeCones;
+      const packageLabel = String(source.packageType || 'package').replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+      for (const type of ['small', 'large']) {
+        const coneQty = type === 'small' ? smallCones : largeCones;
+        if (!coneQty) continue;
+        const conesPerPackage = Number(
+          type === 'small' ? source.smallConesPerPackage : source.largeConesPerPackage
+        );
+        const conversion = fullPackageConversion({ packageQty, coneQty, conesPerPackage });
+        if (!conversion.needsConversion) continue;
+        const typeLabel = type === 'small' ? 'Small' : 'Large';
+        const confirmed = await requestWeavingConfirmation({
+          message: `${conesPerPackage} ${typeLabel} Cones make 1 full ${packageLabel}.\nConvert to ${conversion.packageQty} ${packageLabel.endsWith('s') ? packageLabel : `${packageLabel}s`}?`,
+          confirmLabel: 'Convert',
+        });
+        if (!confirmed) {
+          setNotice(`${prefix}${coneQty} ${typeLabel} Cones must be converted or reduced below ${conesPerPackage} before saving.`);
+          return null;
+        }
+        packageQty = conversion.packageQty;
+        if (type === 'small') smallCones = conversion.coneQty;
+        else largeCones = conversion.coneQty;
+      }
+
+      const normalized = {
+        ...source,
+        packageQty,
+        packageQtyInput: String(packageQty),
+        smallCones,
+        largeCones,
+        totalCones: smallCones + largeCones,
+        coneRows: [
+          ...(smallCones ? [{ qty: String(smallCones), type: 'small' }] : []),
+          ...(largeCones ? [{ qty: String(largeCones), type: 'large' }] : []),
+        ],
+      };
+      if (!normalized.coneRows.length) normalized.coneRows = [{ qty: '', type: '' }];
+      prepared.push({ ...normalized, ...autoYarnWeight(normalized) });
+    }
+    return prepared;
+  };
+
   const save = async () => {
     setSaving(true);
 
     try {
       const commonGeneralPosting = form.lines[0] || itemRow();
 
-      const linesForSave = activeLines.map((row) => ({
-        ...row,
+      const preparedYarnLines = kind === 'yarn' ? await prepareYarnLinesForSave(activeLines) : null;
+      if (kind === 'yarn' && !preparedYarnLines) return;
+
+      if (kind === 'yarn') {
+        let activeIndex = 0;
+        setForm((current) => ({
+          ...current,
+          lines: current.lines.map((row) =>
+            started(row, 'yarn') ? preparedYarnLines[activeIndex++] : row
+          ),
+        }));
+      }
+
+      const linesForSave = (preparedYarnLines || activeLines).map((row) => ({
+        ...(kind === 'yarn' ? stripYarnPackingUiState(row) : row),
 
         ...(kind === 'general' && form.entryMode === 'detailed'
           ? {
@@ -1335,24 +1425,20 @@ export default function WeavingPurchasePage() {
                         )}
 
                         <fieldset disabled={linkedParty} className="min-w-0">
-                          <SearchableCreatableSelect
+                          <WeavingCounterpartySelect
                             label={
                               form.yarnSource === 'party'
                                 ? 'Yarn Owner / Party *'
                                 : 'Supplier / Party *'
                             }
                             placeholder="Search supplier or party"
-                            options={meta.parties.filter(
-                              (party) =>
-                                !party.isHidden &&
-                                !party.serviceTypes?.includes('sizing') &&
-                                (party.role === 'both' ||
-                                  party.role ===
-                                    (form.yarnSource === 'party' ? 'customer' : 'supplier'))
-                            )}
+                            parties={meta.parties}
+                            context={form.yarnSource === 'party' ? 'customer' : 'supplier'}
                             value={form.partyId}
                             required
                             onChange={(partyId) => handlePurchasePartyChange(partyId, 0)}
+                            onPartySaved={refreshCounterparties}
+                            onError={setNotice}
                           />
                         </fieldset>
 
@@ -1417,85 +1503,12 @@ export default function WeavingPurchasePage() {
                           />
                         )}
 
-                        {field(
-                          'Package Type',
-                          <select
-                            className={control}
-                            value={row.packageType || 'bag'}
-                            onChange={(event) => {
-                              const profile =
-                                profiles.find((item) => item.packageType === event.target.value) ||
-                                {};
-
-                              linePatch(0, {
-                                packageType: event.target.value,
-
-                                packageWeight: profile.packageWeight ?? 100,
-
-                                smallConesPerPackage: profile.smallConesPerPackage ?? 40,
-
-                                largeConesPerPackage: profile.largeConesPerPackage ?? 24,
-                              });
-                            }}
-                          >
-                            {profiles.map((profile) => (
-                              <option key={profile.packageType} value={profile.packageType}>
-                                {profile.packageType.replace(/\b\w/g, (letter) =>
-                                  letter.toUpperCase()
-                                )}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-
-                        {field(
-                          'Quantity',
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            className={control}
-                            placeholder="Quantity"
-                            value={row.packageQty}
-                            onChange={(event) =>
-                              linePatch(0, {
-                                packageQty: event.target.value,
-                              })
-                            }
-                          />
-                        )}
-
-                        {field(
-                          'Small Cones',
-                          <input
-                            type="number"
-                            min="0"
-                            className={control}
-                            placeholder="Small Cones"
-                            value={row.smallCones || ''}
-                            onChange={(event) =>
-                              linePatch(0, {
-                                smallCones: event.target.value,
-                              })
-                            }
-                          />
-                        )}
-
-                        {field(
-                          'Large Cones',
-                          <input
-                            type="number"
-                            min="0"
-                            className={control}
-                            placeholder="Large Cones"
-                            value={row.largeCones || ''}
-                            onChange={(event) =>
-                              linePatch(0, {
-                                largeCones: event.target.value,
-                              })
-                            }
-                          />
-                        )}
+                        <WeavingYarnPackingInput
+                          row={row}
+                          profiles={profiles}
+                          onChange={(packing) => linePatch(0, packing)}
+                          onFeedback={setNotice}
+                        />
 
                         <div className="sm:col-span-2 xl:col-span-2">
                           <WeightKgLbsInput
@@ -1561,10 +1574,11 @@ export default function WeavingPurchasePage() {
 
                         <div className="min-w-0">
                           {row.destinationType === 'direct_sizing' ? (
-                            <SearchableCreatableSelect
+                            <WeavingCounterpartySelect
                               label="Sizing Party *"
                               placeholder="Search sizing party"
-                              options={sizing}
+                              parties={meta.parties}
+                              context="sizing"
                               value={row.sizingPartyId}
                               required
                               onChange={(sizingPartyId) =>
@@ -1572,6 +1586,8 @@ export default function WeavingPurchasePage() {
                                   sizingPartyId,
                                 })
                               }
+                              onPartySaved={refreshCounterparties}
+                              onError={setNotice}
                             />
                           ) : (
                             field(
@@ -1680,18 +1696,16 @@ export default function WeavingPurchasePage() {
                         )}
 
                         <fieldset disabled={linkedParty} className="min-w-0">
-                          <SearchableCreatableSelect
+                          <WeavingCounterpartySelect
                             label="Supplier / Party *"
                             placeholder="Search supplier or party"
-                            options={meta.parties.filter(
-                              (party) =>
-                                !party.isHidden &&
-                                !party.serviceTypes?.includes('sizing') &&
-                                (party.role === 'both' || party.role === 'supplier')
-                            )}
+                            parties={meta.parties}
+                            context="supplier"
                             value={form.partyId}
                             required
                             onChange={(partyId) => handlePurchasePartyChange(partyId, 0)}
+                            onPartySaved={refreshCounterparties}
+                            onError={setNotice}
                           />
                         </fieldset>
 
@@ -1866,15 +1880,11 @@ export default function WeavingPurchasePage() {
                 ) : (
                   <>
                     <fieldset>
-                      <SearchableCreatableSelect
+                      <WeavingCounterpartySelect
                         label="Supplier / Party *"
                         placeholder="Search supplier or party"
-                        options={meta.parties.filter(
-                          (row) =>
-                            !row.isHidden &&
-                            !row.serviceTypes?.includes('sizing') &&
-                            (row.role === 'both' || row.role === 'supplier')
-                        )}
+                        parties={meta.parties}
+                        context="supplier"
                         value={form.partyId}
                         required
                         onChange={(partyId) =>
@@ -1882,6 +1892,8 @@ export default function WeavingPurchasePage() {
                             partyId,
                           })
                         }
+                        onPartySaved={refreshCounterparties}
+                        onError={setNotice}
                       />
                     </fieldset>
 
@@ -2811,85 +2823,12 @@ export default function WeavingPurchasePage() {
                           />
                         )}
 
-                        {field(
-                          'Package Type',
-                          <select
-                            className={control}
-                            value={row.packageType || 'bag'}
-                            onChange={(event) => {
-                              const profile =
-                                profiles.find((item) => item.packageType === event.target.value) ||
-                                {};
-
-                              linePatch(index, {
-                                packageType: event.target.value,
-
-                                packageWeight: profile.packageWeight ?? 100,
-
-                                smallConesPerPackage: profile.smallConesPerPackage ?? 40,
-
-                                largeConesPerPackage: profile.largeConesPerPackage ?? 24,
-                              });
-                            }}
-                          >
-                            {profiles.map((profile) => (
-                              <option key={profile.packageType} value={profile.packageType}>
-                                {profile.packageType.replace(/\b\w/g, (letter) =>
-                                  letter.toUpperCase()
-                                )}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-
-                        {field(
-                          'Quantity',
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            className={control}
-                            placeholder="Quantity"
-                            value={row.packageQty}
-                            onChange={(event) =>
-                              linePatch(index, {
-                                packageQty: event.target.value,
-                              })
-                            }
-                          />
-                        )}
-
-                        {field(
-                          'Small Cones',
-                          <input
-                            type="number"
-                            min="0"
-                            className={control}
-                            placeholder="Small Cones"
-                            value={row.smallCones || ''}
-                            onChange={(event) =>
-                              linePatch(index, {
-                                smallCones: event.target.value,
-                              })
-                            }
-                          />
-                        )}
-
-                        {field(
-                          'Large Cones',
-                          <input
-                            type="number"
-                            min="0"
-                            className={control}
-                            placeholder="Large Cones"
-                            value={row.largeCones || ''}
-                            onChange={(event) =>
-                              linePatch(index, {
-                                largeCones: event.target.value,
-                              })
-                            }
-                          />
-                        )}
+                        <WeavingYarnPackingInput
+                          row={row}
+                          profiles={profiles}
+                          onChange={(packing) => linePatch(index, packing)}
+                          onFeedback={setNotice}
+                        />
 
                         {field(
                           'Lot / Reference',
@@ -2969,10 +2908,11 @@ export default function WeavingPurchasePage() {
 
                         <div className="min-w-0">
                           {row.destinationType === 'direct_sizing' ? (
-                            <SearchableCreatableSelect
+                            <WeavingCounterpartySelect
                               label="Sizing Party *"
                               placeholder="Search sizing party"
-                              options={sizing}
+                              parties={meta.parties}
+                              context="sizing"
                               value={row.sizingPartyId}
                               required
                               onChange={(sizingPartyId) =>
@@ -2980,6 +2920,8 @@ export default function WeavingPurchasePage() {
                                   sizingPartyId,
                                 })
                               }
+                              onPartySaved={refreshCounterparties}
+                              onError={setNotice}
                             />
                           ) : (
                             field(

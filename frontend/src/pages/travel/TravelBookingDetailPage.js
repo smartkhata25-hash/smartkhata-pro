@@ -79,6 +79,7 @@ import {
 } from '../../components/travel/bookings/travelBookingConfig';
 
 import BookingStatusBadge from '../../components/travel/bookings/BookingStatusBadge';
+import { resolveUmrahCityNights } from '../../components/travel/umrah/umrahStayNights';
 
 const tabConfig = [
   {
@@ -1095,10 +1096,24 @@ const renderItemSpecificDetails = (booking, item) => {
           />
 
           <InfoCard
+            icon={FaBed}
+            label={t('travel.booking.fields.makkahNights')}
+            value={resolveUmrahCityNights(details, 'makkah') ?? '-'}
+            tone="cyan"
+          />
+
+          <InfoCard
             icon={FaHotel}
             label={t('travel.booking.fields.madinahHotel')}
             value={getHotelName(details.madinahHotelId)}
             tone="violet"
+          />
+
+          <InfoCard
+            icon={FaBed}
+            label={t('travel.booking.fields.madinahNights')}
+            value={resolveUmrahCityNights(details, 'madinah') ?? '-'}
+            tone="cyan"
           />
 
           <InfoCard icon={FaUsers} label="Pax" value={pricingSummary.pax || '-'} tone="cyan" />

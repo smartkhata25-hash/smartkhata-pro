@@ -2,14 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from './WeavingSaleSaveOutput';
 
-import SearchableCreatableSelect from './SearchableCreatableSelect';
+import WeavingCounterpartySelect from './WeavingCounterpartySelect';
 import WeavingSalePaymentSection, { paymentError, paymentReceived, confirmExcessPayment } from './WeavingSalePaymentSection';
 import { t } from '../../i18n/i18n';
 
 const input = 'mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
 const Field = ({ label, children, className = '' }) => <label className={`block text-sm font-medium text-slate-700 ${className}`}><span>{label}</span>{children}</label>;
 
-export default function WeavingPostedSaleEditModal({ invoice, meta, saving, onClose, onSave }) {
+export default function WeavingPostedSaleEditModal({ invoice, meta, saving, onClose, onSave, onPartySaved, onPartyError }) {
   const [initial] = useState({
     ...(invoice.paymentDetails || {}),
     invoiceDate: invoice.invoiceDate, partyId: invoice.partyId?._id || invoice.partyId,
@@ -28,7 +28,7 @@ export default function WeavingPostedSaleEditModal({ invoice, meta, saving, onCl
   const save = useSaleSaveOutput(performSave, savedSaleOutputUrl, saving);
   return <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-3"><section className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-md bg-white shadow-2xl"><header className="sticky top-0 flex items-center justify-between border-b bg-white px-5 py-4"><h2 className="text-lg font-bold">Edit {invoice.invoiceNo}</h2><button type="button" aria-label="Close" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-slate-100"><FaTimes /></button></header><div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
     <Field label={t('weaving.sales.invoiceDate')}><input type="date" className={input} value={form.invoiceDate} onChange={(event) => patch({ invoiceDate: event.target.value })} /></Field>
-    <SearchableCreatableSelect label={t('weaving.sales.party')} options={meta.parties} value={form.partyId} required onChange={(partyId) => patch({ partyId })} />
+    <WeavingCounterpartySelect label={t('weaving.sales.party')} parties={meta.parties} context="customer" value={form.partyId} required onChange={(partyId) => patch({ partyId })} onPartySaved={onPartySaved} onError={onPartyError} />
     <Field label={t('weaving.sales.quantity')}><input type="number" min="0" className={input} disabled={invoice.entryMode === 'than' || Boolean(invoice.lines?.length)} value={form.quantity} onChange={(event) => patch({ quantity: event.target.value })} /></Field>
     <Field label={t('weaving.sales.rate')}><input type="number" min="0" className={input} disabled={Boolean(invoice.lines?.length)} value={form.finalRate} onChange={(event) => patch({ finalRate: event.target.value })} /></Field>
     <Field label="Discount / Deduction"><input type="number" min="0" className={input} value={form.discountAmount} onChange={(event) => patch({ discountAmount: event.target.value })} /></Field>

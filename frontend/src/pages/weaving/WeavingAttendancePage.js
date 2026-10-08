@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   FaBan,
@@ -212,13 +212,17 @@ const DutyBadge = ({ row }) => {
   return <span className="text-slate-300">—</span>;
 };
 
-const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disabled, onChange }) => {
+export const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disabled, onChange }) => {
+  const inputId = useId();
+  const listboxId = `${inputId}-replacement-listbox`;
   const wrapperRef = useRef(null);
   const dropdownRef = useRef(null);
+  const optionRefs = useRef([]);
 
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [dropdownStyle, setDropdownStyle] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
 
   const selected = options.find((option) => option._id === row.replacementEmployeeId);
 
@@ -289,6 +293,7 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
       if (!clickedInput && !clickedDropdown) {
         setOpen(false);
         setSearch('');
+        setActiveIndex(-1);
       }
     };
 
@@ -329,6 +334,18 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
     });
   }, [options, row.employeeId, row.replacementEmployeeId, assignedIds, selectedShiftId, search]);
 
+  const navigationKey = filteredOptions.map((option) => option._id).join('|');
+
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [navigationKey]);
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+
+    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, open]);
+
   if (row.generatedByReplacement) {
     return (
       <span className="block max-w-[130px] truncate text-[10px] font-bold text-slate-500 md:max-w-[210px] md:text-xs">
@@ -345,12 +362,60 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
     if (disabled) return;
 
     setSearch('');
+    setActiveIndex(-1);
     setOpen(true);
   };
 
   const closeDropdown = () => {
     setOpen(false);
     setSearch('');
+    setActiveIndex(-1);
+  };
+
+  const selectReplacement = (replacementId) => {
+    onChange(replacementId);
+    closeDropdown();
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!open) {
+        setSearch('');
+        setOpen(true);
+      }
+
+      const itemCount = filteredOptions.length + 1;
+
+      setActiveIndex((current) => {
+        if (current < 0) return event.key === 'ArrowDown' ? 0 : itemCount - 1;
+
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        return (current + direction + itemCount) % itemCount;
+      });
+      return;
+    }
+
+    if (event.key === 'Enter' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (activeIndex === 0) selectReplacement('');
+      else if (activeIndex > 0) {
+        const option = filteredOptions[activeIndex - 1];
+
+        if (option) selectReplacement(option._id);
+      }
+      return;
+    }
+
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeDropdown();
+    }
   };
 
   return (
@@ -366,18 +431,28 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
           <FaSearch aria-hidden="true" className="ml-2 h-3 w-3 flex-shrink-0 text-slate-400" />
 
           <input
+            id={inputId}
             type="text"
             disabled={disabled}
             value={open ? search : selectedLabel}
             placeholder={selectedLabel || t('weaving.attendance.searchReplacement')}
             onFocus={openDropdown}
             onClick={openDropdown}
+            onKeyDown={handleKeyDown}
             onChange={(event) => {
               if (disabled) return;
 
               setSearch(event.target.value);
+              setActiveIndex(-1);
               setOpen(true);
             }}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls={open ? listboxId : undefined}
+            aria-activedescendant={
+              open && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined
+            }
             className="h-full min-w-0 flex-1 border-0 bg-transparent px-1.5 text-[10px] font-bold text-slate-700 outline-none placeholder:text-slate-400 md:text-xs"
           />
 
@@ -429,14 +504,20 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
             style={dropdownStyle}
             className="rounded-xl border border-slate-200 bg-white shadow-2xl"
           >
-            <div className="max-h-[260px] overflow-y-auto rounded-xl bg-white p-1.5">
+            <div
+              id={listboxId}
+              role="listbox"
+              className="max-h-[260px] overflow-y-auto rounded-xl bg-white p-1.5"
+            >
               <button
                 type="button"
-                onClick={() => {
-                  onChange('');
-                  closeDropdown();
-                }}
-                className="flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-500 transition hover:bg-slate-50"
+                id={`${listboxId}-option-0`}
+                role="option"
+                aria-selected={!row.replacementEmployeeId}
+                ref={(node) => { optionRefs.current[0] = node; }}
+                onMouseEnter={() => setActiveIndex(0)}
+                onClick={() => selectReplacement('')}
+                className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-500 transition hover:bg-slate-50 ${activeIndex === 0 ? 'bg-slate-100 ring-1 ring-inset ring-cyan-300' : ''}`}
               >
                 {t('weaving.attendance.noReplacement')}
               </button>
@@ -446,16 +527,23 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
                   {t('weaving.attendance.noReplacementFound')}
                 </div>
               ) : (
-                filteredOptions.map((option) => (
+                filteredOptions.map((option, optionIndex) => {
+                  const index = optionIndex + 1;
+
+                  return (
                   <button
                     type="button"
                     key={option._id}
-                    onClick={() => {
-                      onChange(option._id);
-                      closeDropdown();
-                    }}
+                    id={`${listboxId}-option-${index}`}
+                    role="option"
+                    aria-selected={option._id === row.replacementEmployeeId}
+                    ref={(node) => { optionRefs.current[index] = node; }}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => selectReplacement(option._id)}
                     className={`block w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-cyan-50 ${
-                      option._id === row.replacementEmployeeId ? 'bg-cyan-50' : ''
+                      activeIndex === index
+                        ? 'bg-cyan-100 ring-1 ring-inset ring-cyan-400'
+                        : option._id === row.replacementEmployeeId ? 'bg-cyan-50' : ''
                     }`}
                   >
                     <span className="block truncate text-xs font-extrabold text-slate-900 md:text-sm">
@@ -469,7 +557,8 @@ const ReplacementSelect = ({ row, options, assignedIds, selectedShiftId, disable
                         .join(' • ')}
                     </span>
                   </button>
-                ))
+                  );
+                })
               )}
             </div>
           </div>,

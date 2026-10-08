@@ -6,6 +6,7 @@ import {
   getLocalDateInputValue,
   getLocalTimeInputValue,
 } from '../../../utils/localDateTime';
+import { getUmrahNightsInputValue } from '../umrah/umrahStayNights';
 
 export const BOOKING_STATUSES = Object.freeze([
   'draft',
@@ -387,6 +388,8 @@ export const defaultUmrahDetails = {
   returnDate: '',
   makkahHotelId: '',
   madinahHotelId: '',
+  makkahNights: '',
+  madinahNights: '',
   syncPassengerCountsToComponents: true,
   components: [],
   plannerInfo: null,
@@ -893,6 +896,10 @@ const prepareBookingItemForForm = (item = {}) => {
       makkahHotelId: getRecordId(item.umrahDetails?.makkahHotelId),
 
       madinahHotelId: getRecordId(item.umrahDetails?.madinahHotelId),
+
+      makkahNights: getUmrahNightsInputValue(item.umrahDetails || {}, 'makkah'),
+
+      madinahNights: getUmrahNightsInputValue(item.umrahDetails || {}, 'madinah'),
 
       syncPassengerCountsToComponents: item.umrahDetails?.syncPassengerCountsToComponents !== false,
 

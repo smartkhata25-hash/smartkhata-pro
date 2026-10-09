@@ -26,7 +26,7 @@ export const createEmptyCalculatorHotel = (city = 'makkah') => ({
   weekendPrice: '',
 });
 
-export const getCurrencyRateToBase = (currencySettings, currency) => {
+export const getCurrencyRateToBase = (currencySettings, currency, side = 'cost') => {
   const safeCurrency = String(currency || '').toUpperCase();
   const baseCurrency = String(
     currencySettings?.baseCurrency || DEFAULT_TRAVEL_CURRENCY
@@ -44,7 +44,11 @@ export const getCurrencyRateToBase = (currencySettings, currency) => {
     (item) => String(item?.currency || '').toUpperCase() === safeCurrency
   );
 
-  return Number(rate?.rateToBase || 0);
+  const legacyRate = Number(rate?.rateToBase || 0);
+  const sideRate = Number(
+    side === 'sale' ? rate?.saleRateToBase ?? legacyRate : rate?.costRateToBase ?? legacyRate
+  );
+  return Number.isFinite(sideRate) && sideRate >= 0 ? sideRate : 0;
 };
 
 const getSarToPkrRate = (rates = DEFAULT_UMRAH_RATES) =>
@@ -75,11 +79,13 @@ export const getUsdToSarRate = (rates = DEFAULT_UMRAH_RATES) => {
 };
 
 export const getCalculatorRatesFromSettings = (currencySettings) => {
+  // The calculator estimates supplier/package costs, so its legacy single-rate
+  // snapshot deliberately starts from the Cost side of Travel Currency Settings.
   const sarToBase =
-    getCurrencyRateToBase(currencySettings, 'SAR') || DEFAULT_UMRAH_RATES.SAR_to_PKR;
+    getCurrencyRateToBase(currencySettings, 'SAR', 'cost') || DEFAULT_UMRAH_RATES.SAR_to_PKR;
 
   const usdToBase =
-    getCurrencyRateToBase(currencySettings, 'USD') || DEFAULT_UMRAH_RATES.USD_to_PKR;
+    getCurrencyRateToBase(currencySettings, 'USD', 'cost') || DEFAULT_UMRAH_RATES.USD_to_PKR;
 
   const sarToPkr = roundMoney(sarToBase);
   const usdToPkr = roundMoney(usdToBase);

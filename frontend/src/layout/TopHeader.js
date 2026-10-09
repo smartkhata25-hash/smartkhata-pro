@@ -7,6 +7,7 @@ import MegaMenu from './MegaMenu';
 import menuConfig from './menuConfig';
 import { filterMenuConfigByModules } from '../utils/moduleNavigation';
 import { MODULE_KEYS } from '../utils/moduleConfig';
+import { hasPermission } from '../utils/permissionHelper';
 import { isTravelContext, buildTravelRouteState } from '../utils/travelContext';
 import {
   weavingSearchConfig,
@@ -156,6 +157,11 @@ const travelTopMenuConfig = [
       {
         title: 'travel.nav.reports',
         items: [
+          {
+            label: 'reports.trialBalance',
+            path: '/travel/trial-balance',
+            permission: 'reports.trial_balance',
+          },
           {
             label: 'travel.reports.tabs.overview',
             path: '/travel/reports?view=overview',
@@ -497,7 +503,9 @@ const TopHeader = ({
         );
         navigate(destination?.path || '/weaving/dashboard');
       } else if (isTravelWorkspace) {
-        if (term.includes('customer')) {
+        if (term.includes('balance') && hasPermission('reports.trial_balance', user)) {
+          navigate('/travel/trial-balance');
+        } else if (term.includes('customer')) {
           navigate('/travel/customers');
         } else if (term.includes('vendor') || term.includes('supplier')) {
           navigate('/travel/vendors');
@@ -514,6 +522,8 @@ const TopHeader = ({
         } else {
           navigate('/travel/dashboard');
         }
+      } else if (term.includes('balance')) {
+        navigate('/trial-balance');
       } else if (term.includes('customer')) {
         navigate('/customers');
       } else if (term.includes('supplier')) {

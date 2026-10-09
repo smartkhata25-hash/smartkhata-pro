@@ -20,6 +20,16 @@ const travelCurrencyRateSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    costRateToBase: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+    saleRateToBase: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
   },
   { _id: false },
 );

@@ -39,12 +39,21 @@ const normalizeRateMap = (settings = null) => {
   const byCurrency = new Map(
     (settings?.rates || []).map((rate) => [
       rate.currency,
-      rate.rateToBase === 0 ? '0' : String(rate.rateToBase || ''),
+      {
+        cost:
+          Number(rate.costRateToBase ?? rate.rateToBase) === 0
+            ? '0'
+            : String(rate.costRateToBase ?? rate.rateToBase ?? ''),
+        sale:
+          Number(rate.saleRateToBase ?? rate.rateToBase) === 0
+            ? '0'
+            : String(rate.saleRateToBase ?? rate.rateToBase ?? ''),
+      },
     ])
   );
 
   return getRateCodes(settings).reduce((result, code) => {
-    result[code] = byCurrency.get(code) || '';
+    result[code] = byCurrency.get(code) || { cost: '', sale: '' };
 
     return result;
   }, {});
@@ -169,10 +178,13 @@ const TravelSettingsPage = () => {
     }
   };
 
-  const handleRateChange = (currency, value) => {
+  const handleRateChange = (currency, side, value) => {
     setRateValues((current) => ({
       ...current,
-      [currency]: value,
+      [currency]: {
+        ...(current[currency] || {}),
+        [side]: value,
+      },
     }));
   };
 
@@ -194,8 +206,8 @@ const TravelSettingsPage = () => {
 
         rates: rateCodes.map((currency) => ({
           currency,
-
-          rateToBase: Number(rateValues[currency] || 0),
+          costRateToBase: Number(rateValues[currency]?.cost || 0),
+          saleRateToBase: Number(rateValues[currency]?.sale || 0),
         })),
       });
 
@@ -377,30 +389,35 @@ const TravelSettingsPage = () => {
                   </span>
                 </div>
 
-                <label className="mt-4 block">
-                  <span className="mb-1.5 block text-xs font-bold text-slate-500">
-                    1 {code} = {DEFAULT_TRAVEL_CURRENCY}
-                  </span>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      value={rateValues[code] || ''}
-                      onChange={(event) => handleRateChange(code, event.target.value)}
-                      onWheel={(event) => event.currentTarget.blur()}
-                      placeholder={t('travel.settings.ratePlaceholder')}
-                      disabled={!canManage || loading || saving}
-                      className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-extrabold text-slate-950 outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                    />
-
-                    <span className="flex h-11 flex-shrink-0 items-center rounded-lg bg-slate-100 px-3 text-xs font-extrabold text-slate-600">
-                      {DEFAULT_TRAVEL_CURRENCY}
-                    </span>
-                  </div>
-                </label>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {[
+                    ['cost', t('travel.settings.costRate')],
+                    ['sale', t('travel.settings.saleRate')],
+                  ].map(([side, label]) => (
+                    <label key={side} className="block">
+                      <span className="mb-1.5 block text-xs font-bold text-slate-500">
+                        {label}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          value={rateValues[code]?.[side] || ''}
+                          onChange={(event) => handleRateChange(code, side, event.target.value)}
+                          onWheel={(event) => event.currentTarget.blur()}
+                          placeholder={t('travel.settings.ratePlaceholder')}
+                          disabled={!canManage || loading || saving}
+                          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-extrabold text-slate-950 outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                        <span className="flex h-11 flex-shrink-0 items-center rounded-lg bg-slate-100 px-2 text-[11px] font-extrabold text-slate-600">
+                          {DEFAULT_TRAVEL_CURRENCY}
+                        </span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
             );
           })}

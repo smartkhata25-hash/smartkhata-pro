@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { getLedgerByAccount } from '../services/journalService';
 import { getAllAccounts } from '../services/accountService';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { CSVLink } from 'react-csv';
@@ -34,8 +34,9 @@ const getPageModuleScope = (location = {}) => {
 };
 
 const GeneralLedgerPage = () => {
+  const { accountId: routeAccountId = '' } = useParams();
   const [accounts, setAccounts] = useState([]);
-  const [selectedAccount, setSelectedAccount] = useState('');
+  const [selectedAccount, setSelectedAccount] = useState(routeAccountId);
   const [ledger, setLedger] = useState([]);
   const [filteredLedger, setFilteredLedger] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -68,7 +69,7 @@ const GeneralLedgerPage = () => {
     fetchAccounts();
   }, [token, navigate, moduleScope]);
 
-  const fetchLedger = async (accountId) => {
+  const fetchLedger = useCallback(async (accountId) => {
     setLoading(true);
     try {
       const response = await getLedgerByAccount(accountId, startDate, endDate, { moduleScope });
@@ -101,7 +102,13 @@ const GeneralLedgerPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [endDate, moduleScope, startDate]);
+
+  useEffect(() => {
+    if (!routeAccountId) return;
+    setSelectedAccount(routeAccountId);
+    fetchLedger(routeAccountId);
+  }, [fetchLedger, routeAccountId]);
 
   const handleAccountChange = (e) => {
     const accountId = e.target.value;

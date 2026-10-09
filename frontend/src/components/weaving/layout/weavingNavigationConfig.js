@@ -22,6 +22,7 @@ const attendancePermissions = [
   'weaving.attendance.override',
 ];
 const reportsPermissions = [
+  'reports.trial_balance',
   'payroll.view',
   'weaving.reports.view',
   'weaving.reports.production',
@@ -86,6 +87,7 @@ export const weavingSearchConfig = Object.freeze([
   { terms: ['loom performance'], path: '/weaving/looms', anyPermissions: ['weaving.reports.view', 'weaving.looms.view_performance'] },
   { terms: ['production'], path: '/weaving/production', anyPermissions: ['weaving.reports.view', 'weaving.reports.production'] },
   { terms: ['general ledger'], path: '/weaving/general-ledger', permission: 'reports.general_ledger' },
+  { terms: ['trial balance', 'balance'], path: '/weaving/trial-balance', permission: 'reports.trial_balance' },
   { terms: ['journal'], path: '/weaving/journal-entries', permission: 'journal.view' },
   { terms: ['business value'], path: '/weaving/business-value', permission: 'business_value.view' },
   { terms: ['accounts', 'account'], path: '/weaving/accounts', permission: 'accounts.view' },
@@ -357,6 +359,7 @@ export const weavingTopMenuConfig = Object.freeze([
         title: 'weaving.nav.reports',
         items: [
           { label: 'weaving.sidebar.generalLedger', path: '/weaving/general-ledger', permission: 'reports.general_ledger' },
+          { label: 'reports.trialBalance', path: '/weaving/trial-balance', permission: 'reports.trial_balance' },
           { label: 'businessValue.menuLabel', path: '/weaving/business-value', permission: 'business_value.view' },
           { label: 'weaving.operationalReports.salaryClosingSheet', path: '/weaving/payroll/salary-closing', permission: 'payroll.view' },
           { label: 'weaving.operationalReports.productionReport', path: '/weaving/reports?tab=production', anyPermissions: ['weaving.reports.view', 'weaving.reports.production'] },

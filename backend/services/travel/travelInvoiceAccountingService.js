@@ -557,6 +557,14 @@ const buildAccountingSnapshot = (source = {}) =>
 
     vendorPaymentAccountId: String(source.vendorPaymentAccountId || ""),
 
+    currencyRateSnapshot: (source.currencyRateSnapshot || [])
+      .map((rate) => ({
+        currency: String(rate.currency || "").toUpperCase(),
+        costRateToBase: Number(Number(rate.costRateToBase || 0).toFixed(6)),
+        saleRateToBase: Number(Number(rate.saleRateToBase || 0).toFixed(6)),
+      }))
+      .sort((left, right) => left.currency.localeCompare(right.currency)),
+
     vendorPayments: (source.vendorPayments || []).map((payment) => ({
       vendorType: payment.vendorType || "vendor",
       vendorId: String(payment.vendorId || ""),

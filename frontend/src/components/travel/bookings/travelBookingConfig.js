@@ -9,6 +9,7 @@ import {
 import { getUmrahNightsInputValue } from '../umrah/umrahStayNights';
 import { normalizeTravelPaymentTypeForEdit } from './form/bookingPaymentUtils';
 import { alignTravelerDetailRows } from './form/travelerOccurrenceUtils';
+import { resolveBookingCurrencyRateSnapshot } from './form/bookingFormUtils';
 
 export const BOOKING_STATUSES = Object.freeze([
   'draft',
@@ -559,6 +560,8 @@ export const createInitialBookingForm = (serviceType = 'air_ticket') => {
 
     bookingItems: [createEmptyBookingItem(initialItemType)],
 
+    currencyRateSnapshot: [],
+
     travelStartDate: '',
 
     travelEndDate: '',
@@ -1004,7 +1007,7 @@ const prepareVendorPaymentsForForm = (booking = {}, bookingItems = []) => {
   return [...legacyPayments.values()];
 };
 
-export const prepareBookingForForm = (booking = null) => {
+export const prepareBookingForForm = (booking = null, currencySettings = null) => {
   if (!booking) {
     return createInitialBookingForm();
   }
@@ -1043,6 +1046,11 @@ export const prepareBookingForForm = (booking = null) => {
     travelers: (booking.travelers || []).map((traveler) => getRecordId(traveler)).filter(Boolean),
 
     bookingItems,
+
+    currencyRateSnapshot:
+      booking?._id || (booking?.currencyRateSnapshot || []).length
+        ? resolveBookingCurrencyRateSnapshot(booking, currencySettings)
+        : [],
 
     travelStartDate: normalizeDateForInput(booking.travelStartDate),
 

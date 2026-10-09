@@ -18,6 +18,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ChartOfAccountsPage = lazy(() => import('./pages/ChartOfAccountsPage'));
 const JournalEntriesPage = lazy(() => import('./pages/JournalEntriesPage'));
 const TrialBalancePage = lazy(() => import('./pages/TrialBalancePage'));
+const TrialBalanceChartPage = lazy(() => import('./pages/TrialBalanceChartPage'));
 const GeneralLedgerPage = lazy(() => import('./pages/GeneralLedgerPage'));
 const IncomeStatementPage = lazy(() => import('./pages/IncomeStatementPage'));
 const CustomersPage = lazy(() => import('./pages/CustomersPage'));
@@ -433,6 +434,30 @@ function App() {
             />
 
             <Route
+              path="/weaving/trial-balance"
+              element={
+                <PermissionRoute
+                  permission="reports.trial_balance"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <TrialBalancePage moduleScope="weaving" />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/trial-balance/chart"
+              element={
+                <PermissionRoute
+                  permission="reports.trial_balance"
+                  moduleKey={MODULE_KEYS.WEAVING}
+                >
+                  <TrialBalanceChartPage moduleScope="weaving" />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/weaving/expenses"
               element={
                 <PermissionRoute permission="expenses.view" moduleKey={MODULE_KEYS.WEAVING}>
@@ -575,7 +600,7 @@ function App() {
             <Route
               path="/weaving/reports"
               element={
-                <PermissionRoute anyPermissions={['payroll.view', 'weaving.reports.view', 'weaving.reports.production', 'weaving.reports.stock', 'weaving.reports.sales', 'weaving.reports.profit', 'weaving.looms.view_performance']} moduleKey={MODULE_KEYS.WEAVING}>
+                <PermissionRoute anyPermissions={['payroll.view', 'weaving.reports.view', 'weaving.reports.production', 'weaving.reports.stock', 'weaving.reports.sales', 'weaving.reports.profit', 'weaving.looms.view_performance', 'reports.trial_balance']} moduleKey={MODULE_KEYS.WEAVING}>
                   <WeavingReportsHubPage />
                 </PermissionRoute>
               }
@@ -633,8 +658,32 @@ function App() {
             <Route
               path="/travel/reports"
               element={
-                <PermissionRoute permission="travel.reports" moduleKey={MODULE_KEYS.TRAVEL}>
+                <PermissionRoute anyPermissions={['travel.reports', 'reports.trial_balance']} moduleKey={MODULE_KEYS.TRAVEL}>
                   <TravelReportsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/trial-balance"
+              element={
+                <PermissionRoute
+                  permission="reports.trial_balance"
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TrialBalancePage moduleScope="travel" />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/trial-balance/chart"
+              element={
+                <PermissionRoute
+                  permission="reports.trial_balance"
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TrialBalanceChartPage moduleScope="travel" />
                 </PermissionRoute>
               }
             />
@@ -1166,7 +1215,16 @@ function App() {
               path="/trial-balance"
               element={
                 <PermissionRoute permission="reports.trial_balance">
-                  <TrialBalancePage />
+                  <TrialBalancePage moduleScope="trading" />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/trial-balance/chart"
+              element={
+                <PermissionRoute permission="reports.trial_balance">
+                  <TrialBalanceChartPage moduleScope="trading" />
                 </PermissionRoute>
               }
             />

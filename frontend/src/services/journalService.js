@@ -20,8 +20,11 @@ const getDateParams = (startDate, endDate, options = {}) => {
     ...getScopedParams(options),
   };
 
-  if (startDate && endDate) {
+  if (startDate) {
     params.startDate = startDate;
+  }
+
+  if (endDate) {
     params.endDate = endDate;
   }
 

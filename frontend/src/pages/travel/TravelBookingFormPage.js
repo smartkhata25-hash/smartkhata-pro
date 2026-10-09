@@ -5,6 +5,7 @@ import {
   FaChevronUp,
   FaClipboardList,
   FaCoins,
+  FaExchangeAlt,
   FaFileInvoiceDollar,
   FaMoneyBillWave,
   FaPaperclip,
@@ -39,6 +40,7 @@ import {
   fetchTravelServices,
   fetchTravelers,
   fetchTravelVendors,
+  updateTravelCurrencyDefaultRate,
   updateTravelBooking,
 } from '../../services/travelMasterService';
 import { fetchTravelReminderSettings } from '../../services/travelReminderService';
@@ -120,6 +122,7 @@ import {
 import BookingRelationModal from '../../components/travel/bookings/form/BookingRelationModal';
 import MatchingTravelersModal from '../../components/travel/bookings/form/MatchingTravelersModal';
 import TravelerDuplicateConfirmationModal from '../../components/travel/bookings/form/TravelerDuplicateConfirmationModal';
+import TravelCurrencyRateModal from '../../components/travel/bookings/form/TravelCurrencyRateModal';
 import {
   applyCustomerReceiptAmountChange,
   normalizeCustomerReceiptForPayload,
@@ -142,11 +145,17 @@ import {
   calculateBookingItemSourceTotals,
   calculateLocalTotals,
   calculateUmrahComponentSourceTotals,
+  captureCurrencyRateSnapshot,
   compactPayload,
   deriveVendorCostGroups,
+  findMissingConversionRate,
+  getInvoiceCurrencyRate,
+  getMissingInvoiceCurrencyRateSides,
   getVendorCounterpartyKey,
   isRowVendorMode,
+  normalizeDualCurrencyRates,
   sanitizeDraftState,
+  updateInvoiceCurrencyRate,
   upsertRecord,
 } from '../../components/travel/bookings/form/bookingFormUtils';
 
@@ -584,7 +593,17 @@ const TextField = ({
   </label>
 );
 
-const MoneyField = ({ labelKey, value, onChange, disabled = false, accent = false }) => (
+const MoneyField = ({
+  labelKey,
+  value,
+  onChange,
+  disabled = false,
+  accent = false,
+  currency = DEFAULT_TRAVEL_CURRENCY,
+  side,
+  baseCurrency = DEFAULT_TRAVEL_CURRENCY,
+  onRateClick,
+}) => (
   <label className="min-w-0">
     <FieldLabel>{t(labelKey)}</FieldLabel>
 
@@ -602,13 +621,37 @@ const MoneyField = ({ labelKey, value, onChange, disabled = false, accent = fals
         step="0.01"
         value={value ?? ''}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className={`${fieldClass} pl-8 ${
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          onChange(nextValue);
+          if (onRateClick && Number(nextValue) > 0) {
+            onRateClick({
+              currency,
+              side,
+              sourceAmount: Number(nextValue),
+              required: true,
+            });
+          }
+        }}
+        className={`${fieldClass} pl-8 ${onRateClick && currency !== baseCurrency ? 'pr-10' : ''} ${
           accent
             ? 'border-amber-200 bg-amber-50/40 focus:border-amber-400 focus:ring-amber-100'
             : ''
         }`}
       />
+
+      {onRateClick && currency !== baseCurrency && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onRateClick({ currency, side, sourceAmount: Number(value || 0) })}
+          className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-cyan-600 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:text-slate-300"
+          title={`${side === 'cost' ? 'Cost' : 'Sale'} conversion rate`}
+          aria-label={`${side === 'cost' ? 'Cost' : 'Sale'} conversion rate for ${currency}`}
+        >
+          <FaExchangeAlt aria-hidden="true" />
+        </button>
+      )}
     </div>
   </label>
 );
@@ -687,8 +730,10 @@ const TravelBookingFormPage = () => {
   const canManageServices = hasPermission('travel.services.manage');
   const canManageHotels = hasPermission('travel.hotels.manage');
   const canManageVendors = hasPermission('travel.vendors.manage');
+  const canManageSettings = hasPermission('travel.settings');
 
   const [formState, setFormState] = useState(() => createInitialBookingForm('air_ticket'));
+  const [showServiceAndTitle, setShowServiceAndTitle] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -722,6 +767,9 @@ const TravelBookingFormPage = () => {
   const [matchingTravelersPrompt, setMatchingTravelersPrompt] = useState(null);
   const [customerTravelerBusy, setCustomerTravelerBusy] = useState({});
   const [resolvedCustomerTravelerIds, setResolvedCustomerTravelerIds] = useState({});
+  const [rateModal, setRateModal] = useState(null);
+  const [rateModalSaving, setRateModalSaving] = useState(false);
+  const [rateModalError, setRateModalError] = useState('');
 
   const postedInvoiceEditing = Boolean(isEditMode && formState.accountingPosted);
   const accountingLocked = Boolean(formState.accountingPosted && !isEditMode);
@@ -881,14 +929,19 @@ const TravelBookingFormPage = () => {
         paymentAccounts: true,
       });
       setFormState((current) => {
+        const currencyRateSnapshot =
+          !isEditMode && !(current.currencyRateSnapshot || []).length
+            ? captureCurrencyRateSnapshot(currencyData)
+            : current.currencyRateSnapshot;
         const currentReminder = normalizeReminderSettingsForForm(current.reminderSettings);
 
         if (currentReminder.inheritBusinessDefaults === false) {
-          return current;
+          return { ...current, currencyRateSnapshot };
         }
 
         return {
           ...current,
+          currencyRateSnapshot,
           reminderSettings: normalizeReminderSettingsForForm({
             inheritBusinessDefaults: true,
             automaticRemindersEnabled: reminderSettingsData?.automaticRemindersEnabled,
@@ -904,7 +957,7 @@ const TravelBookingFormPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isEditMode]);
 
   useEffect(() => {
     loadReferences();
@@ -920,12 +973,13 @@ const TravelBookingFormPage = () => {
         setLoading(true);
         setFormError('');
 
-        const [booking, latestReminderSettings] = await Promise.all([
+        const [booking, latestReminderSettings, latestCurrencySettings] = await Promise.all([
           fetchTravelBookingById(id),
           fetchTravelReminderSettings(),
+          fetchTravelCurrencySettings(),
         ]);
 
-        const preparedBooking = prepareBookingForForm(booking);
+        const preparedBooking = prepareBookingForForm(booking, latestCurrencySettings);
 
         const bookingReminder = normalizeReminderSettingsForForm(preparedBooking.reminderSettings);
 
@@ -944,6 +998,7 @@ const TravelBookingFormPage = () => {
             : preparedBooking;
 
         setReminderBusinessSettings(latestReminderSettings || null);
+        setCurrencySettings(latestCurrencySettings || null);
         setFormState(finalBooking);
 
         void ensureReferencesLoaded(getBookingOptionalReferenceKeys(finalBooking));
@@ -990,6 +1045,124 @@ const TravelBookingFormPage = () => {
       ),
     [currencySettings, effectiveVendorPayments, formState]
   );
+
+  const baseCurrency = currencySettings?.baseCurrency || DEFAULT_TRAVEL_CURRENCY;
+  const defaultCurrencyRates = useMemo(
+    () => normalizeDualCurrencyRates(currencySettings),
+    [currencySettings]
+  );
+
+  const buildCurrencyRateModal = ({
+    currency,
+    side,
+    sourceAmount = 0,
+    required = false,
+    nextSide = null,
+    snapshot = formState.currencyRateSnapshot,
+  }) => {
+    const code = String(currency || baseCurrency).toUpperCase();
+    const defaultRow = defaultCurrencyRates.find((row) => row.currency === code);
+    return {
+      currency: code,
+      side,
+      sourceAmount,
+      required,
+      nextSide,
+      currentInvoiceRate: getInvoiceCurrencyRate(snapshot, code, side, baseCurrency),
+      currentDefaultRate:
+        side === 'cost' ? defaultRow?.costRateToBase || 0 : defaultRow?.saleRateToBase || 0,
+    };
+  };
+
+  const openCurrencyRateModal = ({
+    currency,
+    side,
+    sourceAmount = 0,
+    required = false,
+    nextSide = null,
+  }) => {
+    const code = String(currency || baseCurrency).toUpperCase();
+    if (code === String(baseCurrency).toUpperCase() || rateModal) return;
+    const currentInvoiceRate = getInvoiceCurrencyRate(
+      formState.currencyRateSnapshot,
+      code,
+      side,
+      baseCurrency
+    );
+    if (required && currentInvoiceRate > 0) return;
+    setRateModalError('');
+    setRateModal(buildCurrencyRateModal({
+      currency: code,
+      side,
+      sourceAmount,
+      required,
+      nextSide,
+    }));
+  };
+
+  const promptForMissingCurrencyRates = (currency) => {
+    if (rateModal) return;
+    const missingSides = getMissingInvoiceCurrencyRateSides(
+      formState.currencyRateSnapshot,
+      currency,
+      baseCurrency
+    );
+    if (!missingSides.length) return;
+    openCurrencyRateModal({
+      currency,
+      side: missingSides[0],
+      required: true,
+      nextSide: missingSides[1] || null,
+    });
+  };
+
+  const applyCurrencyRate = async (rate, makeDefault) => {
+    if (!rateModal || rateModalSaving) return;
+    try {
+      setRateModalSaving(true);
+      setRateModalError('');
+      if (makeDefault) {
+        const savedSettings = await updateTravelCurrencyDefaultRate(
+          rateModal.currency,
+          rateModal.side,
+          rate
+        );
+        setCurrencySettings(savedSettings);
+      }
+      const nextSnapshot = updateInvoiceCurrencyRate(
+        formState.currencyRateSnapshot,
+        rateModal.currency,
+        rateModal.side,
+        rate
+      );
+      setFormState((current) => ({
+        ...current,
+        currencyRateSnapshot: updateInvoiceCurrencyRate(
+          current.currencyRateSnapshot,
+          rateModal.currency,
+          rateModal.side,
+          rate
+        ),
+      }));
+      if (rateModal.nextSide) {
+        setRateModal(buildCurrencyRateModal({
+          currency: rateModal.currency,
+          side: rateModal.nextSide,
+          required: true,
+          snapshot: nextSnapshot,
+        }));
+      } else {
+        setRateModal(null);
+      }
+    } catch (error) {
+      console.error('Travel invoice conversion rate update failed:', error);
+      setRateModalError(
+        error?.response?.data?.message || 'Conversion rate could not be updated.'
+      );
+    } finally {
+      setRateModalSaving(false);
+    }
+  };
 
   const activeCustomers = useMemo(() => customers.filter(isRecordActive), [customers]);
 
@@ -1188,6 +1361,32 @@ const TravelBookingFormPage = () => {
         bookingItems,
       };
     });
+  };
+
+  const updateItemCurrency = (itemIndex, currency) => {
+    updateItem(itemIndex, (currentItem) => ({
+      ...currentItem,
+      costCurrency: currency,
+      sellingCurrency: currency,
+    }));
+    promptForMissingCurrencyRates(currency);
+  };
+
+  const updateUmrahComponentCurrency = (itemIndex, componentIndex, currency) => {
+    updateItem(itemIndex, (currentItem) => {
+      const nextUmrah = { ...(currentItem.umrahDetails || {}) };
+      const nextComponents = [...(nextUmrah.components || [])];
+      nextComponents[componentIndex] = {
+        ...nextComponents[componentIndex],
+        costCurrency: currency,
+        sellingCurrency: currency,
+      };
+      return {
+        ...currentItem,
+        umrahDetails: { ...nextUmrah, components: nextComponents },
+      };
+    });
+    promptForMissingCurrencyRates(currency);
   };
 
   const updateItemField = (index, field, value) => {
@@ -2618,7 +2817,10 @@ const TravelBookingFormPage = () => {
 
     clearDraft();
 
-    setFormState(createInitialBookingForm('air_ticket'));
+    setFormState({
+      ...createInitialBookingForm('air_ticket'),
+      currencyRateSnapshot: captureCurrencyRateSnapshot(currencySettings),
+    });
 
     setExpandedItems({});
     setFormError('');
@@ -2632,6 +2834,14 @@ const TravelBookingFormPage = () => {
 
     if (!Array.isArray(formState.bookingItems) || formState.bookingItems.length === 0) {
       return 'At least one invoice item is required.';
+    }
+
+    if (['quotation', 'confirmed', 'processing', 'completed'].includes(status)) {
+      const missingRate = findMissingConversionRate(formState, currencySettings);
+      if (missingRate) {
+        const label = missingRate.side === 'cost' ? 'Cost' : 'Sale';
+        return `${label} conversion rate for ${missingRate.currency} is not configured.`;
+      }
     }
 
     for (let index = 0; index < formState.bookingItems.length; index += 1) {
@@ -3068,6 +3278,10 @@ const TravelBookingFormPage = () => {
               labelKey="travel.booking.fields.costPrice"
               value={row?.costPrice}
               disabled={accountingLocked}
+              currency={component.costCurrency}
+              side="cost"
+              baseCurrency={baseCurrency}
+              onRateClick={openCurrencyRateModal}
               onChange={(value) =>
                 updateUmrahComponentPaxRow(itemIndex, componentIndex, paxType, 'costPrice', value)
               }
@@ -3077,6 +3291,10 @@ const TravelBookingFormPage = () => {
               labelKey="travel.booking.fields.sellingPrice"
               value={row?.sellingPrice}
               disabled={accountingLocked}
+              currency={component.sellingCurrency}
+              side="sale"
+              baseCurrency={baseCurrency}
+              onRateClick={openCurrencyRateModal}
               onChange={(value) =>
                 updateUmrahComponentPaxRow(
                   itemIndex,
@@ -3181,6 +3399,10 @@ const TravelBookingFormPage = () => {
             labelKey="travel.booking.fields.costPrice"
             value={pricing.costPrice}
             disabled={accountingLocked}
+            currency={component.costCurrency}
+            side="cost"
+            baseCurrency={baseCurrency}
+            onRateClick={openCurrencyRateModal}
             onChange={(value) =>
               updateUmrahQuantityPricing(itemIndex, componentIndex, 'costPrice', value)
             }
@@ -3190,6 +3412,10 @@ const TravelBookingFormPage = () => {
             labelKey="travel.booking.fields.sellingPrice"
             value={pricing.sellingPrice}
             disabled={accountingLocked}
+            currency={component.sellingCurrency}
+            side="sale"
+            baseCurrency={baseCurrency}
+            onRateClick={openCurrencyRateModal}
             onChange={(value) =>
               updateUmrahQuantityPricing(itemIndex, componentIndex, 'sellingPrice', value)
             }
@@ -3365,6 +3591,10 @@ const TravelBookingFormPage = () => {
                       labelKey="travel.booking.fields.costPrice"
                       value={room.costPrice}
                       disabled={accountingLocked}
+                      currency={component.costCurrency}
+                      side="cost"
+                      baseCurrency={baseCurrency}
+                      onRateClick={openCurrencyRateModal}
                       onChange={(value) =>
                         updateUmrahHotelRoomRow(
                           itemIndex,
@@ -3380,6 +3610,10 @@ const TravelBookingFormPage = () => {
                       labelKey="travel.booking.fields.sellingPrice"
                       value={room.sellingPrice}
                       disabled={accountingLocked}
+                      currency={component.sellingCurrency}
+                      side="sale"
+                      baseCurrency={baseCurrency}
+                      onRateClick={openCurrencyRateModal}
                       onChange={(value) =>
                         updateUmrahHotelRoomRow(
                           itemIndex,
@@ -3621,33 +3855,9 @@ const TravelBookingFormPage = () => {
                       <CurrencySelect
                         value={component.costCurrency}
                         disabled={accountingLocked}
-                        onChange={(value) => {
-                          updateItem(itemIndex, (currentItem) => {
-                            const nextUmrah = {
-                              ...(currentItem.umrahDetails || {}),
-                            };
-
-                            const nextComponents = [...(nextUmrah.components || [])];
-
-                            nextComponents[componentIndex] = {
-                              ...nextComponents[componentIndex],
-
-                              costCurrency: value,
-
-                              sellingCurrency: value,
-                            };
-
-                            return {
-                              ...currentItem,
-
-                              umrahDetails: {
-                                ...nextUmrah,
-
-                                components: nextComponents,
-                              },
-                            };
-                          });
-                        }}
+                        onChange={(value) =>
+                          updateUmrahComponentCurrency(itemIndex, componentIndex, value)
+                        }
                       />
                     </label>
 
@@ -4750,6 +4960,10 @@ const TravelBookingFormPage = () => {
             labelKey="travel.booking.fields.costPrice"
             value={row?.costPrice}
             disabled={accountingLocked}
+            currency={item.costCurrency}
+            side="cost"
+            baseCurrency={baseCurrency}
+            onRateClick={openCurrencyRateModal}
             onChange={(value) => updatePaxPricingRow(itemIndex, rowIndex, 'costPrice', value)}
           />
 
@@ -4757,6 +4971,10 @@ const TravelBookingFormPage = () => {
             labelKey="travel.booking.fields.sellingPrice"
             value={row?.sellingPrice}
             disabled={accountingLocked}
+            currency={item.sellingCurrency}
+            side="sale"
+            baseCurrency={baseCurrency}
+            onRateClick={openCurrencyRateModal}
             onChange={(value) => updatePaxPricingRow(itemIndex, rowIndex, 'sellingPrice', value)}
           />
 
@@ -4873,13 +5091,7 @@ const TravelBookingFormPage = () => {
             <CurrencySelect
               value={item.costCurrency}
               disabled={accountingLocked}
-              onChange={(value) => {
-                updateItem(itemIndex, (currentItem) => ({
-                  ...currentItem,
-                  costCurrency: value,
-                  sellingCurrency: value,
-                }));
-              }}
+              onChange={(value) => updateItemCurrency(itemIndex, value)}
             />
           </label>
 
@@ -5068,6 +5280,10 @@ const TravelBookingFormPage = () => {
                       labelKey="travel.booking.fields.costPrice"
                       value={room.costPrice}
                       disabled={accountingLocked}
+                      currency={item.costCurrency}
+                      side="cost"
+                      baseCurrency={baseCurrency}
+                      onRateClick={openCurrencyRateModal}
                       onChange={(value) =>
                         updateHotelRoomPricingRow(itemIndex, roomIndex, 'costPrice', value)
                       }
@@ -5077,6 +5293,10 @@ const TravelBookingFormPage = () => {
                       labelKey="travel.booking.fields.sellingPrice"
                       value={room.sellingPrice}
                       disabled={accountingLocked}
+                      currency={item.sellingCurrency}
+                      side="sale"
+                      baseCurrency={baseCurrency}
+                      onRateClick={openCurrencyRateModal}
                       onChange={(value) =>
                         updateHotelRoomPricingRow(itemIndex, roomIndex, 'sellingPrice', value)
                       }
@@ -5121,13 +5341,7 @@ const TravelBookingFormPage = () => {
             <CurrencySelect
               value={item.costCurrency}
               disabled={accountingLocked}
-              onChange={(value) =>
-                updateItem(itemIndex, (currentItem) => ({
-                  ...currentItem,
-                  costCurrency: value,
-                  sellingCurrency: value,
-                }))
-              }
+              onChange={(value) => updateItemCurrency(itemIndex, value)}
             />
           </label>
 
@@ -5186,6 +5400,10 @@ const TravelBookingFormPage = () => {
           labelKey="travel.booking.fields.costPrice"
           value={pricing.costPrice}
           disabled={accountingLocked}
+          currency={item.costCurrency}
+          side="cost"
+          baseCurrency={baseCurrency}
+          onRateClick={openCurrencyRateModal}
           onChange={(value) => updateQuantityPricing(itemIndex, 'costPrice', value)}
         />
 
@@ -5193,6 +5411,10 @@ const TravelBookingFormPage = () => {
           labelKey="travel.booking.fields.sellingPrice"
           value={pricing.sellingPrice}
           disabled={accountingLocked}
+          currency={item.sellingCurrency}
+          side="sale"
+          baseCurrency={baseCurrency}
+          onRateClick={openCurrencyRateModal}
           onChange={(value) => updateQuantityPricing(itemIndex, 'sellingPrice', value)}
         />
 
@@ -5202,13 +5424,7 @@ const TravelBookingFormPage = () => {
           <CurrencySelect
             value={item.costCurrency}
             disabled={accountingLocked}
-            onChange={(value) =>
-              updateItem(itemIndex, (currentItem) => ({
-                ...currentItem,
-                costCurrency: value,
-                sellingCurrency: value,
-              }))
-            }
+            onChange={(value) => updateItemCurrency(itemIndex, value)}
           />
         </label>
 
@@ -5284,7 +5500,17 @@ const TravelBookingFormPage = () => {
         </div>
 
         <div className="p-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${
+              showServiceAndTitle
+                ? useComponents
+                  ? 'xl:grid-cols-3'
+                  : 'xl:grid-cols-4'
+                : useComponents
+                  ? 'xl:grid-cols-1'
+                  : 'xl:grid-cols-2'
+            }`}
+          >
             <label className="min-w-0">
               <FieldLabel>{t('travel.booking.fields.bookingItem')}</FieldLabel>
 
@@ -5302,41 +5528,45 @@ const TravelBookingFormPage = () => {
               </select>
             </label>
 
-            <TravelCompactAutocomplete
-              labelKey="travel.booking.fields.service"
-              value={getRecordId(item.serviceId) || ''}
-              records={activeServices}
-              disabled={accountingLocked}
-              getLabel={getServiceLabel}
-              getMeta={(service) => service?.code || ''}
-              placeholderKey="travel.placeholders.serviceName"
-              onChange={(_, service) => selectServiceForItem(index, service || {})}
-              onQuickAdd={
-                canManageServices
-                  ? (query) =>
-                      openModal('service', 'quick', {
-                        query,
-                        itemIndex: index,
-                      })
-                  : null
-              }
-              onAddDetails={
-                canManageServices
-                  ? (query) =>
-                      openModal('service', 'details', {
-                        query,
-                        itemIndex: index,
-                      })
-                  : null
-              }
-            />
+            {showServiceAndTitle && (
+              <>
+                <TravelCompactAutocomplete
+                  labelKey="travel.booking.fields.service"
+                  value={getRecordId(item.serviceId) || ''}
+                  records={activeServices}
+                  disabled={accountingLocked}
+                  getLabel={getServiceLabel}
+                  getMeta={(service) => service?.code || ''}
+                  placeholderKey="travel.placeholders.serviceName"
+                  onChange={(_, service) => selectServiceForItem(index, service || {})}
+                  onQuickAdd={
+                    canManageServices
+                      ? (query) =>
+                          openModal('service', 'quick', {
+                            query,
+                            itemIndex: index,
+                          })
+                      : null
+                  }
+                  onAddDetails={
+                    canManageServices
+                      ? (query) =>
+                          openModal('service', 'details', {
+                            query,
+                            itemIndex: index,
+                          })
+                      : null
+                  }
+                />
 
-            <TextField
-              labelKey="travel.booking.fields.itemTitle"
-              value={item.title}
-              disabled={accountingLocked}
-              onChange={(value) => updateItemField(index, 'title', value)}
-            />
+                <TextField
+                  labelKey="travel.booking.fields.itemTitle"
+                  value={item.title}
+                  disabled={accountingLocked}
+                  onChange={(value) => updateItemField(index, 'title', value)}
+                />
+              </>
+            )}
 
             {!useComponents && (
               <div>
@@ -5391,8 +5621,6 @@ const TravelBookingFormPage = () => {
       </div>
     );
   };
-
-  const baseCurrency = totals.baseCurrency || DEFAULT_TRAVEL_CURRENCY;
 
   const attachments = formState.attachments || [];
 
@@ -5557,6 +5785,19 @@ const TravelBookingFormPage = () => {
 
             {/* RIGHT SIDE: Actions */}
             <div className="flex flex-shrink-0 flex-wrap items-end gap-2">
+              <label
+                className="inline-flex h-9 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-violet-200 bg-white px-3 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50"
+                title="Show Service and Item Title"
+              >
+                <input
+                  type="checkbox"
+                  checked={showServiceAndTitle}
+                  onChange={(event) => setShowServiceAndTitle(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                />
+                <span>Service / Custom Title</span>
+              </label>
+
               {!accountingLocked && (
                 <button
                   type="button"
@@ -6111,6 +6352,26 @@ const TravelBookingFormPage = () => {
         hotels={activeHotels}
         canManageCities={canManageHotels}
         onCreateCity={createCityInline}
+      />
+
+      <TravelCurrencyRateModal
+        open={Boolean(rateModal)}
+        currency={rateModal?.currency}
+        side={rateModal?.side}
+        currentInvoiceRate={rateModal?.currentInvoiceRate}
+        currentDefaultRate={rateModal?.currentDefaultRate}
+        baseCurrency={baseCurrency}
+        sourceAmount={rateModal?.sourceAmount}
+        required={Boolean(rateModal?.required)}
+        canMakeDefault={canManageSettings}
+        saving={rateModalSaving}
+        error={rateModalError}
+        onClose={() => {
+          if (rateModalSaving) return;
+          setRateModal(null);
+          setRateModalError('');
+        }}
+        onApply={applyCurrencyRate}
       />
 
       <BookingRelationModal

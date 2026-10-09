@@ -1,4 +1,7 @@
-import { DEFAULT_TRAVEL_CURRENCY } from '../../../../config/travelConfig';
+import {
+  DEFAULT_TRAVEL_CURRENCY,
+  SUPPORTED_TRAVEL_CURRENCIES,
+} from '../../../../config/travelConfig';
 
 export const sanitizeDraftState = (state) => ({
   ...state,
@@ -176,21 +179,90 @@ const normalizeCurrencyCode = (value) =>
     .trim()
     .toUpperCase();
 
-const buildRateMap = (currencySettings, calculatorRates = null) => {
+export const normalizeDualCurrencyRates = (currencySettings = null) => {
   const baseCurrency = normalizeCurrencyCode(
     currencySettings?.baseCurrency || DEFAULT_TRAVEL_CURRENCY
   );
 
-  const rates = new Map([[baseCurrency, 1]]);
+  return (currencySettings?.rates || []).map((rate) => {
+    const legacyRate = Number(rate?.rateToBase || 0);
+    const costRate = Number(rate?.costRateToBase ?? legacyRate);
+    const saleRate = Number(rate?.saleRateToBase ?? legacyRate);
+    return {
+      currency: normalizeCurrencyCode(rate?.currency),
+      costRateToBase: Number.isFinite(costRate) && costRate >= 0 ? costRate : 0,
+      saleRateToBase: Number.isFinite(saleRate) && saleRate >= 0 ? saleRate : 0,
+    };
+  }).filter((rate) => rate.currency && rate.currency !== baseCurrency);
+};
 
-  (currencySettings?.rates || []).forEach((rate) => {
+export const captureCurrencyRateSnapshot = (currencySettings = null) =>
+  normalizeDualCurrencyRates(currencySettings).map((rate) => ({ ...rate }));
+
+export const updateInvoiceCurrencyRate = (snapshot, currency, side, value) => {
+  const code = normalizeCurrencyCode(currency);
+  const field = side === 'cost' ? 'costRateToBase' : 'saleRateToBase';
+  const numeric = Number(value);
+  if (!code || !Number.isFinite(numeric) || numeric < 0) return snapshot || [];
+  const rows = Array.isArray(snapshot) ? snapshot.map((row) => ({ ...row })) : [];
+  const index = rows.findIndex((row) => normalizeCurrencyCode(row.currency) === code);
+  if (index >= 0) rows[index][field] = numeric;
+  else rows.push({ currency: code, costRateToBase: 0, saleRateToBase: 0, [field]: numeric });
+  return rows;
+};
+
+export const getInvoiceCurrencyRate = (
+  snapshot,
+  currency,
+  side,
+  baseCurrency = DEFAULT_TRAVEL_CURRENCY
+) => {
+  const code = normalizeCurrencyCode(currency);
+  if (code === normalizeCurrencyCode(baseCurrency)) return 1;
+  const row = (snapshot || []).find(
+    (candidate) => normalizeCurrencyCode(candidate?.currency) === code
+  );
+  const rate = Number(side === 'cost' ? row?.costRateToBase : row?.saleRateToBase);
+  return Number.isFinite(rate) && rate >= 0 ? rate : 0;
+};
+
+export const getMissingInvoiceCurrencyRateSides = (
+  snapshot,
+  currency,
+  baseCurrency = DEFAULT_TRAVEL_CURRENCY
+) => {
+  const code = normalizeCurrencyCode(currency);
+  if (code === normalizeCurrencyCode(baseCurrency)) return [];
+  return ['cost', 'sale'].filter(
+    (side) => getInvoiceCurrencyRate(snapshot, code, side, baseCurrency) <= 0
+  );
+};
+
+const buildRateMap = (currencySettings, currencyRateSnapshot = [], calculatorRates = null) => {
+  const baseCurrency = normalizeCurrencyCode(
+    currencySettings?.baseCurrency || DEFAULT_TRAVEL_CURRENCY
+  );
+
+  const costRates = new Map([[baseCurrency, 1]]);
+  const saleRates = new Map([[baseCurrency, 1]]);
+
+  normalizeDualCurrencyRates(currencySettings).forEach((rate) => {
     const currency = normalizeCurrencyCode(rate?.currency);
-
-    const rateToBase = Number(rate?.rateToBase || 0);
-
     if (currency) {
-      rates.set(currency, Number.isFinite(rateToBase) && rateToBase > 0 ? rateToBase : 0);
+      costRates.set(currency, rate.costRateToBase);
+      saleRates.set(currency, rate.saleRateToBase);
     }
+  });
+
+  const snapshotCurrencies = new Set();
+  (currencyRateSnapshot || []).forEach((rate) => {
+    const currency = normalizeCurrencyCode(rate?.currency);
+    if (!currency || currency === baseCurrency) return;
+    snapshotCurrencies.add(currency);
+    const costRate = Number(rate?.costRateToBase);
+    const saleRate = Number(rate?.saleRateToBase);
+    if (Number.isFinite(costRate) && costRate >= 0) costRates.set(currency, costRate);
+    if (Number.isFinite(saleRate) && saleRate >= 0) saleRates.set(currency, saleRate);
   });
 
   if (baseCurrency === 'PKR' && calculatorRates) {
@@ -198,17 +270,20 @@ const buildRateMap = (currencySettings, calculatorRates = null) => {
     const usdToPkr = Number(calculatorRates?.USD_to_PKR || 0);
 
     if (Number.isFinite(sarToPkr) && sarToPkr > 0) {
-      rates.set('SAR', sarToPkr);
+      if (!snapshotCurrencies.has('SAR') && !(costRates.get('SAR') > 0)) costRates.set('SAR', sarToPkr);
+      if (!snapshotCurrencies.has('SAR') && !(saleRates.get('SAR') > 0)) saleRates.set('SAR', sarToPkr);
     }
 
     if (Number.isFinite(usdToPkr) && usdToPkr > 0) {
-      rates.set('USD', usdToPkr);
+      if (!snapshotCurrencies.has('USD') && !(costRates.get('USD') > 0)) costRates.set('USD', usdToPkr);
+      if (!snapshotCurrencies.has('USD') && !(saleRates.get('USD') > 0)) saleRates.set('USD', usdToPkr);
     }
   }
 
   return {
     baseCurrency,
-    rates,
+    costRates,
+    saleRates,
   };
 };
 
@@ -224,7 +299,7 @@ const getCalculatorRateSnapshot = (formState = {}) => {
   return null;
 };
 
-const estimateAmount = (amount, currency, settings) => {
+const estimateAmount = (amount, currency, settings, side) => {
   const numericAmount = parseMoney(amount);
 
   if (!numericAmount) {
@@ -237,7 +312,8 @@ const estimateAmount = (amount, currency, settings) => {
     return numericAmount;
   }
 
-  const rate = Number(settings.rates.get(safeCurrency) || 0);
+  const rates = side === 'cost' ? settings.costRates : settings.saleRates;
+  const rate = Number(rates.get(safeCurrency) || 0);
 
   return rate > 0 ? numericAmount * rate : 0;
 };
@@ -489,6 +565,128 @@ export const calculateBookingItemSourceTotals = (item = {}) => {
   };
 };
 
+const addRateCandidate = (map, currency, side, sourceAmount, baseAmount, baseCurrency) => {
+  const code = normalizeCurrencyCode(currency);
+  const source = Number(sourceAmount || 0);
+  const base = Number(baseAmount || 0);
+  if (!code || code === baseCurrency || source <= 0 || base <= 0) return;
+  const rate = base / source;
+  if (!Number.isFinite(rate) || rate <= 0) return;
+  const key = `${code}:${side}`;
+  map.set(key, [...(map.get(key) || []), rate]);
+};
+
+const consistentRate = (values = []) => {
+  if (!values.length) return 0;
+  if (!values.every((value) => Math.abs(value - values[0]) <= 0.01)) return 0;
+  return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(6));
+};
+
+export const resolveBookingCurrencyRateSnapshot = (booking = {}, currencySettings = null) => {
+  const baseCurrency = normalizeCurrencyCode(
+    booking?.baseCurrency || currencySettings?.baseCurrency || DEFAULT_TRAVEL_CURRENCY
+  );
+  const saved = new Map(
+    (booking?.currencyRateSnapshot || []).map((row) => [
+      normalizeCurrencyCode(row?.currency),
+      {
+        currency: normalizeCurrencyCode(row?.currency),
+        costRateToBase: Number(row?.costRateToBase || 0),
+        saleRateToBase: Number(row?.saleRateToBase || 0),
+      },
+    ])
+  );
+  const candidates = new Map();
+
+  if (saved.size === 0) {
+    (booking?.bookingItems || []).forEach((item) => {
+      const useComponents =
+        item?.itemType === 'umrah_package' &&
+        item?.umrahDetails?.packageMode === 'custom_component_package' &&
+        Array.isArray(item?.umrahDetails?.components) &&
+        item.umrahDetails.components.length > 0;
+      if (useComponents) {
+        item.umrahDetails.components.forEach((component) => {
+          const totals = calculateUmrahComponentSourceTotals(component);
+          addRateCandidate(candidates, component.costCurrency, 'cost', totals.cost, component.estimatedCostBase, baseCurrency);
+          addRateCandidate(candidates, component.sellingCurrency, 'sale', totals.selling, component.estimatedSellingBase, baseCurrency);
+        });
+        return;
+      }
+      const totals = calculateBookingItemSourceTotals(item);
+      addRateCandidate(candidates, item.costCurrency, 'cost', totals.cost, item.estimatedCostBase, baseCurrency);
+      addRateCandidate(candidates, item.sellingCurrency, 'sale', totals.selling, item.estimatedSellingBase, baseCurrency);
+    });
+  }
+
+  const defaults = new Map(
+    normalizeDualCurrencyRates(currencySettings).map((row) => [row.currency, row])
+  );
+  const calculatorRates = getCalculatorRateSnapshot(booking);
+
+  return SUPPORTED_TRAVEL_CURRENCIES.map((currency) => currency.code)
+    .filter((currency) => currency !== baseCurrency)
+    .map((currency) => {
+      const savedRow = saved.get(currency);
+      const defaultRow = defaults.get(currency);
+      const calculatorRate =
+        baseCurrency === 'PKR'
+          ? Number(calculatorRates?.[`${currency}_to_PKR`] || 0)
+          : 0;
+      return {
+        currency,
+        costRateToBase: savedRow
+          ? savedRow.costRateToBase
+          : consistentRate(candidates.get(`${currency}:cost`)) ||
+            (calculatorRate > 0 ? calculatorRate : 0) ||
+            defaultRow?.costRateToBase ||
+            0,
+        saleRateToBase: savedRow
+          ? savedRow.saleRateToBase
+          : consistentRate(candidates.get(`${currency}:sale`)) ||
+            (calculatorRate > 0 ? calculatorRate : 0) ||
+            defaultRow?.saleRateToBase ||
+            0,
+      };
+    });
+};
+
+export const findMissingConversionRate = (formState = {}, currencySettings = null) => {
+  const settings = buildRateMap(
+    currencySettings,
+    formState.currencyRateSnapshot,
+    getCalculatorRateSnapshot(formState)
+  );
+  const missing = [];
+  const check = (amount, currency, side) => {
+    const code = normalizeCurrencyCode(currency);
+    if (Number(amount || 0) <= 0 || code === settings.baseCurrency) return;
+    const rates = side === 'cost' ? settings.costRates : settings.saleRates;
+    if (!(Number(rates.get(code) || 0) > 0)) missing.push({ currency: code, side });
+  };
+
+  (formState.bookingItems || []).forEach((item) => {
+    const useComponents =
+      item?.itemType === 'umrah_package' &&
+      item?.umrahDetails?.packageMode === 'custom_component_package' &&
+      Array.isArray(item?.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component) => {
+        const totals = calculateUmrahComponentSourceTotals(component);
+        check(totals.cost, component.costCurrency, 'cost');
+        check(totals.selling, component.sellingCurrency, 'sale');
+      });
+      return;
+    }
+    const totals = calculateBookingItemSourceTotals(item);
+    check(totals.cost, item.costCurrency, 'cost');
+    check(totals.selling, item.sellingCurrency, 'sale');
+  });
+
+  return missing[0] || null;
+};
+
 export const getVendorCounterpartyKey = (source = {}) => {
   const isParty = source?.vendorType === 'party' || Boolean(source?.vendorPartyId);
   const id = isParty ? source?.vendorPartyId : source?.vendorId;
@@ -501,7 +699,11 @@ export const isRowVendorMode = (item = {}) =>
   item.paxPricing.some((row) => Boolean(row?.vendorId || row?.vendorPartyId));
 
 export const deriveVendorCostGroups = (formState = {}, currencySettings = null) => {
-  const settings = buildRateMap(currencySettings, getCalculatorRateSnapshot(formState));
+  const settings = buildRateMap(
+    currencySettings,
+    formState.currencyRateSnapshot,
+    getCalculatorRateSnapshot(formState)
+  );
   const groups = new Map();
   let unassignedCostBase = 0;
 
@@ -552,7 +754,7 @@ export const deriveVendorCostGroups = (formState = {}, currencySettings = null) 
         const totals = calculateUmrahComponentSourceTotals(component);
         addCost(
           component,
-          estimateAmount(totals.cost, component.costCurrency, settings),
+          estimateAmount(totals.cost, component.costCurrency, settings, 'cost'),
           component.label || component.componentType || description
         );
       });
@@ -565,12 +767,18 @@ export const deriveVendorCostGroups = (formState = {}, currencySettings = null) 
           estimateAmount(
             parseQuantity(row?.count, 0) * parseMoney(row?.costPrice),
             item.costCurrency,
-            settings
+            settings,
+            'cost'
           )
         )
       );
       const itemCostBase = roundMoney(
-        estimateAmount(calculateBookingItemSourceTotals(item).cost, item.costCurrency, settings)
+        estimateAmount(
+          calculateBookingItemSourceTotals(item).cost,
+          item.costCurrency,
+          settings,
+          'cost'
+        )
       );
       const delta = roundMoney(
         itemCostBase - rowCosts.reduce((sum, amount) => sum + amount, 0)
@@ -595,7 +803,7 @@ export const deriveVendorCostGroups = (formState = {}, currencySettings = null) 
     }
 
     const totals = calculateBookingItemSourceTotals(item);
-    addCost(item, estimateAmount(totals.cost, item.costCurrency, settings), description);
+    addCost(item, estimateAmount(totals.cost, item.costCurrency, settings, 'cost'), description);
   });
 
   return {
@@ -609,7 +817,11 @@ export const deriveVendorCostGroups = (formState = {}, currencySettings = null) 
 export const calculateLocalTotals = (formState, currencySettings) => {
   const calculatorRates = getCalculatorRateSnapshot(formState);
 
-  const settings = buildRateMap(currencySettings, calculatorRates);
+  const settings = buildRateMap(
+    currencySettings,
+    formState.currencyRateSnapshot,
+    calculatorRates
+  );
 
   const totals = (formState.bookingItems || []).reduce(
     (result, item) => {
@@ -627,16 +839,16 @@ export const calculateLocalTotals = (formState, currencySettings) => {
             sourceTotals.selling,
 
             component.sellingCurrency,
-
-            settings
+            settings,
+            'sale'
           );
 
           const componentCost = estimateAmount(
             sourceTotals.cost,
 
             component.costCurrency,
-
-            settings
+            settings,
+            'cost'
           );
 
           result.selling += roundMoney(componentSelling);
@@ -653,16 +865,16 @@ export const calculateLocalTotals = (formState, currencySettings) => {
         sourceTotals.selling,
 
         item.sellingCurrency,
-
-        settings
+        settings,
+        'sale'
       );
 
       const itemCost = estimateAmount(
         sourceTotals.cost,
 
         item.costCurrency,
-
-        settings
+        settings,
+        'cost'
       );
 
       result.selling += roundMoney(itemSelling);

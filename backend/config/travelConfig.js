@@ -46,6 +46,9 @@ const isSupportedTravelCurrency = (value = "") =>
 const getDefaultTravelCurrencyRates = () =>
   TRAVEL_CURRENCY_RATE_CODES.map((currency) => ({
     currency,
+    costRateToBase: 0,
+    saleRateToBase: 0,
+    // Kept during the dual-rate transition for older API consumers/documents.
     rateToBase: 0,
   }));
 

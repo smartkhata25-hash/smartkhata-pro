@@ -8,6 +8,9 @@ const { isBalanced } = require("../utils/journalHelper");
 const { logAudit } = require("../utils/auditHelper");
 const { isPeriodLocked } = require("../utils/periodLockHelper");
 const {
+  buildTrialBalanceRows,
+} = require("../services/trialBalanceService");
+const {
   TRAVEL_BUSINESS_VALUE_ACCOUNT_ORIGINS,
 } = require("../utils/businessValueModuleScope");
 const {
@@ -652,73 +655,15 @@ exports.getTrialBalance = async (req, res) => {
       },
     ]);
 
-    const accountQuery = {
+    // The selected journals are the module boundary. Include every account
+    // they reference, even when legacy Account.moduleScope metadata is stale.
+    const referencedAccountIds = summary.map((row) => row._id).filter(Boolean);
+    const accounts = await Account.find({
+      _id: { $in: referencedAccountIds },
       userId,
-    };
-
-    applyModuleScopeFilter(accountQuery, moduleScope);
-
-    const accounts = await Account.find(accountQuery);
-
-    const trialBalance = [];
-
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    for (const acc of accounts) {
-      const accSummary = summary.find(
-        (s) => s._id.toString() === acc._id.toString(),
-      );
-
-      const dr = accSummary?.totalDebit || 0;
-      const cr = accSummary?.totalCredit || 0;
-
-      let netBalance = 0;
-
-      if (acc.normalBalance === "debit") {
-        netBalance = dr - cr;
-      } else {
-        netBalance = cr - dr;
-      }
-
-      let debit = 0;
-      let credit = 0;
-
-      if (netBalance > 0) {
-        if (acc.normalBalance === "debit") {
-          debit = netBalance;
-        } else {
-          credit = netBalance;
-        }
-      }
-
-      if (netBalance < 0) {
-        if (acc.normalBalance === "debit") {
-          credit = Math.abs(netBalance);
-        } else {
-          debit = Math.abs(netBalance);
-        }
-      }
-
-      if (debit !== 0 || credit !== 0) {
-        trialBalance.push({
-          accountId: acc._id,
-          accountName: acc.name,
-          debit,
-          credit,
-        });
-
-        totalDebit += debit;
-        totalCredit += credit;
-      }
-    }
-
-    res.json({
-      trialBalance,
-      totalDebit,
-      totalCredit,
-      isBalanced: totalDebit === totalCredit,
     });
+
+    res.json(buildTrialBalanceRows(summary, accounts));
   } catch (err) {
     res.status(err.statusCode || 500).json({
       message: "Trial balance error",
@@ -741,7 +686,11 @@ exports.getLedgerByAccount = async (req, res) => {
       userId,
     };
 
-    applyModuleScopeFilter(accountQuery, moduleScope);
+    // Travel journal scope below remains the isolation boundary, so a stale
+    // Account.moduleScope cannot block its Travel-only ledger drill-down.
+    if (moduleScope !== MODULE_SCOPES.TRAVEL) {
+      applyModuleScopeFilter(accountQuery, moduleScope);
+    }
 
     const account = await Account.findOne(accountQuery);
 
@@ -988,3 +937,8 @@ exports.getMonthlyCashFlow = async (req, res) => {
     });
   }
 };
+
+// Read-only diagnostics/tests may reuse the exact production scope boundary.
+exports._test = Object.freeze({
+  getJournalScopeFilter,
+});

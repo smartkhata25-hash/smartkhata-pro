@@ -981,6 +981,21 @@ const currencyBreakdownSchema = new mongoose.Schema(
   },
 );
 
+const currencyRateSnapshotSchema = new mongoose.Schema(
+  {
+    currency: {
+      type: String,
+      required: true,
+      trim: true,
+      uppercase: true,
+      enum: SUPPORTED_TRAVEL_CURRENCY_CODES,
+    },
+    costRateToBase: amountField,
+    saleRateToBase: amountField,
+  },
+  { _id: false },
+);
+
 const attachmentSchema = new mongoose.Schema(
   {
     key: {
@@ -1202,6 +1217,11 @@ const travelBookingSchema = new mongoose.Schema(
 
     currencyBreakdown: {
       type: [currencyBreakdownSchema],
+      default: [],
+    },
+
+    currencyRateSnapshot: {
+      type: [currencyRateSnapshotSchema],
       default: [],
     },
 

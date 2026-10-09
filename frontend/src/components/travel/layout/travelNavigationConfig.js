@@ -140,7 +140,7 @@ export const travelSidebarItems = Object.freeze([
     labelKey: 'travel.sidebar.reports',
     icon: FaChartLine,
     module: MODULE_KEYS.TRAVEL,
-    permission: 'travel.reports',
+    anyPermissions: ['travel.reports', 'reports.trial_balance'],
   },
   {
     key: 'travelSettings',

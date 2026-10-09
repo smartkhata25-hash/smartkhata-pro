@@ -1647,60 +1647,164 @@ const getCurrencySettings = async (userId) => {
     ? settings.rates
     : getDefaultTravelCurrencyRates();
 
-  const rateMap = new Map([[baseCurrency, 1]]);
+  const costRates = new Map([[baseCurrency, 1]]);
+  const saleRates = new Map([[baseCurrency, 1]]);
 
   rates.forEach((rate) => {
     const currency = normalizeCurrencyCode(rate?.currency);
 
-    const rateToBase = Number(rate?.rateToBase || 0);
+    const legacyRate = Number(rate?.rateToBase || 0);
+    const costRate = Number(rate?.costRateToBase ?? legacyRate);
+    const saleRate = Number(rate?.saleRateToBase ?? legacyRate);
 
     if (SUPPORTED_TRAVEL_CURRENCY_CODES.includes(currency)) {
-      rateMap.set(
-        currency,
-        Number.isFinite(rateToBase) ? Math.max(rateToBase, 0) : 0,
-      );
+      costRates.set(currency, Number.isFinite(costRate) ? Math.max(costRate, 0) : 0);
+      saleRates.set(currency, Number.isFinite(saleRate) ? Math.max(saleRate, 0) : 0);
     }
   });
 
   return {
     baseCurrency,
-    rateMap,
+    costRates,
+    saleRates,
   };
 };
 
-const applyCalculatorRateSnapshot = (currencySettings, bookingItems = []) => {
-  const umrahItem = bookingItems.find(
-    (item) =>
+const normalizeCurrencyRateSnapshot = (rows, baseCurrency, { strict = false } = {}) => {
+  const byCurrency = new Map();
+  const source = Array.isArray(rows) ? rows : [];
+
+  source.forEach((row) => {
+    const currency = normalizeCurrencyCode(row?.currency);
+    const costRate = Number(row?.costRateToBase);
+    const saleRate = Number(row?.saleRateToBase);
+    const validCurrency = SUPPORTED_TRAVEL_CURRENCY_CODES.includes(currency);
+    const validRates = Number.isFinite(costRate) && costRate >= 0 && Number.isFinite(saleRate) && saleRate >= 0;
+
+    if (!validCurrency || !validRates || byCurrency.has(currency)) {
+      if (strict) {
+        throw createHttpError(400, "Invalid or duplicate invoice currency rate snapshot");
+      }
+      return;
+    }
+
+    byCurrency.set(currency, {
+      currency,
+      costRateToBase: currency === baseCurrency ? 1 : costRate,
+      saleRateToBase: currency === baseCurrency ? 1 : saleRate,
+    });
+  });
+
+  return byCurrency;
+};
+
+const addHistoricalRateCandidate = (candidates, currency, side, sourceAmount, baseAmount, baseCurrency) => {
+  const code = normalizeCurrency(currency);
+  const source = Number(sourceAmount || 0);
+  const base = Number(baseAmount || 0);
+  if (code === baseCurrency || source <= 0 || base <= 0) return;
+  const rate = base / source;
+  if (!Number.isFinite(rate) || rate <= 0) return;
+  const key = `${code}:${side}`;
+  candidates.set(key, [...(candidates.get(key) || []), rate]);
+};
+
+const getConsistentHistoricalRate = (values = []) => {
+  if (!values.length) return 0;
+  const first = values[0];
+  return values.every((value) => Math.abs(value - first) <= 0.01)
+    ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(6))
+    : 0;
+};
+
+const deriveHistoricalCurrencyRates = (booking, baseCurrency) => {
+  const candidates = new Map();
+  const source = booking?.toObject ? booking.toObject() : booking || {};
+
+  (source.bookingItems || []).forEach((item) => {
+    const useComponents =
       item?.itemType === "umrah_package" &&
-      item?.umrahDetails?.pricingSummary?.rates,
-  );
+      item?.umrahDetails?.packageMode === "custom_component_package" &&
+      Array.isArray(item?.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
 
-  const calculatorRates = umrahItem?.umrahDetails?.pricingSummary?.rates;
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component) => {
+        const totals = calculateComponentSourceTotals(component);
+        addHistoricalRateCandidate(candidates, component.costCurrency, "cost", totals.costTotal, component.estimatedCostBase, baseCurrency);
+        addHistoricalRateCandidate(candidates, component.sellingCurrency, "sale", totals.sellingTotal, component.estimatedSellingBase, baseCurrency);
+      });
+      return;
+    }
 
-  if (!calculatorRates || currencySettings.baseCurrency !== "PKR") {
-    return currencySettings;
+    const totals = calculateItemSourceTotals(item);
+    addHistoricalRateCandidate(candidates, item.costCurrency, "cost", totals.costTotal, item.estimatedCostBase, baseCurrency);
+    addHistoricalRateCandidate(candidates, item.sellingCurrency, "sale", totals.sellingTotal, item.estimatedSellingBase, baseCurrency);
+  });
+
+  const result = new Map();
+  SUPPORTED_TRAVEL_CURRENCY_CODES.forEach((currency) => {
+    if (currency === baseCurrency) return;
+    const costRateToBase = getConsistentHistoricalRate(candidates.get(`${currency}:cost`));
+    const saleRateToBase = getConsistentHistoricalRate(candidates.get(`${currency}:sale`));
+    if (costRateToBase > 0 || saleRateToBase > 0) {
+      result.set(currency, { currency, costRateToBase, saleRateToBase });
+    }
+  });
+
+  if (baseCurrency === "PKR") {
+    const calculatorRates = (source.bookingItems || [])
+      .find((item) => item?.itemType === "umrah_package" && item?.umrahDetails?.pricingSummary?.rates)
+      ?.umrahDetails?.pricingSummary?.rates;
+    [["SAR", calculatorRates?.SAR_to_PKR], ["USD", calculatorRates?.USD_to_PKR]].forEach(([currency, value]) => {
+      const rate = Number(value || 0);
+      if (!(rate > 0)) return;
+      const current = result.get(currency) || { currency, costRateToBase: 0, saleRateToBase: 0 };
+      result.set(currency, {
+        ...current,
+        costRateToBase: current.costRateToBase || rate,
+        saleRateToBase: current.saleRateToBase || rate,
+      });
+    });
   }
 
-  const rateMap = new Map(currencySettings.rateMap);
-
-  const sarToPkr = Number(calculatorRates.SAR_to_PKR || 0);
-  const usdToPkr = Number(calculatorRates.USD_to_PKR || 0);
-
-  if (Number.isFinite(sarToPkr) && sarToPkr > 0) {
-    rateMap.set("SAR", sarToPkr);
-  }
-
-  if (Number.isFinite(usdToPkr) && usdToPkr > 0) {
-    rateMap.set("USD", usdToPkr);
-  }
-
-  return {
-    ...currencySettings,
-    rateMap,
-  };
+  return result;
 };
 
-const estimateBaseAmount = (amount, currency, settings) => {
+const resolveBookingCurrencySettings = ({ body, existingBooking, savedSettings }) => {
+  const { baseCurrency } = savedSettings;
+  const hasPayloadSnapshot = Object.prototype.hasOwnProperty.call(body || {}, "currencyRateSnapshot");
+  const payloadRows = parseJsonField(body?.currencyRateSnapshot, []);
+  const payloadSnapshot = normalizeCurrencyRateSnapshot(payloadRows, baseCurrency, { strict: hasPayloadSnapshot });
+  const savedSnapshot = normalizeCurrencyRateSnapshot(existingBooking?.currencyRateSnapshot, baseCurrency);
+  const historical = deriveHistoricalCurrencyRates(existingBooking, baseCurrency);
+
+  const currencyRateSnapshot = SUPPORTED_TRAVEL_CURRENCY_CODES
+    .filter((currency) => currency !== baseCurrency)
+    .map((currency) => {
+      const payload = payloadSnapshot.get(currency);
+      const saved = savedSnapshot.get(currency);
+      const derived = historical.get(currency);
+      return {
+        currency,
+        costRateToBase:
+          payload?.costRateToBase ?? saved?.costRateToBase ?? derived?.costRateToBase ?? Number(savedSettings.costRates.get(currency) || 0),
+        saleRateToBase:
+          payload?.saleRateToBase ?? saved?.saleRateToBase ?? derived?.saleRateToBase ?? Number(savedSettings.saleRates.get(currency) || 0),
+      };
+    });
+
+  const costRates = new Map([[baseCurrency, 1]]);
+  const saleRates = new Map([[baseCurrency, 1]]);
+  currencyRateSnapshot.forEach((row) => {
+    costRates.set(row.currency, row.costRateToBase);
+    saleRates.set(row.currency, row.saleRateToBase);
+  });
+
+  return { baseCurrency, costRates, saleRates, currencyRateSnapshot };
+};
+
+const estimateBaseAmount = (amount, currency, settings, side) => {
   const numericAmount = Number(amount || 0);
 
   if (numericAmount === 0) {
@@ -1713,7 +1817,8 @@ const estimateBaseAmount = (amount, currency, settings) => {
     return numericAmount;
   }
 
-  const rate = Number(settings.rateMap.get(cleanCurrency) || 0);
+  const rateMap = side === "cost" ? settings.costRates : settings.saleRates;
+  const rate = Number(rateMap.get(cleanCurrency) || 0);
 
   return rate > 0 ? numericAmount * rate : 0;
 };
@@ -1765,18 +1870,21 @@ const applyEstimatedTotals = (items, currencySettings) => {
             componentTotals.sellingTotal,
             component.sellingCurrency,
             currencySettings,
+            "sale",
           );
 
           const estimatedCostBase = estimateBaseAmount(
             componentTotals.costTotal,
             component.costCurrency,
             currencySettings,
+            "cost",
           );
 
           const estimatedVendorPaidBase = estimateBaseAmount(
             component.vendorPaidAmount,
             component.costCurrency,
             currencySettings,
+            "cost",
           );
 
           addBreakdownAmount(
@@ -1836,18 +1944,21 @@ const applyEstimatedTotals = (items, currencySettings) => {
       itemSourceTotals.sellingTotal,
       nextItem.sellingCurrency,
       currencySettings,
+      "sale",
     );
 
     const estimatedCostBase = estimateBaseAmount(
       itemSourceTotals.costTotal,
       nextItem.costCurrency,
       currencySettings,
+      "cost",
     );
 
     const estimatedVendorPaidBase = estimateBaseAmount(
       nextItem.vendorPaidAmount,
       nextItem.costCurrency,
       currencySettings,
+      "cost",
     );
 
     nextItem.estimatedSellingBase = roundMoney(estimatedSellingBase);
@@ -1862,6 +1973,7 @@ const applyEstimatedTotals = (items, currencySettings) => {
             Number(row.count || 0) * Number(row.costPrice || 0),
             nextItem.costCurrency,
             currencySettings,
+            "cost",
           ),
         ),
         estimatedSellingBase: roundMoney(
@@ -1869,6 +1981,7 @@ const applyEstimatedTotals = (items, currencySettings) => {
             Number(row.count || 0) * Number(row.sellingPrice || 0),
             nextItem.sellingCurrency,
             currencySettings,
+            "sale",
           ),
         ),
       }));
@@ -1956,6 +2069,40 @@ const applyEstimatedTotals = (items, currencySettings) => {
 
     estimatedProfit: roundMoney(roundedSellingTotal - roundedCostTotal),
   };
+};
+
+const assertRequiredCurrencyRates = (items, settings, status) => {
+  if (!POSTING_STATUSES.has(status) && status !== "quotation") return;
+
+  const assertRate = (amount, currency, side) => {
+    const numericAmount = Number(amount || 0);
+    const code = normalizeCurrency(currency);
+    if (numericAmount <= 0 || code === settings.baseCurrency) return;
+    const rates = side === "cost" ? settings.costRates : settings.saleRates;
+    if (!(Number(rates.get(code) || 0) > 0)) {
+      const label = side === "cost" ? "Cost" : "Sale";
+      throw createHttpError(400, `${label} conversion rate for ${code} is not configured`);
+    }
+  };
+
+  items.forEach((item) => {
+    const useComponents =
+      item.itemType === "umrah_package" &&
+      item.umrahDetails?.packageMode === "custom_component_package" &&
+      Array.isArray(item.umrahDetails?.components) &&
+      item.umrahDetails.components.length > 0;
+    if (useComponents) {
+      item.umrahDetails.components.forEach((component) => {
+        const totals = calculateComponentSourceTotals(component);
+        assertRate(totals.costTotal, component.costCurrency, "cost");
+        assertRate(totals.sellingTotal, component.sellingCurrency, "sale");
+      });
+      return;
+    }
+    const totals = calculateItemSourceTotals(item);
+    assertRate(totals.costTotal, item.costCurrency, "cost");
+    assertRate(totals.sellingTotal, item.sellingCurrency, "sale");
+  });
 };
 
 const collectEffectiveVendorCosts = (items = [], { requireAssigned = false } = {}) => {
@@ -2275,10 +2422,13 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
 
   const savedCurrencySettings = await getCurrencySettings(userId);
 
-  const currencySettings = applyCalculatorRateSnapshot(
-    savedCurrencySettings,
-    bookingItems,
-  );
+  const currencySettings = resolveBookingCurrencySettings({
+    body,
+    existingBooking,
+    savedSettings: savedCurrencySettings,
+  });
+
+  assertRequiredCurrencyRates(bookingItems, currencySettings, status);
 
   const totals = applyEstimatedTotals(bookingItems, currencySettings);
 
@@ -2425,6 +2575,8 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
     invoiceDate,
 
     baseCurrency: currencySettings.baseCurrency,
+
+    currencyRateSnapshot: currencySettings.currencyRateSnapshot,
 
     currencyBreakdown: totals.currencyBreakdown,
 
@@ -2630,4 +2782,12 @@ module.exports = {
   populateBooking,
   sendError,
   serializeBooking,
+  _test: {
+    applyEstimatedTotals,
+    assertRequiredCurrencyRates,
+    deriveHistoricalCurrencyRates,
+    estimateBaseAmount,
+    normalizeCurrencyRateSnapshot,
+    resolveBookingCurrencySettings,
+  },
 };

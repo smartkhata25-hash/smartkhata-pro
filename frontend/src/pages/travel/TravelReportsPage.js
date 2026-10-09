@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  FaBalanceScale,
   FaChartBar,
   FaChartLine,
   FaMoneyBillWave,
@@ -25,6 +26,7 @@ import TravelProfitSummaryModal from '../../components/travel/reports/TravelProf
 import { t } from '../../i18n/i18n';
 import { fetchTravelReportSummary } from '../../services/travelMasterService';
 import { getLocalDateInputValue } from '../../utils/localDateTime';
+import { hasPermission } from '../../utils/permissionHelper';
 
 import {
     TravelErrorModal,
@@ -246,6 +248,8 @@ const ReportTable = ({ columns, rows, emptyMessage }) => (
 
 const TravelReportsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const canViewTravelReports = hasPermission('travel.reports');
+  const canViewTrialBalance = hasPermission('reports.trial_balance');
 
   const filters = useMemo(() => getFiltersFromParams(searchParams), [searchParams]);
 
@@ -305,6 +309,8 @@ const TravelReportsPage = () => {
 
   const loadReport = useCallback(
     async (options = {}) => {
+      if (!canViewTravelReports) return;
+
       try {
         setLoading(true);
         setPageError('');
@@ -351,7 +357,7 @@ const TravelReportsPage = () => {
         setLoading(false);
       }
     },
-    [filters.endDate, filters.preset, filters.startDate]
+    [canViewTravelReports, filters.endDate, filters.preset, filters.startDate]
   );
 
   useEffect(() => {
@@ -1117,6 +1123,7 @@ const TravelReportsPage = () => {
     <TravelMasterPageFrame
       titleKey="travel.reports.title"
       actions={
+        canViewTravelReports ? (
         <TravelActionButton
           icon={FaSyncAlt}
           variant="secondary"
@@ -1129,8 +1136,10 @@ const TravelReportsPage = () => {
         >
           {loading ? t('travel.common.loading') : t('travel.common.refresh')}
         </TravelActionButton>
+        ) : null
       }
       filters={
+        canViewTravelReports ? (
         <TravelMasterToolbar className="lg:flex-wrap">
           <div className="flex w-full flex-wrap gap-1.5">
             {REPORT_VIEW_OPTIONS.map((option) => {
@@ -1192,9 +1201,28 @@ const TravelReportsPage = () => {
             {periodText}
           </span>
         </TravelMasterToolbar>
+        ) : null
       }
     >
-      <div className="mb-4 flex justify-end">
+      {canViewTrialBalance && (
+        <Link
+          to="/travel/trial-balance"
+          className="mb-4 flex items-center justify-between gap-4 rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-50 via-white to-blue-50 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-md"
+        >
+          <span className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-cyan-600 to-blue-700 text-white shadow-sm">
+              <FaBalanceScale aria-hidden="true" />
+            </span>
+            <span>
+              <span className="block font-black text-slate-950">{t('reports.trialBalance')}</span>
+              <span className="block text-xs font-semibold text-slate-500">Travel-scoped debit and credit balances</span>
+            </span>
+          </span>
+          <span className="text-sm font-extrabold text-cyan-700">Open report →</span>
+        </Link>
+      )}
+
+      {canViewTravelReports && <div className="mb-4 flex justify-end">
         <button
           type="button"
           onClick={() => setProfitModalOpen(true)}
@@ -1203,21 +1231,21 @@ const TravelReportsPage = () => {
           <FaChartLine aria-hidden="true" />
           Profit Summary
         </button>
-      </div>
+      </div>}
 
-      <TravelErrorModal
+      {canViewTravelReports && <TravelErrorModal
         open={Boolean(pageError)}
         message={pageError}
         onClose={() => setPageError('')}
-      />
+      />}
 
-      {activeReportContent}
+      {canViewTravelReports && activeReportContent}
 
-      <TravelProfitSummaryModal
+      {canViewTravelReports && <TravelProfitSummaryModal
         isOpen={profitModalOpen}
         onClose={() => setProfitModalOpen(false)}
         data={report.totals}
-      />
+      />}
     </TravelMasterPageFrame>
   );
 };

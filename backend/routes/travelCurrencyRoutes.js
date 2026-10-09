@@ -12,5 +12,10 @@ router.use(protect, requireModule(MODULE_KEYS.TRAVEL));
 
 router.get("/", requirePermission("travel.settings"), ctrl.getTravelCurrencySettings);
 router.put("/", requirePermission("travel.settings"), ctrl.updateTravelCurrencySettings);
+router.patch(
+  "/rates/:currency",
+  requirePermission("travel.settings"),
+  ctrl.updateTravelCurrencyRate,
+);
 
 module.exports = router;

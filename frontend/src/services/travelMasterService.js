@@ -1069,3 +1069,13 @@ export const updateTravelCurrencySettings = (data) =>
     `${TRAVEL_API}/currency-settings`,
     data
   );
+
+export const updateTravelCurrencyDefaultRate = async (currency, side, rateToBase) => {
+  const response = await axios.patch(
+    `${TRAVEL_API}/currency-settings/rates/${encodeURIComponent(currency)}`,
+    { side, rateToBase },
+    getConfig()
+  );
+  setCachedTravelRecords(TRAVEL_CACHE_DOMAINS.CURRENCY_SETTINGS, [response.data]);
+  return response.data;
+};

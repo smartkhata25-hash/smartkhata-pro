@@ -10,6 +10,7 @@ import {
   FaSyncAlt,
   FaTrash,
   FaUndo,
+  FaUndoAlt,
 } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
@@ -17,6 +18,7 @@ import {
   createTravelParty,
   deleteTravelParty,
   fetchTravelParties,
+  fetchTravelRefundOutstandingSummary,
   mergeTravelParties,
   restoreTravelParty,
   updateTravelParty,
@@ -189,6 +191,8 @@ const TravelPartiesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [parties, setParties] = useState([]);
+  const [customerRefundOutstanding, setCustomerRefundOutstanding] = useState({});
+  const [vendorRefundOutstanding, setVendorRefundOutstanding] = useState({});
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -212,6 +216,8 @@ const TravelPartiesPage = () => {
     hasPermission('travel.view');
   const canManage = hasPermission('travel.parties.manage');
   const canViewLedger = hasPermission('parties.view_ledger') || canView;
+  const canPayCustomerRefund = hasPermission('travel.bookings.edit') || hasPermission('travel.payments');
+  const canReceiveVendorRefund = hasPermission('travel.vendors.manage') || hasPermission('travel.payments');
 
   const loadParties = useCallback(
     async (options = {}) => {
@@ -223,18 +229,25 @@ const TravelPartiesPage = () => {
         setLoading(true);
         setPageError('');
 
-        const data = await fetchTravelParties(
-          {
-            includeBalance: 'true',
-            status,
-          },
-          {
-            forceRefresh: true,
-            ...requestOptions,
-          }
-        );
+        const [data, summary] = await Promise.all([
+          fetchTravelParties(
+            { includeBalance: 'true', status },
+            { forceRefresh: true, ...requestOptions }
+          ),
+          canPayCustomerRefund || canReceiveVendorRefund
+            ? fetchTravelRefundOutstandingSummary().catch(() => ({ customers: [], vendors: [] }))
+            : Promise.resolve({ customers: [], vendors: [] }),
+        ]);
 
         setParties(Array.isArray(data) ? data : []);
+        setCustomerRefundOutstanding(Object.fromEntries(
+          (summary?.customers || []).filter((row) => row.entityType === 'party')
+            .map((row) => [String(row.entityId), row])
+        ));
+        setVendorRefundOutstanding(Object.fromEntries(
+          (summary?.vendors || []).filter((row) => row.entityType === 'party')
+            .map((row) => [String(row.entityId), row])
+        ));
       } catch (error) {
         console.error('Travel parties load failed:', error);
         setPageError(t('travel.parties.loadFailed'));
@@ -242,7 +255,7 @@ const TravelPartiesPage = () => {
         setLoading(false);
       }
     },
-    [activeTab, canView]
+    [activeTab, canPayCustomerRefund, canReceiveVendorRefund, canView]
   );
 
   useEffect(() => {
@@ -484,6 +497,16 @@ setPageError(error?.response?.data?.message || t('alerts.mergeFailed'));
     });
   };
 
+  const openCustomerRefund = (party) => {
+    if (!party?._id || !canPayCustomerRefund) return;
+    navigate(`/travel/payments?mode=customer-refund&customerType=party&customerPartyId=${party._id}`);
+  };
+
+  const openVendorRefund = (party) => {
+    if (!party?._id || !canReceiveVendorRefund) return;
+    navigate(`/travel/payments?mode=vendor-refund&vendorType=party&vendorPartyId=${party._id}`);
+  };
+
   const mergeTargetOptions = useMemo(
     () =>
       parties.filter(
@@ -588,6 +611,22 @@ setPageError(error?.response?.data?.message || t('alerts.mergeFailed'));
               variant="amber"
             />
           )}
+          {canPayCustomerRefund && customerRefundOutstanding[String(party._id)] && (
+            <IconActionButton
+              icon={FaUndoAlt}
+              title={`Pay refund (${formatTravelMoney(customerRefundOutstanding[String(party._id)].outstandingAmount)})`}
+              onClick={() => openCustomerRefund(party)}
+              variant="rose"
+            />
+          )}
+          {canReceiveVendorRefund && vendorRefundOutstanding[String(party._id)] && (
+            <IconActionButton
+              icon={FaUndoAlt}
+              title={`Receive refund (${formatTravelMoney(vendorRefundOutstanding[String(party._id)].outstandingAmount)})`}
+              onClick={() => openVendorRefund(party)}
+              variant="green"
+            />
+          )}
           <IconActionButton
             icon={FaExchangeAlt}
             title={t('party.merge')}
@@ -672,6 +711,22 @@ setPageError(error?.response?.data?.message || t('alerts.mergeFailed'));
               title={t('travel.parties.actions.vendorPayment')}
               onClick={() => openVendorPayment(party)}
               variant="amber"
+            />
+          )}
+          {canPayCustomerRefund && customerRefundOutstanding[String(party._id)] && (
+            <IconActionButton
+              icon={FaUndoAlt}
+              title={`Pay refund (${formatTravelMoney(customerRefundOutstanding[String(party._id)].outstandingAmount)})`}
+              onClick={() => openCustomerRefund(party)}
+              variant="rose"
+            />
+          )}
+          {canReceiveVendorRefund && vendorRefundOutstanding[String(party._id)] && (
+            <IconActionButton
+              icon={FaUndoAlt}
+              title={`Receive refund (${formatTravelMoney(vendorRefundOutstanding[String(party._id)].outstandingAmount)})`}
+              onClick={() => openVendorRefund(party)}
+              variant="green"
             />
           )}
           <IconActionButton

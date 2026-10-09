@@ -448,7 +448,7 @@ exports.reverseTravelRefund = async (req, res) => {
         userId,
         referenceId: refund._id,
         originModule: TRAVEL_REFUND_ORIGIN,
-        sourceTypes: ["travel_refund", "refund_payment"],
+        sourceTypes: ["travel_refund", "refund_payment", "purchase_return_payment"],
         session,
         reason,
       });

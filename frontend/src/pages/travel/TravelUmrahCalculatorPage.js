@@ -16,10 +16,12 @@ import { DEFAULT_TRAVEL_CURRENCY } from '../../config/travelConfig';
 import { t } from '../../i18n/i18n';
 import {
   createTravelHotel,
+  createTravelCity,
   createTravelVendor,
   fetchTravelAirlines,
   fetchTravelCurrencySettings,
   fetchTravelHotels,
+  fetchTravelCities,
   fetchTravelServiceCategories,
   fetchTravelVendors,
 } from '../../services/travelMasterService';
@@ -351,6 +353,7 @@ const TravelUmrahCalculatorPage = () => {
   const appliedPlanRef = useRef(false);
 
   const [hotels, setHotels] = useState([]);
+  const [cities, setCities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [airlines, setAirlines] = useState([]);
@@ -399,13 +402,15 @@ const TravelUmrahCalculatorPage = () => {
       setLoading(true);
       setPageError('');
 
-      const [hotelData, airlineData, currencyData] = await Promise.all([
+      const [hotelData, cityData, airlineData, currencyData] = await Promise.all([
         fetchTravelHotels(),
+        fetchTravelCities(),
         fetchTravelAirlines(),
         fetchTravelCurrencySettings(),
       ]);
 
       setHotels(Array.isArray(hotelData) ? hotelData : []);
+      setCities(Array.isArray(cityData) ? cityData : []);
 
       setAirlines(Array.isArray(airlineData) ? airlineData : []);
 
@@ -499,6 +504,17 @@ const TravelUmrahCalculatorPage = () => {
       setFormError(error?.response?.data?.message || t('travel.alerts.saveFailed'));
     } finally {
       setModalSaving(false);
+    }
+  };
+
+  const createCityInline = async (name) => {
+    try {
+      const saved = await createTravelCity({ name });
+      setCities((current) => upsertRecord(current, saved));
+      return saved;
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.cities.createFailed'));
+      throw error;
     }
   };
 
@@ -1392,6 +1408,10 @@ setPageError(t('travel.alerts.permissionDenied'));
         error={formError}
         onQuickAddVendor={quickAddHotelVendor}
         onAddVendorDetails={openHotelVendorDetails}
+        cities={cities}
+        hotels={hotels}
+        canManageCities={canManageHotels}
+        onCreateCity={createCityInline}
       />
 
       <TravelVendorFormModal

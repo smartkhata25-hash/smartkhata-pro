@@ -201,6 +201,28 @@ const PartyLedgerPage = () => {
 
     const type = entry.sourceType?.toLowerCase();
 
+    if (type === 'travel_refund' && entry.referenceId) {
+      navigate(`/travel/refunds/${entry.referenceId}`);
+      return;
+    }
+
+    if (type === 'refund_payment' && entry.originModule === 'travel_refund' && entry.referenceId) {
+      navigate(`/travel/refunds/${entry.referenceId}`);
+      return;
+    }
+
+    if (type === 'travel_vendor_return' && entry.referenceId) {
+      navigate(`/travel/vendor-returns/${entry.referenceId}`);
+      return;
+    }
+
+    if (type === 'purchase_return_payment' && entry.referenceId) {
+      navigate(entry.originModule === 'travel_refund'
+        ? `/travel/refunds/${entry.referenceId}`
+        : `/travel/vendor-returns/${entry.referenceId}`);
+      return;
+    }
+
     if (['sale_invoice', 'opening_sale_invoice'].includes(type) && entry.invoiceId) {
       navigate(`/create-sale?invoiceId=${entry.invoiceId}`);
 

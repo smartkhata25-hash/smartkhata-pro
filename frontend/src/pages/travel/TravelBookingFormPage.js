@@ -19,6 +19,7 @@ import {
 
 import {
   createTraveler,
+  createTravelCity,
   createTravelBooking,
   createTravelCustomer,
   createTravelHotel,
@@ -31,6 +32,7 @@ import {
   fetchTravelCustomers,
   fetchTravelCurrencySettings,
   fetchTravelHotels,
+  fetchTravelCities,
   fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelServiceCategories,
@@ -86,6 +88,13 @@ import {
   quickHotelFields,
 } from '../../components/travel/hotels/travelHotelConfig';
 import TravelHotelFormModal from '../../components/travel/hotels/TravelHotelFormModal';
+import TravelCityAutocomplete from '../../components/travel/cities/TravelCityAutocomplete';
+import {
+  applyHotelCityChange,
+  applyHotelSelection,
+  appendHotelBookingItem,
+  filterHotelsByCity,
+} from '../../components/travel/cities/travelCityUtils';
 
 import {
   buildVendorOpeningPayload,
@@ -109,6 +118,25 @@ import {
 } from '../../components/travel/quickAdd/travelQuickAdd';
 
 import BookingRelationModal from '../../components/travel/bookings/form/BookingRelationModal';
+import MatchingTravelersModal from '../../components/travel/bookings/form/MatchingTravelersModal';
+import TravelerDuplicateConfirmationModal from '../../components/travel/bookings/form/TravelerDuplicateConfirmationModal';
+import {
+  applyCustomerReceiptAmountChange,
+  normalizeCustomerReceiptForPayload,
+} from '../../components/travel/bookings/form/bookingPaymentUtils';
+import {
+  appendTravelerOccurrence,
+  buildTravelerOccurrences,
+  getTravelerAddDecision,
+  removeTravelerOccurrence,
+  updateTravelerDetailOccurrence,
+} from '../../components/travel/bookings/form/travelerOccurrenceUtils';
+import {
+  canUseCustomerAsTraveler,
+  getSelectedCustomerTravelerId,
+  itemContainsTraveler,
+  resolveCustomerTraveler,
+} from '../../components/travel/bookings/form/customerTravelerUtils';
 
 import {
   calculateBookingItemSourceTotals,
@@ -362,6 +390,7 @@ const getBookingOptionalReferenceKeys = (bookingState = {}) => {
 
     if (itemType === 'hotel' || hasRecordReference(item.hotelDetails?.hotelId)) {
       keys.add('hotels');
+      keys.add('cities');
     }
 
     addFlightReferenceKeys(item.ticketDetails);
@@ -647,6 +676,7 @@ const TravelBookingFormPage = () => {
   const routePrefillAppliedRef = useRef(false);
   const lazyReferenceLoadedRef = useRef({});
   const quickAddLocksRef = useRef(new Set());
+  const customerTravelerLocksRef = useRef(new Set());
   const hotelModalDraftRef = useRef(null);
 
   const isEditMode = Boolean(id);
@@ -670,6 +700,7 @@ const TravelBookingFormPage = () => {
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
   const [hotels, setHotels] = useState([]);
+  const [cities, setCities] = useState([]);
   const [airlines, setAirlines] = useState([]);
   const [airports, setAirports] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -687,6 +718,10 @@ const TravelBookingFormPage = () => {
   const [modalSaving, setModalSaving] = useState(false);
   const [advanceConfirmationStatus, setAdvanceConfirmationStatus] = useState('');
   const [repostConfirmation, setRepostConfirmation] = useState(null);
+  const [duplicateTravelerPrompt, setDuplicateTravelerPrompt] = useState(null);
+  const [matchingTravelersPrompt, setMatchingTravelersPrompt] = useState(null);
+  const [customerTravelerBusy, setCustomerTravelerBusy] = useState({});
+  const [resolvedCustomerTravelerIds, setResolvedCustomerTravelerIds] = useState({});
 
   const postedInvoiceEditing = Boolean(isEditMode && formState.accountingPosted);
   const accountingLocked = Boolean(formState.accountingPosted && !isEditMode);
@@ -751,6 +786,11 @@ const TravelBookingFormPage = () => {
       if (key === 'hotels') {
         const data = await fetchTravelHotels({}, options);
         setHotels((current) => mergeReferenceRecords(current, data));
+      }
+
+      if (key === 'cities') {
+        const data = await fetchTravelCities({}, options);
+        setCities((current) => mergeReferenceRecords(current, data));
       }
 
       if (key === 'airlines') {
@@ -973,6 +1013,8 @@ const TravelBookingFormPage = () => {
 
   const activeHotels = useMemo(() => hotels.filter(isRecordActive), [hotels]);
 
+  const activeCities = useMemo(() => cities.filter(isRecordActive), [cities]);
+
   const activeAirlines = useMemo(() => airlines.filter(isRecordActive), [airlines]);
 
   const activeAirports = useMemo(() => airports.filter(isRecordActive), [airports]);
@@ -1079,10 +1121,14 @@ const TravelBookingFormPage = () => {
   }, [modal]);
 
   const updateRoot = (field, value) => {
-    setFormState((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setFormState((current) =>
+      field === 'receivedAmount'
+        ? applyCustomerReceiptAmountChange(current, value)
+        : {
+            ...current,
+            [field]: value,
+          }
+    );
   };
 
   const updateVendorPayment = (vendorKey, field, value) => {
@@ -1402,6 +1448,31 @@ const TravelBookingFormPage = () => {
         hotelDetails,
       };
     });
+  };
+
+  const createCityInline = async (name) => {
+    try {
+      const saved = await createTravelCity({ name });
+      setCities((current) => upsertRecord(current, saved));
+      return saved;
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.cities.createFailed'));
+      throw error;
+    }
+  };
+
+  const updateHotelCity = (itemIndex, city) => {
+    updateItem(itemIndex, (item) => ({
+      ...item,
+      hotelDetails: applyHotelCityChange(item.hotelDetails || {}, city, activeHotels),
+    }));
+  };
+
+  const selectHotelForItem = (itemIndex, hotel) => {
+    updateItem(itemIndex, (item) => ({
+      ...item,
+      hotelDetails: applyHotelSelection(item.hotelDetails || {}, hotel),
+    }));
   };
 
   const updateItemDetails = (index, group, field, value) => {
@@ -1937,6 +2008,19 @@ const TravelBookingFormPage = () => {
     }));
   };
 
+  const addAnotherHotel = () => {
+    const newIndex = (formState.bookingItems || []).length;
+    setFormState((current) => appendHotelBookingItem(current, createEmptyBookingItem));
+    setExpandedItems((current) => ({ ...current, [newIndex]: true }));
+    void ensureReferencesLoaded(['hotels', 'cities']);
+    window.setTimeout(() => {
+      document.getElementById(`travel-booking-item-${newIndex}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 80);
+  };
+
   const removeBookingItem = (index) => {
     setFormState((current) => {
       if ((current.bookingItems || []).length <= 1) {
@@ -1999,23 +2083,28 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const toggleItemTraveler = (itemIndex, travelerId) => {
+  const addItemTravelerOccurrence = (
+    itemIndex,
+    travelerId,
+    travelerRecord = null,
+    { skipIfPresent = false, expectedCustomerId = '' } = {}
+  ) => {
     setFormState((current) => {
-      const bookingItems = [...(current.bookingItems || [])];
-
-      const item = bookingItems[itemIndex];
-
-      if (!item) {
+      if (
+        expectedCustomerId &&
+        (current.customerType !== 'customer' ||
+          String(getRecordId(current.customerId)) !== String(expectedCustomerId))
+      ) {
         return current;
       }
 
-      const currentIds = item.travelerIds || [];
-
-      const exists = currentIds.some((idValue) => String(idValue) === String(travelerId));
-
-      const travelerIds = exists
-        ? currentIds.filter((idValue) => String(idValue) !== String(travelerId))
-        : [...currentIds, travelerId];
+      const bookingItems = [...(current.bookingItems || [])];
+      const item = bookingItems[itemIndex];
+      if (!item) return current;
+      const traveler = travelerRecord || activeTravelers.find(
+        (record) => String(record._id) === String(travelerId)
+      );
+      const passengerName = traveler?.fullName || traveler?.name || '';
 
       const rootTravelers = (current.travelers || []).some(
         (idValue) => String(idValue) === String(travelerId)
@@ -2023,16 +2112,161 @@ const TravelBookingFormPage = () => {
         ? current.travelers
         : [...(current.travelers || []), travelerId];
 
-      bookingItems[itemIndex] = {
-        ...item,
-        travelerIds,
-      };
+      if (skipIfPresent && itemContainsTraveler(item, travelerId)) {
+        return rootTravelers === current.travelers
+          ? current
+          : { ...current, travelers: rootTravelers };
+      }
+
+      bookingItems[itemIndex] = appendTravelerOccurrence(
+        item,
+        travelerId,
+        (id) => ({ ...createEmptyTicketPassenger('adult'), travelerId: id, passengerName }),
+        (id) => ({
+          ...createEmptyVisaTraveler('adult'),
+          travelerId: id,
+          passengerName,
+          passportNumber: traveler?.passportNumber || '',
+        })
+      );
 
       return {
         ...current,
         travelers: rootTravelers,
         bookingItems,
       };
+    });
+  };
+
+  const requestAddItemTraveler = (itemIndex, travelerId, travelerRecord = null) => {
+    const item = formState.bookingItems?.[itemIndex];
+    if (!item || !travelerId) return;
+    const decision = getTravelerAddDecision(item.travelerIds, travelerId);
+
+    if (!decision.duplicate) {
+      addItemTravelerOccurrence(itemIndex, travelerId, travelerRecord);
+      return;
+    }
+
+    const traveler = travelerRecord || activeTravelers.find(
+      (record) => String(record._id) === String(travelerId)
+    );
+    setDuplicateTravelerPrompt({
+      itemIndex,
+      travelerId,
+      travelerRecord: traveler || null,
+      travelerName: traveler ? getTravelerLabel(traveler) : String(travelerId),
+    });
+  };
+
+  const removeItemTravelerOccurrence = (itemIndex, absoluteIndex) => {
+    setFormState((current) => {
+      const bookingItems = [...(current.bookingItems || [])];
+      if (!bookingItems[itemIndex]) return current;
+      bookingItems[itemIndex] = removeTravelerOccurrence(bookingItems[itemIndex], absoluteIndex);
+      return { ...current, bookingItems };
+    });
+  };
+
+  const assignCustomerTravelerToItem = (itemIndex, customerId, traveler) => {
+    if (!traveler?._id) return;
+
+    setTravelers((current) => upsertRecord(current, traveler));
+    setResolvedCustomerTravelerIds((current) => ({
+      ...current,
+      [String(customerId)]: traveler._id,
+    }));
+    addItemTravelerOccurrence(itemIndex, traveler._id, traveler, {
+      skipIfPresent: true,
+      expectedCustomerId: customerId,
+    });
+  };
+
+  const handleEnsureCustomerTraveler = async (itemIndex) => {
+    if (
+      accountingLocked ||
+      !canUseCustomerAsTraveler(formState)
+    ) {
+      return;
+    }
+
+    const customerId = getRecordId(formState.customerId);
+    const requestKey = `${itemIndex}:${customerId}`;
+    const customerLockKey = String(customerId);
+    if (customerTravelerLocksRef.current.has(customerLockKey)) return;
+
+    const customer = activeCustomers.find(
+      (record) => String(getRecordId(record)) === String(customerId)
+    );
+    if (!customer) {
+      setFormError(t('travel.booking.customerTraveler.customerUnavailable'));
+      return;
+    }
+    if (!String(customer.name || '').trim()) {
+      setFormError(t('travel.booking.customerTraveler.customerNameRequired'));
+      return;
+    }
+
+    customerTravelerLocksRef.current.add(customerLockKey);
+    setCustomerTravelerBusy((current) => ({ ...current, [requestKey]: true }));
+    setFormError('');
+
+    try {
+      const result = await resolveCustomerTraveler({
+        customer,
+        loadedTravelers: activeTravelers,
+        fetchTravelers,
+        createTraveler,
+        canCreate: canManageTravelers,
+      });
+
+      if (result.status === 'forbidden') {
+        setFormError(t('travel.booking.customerTraveler.createPermissionDenied'));
+        return;
+      }
+      if (result.status === 'invalid-name') {
+        setFormError(t('travel.booking.customerTraveler.customerNameRequired'));
+        return;
+      }
+      if (result.status !== 'resolved' && result.status !== 'choose') {
+        setFormError(t('travel.booking.customerTraveler.customerUnavailable'));
+        return;
+      }
+
+      if (result.status === 'choose') {
+        setTravelers((current) => mergeReferenceRecords(current, result.matches));
+        setMatchingTravelersPrompt({
+          itemIndex,
+          customerId,
+          customerName: String(customer.name || '').trim(),
+          travelers: result.matches,
+        });
+        return;
+      }
+
+      assignCustomerTravelerToItem(itemIndex, customerId, result.traveler);
+    } catch (error) {
+      console.error('Customer traveler resolution failed:', error);
+      setFormError(
+        error?.response?.data?.message || t('travel.booking.customerTraveler.resolveFailed')
+      );
+    } finally {
+      customerTravelerLocksRef.current.delete(customerLockKey);
+      setCustomerTravelerBusy((current) => ({ ...current, [requestKey]: false }));
+    }
+  };
+
+  const getCustomerTravelerSelection = (item = {}) => {
+    if (!canUseCustomerAsTraveler(formState)) return '';
+
+    const customerId = getRecordId(formState.customerId);
+    if (!customerId) return '';
+
+    return getSelectedCustomerTravelerId({
+      item,
+      customerId,
+      resolvedTravelerId: resolvedCustomerTravelerIds[String(customerId)],
+      travelers: activeTravelers,
     });
   };
 
@@ -2086,10 +2320,12 @@ const TravelBookingFormPage = () => {
           ? {
               ...emptyHotelForm,
               name: context.query || '',
+              city: context.city || '',
             }
           : {
               ...emptyQuickHotel,
               name: context.query || '',
+              city: context.city || '',
             },
 
       vendor:
@@ -2143,34 +2379,9 @@ const TravelBookingFormPage = () => {
 
     if (type === 'traveler') {
       setTravelers((current) => upsertRecord(current, record));
-
-      setFormState((current) => {
-        const bookingItems = [...(current.bookingItems || [])];
-
-        if (Number.isInteger(itemIndex) && bookingItems[itemIndex]) {
-          const ids = [...(bookingItems[itemIndex].travelerIds || []), record._id];
-
-          bookingItems[itemIndex] = {
-            ...bookingItems[itemIndex],
-
-            travelerIds: ids.filter(
-              (value, index, array) =>
-                array.findIndex((candidate) => String(candidate) === String(value)) === index
-            ),
-          };
-        }
-
-        const travelersWithNewRecord = [...(current.travelers || []), record._id].filter(
-          (value, index, array) =>
-            array.findIndex((candidate) => String(candidate) === String(value)) === index
-        );
-
-        return {
-          ...current,
-          travelers: travelersWithNewRecord,
-          bookingItems,
-        };
-      });
+      if (Number.isInteger(itemIndex)) {
+        requestAddItemTraveler(itemIndex, record._id, record);
+      }
     }
 
     if (type === 'service') {
@@ -2196,12 +2407,16 @@ const TravelBookingFormPage = () => {
       if (Number.isInteger(itemIndex) && Number.isInteger(componentIndex)) {
         updateUmrahComponent(itemIndex, componentIndex, 'hotelId', record._id);
       } else if (Number.isInteger(itemIndex)) {
-        updateItemDetails(
-          itemIndex,
-          context.group || 'hotelDetails',
-          context.field || 'hotelId',
-          record._id
-        );
+        if (!context.group || context.group === 'hotelDetails') {
+          selectHotelForItem(itemIndex, record);
+        } else {
+          updateItemDetails(
+            itemIndex,
+            context.group,
+            context.field || 'hotelId',
+            record._id
+          );
+        }
       }
     }
 
@@ -2634,12 +2849,7 @@ const TravelBookingFormPage = () => {
       }),
     };
 
-    if (numberValue(formState.receivedAmount) <= 0) {
-      source.accountId = undefined;
-      source.paymentType = undefined;
-    }
-
-    const payload = compactPayload(source);
+    const payload = compactPayload(normalizeCustomerReceiptForPayload(source));
 
     payload.keepAttachmentKeys = keepAttachmentKeys;
 
@@ -2709,10 +2919,45 @@ const TravelBookingFormPage = () => {
     }
   };
 
-  const renderTravelerPicker = (item, index) => (
+  const renderTravelerPicker = (item, index) => {
+    const customerId = canUseCustomerAsTraveler(formState)
+      ? getRecordId(formState.customerId)
+      : '';
+    const lockKey = customerId ? `${index}:${customerId}` : '';
+    const customerTravelerSelected = Boolean(getCustomerTravelerSelection(item));
+    const resolvingCustomerTraveler = Boolean(lockKey && customerTravelerBusy[lockKey]);
+
+    return (
     <div className="space-y-2 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-extrabold text-slate-500">
+          {t('travel.booking.fields.itemTravelers')}
+        </span>
+
+        {customerId && (
+          <label className={`inline-flex items-center gap-2 text-xs font-bold ${accountingLocked ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer text-slate-600'}`}>
+            <input
+              type="checkbox"
+              checked={customerTravelerSelected}
+              disabled={accountingLocked || resolvingCustomerTraveler}
+              onChange={(event) => {
+                if (event.target.checked && !customerTravelerSelected) {
+                  void handleEnsureCustomerTraveler(index);
+                }
+              }}
+              className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 disabled:cursor-not-allowed"
+            />
+            <span>{t('travel.booking.customerTraveler.sameCustomer')}</span>
+            {resolvingCustomerTraveler && (
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-cyan-200 border-t-cyan-600" aria-label={t('travel.booking.customerTraveler.resolving')} />
+            )}
+          </label>
+        )}
+      </div>
+
       <div className="flex flex-wrap gap-2">
-        {(item.travelerIds || []).map((travelerId) => {
+        {buildTravelerOccurrences(item.travelerIds || []).map((occurrence) => {
+          const { travelerId, absoluteIndex } = occurrence;
           const traveler = activeTravelers.find(
             (record) => String(record._id) === String(travelerId)
           );
@@ -2720,12 +2965,13 @@ const TravelBookingFormPage = () => {
           return (
             <button
               type="button"
-              key={travelerId}
+              key={occurrence.key}
               disabled={accountingLocked}
-              onClick={() => toggleItemTraveler(index, travelerId)}
+              onClick={() => removeItemTravelerOccurrence(index, absoluteIndex)}
               className="inline-flex items-center gap-2 rounded-full border border-cyan-100 bg-gradient-to-r from-cyan-50 to-sky-50 px-3 py-1 text-xs font-bold text-cyan-800 transition hover:shadow-sm disabled:opacity-70"
             >
               {traveler ? getTravelerLabel(traveler) : travelerId}
+              {occurrence.occurrence > 0 ? ` · ${occurrence.occurrence + 1}` : ''}
 
               {!accountingLocked && <FaTimes aria-hidden="true" className="text-[10px]" />}
             </button>
@@ -2735,13 +2981,12 @@ const TravelBookingFormPage = () => {
 
       {!accountingLocked && (
         <TravelCompactAutocomplete
-          labelKey="travel.booking.fields.itemTravelers"
           value=""
           records={activeTravelers}
           getLabel={getTravelerLabel}
           getMeta={getTravelerMeta}
           placeholderKey="travel.booking.placeholders.selectTraveler"
-          onChange={(value) => value && toggleItemTraveler(index, value)}
+          onChange={(value, record) => value && requestAddItemTraveler(index, value, record)}
           onQuickAdd={
             canManageTravelers
               ? (query) =>
@@ -2763,7 +3008,8 @@ const TravelBookingFormPage = () => {
         />
       )}
     </div>
-  );
+    );
+  };
 
   const renderUmrahComponents = (item, itemIndex) => {
     const details = item.umrahDetails || {};
@@ -3440,46 +3686,27 @@ const TravelBookingFormPage = () => {
     );
   };
 
-  const updateTicketPassengerDetails = (itemIndex, travelerId, updates = {}) => {
+  const updateTicketPassengerDetails = (itemIndex, absoluteIndex, updates = {}) => {
     updateItem(itemIndex, (item) => {
       const ticketDetails = {
         ...(item.ticketDetails || {}),
       };
 
-      const passengerTickets = Array.isArray(ticketDetails.passengerTickets)
-        ? ticketDetails.passengerTickets.map((row) => ({
-            ...row,
-          }))
-        : [];
-
-      const rowIndex = passengerTickets.findIndex(
-        (row) => String(getRecordId(row?.travelerId)) === String(travelerId)
-      );
+      const travelerId = item.travelerIds?.[absoluteIndex];
+      if (!travelerId) return item;
 
       const traveler = activeTravelers.find((record) => String(record._id) === String(travelerId));
-
-      if (rowIndex === -1) {
-        passengerTickets.push({
+      const passengerTickets = updateTravelerDetailOccurrence(
+        item.travelerIds || [],
+        ticketDetails.passengerTickets || [],
+        absoluteIndex,
+        updates,
+        (id) => ({
           ...createEmptyTicketPassenger('adult'),
-
-          travelerId,
-
+          travelerId: id,
           passengerName: traveler?.fullName || traveler?.name || '',
-
-          ...updates,
-        });
-      } else {
-        passengerTickets[rowIndex] = {
-          ...passengerTickets[rowIndex],
-
-          travelerId,
-
-          passengerName:
-            passengerTickets[rowIndex].passengerName || traveler?.fullName || traveler?.name || '',
-
-          ...updates,
-        };
-      }
+        })
+      );
 
       return {
         ...item,
@@ -3493,68 +3720,48 @@ const TravelBookingFormPage = () => {
     });
   };
 
-  const updateTicketPassengerDetail = (itemIndex, travelerId, field, value) => {
-    updateTicketPassengerDetails(itemIndex, travelerId, {
+  const updateTicketPassengerDetail = (itemIndex, absoluteIndex, field, value) => {
+    updateTicketPassengerDetails(itemIndex, absoluteIndex, {
       [field]: value,
     });
   };
 
   const updatePassengerTicketMasterSelection = (
     itemIndex,
-    travelerId,
+    absoluteIndex,
     idField,
     textField,
     record,
     getText
   ) => {
-    updateTicketPassengerDetails(itemIndex, travelerId, {
+    updateTicketPassengerDetails(itemIndex, absoluteIndex, {
       [idField]: record ? getRecordId(record) : '',
       [textField]: record ? getText(record) : '',
     });
   };
 
-  const updateVisaTravelerDetail = (itemIndex, travelerId, field, value) => {
+  const updateVisaTravelerDetail = (itemIndex, absoluteIndex, field, value) => {
     updateItem(itemIndex, (item) => {
       const visaDetails = {
         ...(item.visaDetails || {}),
       };
 
-      const travelerVisas = Array.isArray(visaDetails.travelerVisas)
-        ? visaDetails.travelerVisas.map((row) => ({
-            ...row,
-          }))
-        : [];
-
-      const rowIndex = travelerVisas.findIndex(
-        (row) => String(getRecordId(row?.travelerId)) === String(travelerId)
-      );
+      const travelerId = item.travelerIds?.[absoluteIndex];
+      if (!travelerId) return item;
 
       const traveler = activeTravelers.find((record) => String(record._id) === String(travelerId));
-
-      if (rowIndex === -1) {
-        travelerVisas.push({
+      const travelerVisas = updateTravelerDetailOccurrence(
+        item.travelerIds || [],
+        visaDetails.travelerVisas || [],
+        absoluteIndex,
+        { [field]: value },
+        (id) => ({
           ...createEmptyVisaTraveler('adult'),
-
-          travelerId,
-
+          travelerId: id,
           passengerName: traveler?.fullName || traveler?.name || '',
-
           passportNumber: traveler?.passportNumber || '',
-
-          [field]: value,
-        });
-      } else {
-        travelerVisas[rowIndex] = {
-          ...travelerVisas[rowIndex],
-
-          travelerId,
-
-          passengerName:
-            travelerVisas[rowIndex].passengerName || traveler?.fullName || traveler?.name || '',
-
-          [field]: value,
-        };
-      }
+        })
+      );
 
       return {
         ...item,
@@ -3577,6 +3784,7 @@ const TravelBookingFormPage = () => {
       const details = item.ticketDetails || {};
 
       const selectedTravelerIds = item.travelerIds || [];
+      const selectedTravelerOccurrences = buildTravelerOccurrences(selectedTravelerIds);
 
       return (
         <div className="space-y-3 border-t border-slate-100 pt-3">
@@ -3823,20 +4031,19 @@ const TravelBookingFormPage = () => {
             <div className="space-y-2">
               <p className="text-xs font-black text-slate-800">Passenger Ticket Details</p>
 
-              {selectedTravelerIds.map((travelerId) => {
+              {selectedTravelerOccurrences.map((occurrence) => {
+                const { travelerId, absoluteIndex } = occurrence;
                 const traveler = activeTravelers.find(
                   (record) => String(record._id) === String(travelerId)
                 );
 
-                const passenger =
-                  (details.passengerTickets || []).find(
-                    (row) => String(getRecordId(row?.travelerId)) === String(travelerId)
-                  ) || {};
+                const passenger = (details.passengerTickets || [])[absoluteIndex] || {};
 
                 return (
-                  <div key={travelerId} className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div key={occurrence.key} className="rounded-lg border border-slate-200 bg-white p-3">
                     <p className="mb-2 text-xs font-black text-cyan-700">
                       {traveler ? getTravelerLabel(traveler) : travelerId}
+                      {occurrence.occurrence > 0 ? ` · ${occurrence.occurrence + 1}` : ''}
                     </p>
 
                     <div
@@ -3853,7 +4060,7 @@ const TravelBookingFormPage = () => {
                           onChange={(event) =>
                             updateTicketPassengerDetail(
                               index,
-                              travelerId,
+                              absoluteIndex,
                               'paxType',
                               event.target.value
                             )
@@ -3871,7 +4078,7 @@ const TravelBookingFormPage = () => {
                         value={passenger.pnr}
                         disabled={accountingLocked}
                         onChange={(value) =>
-                          updateTicketPassengerDetail(index, travelerId, 'pnr', value)
+                          updateTicketPassengerDetail(index, absoluteIndex, 'pnr', value)
                         }
                       />
 
@@ -3880,7 +4087,7 @@ const TravelBookingFormPage = () => {
                         value={passenger.ticketNumber}
                         disabled={accountingLocked}
                         onChange={(value) =>
-                          updateTicketPassengerDetail(index, travelerId, 'ticketNumber', value)
+                          updateTicketPassengerDetail(index, absoluteIndex, 'ticketNumber', value)
                         }
                       />
 
@@ -3898,7 +4105,7 @@ const TravelBookingFormPage = () => {
                             onChange={(value, airline) =>
                               updatePassengerTicketMasterSelection(
                                 index,
-                                travelerId,
+                                absoluteIndex,
                                 'airlineId',
                                 'airline',
                                 value ? airline : null,
@@ -3913,7 +4120,7 @@ const TravelBookingFormPage = () => {
                               value={passenger.airline}
                               disabled={accountingLocked}
                               onChange={(value) =>
-                                updateTicketPassengerDetail(index, travelerId, 'airline', value)
+                                updateTicketPassengerDetail(index, absoluteIndex, 'airline', value)
                               }
                             />
                           )}
@@ -3930,7 +4137,7 @@ const TravelBookingFormPage = () => {
                             onChange={(value, airport) =>
                               updatePassengerTicketMasterSelection(
                                 index,
-                                travelerId,
+                                absoluteIndex,
                                 'originAirportId',
                                 'origin',
                                 value ? airport : null,
@@ -3945,7 +4152,7 @@ const TravelBookingFormPage = () => {
                               value={passenger.origin}
                               disabled={accountingLocked}
                               onChange={(value) =>
-                                updateTicketPassengerDetail(index, travelerId, 'origin', value)
+                                updateTicketPassengerDetail(index, absoluteIndex, 'origin', value)
                               }
                             />
                           )}
@@ -3962,7 +4169,7 @@ const TravelBookingFormPage = () => {
                             onChange={(value, airport) =>
                               updatePassengerTicketMasterSelection(
                                 index,
-                                travelerId,
+                                absoluteIndex,
                                 'destinationAirportId',
                                 'destination',
                                 value ? airport : null,
@@ -3977,7 +4184,7 @@ const TravelBookingFormPage = () => {
                               value={passenger.destination}
                               disabled={accountingLocked}
                               onChange={(value) =>
-                                updateTicketPassengerDetail(index, travelerId, 'destination', value)
+                                updateTicketPassengerDetail(index, absoluteIndex, 'destination', value)
                               }
                             />
                           )}
@@ -3990,7 +4197,7 @@ const TravelBookingFormPage = () => {
                             onChange={(value) =>
                               updateTicketPassengerDetail(
                                 index,
-                                travelerId,
+                                absoluteIndex,
                                 'departureDateTime',
                                 value
                               )
@@ -4012,6 +4219,7 @@ const TravelBookingFormPage = () => {
       const details = item.visaDetails || {};
 
       const selectedTravelerIds = item.travelerIds || [];
+      const selectedTravelerOccurrences = buildTravelerOccurrences(selectedTravelerIds);
 
       return (
         <div className="space-y-3 border-t border-slate-100 pt-3">
@@ -4042,20 +4250,19 @@ const TravelBookingFormPage = () => {
             <div className="space-y-2">
               <p className="text-xs font-black text-slate-800">Traveler Visa Details</p>
 
-              {selectedTravelerIds.map((travelerId) => {
+              {selectedTravelerOccurrences.map((occurrence) => {
+                const { travelerId, absoluteIndex } = occurrence;
                 const traveler = activeTravelers.find(
                   (record) => String(record._id) === String(travelerId)
                 );
 
-                const visaTraveler =
-                  (details.travelerVisas || []).find(
-                    (row) => String(getRecordId(row?.travelerId)) === String(travelerId)
-                  ) || {};
+                const visaTraveler = (details.travelerVisas || [])[absoluteIndex] || {};
 
                 return (
-                  <div key={travelerId} className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div key={occurrence.key} className="rounded-lg border border-slate-200 bg-white p-3">
                     <p className="mb-2 text-xs font-black text-cyan-700">
                       {traveler ? getTravelerLabel(traveler) : travelerId}
+                      {occurrence.occurrence > 0 ? ` · ${occurrence.occurrence + 1}` : ''}
                     </p>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -4068,7 +4275,7 @@ const TravelBookingFormPage = () => {
                           onChange={(event) =>
                             updateVisaTravelerDetail(
                               index,
-                              travelerId,
+                              absoluteIndex,
                               'paxType',
                               event.target.value
                             )
@@ -4086,7 +4293,7 @@ const TravelBookingFormPage = () => {
                         value={visaTraveler.passportNumber || traveler?.passportNumber || ''}
                         disabled={accountingLocked}
                         onChange={(value) =>
-                          updateVisaTravelerDetail(index, travelerId, 'passportNumber', value)
+                          updateVisaTravelerDetail(index, absoluteIndex, 'passportNumber', value)
                         }
                       />
 
@@ -4095,7 +4302,7 @@ const TravelBookingFormPage = () => {
                         value={visaTraveler.reference}
                         disabled={accountingLocked}
                         onChange={(value) =>
-                          updateVisaTravelerDetail(index, travelerId, 'reference', value)
+                          updateVisaTravelerDetail(index, absoluteIndex, 'reference', value)
                         }
                       />
                     </div>
@@ -4128,35 +4335,70 @@ const TravelBookingFormPage = () => {
 
     if (item.itemType === 'hotel') {
       const details = item.hotelDetails || {};
+      const filteredHotels = filterHotelsByCity(activeHotels, details.city);
 
       return (
         <div className="border-t border-slate-100 pt-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <TravelCityAutocomplete
+              inputId={`hotel-city-${index}`}
+              value={details.city || ''}
+              onChange={(value) => updateHotelCity(index, value)}
+              cities={activeCities}
+              hotels={activeHotels}
+              onCreate={canManageHotels ? createCityInline : null}
+              disabled={accountingLocked}
+            />
+
             <TravelCompactAutocomplete
               labelKey="travel.booking.fields.hotel"
               value={getRecordId(details.hotelId) || ''}
-              records={activeHotels}
+              records={filteredHotels}
               disabled={accountingLocked}
               getLabel={getHotelLabel}
               getMeta={(hotel) => hotel?.country || ''}
               placeholderKey="travel.placeholders.hotelName"
-              onChange={(value) => updateItemDetails(index, 'hotelDetails', 'hotelId', value)}
+              onChange={(value, hotel) => {
+                if (!value) {
+                  updateItemDetails(index, 'hotelDetails', 'hotelId', '');
+                  return;
+                }
+                selectHotelForItem(index, hotel);
+              }}
               onQuickAdd={
                 canManageHotels
-                  ? (query) =>
+                  ? (query) => {
+                      if (!details.city) {
+                        setFormError(t('travel.booking.alerts.selectCityFirst'));
+                        document.getElementById(`hotel-city-${index}`)?.focus();
+                        return;
+                      }
+                      return (
                       openModal('hotel', 'quick', {
                         query,
                         itemIndex: index,
+                        city: details.city,
                       })
+                      );
+                    }
                   : null
               }
               onAddDetails={
                 canManageHotels
-                  ? (query) =>
+                  ? (query) => {
+                      if (!details.city) {
+                        setFormError(t('travel.booking.alerts.selectCityFirst'));
+                        document.getElementById(`hotel-city-${index}`)?.focus();
+                        return;
+                      }
+                      return (
                       openModal('hotel', 'details', {
                         query,
                         itemIndex: index,
+                        city: details.city,
                       })
+                      );
+                    }
                   : null
               }
             />
@@ -4190,7 +4432,7 @@ const TravelBookingFormPage = () => {
             </label>
 
             <TextField
-              labelKey="travel.booking.fields.confirmationNumber"
+              labelKey="travel.booking.fields.confirmationNumberOptional"
               value={details.confirmationNumber}
               disabled={accountingLocked}
               onChange={(value) =>
@@ -4198,6 +4440,19 @@ const TravelBookingFormPage = () => {
               }
             />
           </div>
+
+          {!accountingLocked && (
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={addAnotherHotel}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-cyan-200 bg-gradient-to-r from-cyan-50 to-blue-50 px-3 text-xs font-extrabold text-cyan-800 transition hover:-translate-y-0.5 hover:shadow-sm"
+              >
+                <FaPlus aria-hidden="true" />
+                {t('travel.booking.actions.addAnotherHotel')}
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -4986,6 +5241,7 @@ const TravelBookingFormPage = () => {
 
     return (
       <div
+        id={`travel-booking-item-${index}`}
         key={item._id || index}
         className="relative overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-cyan-200 hover:shadow-md"
       >
@@ -5147,6 +5403,41 @@ const TravelBookingFormPage = () => {
   return (
     <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
       <TravelErrorModal open={Boolean(formError)} message={formError} onClose={() => setFormError('')} />
+
+      <TravelerDuplicateConfirmationModal
+        open={Boolean(duplicateTravelerPrompt)}
+        travelerName={duplicateTravelerPrompt?.travelerName || ''}
+        onCancel={() => setDuplicateTravelerPrompt(null)}
+        onAddAgain={() => {
+          const prompt = duplicateTravelerPrompt;
+          setDuplicateTravelerPrompt(null);
+          if (prompt) {
+            addItemTravelerOccurrence(
+              prompt.itemIndex,
+              prompt.travelerId,
+              prompt.travelerRecord
+            );
+          }
+        }}
+      />
+
+      <MatchingTravelersModal
+        open={Boolean(matchingTravelersPrompt)}
+        customerName={matchingTravelersPrompt?.customerName || ''}
+        travelers={matchingTravelersPrompt?.travelers || []}
+        onCancel={() => setMatchingTravelersPrompt(null)}
+        onSelect={(traveler) => {
+          const prompt = matchingTravelersPrompt;
+          setMatchingTravelersPrompt(null);
+          if (
+            prompt &&
+            formState.customerType === 'customer' &&
+            String(getRecordId(formState.customerId)) === String(prompt.customerId)
+          ) {
+            assignCustomerTravelerToItem(prompt.itemIndex, prompt.customerId, traveler);
+          }
+        }}
+      />
 
       {advanceConfirmationStatus && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="advance-confirmation-title">
@@ -5816,6 +6107,10 @@ const TravelBookingFormPage = () => {
         error={modalError}
         onQuickAddVendor={quickAddHotelVendor}
         onAddVendorDetails={openHotelVendorDetails}
+        cities={activeCities}
+        hotels={activeHotels}
+        canManageCities={canManageHotels}
+        onCreateCity={createCityInline}
       />
 
       <BookingRelationModal

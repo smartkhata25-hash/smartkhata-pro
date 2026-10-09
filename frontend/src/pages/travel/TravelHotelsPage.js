@@ -4,9 +4,11 @@ FaSyncAlt, FaTimes } from 'react-icons/fa';
 
 import {
   createTravelHotel,
+  createTravelCity,
   createTravelVendor,
   deleteTravelHotel,
   fetchTravelHotels,
+  fetchTravelCities,
   fetchTravelServiceCategories,
   fetchTravelVendors,
   updateTravelHotel,
@@ -98,6 +100,7 @@ const upsertRecord = (records, record) => {
 
 const TravelHotelsPage = () => {
   const [hotels, setHotels] = useState(() => getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.HOTELS));
+  const [cities, setCities] = useState(() => getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.CITIES));
 
   const [vendors, setVendors] = useState(() =>
     getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.VENDORS)
@@ -167,13 +170,15 @@ const TravelHotelsPage = () => {
         setLoading(true);
         setPageError('');
 
-        const [hotelData, vendorData, categoryData] = await Promise.all([
+        const [hotelData, cityData, vendorData, categoryData] = await Promise.all([
           fetchTravelHotels({}, options),
+          fetchTravelCities({}, options),
           fetchTravelVendors({}, options),
           fetchTravelServiceCategories({}, options),
         ]);
 
         setHotels(Array.isArray(hotelData) ? hotelData : []);
+        setCities(Array.isArray(cityData) ? cityData : []);
 
         setVendors(Array.isArray(vendorData) ? vendorData : []);
         setCategories(Array.isArray(categoryData) ? categoryData : []);
@@ -196,6 +201,17 @@ const TravelHotelsPage = () => {
     () => vendors.filter((vendor) => vendor?.isDeleted !== true && vendor?.isActive !== false),
     [vendors]
   );
+
+  const createCityInline = async (name) => {
+    try {
+      const saved = await createTravelCity({ name });
+      setCities((current) => upsertRecord(current, saved));
+      return saved;
+    } catch (error) {
+      setFormError(error?.response?.data?.message || t('travel.cities.createFailed'));
+      throw error;
+    }
+  };
 
   const cityOptions = useMemo(() => {
     const cities = hotels
@@ -599,6 +615,10 @@ setPageError(error?.response?.data?.message || t('travel.hotels.deleteFailed'));
         activeVendors={activeVendors}
         categories={categories}
         canManageVendors={canManageVendors}
+        cities={cities}
+        hotels={hotels}
+        canManageCities={canManage}
+        onCreateCity={createCityInline}
         editingHotel={editingHotel}
         editingVendor={editingVendor}
         formError={formError}

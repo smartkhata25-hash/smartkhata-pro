@@ -79,6 +79,7 @@ import {
 } from '../../components/travel/bookings/travelBookingConfig';
 
 import BookingStatusBadge from '../../components/travel/bookings/BookingStatusBadge';
+import { buildTravelerOccurrences } from '../../components/travel/bookings/form/travelerOccurrenceUtils';
 import { resolveUmrahCityNights } from '../../components/travel/umrah/umrahStayNights';
 
 const tabConfig = [
@@ -668,6 +669,9 @@ const renderAirTicketDetails = (booking, item) => {
   const details = item.ticketDetails || {};
 
   const passengerTickets = details.passengerTickets || [];
+  const passengerOccurrences = buildTravelerOccurrences(
+    passengerTickets.map((passenger) => getRecordId(passenger.travelerId))
+  );
 
   return (
     <div className="space-y-4">
@@ -741,6 +745,7 @@ const renderAirTicketDetails = (booking, item) => {
             {passengerTickets.map((passenger, index) => {
               const travelerName =
                 passenger.passengerName || getTravelerLabel(booking, passenger.travelerId);
+              const occurrence = passengerOccurrences[index]?.occurrence || 0;
 
               return (
                 <article
@@ -754,7 +759,7 @@ const renderAirTicketDetails = (booking, item) => {
 
                     <div className="min-w-0">
                       <p className="truncate text-sm font-black text-slate-900">
-                        {travelerName || '-'}
+                        {travelerName || '-'}{occurrence > 0 ? ` · ${occurrence + 1}` : ''}
                       </p>
 
                       <p className="text-xs font-bold capitalize text-cyan-700">
@@ -810,6 +815,9 @@ const renderVisaDetails = (booking, item) => {
   const details = item.visaDetails || {};
 
   const travelerVisas = details.travelerVisas || [];
+  const visaOccurrences = buildTravelerOccurrences(
+    travelerVisas.map((traveler) => getRecordId(traveler.travelerId))
+  );
 
   return (
     <div className="space-y-4">
@@ -841,6 +849,7 @@ const renderVisaDetails = (booking, item) => {
           {travelerVisas.map((visaTraveler, index) => {
             const travelerName =
               visaTraveler.passengerName || getTravelerLabel(booking, visaTraveler.travelerId);
+            const occurrence = visaOccurrences[index]?.occurrence || 0;
 
             return (
               <article
@@ -853,7 +862,9 @@ const renderVisaDetails = (booking, item) => {
                   </span>
 
                   <div>
-                    <p className="text-sm font-black text-slate-900">{travelerName || '-'}</p>
+                    <p className="text-sm font-black text-slate-900">
+                      {travelerName || '-'}{occurrence > 0 ? ` · ${occurrence + 1}` : ''}
+                    </p>
 
                     <p className="text-xs font-bold text-violet-700">
                       {getPaxLabel(visaTraveler.paxType)}
@@ -895,10 +906,18 @@ const renderVisaDetails = (booking, item) => {
 
 const renderHotelDetails = (item) => {
   const details = item.hotelDetails || {};
+  const hotelCity = details.city || details.hotelId?.city || '';
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <InfoCard
+          icon={FaMapMarkerAlt}
+          label={t('travel.fields.city')}
+          value={hotelCity}
+          tone="cyan"
+        />
+
         <InfoCard
           icon={FaHotel}
           label={t('travel.booking.fields.hotel')}
@@ -923,7 +942,7 @@ const renderHotelDetails = (item) => {
         <InfoCard
           icon={FaBed}
           label="Total Nights"
-          value={details.nights ? `${details.nights} Night(s)` : '-'}
+          value={details.nights ? `${details.nights} ${Number(details.nights) === 1 ? 'Night' : 'Nights'}` : '-'}
           tone="amber"
         />
 

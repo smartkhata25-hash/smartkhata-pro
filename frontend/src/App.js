@@ -77,6 +77,7 @@ const TravelReturnsPage = lazy(() => import('./pages/travel/TravelReturnsPage'))
 const TravelersPage = lazy(() => import('./pages/travel/TravelersPage'));
 const TravelServicesPage = lazy(() => import('./pages/travel/TravelServicesPage'));
 const TravelHotelsPage = lazy(() => import('./pages/travel/TravelHotelsPage'));
+const TravelCitiesPage = lazy(() => import('./pages/travel/TravelCitiesPage'));
 const TravelAirlinesPage = lazy(() => import('./pages/travel/TravelAirlinesPage'));
 const TravelAirportsPage = lazy(() => import('./pages/travel/TravelAirportsPage'));
 const TravelTripPlannerPage = lazy(() => import('./pages/travel/TravelTripPlannerPage'));
@@ -777,6 +778,15 @@ function App() {
               element={
                 <PermissionRoute permission="travel.hotels.view" moduleKey={MODULE_KEYS.TRAVEL}>
                   <TravelHotelsPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/travel/cities"
+              element={
+                <PermissionRoute permission="travel.hotels.view" moduleKey={MODULE_KEYS.TRAVEL}>
+                  <TravelCitiesPage />
                 </PermissionRoute>
               }
             />

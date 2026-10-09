@@ -83,6 +83,7 @@ const isCacheableListRequest = (params = {}) => {
   const safeParams = normalizeParams(params);
   const nonCacheKeys = [
     'search',
+    'customerId',
     'categoryId',
     'city',
     'country',
@@ -378,6 +379,29 @@ export const updateTravelHotelStatus = (id, isActive) =>
 
 export const deleteTravelHotel = (id, options = {}) =>
   deleteRecord(TRAVEL_CACHE_DOMAINS.HOTELS, `${TRAVEL_API}/hotels/${id}`, {
+    ...options,
+    recordId: id,
+  });
+
+export const fetchTravelCities = (params = {}, options = {}) =>
+  fetchList(
+    TRAVEL_CACHE_DOMAINS.CITIES,
+    `${TRAVEL_API}/cities`,
+    { status: 'all', limit: 500, ...params },
+    options
+  );
+
+export const createTravelCity = (data) =>
+  createRecord(TRAVEL_CACHE_DOMAINS.CITIES, `${TRAVEL_API}/cities`, data);
+
+export const updateTravelCity = (id, data) =>
+  updateRecord(TRAVEL_CACHE_DOMAINS.CITIES, `${TRAVEL_API}/cities/${id}`, data);
+
+export const updateTravelCityStatus = (id, isActive) =>
+  updateStatus(TRAVEL_CACHE_DOMAINS.CITIES, `${TRAVEL_API}/cities/${id}/status`, isActive);
+
+export const deleteTravelCity = (id, options = {}) =>
+  deleteRecord(TRAVEL_CACHE_DOMAINS.CITIES, `${TRAVEL_API}/cities/${id}`, {
     ...options,
     recordId: id,
   });
@@ -832,6 +856,91 @@ export const deleteTravelVendorPayment = async (id, options = {}) => {
   );
   clearTravelVendorFinancialCaches();
 
+  return response.data;
+};
+
+export const fetchTravelRefundOutstandingSummary = async () => {
+  const response = await axios.get(`${TRAVEL_API}/payments/refunds/outstanding-summary`, getConfig());
+  return response.data || { customers: [], vendors: [] };
+};
+
+export const fetchOutstandingCustomerRefunds = async (params = {}) => {
+  const response = await axios.get(
+    `${TRAVEL_API}/payments/customer-refunds`,
+    getConfig(normalizeParams(params))
+  );
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+export const createTravelCustomerRefundPayment = async (refundId, data) => {
+  const response = await axios.post(
+    `${TRAVEL_API}/payments/customer-refunds/${refundId}`,
+    data,
+    getConfig()
+  );
+  clearTravelRefundFinancialCaches();
+  return response.data;
+};
+
+export const fetchTravelCustomerRefundPaymentHistory = async (refundId) => {
+  const response = await axios.get(
+    `${TRAVEL_API}/payments/customer-refunds/${refundId}/history`,
+    getConfig()
+  );
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+export const reverseTravelCustomerRefundPayment = async (refundId, journalId) => {
+  const response = await axios.delete(
+    `${TRAVEL_API}/payments/customer-refunds/${refundId}/${journalId}`,
+    getConfig()
+  );
+  clearTravelRefundFinancialCaches();
+  return response.data;
+};
+
+export const fetchOutstandingVendorRefundSources = async (params = {}) => {
+  const response = await axios.get(
+    `${TRAVEL_API}/payments/vendor-refunds`,
+    getConfig(normalizeParams(params))
+  );
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+export const createTravelVendorRefundReceipt = async (sourceType, sourceId, data) => {
+  const response = await axios.post(
+    `${TRAVEL_API}/payments/vendor-refunds/${sourceType}/${sourceId}`,
+    data,
+    getConfig()
+  );
+  clearTravelRefundFinancialCaches();
+  clearTravelVendorReturnFinancialCaches();
+  return response.data;
+};
+
+export const fetchTravelVendorRefundReceiptHistory = async (
+  sourceType,
+  sourceId,
+  params = {}
+) => {
+  const response = await axios.get(
+    `${TRAVEL_API}/payments/vendor-refunds/${sourceType}/${sourceId}/history`,
+    getConfig(normalizeParams(params))
+  );
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+export const reverseTravelVendorRefundReceipt = async (
+  sourceType,
+  sourceId,
+  journalId
+) => {
+  const response = await axios.delete(
+    `${TRAVEL_API}/payments/vendor-refunds/${sourceType}/${sourceId}/${journalId}`,
+    getConfig()
+  );
+  clearTravelRefundFinancialCaches();
+  clearTravelVendorReturnFinancialCaches();
   return response.data;
 };
 

@@ -7,6 +7,7 @@ import TravelVendorFormModal from '../vendors/TravelVendorFormModal';
 
 import { quickHotelFields } from './travelHotelConfig';
 import TravelHotelFormModal from './TravelHotelFormModal';
+import TravelCityAutocomplete from '../cities/TravelCityAutocomplete';
 
 const TravelHotelModals = ({
   activeVendors = [],
@@ -44,6 +45,10 @@ const TravelHotelModals = ({
   vendorValues,
 
   canManageVendors,
+  cities = [],
+  hotels = [],
+  canManageCities = false,
+  onCreateCity,
 }) => {
   const handleQuickVendor = (query = '') => {
     if (!canManageVendors || !onOpenQuickVendor) {
@@ -80,6 +85,10 @@ const TravelHotelModals = ({
         error={formError}
         onQuickAddVendor={handleQuickVendor}
         onAddVendorDetails={handleVendorDetails}
+        cities={cities}
+        hotels={hotels}
+        canManageCities={canManageCities}
+        onCreateCity={onCreateCity}
       />
 
       {/* =========================================
@@ -98,7 +107,16 @@ const TravelHotelModals = ({
         submitting={submitting}
         error={formError}
         submitIcon={FaBed}
-      />
+      >
+        <TravelCityAutocomplete
+          value={quickHotelValues.city || ''}
+          onChange={(value) => onQuickHotelChange('city', value)}
+          cities={cities}
+          hotels={hotels}
+          onCreate={canManageCities ? onCreateCity : null}
+          disabled={submitting}
+        />
+      </TravelFormModal>
 
       {/* =========================================
           VENDOR — QUICK ADD / DETAILS / EDIT

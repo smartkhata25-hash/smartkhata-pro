@@ -5,6 +5,7 @@ export const TRAVEL_CACHE_DOMAINS = Object.freeze({
   SERVICE_CATEGORIES: 'travelServiceCategories',
   SERVICES: 'travelServices',
   HOTELS: 'travelHotels',
+  CITIES: 'travelCities',
   AIRLINES: 'travelAirlines',
   AIRPORTS: 'travelAirports',
   VENDORS: 'travelVendors',

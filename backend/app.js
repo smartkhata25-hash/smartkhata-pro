@@ -34,6 +34,7 @@ app.use(
 );
 app.use("/api/travel/services", require("./routes/travelServiceRoutes"));
 app.use("/api/travel/hotels", require("./routes/travelHotelRoutes"));
+app.use("/api/travel/cities", require("./routes/travelCityRoutes"));
 
 app.use("/api/travel/airlines", require("./routes/travelAirlineRoutes"));
 

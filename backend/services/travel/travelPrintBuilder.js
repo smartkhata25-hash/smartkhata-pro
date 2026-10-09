@@ -126,6 +126,7 @@ const summarizePassengerRows = (rows = []) =>
       joinValues(
         row.passengerName || getName(row.travelerId),
         row.passportNumber,
+        row.pnr,
         row.ticketNumber || row.reference,
       ),
     )
@@ -181,16 +182,27 @@ const buildItemDetails = (booking, item) => {
 
   if (type === "hotel") {
     const hotel = item.hotelDetails || {};
+    const hotelName = getName(hotel.hotelId);
+    const city = String(hotel.city || hotel.hotelId?.city || "").trim();
+    const nights = safeNumber(hotel.nights);
+    const stayLabel = nights > 0 ? `${nights} ${nights === 1 ? "Night" : "Nights"}` : "";
 
     details.push(
       joinValues(
         "Hotel",
-        getName(hotel.hotelId),
+        city,
+        hotelName,
+        stayLabel,
+      ),
+      joinValues(
         formatDate(hotel.checkIn),
         formatDate(hotel.checkOut),
-        hotel.confirmationNumber,
       ),
     );
+
+    if (hotel.confirmationNumber) {
+      details.push(joinValues("Confirmation", hotel.confirmationNumber));
+    }
   }
 
   if (type === "umrah_package") {

@@ -274,6 +274,14 @@ const AccountTransactionTable = ({
       return `/travel/vendor-returns/${referenceId}`;
     }
 
+    if (type.includes('purchase_return_payment') && txn.originModule === 'travel_refund') {
+      return `/travel/refunds/${referenceId}`;
+    }
+
+    if (type.includes('purchase_return_payment') && txn.originModule === 'travel_vendor_return') {
+      return `/travel/vendor-returns/${referenceId}`;
+    }
+
     if (
       type.includes('travel_invoice') ||
       type.includes('travel_booking') ||

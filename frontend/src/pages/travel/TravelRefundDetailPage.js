@@ -9,12 +9,15 @@ import {
   FaPrint,
   FaShareAlt,
   FaTrash,
+  FaUndoAlt,
 } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
   deleteTravelRefund,
+  fetchTravelCustomerRefundPaymentHistory,
   fetchTravelRefundById,
+  fetchTravelVendorRefundReceiptHistory,
   getTravelRefundPdfUrl,
   getTravelRefundPreviewUrl,
   getTravelRefundPrintUrl,
@@ -62,6 +65,8 @@ const getInvoiceNumber = (refund) =>
   refund?.originalInvoiceId?.bookingNumber ||
   '-';
 
+const getId = (value) => (typeof value === 'object' ? value?._id : value) || '';
+
 const getRefundCustomerName = (refund) =>
   getCustomerName(refund?.customer || refund?.customerPartyId || refund?.customerId);
 
@@ -76,7 +81,11 @@ const TravelRefundDetailPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [pageError, setPageError] = useState('');
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [vendorPaymentHistory, setVendorPaymentHistory] = useState([]);
   const canDelete = hasPermission('travel.bookings.edit');
+  const canPayRefund = canDelete || hasPermission('travel.payments');
+  const canReceiveVendorRefund = hasPermission('travel.vendors.manage') || hasPermission('travel.payments');
 
   const loadRefund = useCallback(async () => {
     try {
@@ -85,6 +94,12 @@ const TravelRefundDetailPage = () => {
 
       const data = await fetchTravelRefundById(id);
       setRefund(data);
+      const [customerHistory, vendorHistory] = await Promise.all([
+        fetchTravelCustomerRefundPaymentHistory(id),
+        fetchTravelVendorRefundReceiptHistory('travel_refund', id).catch(() => []),
+      ]);
+      setPaymentHistory(customerHistory);
+      setVendorPaymentHistory(vendorHistory);
     } catch (error) {
       console.error('Travel refund detail load failed:', error);
       setPageError(t('travel.refund.alerts.loadOneFailed'));
@@ -201,6 +216,19 @@ const TravelRefundDetailPage = () => {
           </TravelActionButton>
           {refund && (
             <>
+              {canPayRefund && Number(refund.customerRefundAmount || 0) > Number(refund.paidBackAmount || 0) && (
+                <TravelActionButton
+                  icon={FaUndoAlt}
+                  variant="danger"
+                  onClick={() => {
+                    const isParty = refund.customerType === 'party' || Boolean(refund.customerPartyId);
+                    const customerId = getId(isParty ? refund.customerPartyId : refund.customerId);
+                    navigate(`/travel/payments?mode=customer-refund&customerType=${isParty ? 'party' : 'customer'}&${isParty ? 'customerPartyId' : 'customerId'}=${customerId}&refundId=${refund._id}`);
+                  }}
+                >
+                  Pay refund
+                </TravelActionButton>
+              )}
               <TravelActionButton icon={FaEye} variant="secondary" onClick={handleOpenPreview}>
                 {t('common.preview')}
               </TravelActionButton>
@@ -290,11 +318,27 @@ const TravelRefundDetailPage = () => {
                 value={formatBookingMoney(refund.paidBackAmount)}
               />
               <DetailLine
+                labelKey="Outstanding customer refund"
+                value={formatBookingMoney(Math.max(Number(refund.customerRefundAmount || 0) - Number(refund.paidBackAmount || 0), 0))}
+              />
+              <DetailLine
                 labelKey="travel.booking.fields.paymentAccount"
                 value={refund.accountId?.name || '-'}
               />
               <DetailLine labelKey="travel.fields.notes" value={refund.notes} />
             </div>
+          </Section>
+
+          <Section>
+            <h2 className="mb-3 text-sm font-black text-slate-900">Customer refund settlement history</h2>
+            {!paymentHistory.length ? (
+              <p className="text-sm font-semibold text-slate-500">No customer refund payments recorded.</p>
+            ) : paymentHistory.map((entry) => (
+              <div key={entry._id} className="flex items-center justify-between border-b border-slate-100 py-2 last:border-0">
+                <span className="text-sm font-bold text-slate-700">{formatDateWithOptionalTime(entry.date, entry.time)}{entry.isReversed ? ' · Reversed' : ''}</span>
+                <span className="text-sm font-black text-slate-900">{formatBookingMoney(entry.amount)}</span>
+              </div>
+            ))}
           </Section>
 
           <Section>
@@ -324,6 +368,19 @@ const TravelRefundDetailPage = () => {
                     labelKey="travel.refund.fields.vendorRecoveryAmount"
                     value={formatBookingMoney(item.vendorRecoveryAmount)}
                   />
+                  {canReceiveVendorRefund && Number(item.vendorRecoveryAmount || 0) > 0 && (
+                    <TravelActionButton
+                      icon={FaUndoAlt}
+                      variant="success"
+                      onClick={() => {
+                        const isParty = item.vendorType === 'party' || Boolean(item.vendorPartyId);
+                        const vendorId = getId(isParty ? item.vendorPartyId : item.vendorId);
+                        navigate(`/travel/payments?mode=vendor-refund&vendorType=${isParty ? 'party' : 'vendor'}&${isParty ? 'vendorPartyId' : 'vendorId'}=${vendorId}&sourceType=travel_refund&sourceId=${refund._id}`);
+                      }}
+                    >
+                      Receive vendor recovery
+                    </TravelActionButton>
+                  )}
                 </div>
               ))}
               {(refund.refundItems || []).length === 0 && (
@@ -332,6 +389,18 @@ const TravelRefundDetailPage = () => {
                 </p>
               )}
             </div>
+          </Section>
+
+          <Section>
+            <h2 className="mb-3 text-sm font-black text-slate-900">Vendor recovery settlement history</h2>
+            {!vendorPaymentHistory.length ? (
+              <p className="text-sm font-semibold text-slate-500">No vendor recovery receipts recorded.</p>
+            ) : vendorPaymentHistory.map((entry) => (
+              <div key={entry._id} className="flex items-center justify-between border-b border-slate-100 py-2 last:border-0">
+                <span className="text-sm font-bold text-slate-700">{formatDateWithOptionalTime(entry.date, entry.time)}{entry.isReversed ? ' · Reversed' : ''}</span>
+                <span className="text-sm font-black text-slate-900">{formatBookingMoney(entry.amount)}</span>
+              </div>
+            ))}
           </Section>
 
           <Section>

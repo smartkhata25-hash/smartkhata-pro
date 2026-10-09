@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
 useNavigate, useSearchParams } from 'react-router-dom';
-import { FaCalendarAlt, FaEye, FaPlus, FaSyncAlt, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaCalendarAlt, FaEye, FaPlus, FaSyncAlt, FaTimes, FaTrash, FaUndoAlt } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import { deleteTravelRefund, fetchTravelRefunds } from '../../services/travelMasterService';
@@ -150,6 +150,7 @@ const TravelRefundsPage = () => {
   const canView = hasPermission('travel.bookings.view');
   const canCreate = hasPermission('travel.bookings.edit');
   const canDelete = canCreate;
+  const canPayRefund = canCreate || hasPermission('travel.payments');
 
   const updateFilter = useCallback(
     (field, value) => {
@@ -397,6 +398,21 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
               }}
             />
 
+            {canPayRefund && getRefundPaymentStatus(refund) !== 'paid' && (
+              <IconButton
+                icon={FaUndoAlt}
+                variant="red"
+                title="Pay customer refund"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const isParty = refund.customerType === 'party' || Boolean(refund.customerPartyId);
+                  const target = isParty ? refund.customerPartyId : refund.customerId;
+                  const customerId = typeof target === 'object' ? target?._id : target;
+                  navigate(`/travel/payments?mode=customer-refund&customerType=${isParty ? 'party' : 'customer'}&${isParty ? 'customerPartyId' : 'customerId'}=${customerId}&refundId=${refund._id}`);
+                }}
+              />
+            )}
+
             {canDelete && (
               <IconButton
                 icon={FaTrash}
@@ -410,7 +426,7 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
         ),
       },
     ],
-    [canDelete, deletingId, handleDeleteRefund, navigate]
+    [canDelete, canPayRefund, deletingId, handleDeleteRefund, navigate]
   );
 
   const renderMobileCard = useCallback(
@@ -440,6 +456,21 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
                   navigate(`/travel/refunds/${refund._id}`);
                 }}
               />
+
+              {canPayRefund && getRefundPaymentStatus(refund) !== 'paid' && (
+                <IconButton
+                  icon={FaUndoAlt}
+                  variant="red"
+                  title="Pay customer refund"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const isParty = refund.customerType === 'party' || Boolean(refund.customerPartyId);
+                    const target = isParty ? refund.customerPartyId : refund.customerId;
+                    const customerId = typeof target === 'object' ? target?._id : target;
+                    navigate(`/travel/payments?mode=customer-refund&customerType=${isParty ? 'party' : 'customer'}&${isParty ? 'customerPartyId' : 'customerId'}=${customerId}&refundId=${refund._id}`);
+                  }}
+                />
+              )}
 
               {canDelete && (
                 <IconButton
@@ -487,7 +518,7 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
         </div>
       </article>
     ),
-    [canDelete, deletingId, handleDeleteRefund, navigate]
+    [canDelete, canPayRefund, deletingId, handleDeleteRefund, navigate]
   );
 
   return (

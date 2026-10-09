@@ -288,6 +288,11 @@ export default function SupplierLedgerPage() {
       return;
     }
 
+    if (type === 'purchase_return_payment' && entry.originModule === 'travel_refund') {
+      navigate(`/travel/refunds/${entry.referenceId || entry._id}`);
+      return;
+    }
+
     // ✅ Purchase Invoice
     if (type === 'purchase_invoice') {
       navigate(`/purchase-invoice/${entry.referenceId || entry._id}`);

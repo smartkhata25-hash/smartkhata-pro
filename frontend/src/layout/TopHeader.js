@@ -234,6 +234,11 @@ const travelTopMenuConfig = [
             permission: 'travel.hotels.view',
           },
           {
+            label: 'travel.sidebar.cities',
+            path: '/travel/cities',
+            permission: 'travel.hotels.view',
+          },
+          {
             label: 'travel.sidebar.airlines',
             path: '/travel/airlines',
             permission: 'travel.airlines.view',

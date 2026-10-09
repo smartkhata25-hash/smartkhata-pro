@@ -793,6 +793,12 @@ const bookingItemSchema = new mongoose.Schema(
     },
 
     hotelDetails: {
+      city: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+
       hotelId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "TravelHotel",

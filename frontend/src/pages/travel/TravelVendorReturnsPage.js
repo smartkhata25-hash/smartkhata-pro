@@ -11,6 +11,7 @@ import {
   FaSyncAlt,
   FaTimes,
   FaTrash,
+  FaUndoAlt,
 } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
@@ -304,6 +305,7 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
   const [searchInput, setSearchInput] = useState(filters.search || '');
 
   const canManage = hasPermission('travel.vendors.manage');
+  const canReceiveRefund = canManage || hasPermission('travel.payments');
 
   useEffect(() => {
     setSearchInput(filters.search || '');
@@ -763,6 +765,21 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
               }}
             />
 
+            {canReceiveRefund && getReturnReceivedStatus(record) !== 'received' && (
+              <IconButton
+                icon={FaUndoAlt}
+                variant="violet"
+                title="Receive vendor refund"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const isParty = record.vendorType === 'party' || Boolean(record.vendorPartyId);
+                  const target = isParty ? record.vendorPartyId : record.vendorId;
+                  const vendorId = typeof target === 'object' ? target?._id : target;
+                  navigate(`/travel/payments?mode=vendor-refund&vendorType=${isParty ? 'party' : 'vendor'}&${isParty ? 'vendorPartyId' : 'vendorId'}=${vendorId}&sourceType=travel_vendor_return&sourceId=${record._id}`);
+                }}
+              />
+            )}
+
             {canManage && (
               <IconButton
                 icon={FaTrash}
@@ -776,7 +793,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
         ),
       },
     ],
-    [canManage, deletingId, handleDeleteVendorReturn, navigate]
+    [canManage, canReceiveRefund, deletingId, handleDeleteVendorReturn, navigate]
   );
 
   const renderMobileCard = useCallback(
@@ -807,6 +824,21 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
                   navigate(`/travel/vendor-returns/${record._id}`);
                 }}
               />
+
+              {canReceiveRefund && getReturnReceivedStatus(record) !== 'received' && (
+                <IconButton
+                  icon={FaUndoAlt}
+                  variant="violet"
+                  title="Receive vendor refund"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const isParty = record.vendorType === 'party' || Boolean(record.vendorPartyId);
+                    const target = isParty ? record.vendorPartyId : record.vendorId;
+                    const vendorId = typeof target === 'object' ? target?._id : target;
+                    navigate(`/travel/payments?mode=vendor-refund&vendorType=${isParty ? 'party' : 'vendor'}&${isParty ? 'vendorPartyId' : 'vendorId'}=${vendorId}&sourceType=travel_vendor_return&sourceId=${record._id}`);
+                  }}
+                />
+              )}
 
               {canManage && (
                 <IconButton
@@ -854,7 +886,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
         </div>
       </article>
     ),
-    [canManage, deletingId, handleDeleteVendorReturn, navigate]
+    [canManage, canReceiveRefund, deletingId, handleDeleteVendorReturn, navigate]
   );
 
   return (

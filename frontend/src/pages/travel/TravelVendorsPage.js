@@ -8,6 +8,7 @@ import {
   FaMoneyBillWave,
   FaPlus,
   FaSyncAlt,
+  FaUndoAlt,
   FaTimes,
   FaTrash,
   FaUndo,
@@ -19,6 +20,7 @@ import {
   deleteTravelVendor,
   fetchTravelServiceCategories,
   fetchTravelVendors,
+  fetchTravelRefundOutstandingSummary,
   restoreTravelVendor,
   updateTravelVendor,
 } from '../../services/travelMasterService';
@@ -156,6 +158,7 @@ const TravelVendorsPage = () => {
   const [vendors, setVendors] = useState(() =>
     getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.VENDORS)
   );
+  const [refundOutstanding, setRefundOutstanding] = useState({});
 
   const [categories, setCategories] = useState(() =>
     getCachedTravelRecords(TRAVEL_CACHE_DOMAINS.SERVICE_CATEGORIES)
@@ -190,6 +193,7 @@ const TravelVendorsPage = () => {
     hasPermission('travel.vendors.view') ||
     hasPermission('travel.vendors.manage') ||
     hasPermission('travel.payments');
+  const canReceiveVendorRefund = canManage || hasPermission('travel.payments');
 
   const {
     state: pageMemory,
@@ -282,7 +286,7 @@ const TravelVendorsPage = () => {
         setLoading(true);
         setPageError('');
 
-        const [vendorData, categoryData] = await Promise.all([
+        const [vendorData, categoryData, summary] = await Promise.all([
           fetchTravelVendors(
             {
               includeBalance: 'true',
@@ -294,11 +298,19 @@ const TravelVendorsPage = () => {
             }
           ),
           fetchTravelServiceCategories({}, requestOptions),
+          canReceiveVendorRefund
+            ? fetchTravelRefundOutstandingSummary().catch(() => ({ vendors: [] }))
+            : Promise.resolve({ vendors: [] }),
         ]);
 
         setVendors(Array.isArray(vendorData) ? vendorData : []);
 
         setCategories(Array.isArray(categoryData) ? categoryData : []);
+        setRefundOutstanding(Object.fromEntries(
+          (summary?.vendors || [])
+            .filter((row) => row.entityType === 'vendor')
+            .map((row) => [String(row.entityId), row])
+        ));
       } catch (error) {
         console.error('Travel vendors load failed:', error);
         setPageError(t('travel.alerts.vendorsLoadFailed'));
@@ -306,7 +318,7 @@ const TravelVendorsPage = () => {
         setLoading(false);
       }
     },
-    [activeTab, canView]
+    [activeTab, canReceiveVendorRefund, canView]
   );
 
   useEffect(() => {
@@ -599,6 +611,14 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
     [canPayVendor, navigate]
   );
 
+  const openVendorRefund = useCallback(
+    (vendor) => {
+      if (!vendor?._id || !canReceiveVendorRefund) return;
+      navigate(`/travel/payments?mode=vendor-refund&vendorType=vendor&vendorId=${vendor._id}`);
+    },
+    [canReceiveVendorRefund, navigate]
+  );
+
   const sendTravelReminder = useCallback(
     (vendor, event = null) => {
       event?.stopPropagation?.();
@@ -757,6 +777,15 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
               />
             )}
 
+            {canReceiveVendorRefund && refundOutstanding[String(vendor._id)] && (
+              <IconActionButton
+                icon={FaUndoAlt}
+                title={`Receive refund (${formatTravelMoney(refundOutstanding[String(vendor._id)].outstandingAmount)})`}
+                variant="green"
+                onClick={(event) => { event.stopPropagation(); openVendorRefund(vendor); }}
+              />
+            )}
+
             {vendor.phone && (
               <IconActionButton
                 icon={FaWhatsapp}
@@ -809,6 +838,7 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
     [
       canManage,
       canPayVendor,
+      canReceiveVendorRefund,
       canViewLedger,
       businessName,
       deletingId,
@@ -818,6 +848,8 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
       openDetails,
       openLedger,
       openVendorPayment,
+      openVendorRefund,
+      refundOutstanding,
       restoringId,
       whatsAppTemplate,
     ]
@@ -899,6 +931,15 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
                 />
               )}
 
+              {canReceiveVendorRefund && refundOutstanding[String(vendor._id)] && (
+                <IconActionButton
+                  icon={FaUndoAlt}
+                  title={`Receive refund (${formatTravelMoney(refundOutstanding[String(vendor._id)].outstandingAmount)})`}
+                  variant="green"
+                  onClick={() => openVendorRefund(vendor)}
+                />
+              )}
+
               {vendor.phone && (
                 <IconActionButton
                   icon={FaWhatsapp}
@@ -940,6 +981,7 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
     [
       canManage,
       canPayVendor,
+      canReceiveVendorRefund,
       canViewLedger,
       deletingId,
       handleDeleteVendor,
@@ -948,6 +990,8 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
       openDetails,
       openLedger,
       openVendorPayment,
+      openVendorRefund,
+      refundOutstanding,
       restoringId,
       sendTravelReminder,
     ]

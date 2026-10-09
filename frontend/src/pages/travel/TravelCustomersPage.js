@@ -5,6 +5,7 @@ import {
   FaBook,
   FaEdit,
   FaMoneyBillWave,
+  FaUndoAlt,
   FaSyncAlt,
   FaTimes,
   FaTrash,
@@ -18,6 +19,7 @@ import {
   createTravelCustomer,
   deleteTravelCustomer,
   fetchTravelCustomers,
+  fetchTravelRefundOutstandingSummary,
   restoreTravelCustomer,
   updateTravelCustomer,
 } from '../../services/travelMasterService';
@@ -132,6 +134,7 @@ const TravelCustomersPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [customers, setCustomers] = useState([]);
+  const [refundOutstanding, setRefundOutstanding] = useState({});
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
 
@@ -177,6 +180,9 @@ const TravelCustomersPage = () => {
     hasPermission('travel.bookings.edit') ||
     hasPermission('travel.payments');
 
+  const canPayCustomerRefund =
+    hasPermission('travel.bookings.edit') || hasPermission('travel.payments');
+
   const loadCustomers = useCallback(
     async (options = {}) => {
       if (!canView) {
@@ -189,18 +195,22 @@ const TravelCustomersPage = () => {
         setLoading(true);
         setPageError('');
 
-        const data = await fetchTravelCustomers(
-          {
-            includeBalance: 'true',
-            status,
-          },
-          {
-            forceRefresh: true,
-            ...requestOptions,
-          }
-        );
+        const [data, summary] = await Promise.all([
+          fetchTravelCustomers(
+            { includeBalance: 'true', status },
+            { forceRefresh: true, ...requestOptions }
+          ),
+          canPayCustomerRefund
+            ? fetchTravelRefundOutstandingSummary().catch(() => ({ customers: [] }))
+            : Promise.resolve({ customers: [] }),
+        ]);
 
         setCustomers(Array.isArray(data) ? data : []);
+        setRefundOutstanding(Object.fromEntries(
+          (summary?.customers || [])
+            .filter((row) => row.entityType === 'customer')
+            .map((row) => [String(row.entityId), row])
+        ));
       } catch (error) {
         console.error('Travel customers load failed:', error);
         setPageError(t('travel.customers.loadFailed'));
@@ -208,7 +218,7 @@ const TravelCustomersPage = () => {
         setLoading(false);
       }
     },
-    [activeTab, canView]
+    [activeTab, canPayCustomerRefund, canView]
   );
 
   useEffect(() => {
@@ -361,6 +371,14 @@ const TravelCustomersPage = () => {
       navigate(`/travel/payments?mode=receive&customerId=${customer._id}`);
     },
     [canReceivePayment, navigate]
+  );
+
+  const openCustomerRefund = useCallback(
+    (customer) => {
+      if (!customer?._id || !canPayCustomerRefund) return;
+      navigate(`/travel/payments?mode=customer-refund&customerType=customer&customerId=${customer._id}`);
+    },
+    [canPayCustomerRefund, navigate]
   );
 
   const sendTravelReminder = useCallback(
@@ -711,6 +729,15 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
               />
             )}
 
+            {canPayCustomerRefund && refundOutstanding[String(customer._id)] && (
+              <IconActionButton
+                icon={FaUndoAlt}
+                title={`Pay refund (${formatTravelMoney(refundOutstanding[String(customer._id)].outstandingAmount)})`}
+                variant="rose"
+                onClick={(event) => { event.stopPropagation(); openCustomerRefund(customer); }}
+              />
+            )}
+
             {customer.phone && (
               <IconActionButton
                 icon={FaWhatsapp}
@@ -749,6 +776,7 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
       canDeleteCustomer,
       canEditCustomer,
       canReceivePayment,
+      canPayCustomerRefund,
       canRestoreCustomer,
       canViewLedger,
       deletingId,
@@ -758,6 +786,8 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
       openDetails,
       openLedger,
       openReceivePayment,
+      openCustomerRefund,
+      refundOutstanding,
       restoringId,
       sendTravelReminder,
     ]
@@ -836,6 +866,15 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
               />
             )}
 
+            {canPayCustomerRefund && refundOutstanding[String(customer._id)] && (
+              <IconActionButton
+                icon={FaUndoAlt}
+                title={`Pay refund (${formatTravelMoney(refundOutstanding[String(customer._id)].outstandingAmount)})`}
+                variant="rose"
+                onClick={() => openCustomerRefund(customer)}
+              />
+            )}
+
             {customer.phone && (
               <IconActionButton
                 icon={FaWhatsapp}
@@ -873,6 +912,7 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
       canDeleteCustomer,
       canEditCustomer,
       canReceivePayment,
+      canPayCustomerRefund,
       canRestoreCustomer,
       canViewLedger,
       deletingId,
@@ -882,6 +922,8 @@ setPageError(error?.response?.data?.message || t('travel.customers.restoreFailed
       openDetails,
       openLedger,
       openReceivePayment,
+      openCustomerRefund,
+      refundOutstanding,
       restoringId,
       sendTravelReminder,
     ]

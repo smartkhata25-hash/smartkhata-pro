@@ -7,6 +7,8 @@ import {
   getLocalTimeInputValue,
 } from '../../../utils/localDateTime';
 import { getUmrahNightsInputValue } from '../umrah/umrahStayNights';
+import { normalizeTravelPaymentTypeForEdit } from './form/bookingPaymentUtils';
+import { alignTravelerDetailRows } from './form/travelerOccurrenceUtils';
 
 export const BOOKING_STATUSES = Object.freeze([
   'draft',
@@ -349,6 +351,7 @@ export const defaultVisaDetails = {
 };
 
 export const defaultHotelDetails = {
+  city: '',
   hotelId: '',
   checkIn: '',
   checkOut: '',
@@ -798,6 +801,29 @@ const prepareUmrahComponentForForm = (component = {}) => ({
 
 const prepareBookingItemForForm = (item = {}) => {
   const itemType = item.itemType || 'service';
+  const travelerIds = (item.travelerIds || [])
+    .map((traveler) => getRecordId(traveler))
+    .filter(Boolean);
+  const preparedPassengerTickets = Array.isArray(item.ticketDetails?.passengerTickets)
+    ? item.ticketDetails.passengerTickets.map(prepareTicketPassengerForForm)
+    : [];
+  const preparedTravelerVisas = Array.isArray(item.visaDetails?.travelerVisas)
+    ? item.visaDetails.travelerVisas.map(prepareVisaTravelerForForm)
+    : [];
+  const passengerTickets = itemType === 'air_ticket'
+    ? alignTravelerDetailRows(
+        travelerIds,
+        preparedPassengerTickets,
+        (travelerId) => ({ ...createEmptyTicketPassenger('adult'), travelerId })
+      )
+    : preparedPassengerTickets;
+  const travelerVisas = itemType === 'visit_visa'
+    ? alignTravelerDetailRows(
+        travelerIds,
+        preparedTravelerVisas,
+        (travelerId) => ({ ...createEmptyVisaTraveler('adult'), travelerId })
+      )
+    : preparedTravelerVisas;
 
   return {
     ...createEmptyBookingItem(itemType),
@@ -812,7 +838,7 @@ const prepareBookingItemForForm = (item = {}) => {
 
     vendorPartyId: getRecordId(item.vendorPartyId),
 
-    travelerIds: (item.travelerIds || []).map((traveler) => getRecordId(traveler)).filter(Boolean),
+    travelerIds,
 
     costPrice: item.costPrice ?? '',
 
@@ -851,9 +877,7 @@ const prepareBookingItemForForm = (item = {}) => {
 
       returnDateTime: normalizeDateForInput(item.ticketDetails?.returnDateTime, true),
 
-      passengerTickets: Array.isArray(item.ticketDetails?.passengerTickets)
-        ? item.ticketDetails.passengerTickets.map(prepareTicketPassengerForForm)
-        : [],
+      passengerTickets,
     },
 
     visaDetails: {
@@ -863,15 +887,15 @@ const prepareBookingItemForForm = (item = {}) => {
 
       travelerId: getRecordId(item.visaDetails?.travelerId),
 
-      travelerVisas: Array.isArray(item.visaDetails?.travelerVisas)
-        ? item.visaDetails.travelerVisas.map(prepareVisaTravelerForForm)
-        : [],
+      travelerVisas,
     },
 
     hotelDetails: {
       ...defaultHotelDetails,
 
       ...(item.hotelDetails || {}),
+
+      city: item.hotelDetails?.city || item.hotelDetails?.hotelId?.city || '',
 
       hotelId: getRecordId(item.hotelDetails?.hotelId),
 
@@ -1028,7 +1052,7 @@ export const prepareBookingForForm = (booking = null) => {
 
     receivedAmount: booking.receivedAmount ?? '',
 
-    paymentType: booking.paymentType || 'cash',
+    paymentType: normalizeTravelPaymentTypeForEdit(booking.paymentType),
 
     accountId: getRecordId(booking.accountId),
 

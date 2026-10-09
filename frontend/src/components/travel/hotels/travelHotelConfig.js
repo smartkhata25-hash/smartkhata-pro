@@ -42,6 +42,7 @@ export const hotelFields = [
     labelKey: 'travel.fields.city',
     placeholderKey: 'travel.placeholders.city',
     required: true,
+    hidden: true,
   },
 
   {
@@ -124,6 +125,7 @@ export const quickHotelFields = [
     labelKey: 'travel.fields.city',
     placeholderKey: 'travel.placeholders.city',
     required: true,
+    hidden: true,
   },
 
   {

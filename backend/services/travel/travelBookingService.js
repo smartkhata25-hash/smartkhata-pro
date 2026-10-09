@@ -247,6 +247,34 @@ const normalizeObjectIdArray = (values = [], label) => {
   return ids;
 };
 
+const normalizeObjectIdSequence = (values = [], label) => {
+  const source = Array.isArray(values) ? values : [];
+
+  return source
+    .map((value) => ensureObjectIdString(value, label))
+    .filter(Boolean);
+};
+
+const appendMissingTravelerOccurrences = (travelerIds, rows = []) => {
+  const available = new Map();
+  travelerIds.forEach((id) => {
+    const key = String(id);
+    available.set(key, (available.get(key) || 0) + 1);
+  });
+  const used = new Map();
+
+  rows.forEach((row) => {
+    if (!row?.travelerId) return;
+    const id = String(row.travelerId);
+    const occurrence = used.get(id) || 0;
+    used.set(id, occurrence + 1);
+    if (occurrence >= (available.get(id) || 0)) {
+      travelerIds.push(id);
+      available.set(id, (available.get(id) || 0) + 1);
+    }
+  });
+};
+
 const normalizeCurrency = (value = DEFAULT_TRAVEL_CURRENCY) => {
   const currency = normalizeCurrencyCode(value) || DEFAULT_TRAVEL_CURRENCY;
 
@@ -976,6 +1004,8 @@ const normalizeHotelDetails = (details = {}) => {
   const checkOut = nullableDate(details.checkOut);
 
   return {
+    city: cleanString(details.city),
+
     hotelId: ensureObjectIdString(details.hotelId, "hotel ID") || null,
 
     checkIn,
@@ -1233,7 +1263,7 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
       (rootServiceType === "mixed" ? "service" : rootServiceType),
   );
 
-  const travelerIds = normalizeObjectIdArray(
+  const travelerIds = normalizeObjectIdSequence(
     rawItem.travelerIds,
     "traveler ID",
   );
@@ -1242,30 +1272,16 @@ const normalizeBookingItem = (rawItem = {}, rootServiceType) => {
 
   const visaDetails = normalizeVisaDetails(rawItem.visaDetails || {});
 
-  if (
-    visaDetails.travelerId &&
-    !travelerIds.includes(String(visaDetails.travelerId))
-  ) {
-    travelerIds.push(String(visaDetails.travelerId));
+  if (itemType === "air_ticket") {
+    appendMissingTravelerOccurrences(travelerIds, ticketDetails.passengerTickets);
   }
 
-  ticketDetails.passengerTickets.forEach((passenger) => {
-    if (
-      passenger.travelerId &&
-      !travelerIds.includes(String(passenger.travelerId))
-    ) {
-      travelerIds.push(String(passenger.travelerId));
+  if (itemType === "visit_visa") {
+    if (visaDetails.travelerId && !travelerIds.includes(String(visaDetails.travelerId))) {
+      travelerIds.push(String(visaDetails.travelerId));
     }
-  });
-
-  visaDetails.travelerVisas.forEach((traveler) => {
-    if (
-      traveler.travelerId &&
-      !travelerIds.includes(String(traveler.travelerId))
-    ) {
-      travelerIds.push(String(traveler.travelerId));
-    }
-  });
+    appendMissingTravelerOccurrences(travelerIds, visaDetails.travelerVisas);
+  }
 
   const paxPricing = normalizePaxPricing(rawItem.paxPricing);
   const rowVendorMode = paxPricing.some(
@@ -2605,6 +2621,10 @@ module.exports = {
   normalizeUmrahDetails,
   optionalNonNegativeInteger,
   normalizeStatus,
+  normalizeObjectIdSequence,
+  normalizeBookingItem,
+  normalizeTicketDetails,
+  normalizeVisaDetails,
   normalizePaxPricing,
   normalizeVendorPayments,
   populateBooking,

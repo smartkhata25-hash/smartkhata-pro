@@ -2,6 +2,7 @@ import React from 'react';
 import { FaHotel } from 'react-icons/fa';
 import { TravelFormModal, TravelRelationPicker } from '../master/TravelMasterUI';
 import { hotelFields } from './travelHotelConfig';
+import TravelCityAutocomplete from '../cities/TravelCityAutocomplete';
 
 const TravelHotelFormModal = ({
   activeVendors = [],
@@ -11,6 +12,10 @@ const TravelHotelFormModal = ({
   onChange,
   onQuickAddVendor,
   onAddVendorDetails,
+  cities,
+  hotels = [],
+  canManageCities = false,
+  onCreateCity,
   ...props
 }) => (
   <TravelFormModal
@@ -22,6 +27,27 @@ const TravelHotelFormModal = ({
     onChange={onChange}
     submitIcon={FaHotel}
   >
+    {Array.isArray(cities) ? (
+      <TravelCityAutocomplete
+        value={values.city || ''}
+        onChange={(value) => onChange('city', value)}
+        cities={cities}
+        hotels={hotels}
+        onCreate={canManageCities ? onCreateCity : null}
+        disabled={props.submitting}
+      />
+    ) : (
+      <label className="block min-w-0">
+        <span className="mb-1 block text-xs font-extrabold text-slate-500">City</span>
+        <input
+          value={values.city || ''}
+          onChange={(event) => onChange('city', event.target.value)}
+          required
+          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100"
+        />
+      </label>
+    )}
+
     <TravelRelationPicker
       labelKey="travel.fields.vendor"
       value={values.vendorId || ''}

@@ -9,11 +9,13 @@ import {
   FaPrint,
   FaShareAlt,
   FaTrash,
+  FaUndoAlt,
 } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
   deleteTravelVendorReturn,
+  fetchTravelVendorRefundReceiptHistory,
   fetchTravelVendorReturnById,
   getTravelVendorReturnPdfUrl,
   getTravelVendorReturnPreviewUrl,
@@ -52,7 +54,9 @@ const TravelVendorReturnDetailPage = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [pageError, setPageError] = useState('');
+  const [receiptHistory, setReceiptHistory] = useState([]);
   const canDelete = hasPermission('travel.vendors.manage');
+  const canReceiveRefund = canDelete || hasPermission('travel.payments');
 
   const loadRecord = useCallback(async () => {
     if (!id) return;
@@ -63,6 +67,16 @@ const TravelVendorReturnDetailPage = () => {
 
       const data = await fetchTravelVendorReturnById(id);
       setRecord(data || null);
+      if (data) {
+        const isParty = data.vendorType === 'party' || Boolean(data.vendorPartyId);
+        const target = isParty ? data.vendorPartyId : data.vendorId;
+        const vendorId = typeof target === 'object' ? target?._id : target;
+        setReceiptHistory(await fetchTravelVendorRefundReceiptHistory(
+          'travel_vendor_return',
+          id,
+          isParty ? { vendorType: 'party', vendorPartyId: vendorId } : { vendorType: 'vendor', vendorId }
+        ));
+      }
     } catch (error) {
       console.error('Travel vendor return detail load failed:', error);
       setPageError(t('travel.vendorReturns.loadOneFailed'));
@@ -191,6 +205,20 @@ const TravelVendorReturnDetailPage = () => {
           )}
           {record && (
             <>
+              {canReceiveRefund && Number(record.vendorReturnAmount || 0) > Number(record.amountReceivedNow || 0) && (
+                <TravelActionButton
+                  icon={FaUndoAlt}
+                  variant="success"
+                  onClick={() => {
+                    const isParty = record.vendorType === 'party' || Boolean(record.vendorPartyId);
+                    const target = isParty ? record.vendorPartyId : record.vendorId;
+                    const vendorId = typeof target === 'object' ? target?._id : target;
+                    navigate(`/travel/payments?mode=vendor-refund&vendorType=${isParty ? 'party' : 'vendor'}&${isParty ? 'vendorPartyId' : 'vendorId'}=${vendorId}&sourceType=travel_vendor_return&sourceId=${record._id}`);
+                  }}
+                >
+                  Receive refund
+                </TravelActionButton>
+              )}
               <TravelActionButton icon={FaEye} variant="secondary" onClick={handleOpenPreview}>
                 {t('common.preview')}
               </TravelActionButton>
@@ -234,6 +262,7 @@ const TravelVendorReturnDetailPage = () => {
           {t('travel.common.loading')}
         </div>
       ) : record ? (
+        <div className="space-y-4">
         <section className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-3">
           <DetailLine
             labelKey="travel.vendorReturns.fields.returnNumber"
@@ -269,6 +298,10 @@ const TravelVendorReturnDetailPage = () => {
             value={formatTravelMoney(record.amountReceivedNow)}
           />
           <DetailLine
+            labelKey="Outstanding vendor refund"
+            value={formatTravelMoney(Math.max(Number(record.vendorReturnAmount || 0) - Number(record.amountReceivedNow || 0), 0))}
+          />
+          <DetailLine
             labelKey="travel.fields.paymentType"
             value={
               record.paymentType ? t(`travel.payments.paymentTypes.${record.paymentType}`) : '-'
@@ -284,6 +317,18 @@ const TravelVendorReturnDetailPage = () => {
           />
           <DetailLine labelKey="travel.fields.notes" value={record.notes} />
         </section>
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-sm font-black text-slate-900">Vendor refund receipt history</h2>
+          {!receiptHistory.length ? (
+            <p className="text-sm font-semibold text-slate-500">No vendor refund receipts recorded.</p>
+          ) : receiptHistory.map((entry) => (
+            <div key={entry._id} className="flex items-center justify-between border-b border-slate-100 py-2 last:border-0">
+              <span className="text-sm font-bold text-slate-700">{formatDateWithOptionalTime(entry.date, entry.time)}{entry.isReversed ? ' · Reversed' : ''}</span>
+              <span className="text-sm font-black text-slate-900">{formatTravelMoney(entry.amount)}</span>
+            </div>
+          ))}
+        </section>
+        </div>
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-500">
           {t('travel.vendorReturns.notFound')}

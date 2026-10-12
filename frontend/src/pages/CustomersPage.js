@@ -1,6 +1,7 @@
 // 📁 src/pages/CustomersPage.js
 import axios from 'axios';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import {
   fetchCustomers,
   addCustomer,
@@ -942,7 +943,7 @@ const CustomersPage = () => {
                         marginTop: 2,
                       }}
                     >
-                      Rs. {balance.toFixed(2)}
+                      Rs. {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 
@@ -1032,7 +1033,7 @@ const CustomersPage = () => {
                                 sendWhatsAppReminder({
                                   phone: customer.phone,
                                   customerName: customer.name,
-                                  balance: Number(customer.balance || 0).toFixed(2),
+                                  balance: formatMoneyDisplay(customer.balance),
                                   businessName,
                                   lang: getCurrentLanguage(),
                                   template: whatsAppTemplate,

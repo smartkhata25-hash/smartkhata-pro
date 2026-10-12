@@ -1,6 +1,7 @@
 // src/components/ReceivePaymentList.js
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { getAllReceivePayments, deleteReceivePayment } from '../services/receivePaymentService';
 import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
@@ -619,7 +620,7 @@ const ReceivePaymentList = () => {
                   <td className="border p-2">{getAccountNames(payment)}</td>
 
                   <td className="border p-2 text-center whitespace-nowrap">
-                    {getPaymentTotal(payment).toFixed(2)}
+                    {formatMoneyDisplay(getPaymentTotal(payment))}
                   </td>
 
                   <td className="border p-2">{payment.description || '-'}</td>

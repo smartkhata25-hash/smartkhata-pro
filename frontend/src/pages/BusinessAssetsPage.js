@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
@@ -803,11 +804,7 @@ const AccessDeniedState = () => (
 );
 
 const formatCurrency = (value) => {
-  const amount = toNumber(value);
-
-  return `${t('currency.rs')} ${amount.toLocaleString('en-PK', {
-    maximumFractionDigits: 0,
-  })}`;
+  return `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 };
 
 const formatNumber = (value, fractionDigits = 0) => {

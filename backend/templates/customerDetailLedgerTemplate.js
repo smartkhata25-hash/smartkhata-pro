@@ -1,6 +1,7 @@
 // Customer Detailed Ledger HTML Template
 
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -24,12 +25,7 @@ const safeNumber = (value) => {
 
 const money = (value) => {
   const num = safeNumber(value);
-
-  if (num < 0) {
-    return `(${Math.abs(num).toFixed(2)})`;
-  }
-
-  return num.toFixed(2);
+  return num < 0 ? `(${formatMoney(Math.abs(num))})` : formatMoney(num);
 };
 
 const getSourceLabel = (sourceType, fallback, lang) => {

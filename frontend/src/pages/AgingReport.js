@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { getAgingReport } from '../services/agingService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import { formatMoneyDisplay } from '../utils/money';
 
 const AgingReport = () => {
   const navigate = useNavigate();
@@ -23,11 +24,7 @@ const AgingReport = () => {
       FORMAT AMOUNT
   ================================= */
 
-  const formatAmount = (num) =>
-    new Intl.NumberFormat('en-PK', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(num || 0);
+  const formatAmount = formatMoneyDisplay;
 
   /* ================================
       FETCH DATA

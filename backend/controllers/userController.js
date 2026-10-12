@@ -3,6 +3,7 @@ const PrintSetting = require("../models/PrintSetting");
 const { defaultSettings } = require("./printSettingController");
 const { logActivity } = require("../utils/activityLogger");
 const { normalizeModuleConfig } = require("../utils/moduleConfig");
+const { getEffectivePermissions, getPermissionModules } = require("../utils/permissionList");
 const { MODULE_SCOPES } = require("../utils/moduleScope");
 const createBaseAccountsForUser = require("../utils/createBaseAccounts");
 const createDefaultExpenseTitlesForUser = require("../utils/createDefaultExpenseTitles");
@@ -65,7 +66,6 @@ const savePersonalInfo = async (req, res) => {
       mobile: user.mobile || "",
       address: user.address || "",
     };
-
     user.fullName = String(fullName || "").trim();
     user.cnic = String(cnic || "").trim();
     user.mobile = String(mobile || "").trim();
@@ -149,13 +149,17 @@ const saveBusinessInfo = async (req, res) => {
       taxNumber: user.taxNumber || "",
       ...normalizeModuleConfig(user),
     };
+    const previousModuleConfig = normalizeModuleConfig(user);
 
     user.businessName = String(businessName || "").trim();
     user.businessType = String(businessType || "").trim();
     user.currency = String(currency || "").trim();
     user.taxNumber = String(taxNumber || "").trim();
 
-    if (enabledModules !== undefined || defaultModule !== undefined) {
+    const moduleConfigurationSubmitted =
+      enabledModules !== undefined || defaultModule !== undefined;
+
+    if (moduleConfigurationSubmitted) {
       const moduleConfig = normalizeModuleConfig({
         enabledModules:
           enabledModules !== undefined ? enabledModules : user.enabledModules,
@@ -167,6 +171,33 @@ const saveBusinessInfo = async (req, res) => {
     }
 
     await user.save();
+
+    const nextModuleConfig = normalizeModuleConfig(user);
+    const disabledModules = Object.keys(nextModuleConfig.enabledModules).filter(
+      (moduleKey) => !nextModuleConfig.enabledModules[moduleKey],
+    );
+
+    if (moduleConfigurationSubmitted) {
+      const staffUsers = await User.find({
+        businessOwnerId: ownerId,
+        accountRole: "staff",
+        isDeleted: { $ne: true },
+      }).select("permissions permissionModules");
+
+      await Promise.all(
+        staffUsers.map((staffUser) => {
+          const reviewedModules = Array.isArray(staffUser.permissionModules)
+            ? staffUser.permissionModules
+            : getPermissionModules(staffUser.permissions || []).filter(
+                (moduleKey) => previousModuleConfig.enabledModules[moduleKey],
+              );
+          staffUser.permissionModules = reviewedModules.filter(
+            (moduleKey) => !disabledModules.includes(moduleKey),
+          );
+          return staffUser.save();
+        }),
+      );
+    }
 
     const printSetting = await getOrCreatePrintSetting(ownerId);
 
@@ -223,7 +254,7 @@ const getProfile = async (req, res) => {
       ),
 
       User.findById(actorId).select(
-        "name fullName email mobile accountRole permissions staffStatus mustChangePassword",
+        "name fullName email mobile accountRole permissions permissionModules staffStatus mustChangePassword",
       ),
     ]);
 
@@ -252,7 +283,14 @@ const getProfile = async (req, res) => {
         email: loggedInUser.email || "",
         mobile: loggedInUser.mobile || "",
         accountRole: loggedInUser.accountRole || "owner",
-        permissions: loggedInUser.permissions || [],
+        permissions:
+          (loggedInUser.accountRole || "owner") === "staff"
+            ? getEffectivePermissions(
+                loggedInUser.permissions || [],
+                normalizeModuleConfig(owner),
+                loggedInUser.permissionModules,
+              )
+            : loggedInUser.permissions || [],
         staffStatus: loggedInUser.staffStatus || "active",
         mustChangePassword: Boolean(loggedInUser.mustChangePassword),
       },

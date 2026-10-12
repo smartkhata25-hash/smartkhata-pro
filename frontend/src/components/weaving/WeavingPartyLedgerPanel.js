@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import {
   FaArrowLeft,
   FaDownload,
@@ -28,15 +29,9 @@ const control =
   'h-9 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100';
 
 const money = (value) =>
-  `Rs. ${Number(value || 0).toLocaleString('en-PK', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  `Rs. ${formatMoneyDisplay(value)}`;
 
-const ledgerAmount = (value) =>
-  Number(value || 0).toLocaleString('en-PK', {
-    maximumFractionDigits: 2,
-  });
+const ledgerAmount = formatMoneyDisplay;
 
 const ledgerDate = (value) => {
   const raw = String(value || '').slice(0, 10);

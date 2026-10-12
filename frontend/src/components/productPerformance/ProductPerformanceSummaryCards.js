@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { t } from '../../i18n/i18n';
 
 const SUMMARY_CARD_CONFIG = Object.freeze([
@@ -207,7 +208,7 @@ const numberFormatter = new Intl.NumberFormat();
 const formatNumber = (value) => numberFormatter.format(getSafeNumber(value));
 
 const formatCurrency = (value) =>
-  `${t('currency.rs')} ${numberFormatter.format(Math.round(getSafeNumber(value)))}`;
+  `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 
 const getCardValue = (card, summary) => {
   if (!summary) {

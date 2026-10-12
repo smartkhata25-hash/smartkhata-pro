@@ -358,24 +358,113 @@ const ALL_PERMISSIONS = Object.values(PERMISSIONS).flatMap((group) =>
   Object.values(group),
 );
 
-const DEFAULT_STAFF_PERMISSIONS = [
-  PERMISSIONS.SALES.VIEW,
-  PERMISSIONS.SALES.CREATE,
+// Staff accounts start with no access. Owners must explicitly grant every capability.
+const DEFAULT_STAFF_PERMISSIONS = [];
 
-  PERMISSIONS.PURCHASES.VIEW,
-  PERMISSIONS.REFUNDS.VIEW,
-  PERMISSIONS.PURCHASE_RETURNS.VIEW,
+const PERMISSION_SCOPES = Object.freeze({
+  TRADING: "trading",
+  TRAVEL: "travel",
+  WEAVING: "weaving",
+  SHARED: "shared",
+  OWNER: "owner",
+});
 
-  PERMISSIONS.RECEIVE_PAYMENTS.VIEW,
-  PERMISSIONS.PAY_BILLS.VIEW,
+const TRADING_GROUPS = new Set([
+  "DASHBOARD", "SALES", "REFUNDS", "PURCHASES", "PURCHASE_RETURNS",
+  "RECEIVE_PAYMENTS", "PAY_BILLS", "PRODUCTS", "INVENTORY", "CUSTOMERS",
+  "SUPPLIERS", "PARTIES",
+]);
 
-  PERMISSIONS.PRODUCTS.VIEW,
-  PERMISSIONS.INVENTORY.VIEW,
+const SHARED_GROUPS = new Set([
+  "EMPLOYEES", "PAYROLL", "EXPENSES", "ACCOUNTS", "JOURNAL", "REPORTS",
+  "BUSINESS_VALUE", "BUSINESS_ASSETS", "BUSINESS_LIABILITIES",
+  "BUSINESS_RECEIVABLE_LOANS", "SETTINGS",
+]);
 
-  PERMISSIONS.CUSTOMERS.VIEW,
-  PERMISSIONS.SUPPLIERS.VIEW,
-  PERMISSIONS.PARTIES.VIEW,
+const OWNER_ONLY_PERMISSIONS = new Set([
+  ...Object.values(PERMISSIONS.STAFF),
+  PERMISSIONS.SETTINGS.PERSONAL_INFO,
+  PERMISSIONS.SETTINGS.BUSINESS_INFO,
+]);
+const TRADING_PERMISSION_OVERRIDES = new Set([
+  PERMISSIONS.REPORTS.MONTHLY_SALES,
+  PERMISSIONS.REPORTS.STOCK_VALUE,
+  PERMISSIONS.REPORTS.PRODUCT_PERFORMANCE,
+  PERMISSIONS.SETTINGS.IMPORT,
+]);
+
+const getPermissionScope = (permission) => {
+  if (OWNER_ONLY_PERMISSIONS.has(permission)) return PERMISSION_SCOPES.OWNER;
+  if (String(permission).startsWith("travel.")) return PERMISSION_SCOPES.TRAVEL;
+  if (String(permission).startsWith("weaving.")) return PERMISSION_SCOPES.WEAVING;
+  if (TRADING_PERMISSION_OVERRIDES.has(permission)) return PERMISSION_SCOPES.TRADING;
+
+  const groupName = Object.keys(PERMISSIONS).find((key) =>
+    Object.values(PERMISSIONS[key]).includes(permission),
+  );
+
+  if (TRADING_GROUPS.has(groupName)) return PERMISSION_SCOPES.TRADING;
+  if (SHARED_GROUPS.has(groupName)) return PERMISSION_SCOPES.SHARED;
+  return null;
+};
+
+const isPermissionAvailable = (permission, moduleConfig = {}) => {
+  const scope = getPermissionScope(permission);
+  if (!scope) return false;
+  if (scope === PERMISSION_SCOPES.OWNER) return true;
+  if (scope === PERMISSION_SCOPES.SHARED) return true;
+  return moduleConfig?.enabledModules?.[scope] === true;
+};
+
+const getAllowedPermissions = (moduleConfig = {}) =>
+  ALL_PERMISSIONS.filter(
+    (permission) =>
+      getPermissionScope(permission) !== PERMISSION_SCOPES.OWNER &&
+      isPermissionAvailable(permission, moduleConfig),
+  );
+
+const getPermissionModules = (permissions = []) => [
+  ...new Set(
+    sanitizePermissions(permissions)
+      .map(getPermissionScope)
+      .filter((scope) => ["trading", "travel", "weaving"].includes(scope)),
+  ),
 ];
+
+const getEffectivePermissions = (
+  permissions = [],
+  moduleConfig = {},
+  reviewedModules,
+) => {
+  const hasReviewState = Array.isArray(reviewedModules);
+  return sanitizePermissions(permissions).filter((permission) => {
+    const scope = getPermissionScope(permission);
+    if (!isPermissionAvailable(permission, moduleConfig)) return false;
+    if (scope === PERMISSION_SCOPES.SHARED) return true;
+    return !hasReviewState || reviewedModules.includes(scope);
+  });
+};
+
+const getPermissionCatalog = (moduleConfig = {}) => {
+  const allowed = new Set(getAllowedPermissions(moduleConfig));
+  const labels = { trading: "Trading", travel: "Travel", weaving: "Weaving", shared: "Shared" };
+
+  return Object.entries(labels)
+    .filter(([scope]) => scope === "shared" || moduleConfig?.enabledModules?.[scope] === true)
+    .map(([scope, label]) => ({
+      key: scope,
+      label,
+      groups: Object.entries(PERMISSIONS)
+        .map(([group, values]) => ({
+          key: group.toLowerCase(),
+          permissions: Object.values(values).filter(
+            (permission) => allowed.has(permission) && getPermissionScope(permission) === scope,
+          ),
+        }))
+        .filter((group) => group.permissions.length > 0),
+    }))
+    .filter((section) => section.groups.length > 0);
+};
 
 const isValidPermission = (permission) => {
   return ALL_PERMISSIONS.includes(permission);
@@ -398,4 +487,11 @@ module.exports = {
   isValidPermission,
   sanitizePermissions,
   hasPermission,
+  PERMISSION_SCOPES,
+  getPermissionScope,
+  isPermissionAvailable,
+  getAllowedPermissions,
+  getEffectivePermissions,
+  getPermissionModules,
+  getPermissionCatalog,
 };

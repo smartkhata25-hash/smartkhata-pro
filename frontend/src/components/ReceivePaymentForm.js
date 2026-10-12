@@ -18,7 +18,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
-import { sanitizeMoneyInput } from '../utils/money';
+import { formatMoneyDisplay, sanitizeMoneyInput } from '../utils/money';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -1309,10 +1309,10 @@ const ReceivePaymentForm = () => {
                   <div className="flex justify-between font-semibold text-sm">
                     <span>{t('total')}</span>
                     <span>
-                      {(
+                      {formatMoneyDisplay(
                         paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
                         Number(formData.discountAmount || 0)
-                      ).toFixed(2)}
+                      )}
                     </span>
                   </div>
                 </div>
@@ -1399,13 +1399,13 @@ const ReceivePaymentForm = () => {
                       <td className="p-2 border">{e.billNo || '-'}</td>
                       <td className="p-2 border">{e.description || '-'}</td>
                       <td className="p-2 border text-right font-medium text-green-700">
-                        {e.credit?.toFixed(2) || '0.00'}
+                        {formatMoneyDisplay(e.credit)}
                       </td>
                       <td className="p-2 border text-right font-medium text-red-600">
-                        {e.debit?.toFixed(2) || '0.00'}
+                        {formatMoneyDisplay(e.debit)}
                       </td>
                       <td className="p-2 border text-right font-bold text-blue-700">
-                        {e.runningBalance?.toFixed(2) || '0.00'}
+                        {formatMoneyDisplay(e.runningBalance)}
                       </td>
                     </tr>
                   ))}
@@ -1417,13 +1417,13 @@ const ReceivePaymentForm = () => {
                     </td>
 
                     <td className="p-2 border text-right text-green-700">
-                      {totalCredit.toFixed(2)}
+                      {formatMoneyDisplay(totalCredit)}
                     </td>
 
-                    <td className="p-2 border text-right text-red-600">{totalDebit.toFixed(2)}</td>
+                    <td className="p-2 border text-right text-red-600">{formatMoneyDisplay(totalDebit)}</td>
 
                     <td className="p-2 border text-right text-blue-700 font-bold">
-                      {closingBalance.toFixed(2)}
+                      {formatMoneyDisplay(closingBalance)}
                     </td>
                   </tr>
                 </tfoot>

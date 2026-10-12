@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { FaTimes } from 'react-icons/fa';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from './WeavingSaleSaveOutput';
 
@@ -36,6 +37,6 @@ export default function WeavingPostedSaleEditModal({ invoice, meta, saving, onCl
     <WeavingSalePaymentSection form={form} onChange={patch} total={grand} accounts={meta.paymentAccounts} date={form.invoiceDate} />
     {Number(form.finalRate) !== Number(invoice.originalRate) && <Field label="Rate Override Reason" className="sm:col-span-2"><input className={input} value={form.rateOverrideReason} onChange={(event) => patch({ rateOverrideReason: event.target.value })} /></Field>}
     <Field label={t('weaving.sales.notes')} className="col-span-full"><textarea className={`${input} h-20 py-2`} value={form.notes} onChange={(event) => patch({ notes: event.target.value })} /></Field>
-    <div className="col-span-full flex items-center justify-between rounded-md bg-teal-50 p-4"><span>Grand Total</span><b>Rs. {grand.toLocaleString('en-PK')}</b></div><div className="col-span-full flex flex-wrap justify-end gap-2">{error && <p role="alert" className="text-amber-800">{error}</p>}<button type="button" onClick={() => { setForm(initial); setError(''); }} className="px-3">{t('weaving.salesCleanup.reset')}</button><button type="button" onClick={onClose} className="h-9 rounded-md border px-3 text-sm font-semibold">Cancel</button><WeavingSaleSaveOutput onSave={save} disabled={saving} /><button type="button" disabled={saving} onClick={save} className="h-9 rounded-md bg-teal-700 px-3 text-sm font-semibold text-white disabled:opacity-40">{saving ? 'Saving...' : 'Save'}</button></div>
+    <div className="col-span-full flex items-center justify-between rounded-md bg-teal-50 p-4"><span>Grand Total</span><b>Rs. {formatMoneyDisplay(grand)}</b></div><div className="col-span-full flex flex-wrap justify-end gap-2">{error && <p role="alert" className="text-amber-800">{error}</p>}<button type="button" onClick={() => { setForm(initial); setError(''); }} className="px-3">{t('weaving.salesCleanup.reset')}</button><button type="button" onClick={onClose} className="h-9 rounded-md border px-3 text-sm font-semibold">Cancel</button><WeavingSaleSaveOutput onSave={save} disabled={saving} /><button type="button" disabled={saving} onClick={save} className="h-9 rounded-md bg-teal-700 px-3 text-sm font-semibold text-white disabled:opacity-40">{saving ? 'Saving...' : 'Save'}</button></div>
   </div></section></div>;
 }

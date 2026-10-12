@@ -1,6 +1,7 @@
 // 📁 src/pages/SupplierDetailLedgerPage.js
 // بسم اللہ الرحمن الرحیم
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 
@@ -701,22 +702,22 @@ export default function SupplierDetailLedgerPage() {
         <>
           <div className="card">
             <div style={{ fontSize: 12 }}>{t('ledger.opening')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.opening.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.opening)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#16a34a' }}>{t('debit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.debit.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.debit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#dc2626' }}>{t('credit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.credit.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.credit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#7c2d12' }}>{t('ledger.closing')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.closing.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.closing)}</div>
           </div>
         </>
       }
@@ -765,8 +766,8 @@ export default function SupplierDetailLedgerPage() {
                         <tr key={i}>
                           <td>{it.productName}</td>
                           <td>{it.quantity}</td>
-                          <td>{it.rate.toFixed(2)}</td>
-                          <td>{it.total.toFixed(2)}</td>
+                          <td>{formatMoneyDisplay(it.rate)}</td>
+                          <td>{formatMoneyDisplay(it.total)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -778,19 +779,19 @@ export default function SupplierDetailLedgerPage() {
                     <tr>
                       <td align="right">{t('debit')}:</td>
                       <td align="right" className="amount-debit">
-                        {blk.debit ? blk.debit.toFixed(2) : '—'}
+                        {blk.debit ? formatMoneyDisplay(blk.debit) : '—'}
                       </td>
                     </tr>
                     <tr>
                       <td align="right">{t('credit')}:</td>
                       <td align="right" className="amount-credit">
-                        {blk.credit ? blk.credit.toFixed(2) : '—'}
+                        {blk.credit ? formatMoneyDisplay(blk.credit) : '—'}
                       </td>
                     </tr>
                     <tr>
                       <td align="right">{t('balance')}:</td>
                       <td align="right" className="amount-balance">
-                        {blk.balance.toFixed(2)}
+                        {formatMoneyDisplay(blk.balance)}
                       </td>
                     </tr>
                   </tbody>

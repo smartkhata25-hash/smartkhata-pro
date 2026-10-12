@@ -13,6 +13,7 @@ import {
 
 import { DEFAULT_TRAVEL_CURRENCY } from '../../../config/travelConfig';
 import { t } from '../../../i18n/i18n';
+import { formatMoneyDisplay } from '../../../utils/money';
 
 export const useIsCompactTravelView = () => {
   const [isCompact, setIsCompact] = useState(() => window.innerWidth < 768);
@@ -34,10 +35,9 @@ export const normalizeSearch = (value = '') =>
     .toLowerCase();
 
 export const formatTravelMoney = (value, currency = '') => {
-  const numericValue = Number(value || 0);
   const prefix = `${String(currency || DEFAULT_TRAVEL_CURRENCY).toUpperCase()} `;
 
-  return `${prefix}${numericValue.toLocaleString('en-GB')}`;
+  return `${prefix}${formatMoneyDisplay(value)}`;
 };
 
 export const TravelActionButton = ({

@@ -1,3 +1,5 @@
+const { formatMoney } = require("../utils/money");
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -45,11 +47,7 @@ const LABELS = {
   },
 };
 
-const formatAmount = (value) =>
-  safeNumber(value).toLocaleString("en-PK", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+const formatAmount = formatMoney;
 
 const generateBillWiseAgingLedgerHTML = (data, pageSize = "A4") => {
   const lang = data?.lang === "ur" ? "ur" : "en";

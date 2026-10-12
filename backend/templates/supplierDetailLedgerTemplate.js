@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -13,7 +14,7 @@ const {
 
 const money = (value) => {
   const num = Number(value || 0);
-  return num < 0 ? `(${Math.abs(num).toFixed(2)})` : num.toFixed(2);
+  return num < 0 ? `(${formatMoney(Math.abs(num))})` : formatMoney(num);
 };
 
 const safeText = (value, fallback = "-") => {

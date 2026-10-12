@@ -7,6 +7,7 @@ import {
   BUSINESS_RECEIVABLE_BORROWER_TYPES,
   BUSINESS_RECEIVABLE_PAYMENT_METHODS,
   createBusinessReceivableLoan,
+  formatReceivableLoanAmount,
   getEmptyBusinessReceivableLoan,
   updateBusinessReceivableLoan,
 } from '../../services/businessReceivableLoanService';
@@ -489,7 +490,7 @@ const BusinessReceivableLoanForm = ({
                   </span>
 
                   <span className="text-sm font-black text-slate-700">
-                    {Number(loan?.originalAmount || 0).toLocaleString('en-PK')}
+                    {formatReceivableLoanAmount(loan?.originalAmount)}
                   </span>
                 </div>
               )}

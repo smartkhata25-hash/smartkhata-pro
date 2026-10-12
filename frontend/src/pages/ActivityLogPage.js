@@ -9,6 +9,12 @@ import {
   getActivitySummary,
   getActivityUsers,
 } from '../services/activityService';
+import { getStoredUser } from '../utils/permissionHelper';
+import {
+  getActivityScopeOptions,
+  getEnabledActivityScopes,
+  resolveActivityScope,
+} from '../utils/activityScope';
 
 const EMPTY_PAGINATION = {
   page: 1,
@@ -74,8 +80,11 @@ const ActivityLogPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isTravelWorkspace = location.pathname.startsWith('/travel');
-  const moduleScope = isTravelWorkspace ? 'travel' : 'trading';
+  const storedUser = getStoredUser() || {};
+  const enabledModuleScopes = getEnabledActivityScopes(storedUser);
+  const activityScopeOptions = getActivityScopeOptions(storedUser);
+  const initialScope = resolveActivityScope(storedUser, location);
+  const [moduleScope, setModuleScope] = useState(initialScope);
 
   const [activities, setActivities] = useState([]);
   const [users, setUsers] = useState([]);
@@ -316,6 +325,13 @@ const ActivityLogPage = () => {
 
   const currentPage = Number(pagination.page || filters.page || 1);
   const totalPages = Number(pagination.pages || 0);
+  const backPath =
+    location.state?.returnTo ||
+    (moduleScope === 'travel'
+      ? '/travel/dashboard'
+      : moduleScope === 'weaving'
+        ? '/weaving/dashboard'
+        : '/staff');
 
   return (
     <div className="min-h-full bg-gray-50 p-3 md:p-6">
@@ -339,14 +355,42 @@ const ActivityLogPage = () => {
 
                 <button
                   type="button"
-                  onClick={() => navigate(isTravelWorkspace ? '/travel/dashboard' : '/staff')}
+                  onClick={() => navigate(backPath)}
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
                 >
-                  {isTravelWorkspace ? '← Travel Dashboard' : '← Staff Management'}
+                  ← Back
                 </button>
               </div>
             </div>
           </div>
+
+          {enabledModuleScopes.length > 1 && (
+            <div className="px-4 py-4 flex flex-wrap gap-2 border-b border-gray-200">
+              {activityScopeOptions.map((key) => ({
+                  key,
+                  label: key === 'all'
+                    ? 'All Activity'
+                    : `${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+                })).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => {
+                    setModuleScope(option.key);
+                    setFilters((current) => ({ ...current, page: 1 }));
+                    setAppliedFilters((current) => ({ ...current, page: 1 }));
+                  }}
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold border ${
+                    moduleScope === option.key
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="p-4 border-b border-gray-200">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

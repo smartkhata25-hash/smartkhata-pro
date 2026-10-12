@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import ProductDropdown from './ProductDropdown';
 import { t } from '../i18n/i18n';
-import { roundMoney } from '../utils/money';
+import { formatMoneyDisplay, roundMoney } from '../utils/money';
 
 const blankRow = () => ({
   search: '',
@@ -348,7 +348,7 @@ const InvoiceTable = ({
 
                     {/* Amount */}
                     <td className="border px-0 py-0 md:p-0 text-center font-semibold">
-                      {item.amount ? item.amount.toFixed(2) : '0.00'}
+                      {formatMoneyDisplay(item.amount)}
                     </td>
 
                     {/* Sale Price */}
@@ -373,7 +373,7 @@ const InvoiceTable = ({
                     {/* Cost */}
                     {!hideCost && (
                       <td className="border px-2 py-1 md:p-1 text-center">
-                        {item.cost ? item.cost.toFixed(2) : '0.00'}
+                        {formatMoneyDisplay(item.cost)}
                       </td>
                     )}
 

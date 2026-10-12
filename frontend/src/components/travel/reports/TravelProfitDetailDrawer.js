@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { formatMoneyDisplay } from '../../../utils/money';
 import {
   FaChartLine,
   FaFileInvoiceDollar,
@@ -15,10 +16,7 @@ const getSafeNumber = (value) => {
 };
 
 const formatMoney = (value) =>
-  `Rs. ${getSafeNumber(value).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  `Rs. ${formatMoneyDisplay(value)}`;
 
 const formatPercent = (value) =>
   `${getSafeNumber(value).toLocaleString('en-GB', {

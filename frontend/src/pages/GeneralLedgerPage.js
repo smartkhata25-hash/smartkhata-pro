@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { getLedgerByAccount } from '../services/journalService';
 import { getAllAccounts } from '../services/accountService';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -276,12 +277,12 @@ const GeneralLedgerPage = () => {
                       {row.description}
                     </td>
 
-                    <td className="debit">{row.debit.toFixed(2)}</td>
+                    <td className="debit">{formatMoneyDisplay(row.debit)}</td>
 
-                    <td className="credit">{row.credit.toFixed(2)}</td>
+                    <td className="credit">{formatMoneyDisplay(row.credit)}</td>
 
                     <td className={row.balance < 0 ? 'balance-negative' : 'balance-positive'}>
-                      {row.balance.toFixed(2)}
+                      {formatMoneyDisplay(row.balance)}
                     </td>
                   </tr>
                 ))}
@@ -298,19 +299,19 @@ const GeneralLedgerPage = () => {
             <h3>{t('ledger.summary')}</h3>
 
             <p>
-              <strong>{t('ledger.opening')}:</strong> {summary.opening.toFixed(2)}
+              <strong>{t('ledger.opening')}:</strong> {formatMoneyDisplay(summary.opening)}
             </p>
 
             <p>
-              <strong>{t('ledger.totalDebit')}:</strong> {summary.totalDebit.toFixed(2)}
+              <strong>{t('ledger.totalDebit')}:</strong> {formatMoneyDisplay(summary.totalDebit)}
             </p>
 
             <p>
-              <strong>{t('ledger.totalCredit')}:</strong> {summary.totalCredit.toFixed(2)}
+              <strong>{t('ledger.totalCredit')}:</strong> {formatMoneyDisplay(summary.totalCredit)}
             </p>
 
             <p>
-              <strong>{t('ledger.closing')}:</strong> {summary.closing.toFixed(2)}
+              <strong>{t('ledger.closing')}:</strong> {formatMoneyDisplay(summary.closing)}
             </p>
           </div>
         )}
@@ -364,15 +365,15 @@ const GeneralLedgerPage = () => {
             </p>
 
             <p>
-              <strong>{t('debit')}:</strong> {selectedRow.debit.toFixed(2)}
+              <strong>{t('debit')}:</strong> {formatMoneyDisplay(selectedRow.debit)}
             </p>
 
             <p>
-              <strong>{t('credit')}:</strong> {selectedRow.credit.toFixed(2)}
+              <strong>{t('credit')}:</strong> {formatMoneyDisplay(selectedRow.credit)}
             </p>
 
             <p>
-              <strong>{t('balance')}:</strong> {selectedRow.balance.toFixed(2)}
+              <strong>{t('balance')}:</strong> {formatMoneyDisplay(selectedRow.balance)}
             </p>
 
             <button className="btn gradient-red" onClick={closeModal}>

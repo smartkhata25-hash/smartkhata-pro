@@ -37,6 +37,7 @@ TravelActionButton,
 } from '../../components/travel/master/TravelMasterUI';
 import { hasPermission } from '../../utils/permissionHelper';
 import { buildTravelRouteState } from '../../utils/travelContext';
+import { formatMoneyDisplay } from '../../utils/money';
 import {
   getFirstStayDate,
   getLastStayCheckoutDate,
@@ -81,10 +82,7 @@ const numberValue = (value, fallback = 0) => {
 const roundMoney = (value) => Number(Number(value || 0).toFixed(2));
 
 const formatMoney = (amount, currency = 'SAR') =>
-  `${currency} ${Number(amount || 0).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  `${currency} ${formatMoneyDisplay(amount)}`;
 
 const upsertRecord = (records, record) => {
   if (!record?._id) return records;

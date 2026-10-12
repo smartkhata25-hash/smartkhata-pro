@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import {
   createPurchaseReturn,
   updatePurchaseReturn,
@@ -1067,7 +1068,7 @@ const PurchaseReturnForm = ({ token }) => {
                       <div>📦 Qty: {history.quantity || 0}</div>
 
                       <div className="font-bold text-green-700">
-                        💰 Rate: {Number(history.price || 0).toFixed(2)}
+                        💰 Rate: {formatMoneyDisplay(history.price)}
                       </div>
                     </div>
                   ))}
@@ -1080,7 +1081,7 @@ const PurchaseReturnForm = ({ token }) => {
 
       <div className="sticky bottom-0 bg-white border-t py-3 flex justify-between items-center">
         <div className="font-semibold text-lg">
-          {t('total')}: {totalAmount.toFixed(2)}
+          {t('total')}: {formatMoneyDisplay(totalAmount)}
         </div>
 
         <div className="flex gap-2">

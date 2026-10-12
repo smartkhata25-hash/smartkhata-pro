@@ -27,6 +27,7 @@ import CustomerForm from './CustomerForm';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
 import {
+  formatMoneyDisplay,
   getInvoiceItemMoney,
   moneyNumber,
   roundMoney,
@@ -2397,30 +2398,30 @@ const InvoiceForm = ({
               {/* 🔹 RIGHT SIDE – Totals */}
               <div className="col-span-4 text-right space-y-1">
                 <p>
-                  {t('total')}: Rs. {totalAmount.toFixed(2)}
+                  {t('total')}: Rs. {formatMoneyDisplay(totalAmount)}
                 </p>
                 <p>
-                  {t('discount')}: Rs. {finalDiscount.toFixed(2)}
+                  {t('discount')}: Rs. {formatMoneyDisplay(finalDiscount)}
                 </p>
                 <p className="text-xl font-bold">
-                  {t('netTotal')}: Rs. {grandTotal.toFixed(2)}
+                  {t('netTotal')}: Rs. {formatMoneyDisplay(grandTotal)}
                 </p>
                 <p>
-                  {t('paid')}: Rs. {numericPaidAmount.toFixed(2)}
+                  {t('paid')}: Rs. {formatMoneyDisplay(numericPaidAmount)}
                 </p>
                 <p className="text-red-600 font-semibold">
-                  {t('remaining')}: Rs. {(grandTotal - numericPaidAmount).toFixed(2)}
+                  {t('remaining')}: Rs. {formatMoneyDisplay(grandTotal - numericPaidAmount)}
                 </p>
                 {printSettings?.sales?.settings?.showCustomerTotalBalance !== false && (
                   <p className="text-blue-600 font-semibold">
                     {t('customerTotalBalance')}: Rs.{' '}
-                    {(editingInvoiceFromAPI
+                    {formatMoneyDisplay(editingInvoiceFromAPI
                       ? customerBalance -
                         ((editingInvoiceFromAPI.totalAmount || 0) -
                           (editingInvoiceFromAPI.paidAmount || 0)) +
                         (grandTotal - numericPaidAmount)
                       : customerBalance + (grandTotal - numericPaidAmount)
-                    ).toFixed(2)}
+                    )}
                   </p>
                 )}
               </div>
@@ -2455,7 +2456,7 @@ const InvoiceForm = ({
               <p className="text-sm text-gray-700 mb-4">{t('invoice.overpaymentMessage')}</p>
 
               <p className="text-sm font-semibold text-green-600 mb-6">
-                Extra Rs. {overpayAmount.toFixed(2)} {t('invoice.adjustPrevious')}
+                Extra Rs. {formatMoneyDisplay(overpayAmount)} {t('invoice.adjustPrevious')}
               </p>
 
               <div className="flex justify-end gap-3">

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FaBook, FaEdit, FaRedo, FaTrash, FaUserCircle } from 'react-icons/fa';
 
@@ -49,7 +50,7 @@ const formatDate = (value) => {
   return date.toLocaleDateString('en-GB');
 };
 
-const formatMoney = (value) => Number(value || 0).toLocaleString('en-GB');
+const formatMoney = formatMoneyDisplay;
 
 const pad2 = (value) => String(value).padStart(2, '0');
 
@@ -97,7 +98,7 @@ const getOpeningBalanceLabel = (openingBalance = {}) => {
       ? 'weaving.employees.openingBalance.receivable'
       : 'weaving.employees.openingBalance.payable';
 
-  return `${amount.toLocaleString('en-GB')} - ${t(typeKey)}`;
+  return `${formatMoneyDisplay(amount)} - ${t(typeKey)}`;
 };
 
 const getSalaryTypeLabel = (salaryType) =>

@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FaExchangeAlt, FaTimes } from 'react-icons/fa';
 
 import { TravelActionButton } from '../../master/TravelMasterUI';
+import { formatMoneyDisplay } from '../../../../utils/money';
 
-const money = (value) =>
-  Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const money = formatMoneyDisplay;
 
 const TravelCurrencyRateModal = ({
   open,

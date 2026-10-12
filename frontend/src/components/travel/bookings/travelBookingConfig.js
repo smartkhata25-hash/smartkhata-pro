@@ -1,4 +1,5 @@
 import { DEFAULT_TRAVEL_CURRENCY, getTravelCurrencyOptions } from '../../../config/travelConfig';
+import { formatMoneyDisplay } from '../../../utils/money';
 
 import {
   formatBusinessDateForDisplay,
@@ -1115,10 +1116,7 @@ export const formatDateTime = (value) => {
 };
 
 export const formatBookingMoney = (amount, currency = DEFAULT_TRAVEL_CURRENCY) =>
-  `${currency || DEFAULT_TRAVEL_CURRENCY} ${Number(amount || 0).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  `${currency || DEFAULT_TRAVEL_CURRENCY} ${formatMoneyDisplay(amount)}`;
 
 export const getCustomerName = (customer) =>
   typeof customer === 'object' ? customer?.name || '-' : '-';

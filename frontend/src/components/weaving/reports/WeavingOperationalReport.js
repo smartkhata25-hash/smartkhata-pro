@@ -11,10 +11,11 @@ import {
 import WeavingReportControls from './WeavingReportControls';
 import WeavingProfitAnalysis from '../profit/WeavingProfitAnalysis';
 import { useWeavingFeedback } from '../WeavingFeedbackModal';
+import { formatMoneyDisplay } from '../../../utils/money';
 
 const loaders = { production: getWeavingProductionReport, looms: getWeavingLoomPerformance, quality: getWeavingQualityProduction, stock: getWeavingFabricStockReport, sales: getWeavingSalesReport, rejection: getWeavingPendingRejectionReport, profit: getWeavingProfitReport };
 const number = (value) => value === null || value === undefined ? '-' : Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
-const money = (value) => value === null || value === undefined ? '-' : `Rs ${number(value)}`;
+const money = (value) => value === null || value === undefined ? '-' : `Rs ${formatMoneyDisplay(value)}`;
 const titles = { production: 'productionReport', looms: 'loomPerformance', quality: 'qualityProduction', stock: 'fabricStockReport', sales: 'salesConversion', rejection: 'pendingRejection', profit: 'profitReport' };
 const baseParams = { preset: 'this_month', from: '', to: '', loomId: '', fabricQualityId: '', contractId: '', partyId: '', godownId: '', grade: '', ownershipType: '', saleType: '', paymentStatus: '', groupBy: 'date', scope: 'combined' };
 

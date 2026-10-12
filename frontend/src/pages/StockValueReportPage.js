@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 
 import { fetchStockValueReport } from '../services/stockValueService';
 
@@ -192,19 +193,19 @@ const StockValueReportPage = () => {
 
       <SummaryCard
         title="Cost Value"
-        value={`Rs. ${Number(summary.totalCostValue || 0).toLocaleString()}`}
+        value={`Rs. ${formatMoneyDisplay(summary.totalCostValue)}`}
         gradient="linear-gradient(135deg, #059669, #047857)"
       />
 
       <SummaryCard
         title="Sale Value"
-        value={`Rs. ${Number(summary.totalSaleValue || 0).toLocaleString()}`}
+        value={`Rs. ${formatMoneyDisplay(summary.totalSaleValue)}`}
         gradient="linear-gradient(135deg, #ea580c, #c2410c)"
       />
 
       <SummaryCard
         title="Negative Stock"
-        value={`Rs. ${Number(summary.negativeStockValue || 0).toLocaleString()}`}
+        value={`Rs. ${formatMoneyDisplay(summary.negativeStockValue)}`}
         gradient="linear-gradient(135deg, #dc2626, #991b1b)"
       />
     </div>
@@ -513,7 +514,7 @@ const StockValueReportPage = () => {
                       {Number(row.stockQty || 0).toLocaleString()}
                     </td>
 
-                    <td style={tdStyle}>Rs. {Number(row.unitCost || 0).toLocaleString()}</td>
+                    <td style={tdStyle}>Rs. {formatMoneyDisplay(row.unitCost)}</td>
 
                     <td
                       style={{
@@ -522,10 +523,10 @@ const StockValueReportPage = () => {
                         color: '#047857',
                       }}
                     >
-                      Rs. {Number(row.costValue || 0).toLocaleString()}
+                      Rs. {formatMoneyDisplay(row.costValue)}
                     </td>
 
-                    <td style={tdStyle}>Rs. {Number(row.salePrice || 0).toLocaleString()}</td>
+                    <td style={tdStyle}>Rs. {formatMoneyDisplay(row.salePrice)}</td>
 
                     <td
                       style={{
@@ -534,7 +535,7 @@ const StockValueReportPage = () => {
                         color: '#c2410c',
                       }}
                     >
-                      Rs. {Number(row.saleValue || 0).toLocaleString()}
+                      Rs. {formatMoneyDisplay(row.saleValue)}
                     </td>
                   </tr>
                 ))}
@@ -557,13 +558,13 @@ const StockValueReportPage = () => {
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {Number(summary.totalCostValue || 0).toLocaleString()}
+                    Rs. {formatMoneyDisplay(summary.totalCostValue)}
                   </td>
 
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {Number(summary.totalSaleValue || 0).toLocaleString()}
+                    Rs. {formatMoneyDisplay(summary.totalSaleValue)}
                   </td>
                 </tr>
               </tfoot>

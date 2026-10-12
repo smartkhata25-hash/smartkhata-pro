@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { formatMoneyDisplay } from '../utils/money';
 
 import {
   appendBusinessValueModuleScopeParam,
@@ -324,10 +325,7 @@ export const calculateReceivableLoanProgress = (loan = {}) => {
 };
 
 export const formatReceivableLoanAmount = (value) => {
-  return Number(value || 0).toLocaleString('en-PK', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
+  return formatMoneyDisplay(value);
 };
 
 export const BUSINESS_RECEIVABLE_LOAN_STATUS = {

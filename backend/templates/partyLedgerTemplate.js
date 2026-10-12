@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -20,12 +21,6 @@ const escapeHtml = (value, fallback = "") => {
 const safeNumber = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
-};
-
-const formatMoney = (value) => {
-  const num = safeNumber(value);
-
-  return num.toFixed(2);
 };
 
 const getRoleLabel = (role, lang) => {

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate } from 'react-router-dom';
 import { fetchCustomers } from '../services/customerService';
 import { fetchSaleParties } from '../services/partyService';
@@ -348,7 +349,7 @@ const RefundInvoiceList = () => {
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 text-center whitespace-nowrap">
-                    Rs. {Number(refund.totalAmount || 0).toFixed(2)}
+                    Rs. {formatMoneyDisplay(refund.totalAmount)}
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 capitalize">{refund.paymentType || '-'}</td>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 
 import { getAccounts } from '../services/accountService';
 import { createExpense, updateExpense, getExpenseById } from '../services/expenseService';
@@ -381,7 +382,7 @@ const ExpenseForm = () => {
       <h2 style="text-align:center;">${t('expense.invoiceTitle')}</h2>
       <p><strong>${t('title')}:</strong> ${formData.title}</p>
       <p><strong>${t('date')}:</strong> ${formData.date} ${formData.time}</p>
-      <p><strong>${t('amount')}:</strong> ${creditTotal.toFixed(2)}</p> 
+      <p><strong>${t('amount')}:</strong> ${formatMoneyDisplay(creditTotal)}</p>
       <p><strong>${t('paymentType')}:</strong> ${formData.paymentType}</p>
       <p><strong>${t('description')}:</strong> ${formData.description || '-'}</p>
       </body></html>
@@ -398,7 +399,7 @@ const ExpenseForm = () => {
     doc.setFontSize(12);
     doc.text(`${t('title')}: ${formData.title}`, 14, 30);
     doc.text(`${t('date')}: ${formData.date} ${formData.time}`, 14, 38);
-    doc.text(`${t('amount')}: ${calculateCreditTotal().toFixed(2)}`, 14, 46);
+    doc.text(`${t('amount')}: ${formatMoneyDisplay(calculateCreditTotal())}`, 14, 46);
     doc.text(`${t('paymentType')}: ${formData.paymentType}`, 14, 54);
     doc.text(`${t('description')}: ${formData.description || '-'}`, 14, 62);
 
@@ -649,7 +650,7 @@ const ExpenseForm = () => {
             <div className="w-full md:w-56 rounded-lg md:rounded-xl p-2 md:p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 shadow-sm">
               <div className="flex justify-between font-semibold text-sm">
                 <span>{t('total')}</span>
-                <span>{calculateCreditTotal().toFixed(2)}</span>
+                <span>{formatMoneyDisplay(calculateCreditTotal())}</span>
               </div>
             </div>
           </div>

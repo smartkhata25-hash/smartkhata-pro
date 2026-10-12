@@ -10,54 +10,55 @@ const {
 const getOwnerId = (req) =>
   req.user?.businessOwnerId || req.user?.id || req.userId;
 
-const applyActivityModuleScopeFilter = (query, scope) => {
-  if (scope === MODULE_SCOPES.TRAVEL) {
-    query.$and = [
-      ...(query.$and || []),
-      {
-        $or: [
-          { moduleScope: { $in: [MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH] } },
-          {
-            $and: [
-              {
-                $or: [
-                  { moduleScope: { $exists: false } },
-                  { moduleScope: null },
-                  { moduleScope: "" },
-                ],
-              },
-              { module: /^travel\./i },
-            ],
-          },
-        ],
-      },
-    ];
+const missingScope = {
+  $or: [
+    { moduleScope: { $exists: false } },
+    { moduleScope: null },
+    { moduleScope: "" },
+  ],
+};
 
-    return query;
+const legacyScopeCondition = (scope) => {
+  if (scope === MODULE_SCOPES.TRAVEL) return { module: /^travel\./i };
+  if (scope === MODULE_SCOPES.WEAVING) return { module: /^weaving\./i };
+  return { module: { $not: /^(travel|weaving)\./i } };
+};
+
+const applyActivityModuleScopeFilter = (query, scope, enabledModules = {}) => {
+  const enabled = ["trading", "travel", "weaving"].filter(
+    (moduleKey) => enabledModules[moduleKey] === true,
+  );
+  const selected =
+    scope === "all"
+      ? enabled
+      : scope === MODULE_SCOPES.SHARED
+        ? []
+        : [scope];
+  const explicitScopes = [MODULE_SCOPES.SHARED, ...selected];
+  if (selected.some((item) => ["trading", "travel"].includes(item))) {
+    explicitScopes.push(MODULE_SCOPES.BOTH);
   }
 
   query.$and = [
     ...(query.$and || []),
     {
       $or: [
-        { moduleScope: { $in: [MODULE_SCOPES.TRADING, MODULE_SCOPES.BOTH] } },
-        {
-          $and: [
-            {
-              $or: [
-                { moduleScope: { $exists: false } },
-                { moduleScope: null },
-                { moduleScope: "" },
-              ],
-            },
-            { module: { $not: /^travel\./i } },
-          ],
-        },
+        { moduleScope: { $in: [...new Set(explicitScopes)] } },
+        { module: /^(staff(?:\.|$)|auth$)/i },
+        ...selected.map((moduleKey) => ({
+          $and: [missingScope, legacyScopeCondition(moduleKey)],
+        })),
       ],
     },
   ];
-
   return query;
+};
+
+const validateActivityScope = (req, res, scope) => {
+  if (scope === "all" || scope === MODULE_SCOPES.SHARED) return true;
+  if (req.user?.enabledModules?.[scope] === true) return true;
+  res.status(403).json({ message: "This business module is disabled" });
+  return false;
 };
 
 const escapeRegex = (value = "") =>
@@ -99,7 +100,9 @@ const getActivities = async (req, res) => {
       MODULE_SCOPES.TRADING,
     );
 
-    applyActivityModuleScopeFilter(query, requestedModuleScope);
+    if (!validateActivityScope(req, res, requestedModuleScope)) return;
+
+    applyActivityModuleScopeFilter(query, requestedModuleScope, req.user.enabledModules);
 
     if (staffId) {
       if (!isValidObjectId(staffId)) {
@@ -225,6 +228,7 @@ const getActivities = async (req, res) => {
             "performedBy",
             "action",
             "module",
+            "moduleScope",
             "entityType",
             "entityId",
             "title",
@@ -291,13 +295,16 @@ const getActivityById = async (req, res) => {
       });
     }
 
-    const activity = await ActivityLog.findOne({
+    const detailQuery = {
       _id: new mongoose.Types.ObjectId(id),
 
       businessOwnerId: new mongoose.Types.ObjectId(ownerId),
 
       isDeleted: false,
-    })
+    };
+    applyActivityModuleScopeFilter(detailQuery, "all", req.user.enabledModules);
+
+    const activity = await ActivityLog.findOne(detailQuery)
 
       .populate("performedBy", "name fullName email mobile accountRole")
 
@@ -402,12 +409,18 @@ const getActivitySummary = async (req, res) => {
       MODULE_SCOPES.TRADING,
     );
 
+    if (!validateActivityScope(req, res, requestedModuleScope)) return;
+
     const summaryMatch = {
       businessOwnerId: ownerObjectId,
       isDeleted: false,
     };
 
-    applyActivityModuleScopeFilter(summaryMatch, requestedModuleScope);
+    applyActivityModuleScopeFilter(
+      summaryMatch,
+      requestedModuleScope,
+      req.user.enabledModules,
+    );
 
     const summary = await ActivityLog.aggregate([
       {
@@ -567,4 +580,5 @@ module.exports = {
   getActivityById,
   getActivityStaffList,
   getActivitySummary,
+  applyActivityModuleScopeFilter,
 };

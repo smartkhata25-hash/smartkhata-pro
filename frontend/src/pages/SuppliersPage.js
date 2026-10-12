@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import {
   fetchSuppliers,
   createSupplier,
@@ -877,7 +878,7 @@ const SuppliersPage = () => {
                         marginTop: 2,
                       }}
                     >
-                      Rs. {balance.toFixed(2)}
+                      Rs. {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 
@@ -623,7 +624,7 @@ const PayBillList = () => {
                   <td className="border-b border-r border-gray-200 p-2">{getAccountNames(bill)}</td>
 
                   <td className="border-b border-r border-gray-200 p-2 text-right font-medium whitespace-nowrap">
-                    {getBillTotal(bill).toFixed(2)}
+                    {formatMoneyDisplay(getBillTotal(bill))}
                   </td>
 
                   <td className="border-b border-r border-gray-200 p-2 text-left">

@@ -1,3 +1,5 @@
+const { formatMoney } = require("../utils/money");
+
 const escapeHtml = (value = "") =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -6,10 +8,7 @@ const escapeHtml = (value = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
-const money = (value = 0) =>
-  Number(value || 0).toLocaleString("en-GB", {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoney;
 
 const renderAmount = (value = 0, className = "") =>
   `<span class="amount ${Number(value || 0) === 0 ? "zero" : ""} ${className}">${money(

@@ -92,6 +92,29 @@ code {
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
 }
 
+.auth-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.auth-submit-button__spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: auth-button-spin 0.7s linear infinite;
+}
+
+@keyframes auth-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .btn-secondary {
   background: #e5e7eb;
   color: #111;

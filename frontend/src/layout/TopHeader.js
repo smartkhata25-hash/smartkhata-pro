@@ -127,6 +127,11 @@ const travelTopMenuConfig = [
             permission: 'travel.bookings.view',
           },
           {
+            label: 'travel.purchaseInvoices.title',
+            path: '/travel/purchase-invoices',
+            allPermissions: ['travel.bookings.view', 'travel.vendors.view'],
+          },
+          {
             label: 'travel.booking.serviceTypes.air_ticket',
             path: '/travel/bookings?serviceType=air_ticket',
             permission: 'travel.bookings.view',
@@ -517,6 +522,8 @@ const TopHeader = ({
           navigate('/travel/payments?mode=receive');
         } else if (term.includes('return') || term.includes('credit')) {
           navigate('/travel/vendor-returns');
+        } else if (term.includes('purchase')) {
+          navigate('/travel/purchase-invoices');
         } else if (term.includes('invoice') || term.includes('booking') || term.includes('sale')) {
           navigate('/travel/bookings');
         } else {
@@ -918,7 +925,11 @@ const TopHeader = ({
 
                   <div
                     onClick={() => {
-                      navigateFromHeader('/activity-log', '/travel/activity-log');
+                      navigateFromHeader(
+                        '/activity-log',
+                        '/travel/activity-log',
+                        '/weaving/activity-log'
+                      );
                       setShowUserMenu(false);
                     }}
                     className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"

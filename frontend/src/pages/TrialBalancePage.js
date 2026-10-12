@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -19,10 +20,7 @@ const PRESENTATION = Object.freeze({
   weaving: { label: 'Weaving', page: 'from-teal-50 via-white to-indigo-50', header: 'from-teal-800 via-emerald-800 to-indigo-900', button: 'bg-teal-600 hover:bg-teal-700 focus:ring-teal-200', link: 'text-teal-700 hover:text-teal-900' },
 });
 
-const formatAmount = (value) => Number(value || 0).toLocaleString('en-PK', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const formatAmount = formatMoneyDisplay;
 
 const SummaryCard = ({ label, value, tone }) => {
   const className = tone === 'debit'

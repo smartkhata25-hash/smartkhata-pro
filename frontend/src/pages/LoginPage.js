@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as loginUser } from '../services/authService';
 import { t } from '../i18n/i18n';
 import { useEffect } from 'react';
 import { getDefaultWorkspacePath } from '../utils/moduleNavigation';
+import AuthSubmitButton from '../components/AuthSubmitButton';
 
 const readStoredUser = () => {
   try {
@@ -16,6 +17,8 @@ const readStoredUser = () => {
 export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const inFlightRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,6 +34,11 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (inFlightRef.current) return;
+
+    inFlightRef.current = true;
+    setLoading(true);
+
     try {
       const res = await loginUser(form);
 
@@ -60,6 +68,9 @@ export default function LoginPage() {
 
       const msg = err?.response?.data?.msg;
       alert(msg || t('alerts.loginFailed'));
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
     }
   };
 
@@ -166,18 +177,19 @@ export default function LoginPage() {
           </div>
 
           {/* Button */}
-          <button
+          <AuthSubmitButton
             type="submit"
             className="btn btn-primary"
+            loading={loading}
+            idleLabel={t('login')}
+            loadingLabel={t('auth.loggingIn')}
             style={{
               width: '100%',
               padding: '10px',
               fontSize: '15px',
               fontWeight: '600',
             }}
-          >
-            {t('login')}
-          </button>
+          />
         </form>
 
         {/* Links */}

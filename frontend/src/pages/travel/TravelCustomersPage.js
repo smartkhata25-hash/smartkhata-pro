@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import {
 useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -388,7 +389,7 @@ const TravelCustomersPage = () => {
       sendWhatsAppReminder({
         phone: customer?.phone,
         customerName: customer?.name,
-        balance: getCustomerBalance(customer).toFixed(2),
+        balance: formatMoneyDisplay(getCustomerBalance(customer)),
         businessName,
         lang: getCurrentLanguage(),
         template: whatsAppTemplate,

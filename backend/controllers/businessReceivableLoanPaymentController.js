@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { formatMoney } = require("../utils/money");
 
 const BusinessReceivableLoan = require("../models/BusinessReceivableLoan");
 
@@ -255,9 +256,7 @@ exports.createReceivableLoanPayment = async (req, res) => {
     if (paymentAmount > remainingBefore) {
       return res.status(400).json({
         success: false,
-        message: `Received amount cannot exceed remaining amount of Rs. ${remainingBefore.toLocaleString(
-          "en-PK",
-        )}`,
+        message: `Received amount cannot exceed remaining amount of Rs. ${formatMoney(remainingBefore)}`,
       });
     }
 

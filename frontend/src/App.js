@@ -70,6 +70,9 @@ const TravelBusinessValuePage = lazy(() => import('./pages/travel/TravelBusiness
 const TravelReportsPage = lazy(() => import('./pages/travel/TravelReportsPage'));
 const TravelExpensesPage = lazy(() => import('./pages/travel/TravelExpensesPage'));
 const TravelBookingsPage = lazy(() => import('./pages/travel/TravelBookingsPage'));
+const TravelPurchaseInvoicesPage = lazy(
+  () => import('./pages/travel/TravelPurchaseInvoicesPage')
+);
 const TravelBookingFormPage = lazy(() => import('./pages/travel/TravelBookingFormPage'));
 const TravelBookingDetailPage = lazy(() => import('./pages/travel/TravelBookingDetailPage'));
 const TravelRefundsPage = lazy(() => import('./pages/travel/TravelRefundsPage'));
@@ -734,6 +737,18 @@ function App() {
             />
 
             <Route
+              path="/travel/purchase-invoices"
+              element={
+                <PermissionRoute
+                  allPermissions={['travel.bookings.view', 'travel.vendors.view']}
+                  moduleKey={MODULE_KEYS.TRAVEL}
+                >
+                  <TravelPurchaseInvoicesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
               path="/travel/bookings/new"
               element={
                 <PermissionRoute permission="travel.bookings.create" moduleKey={MODULE_KEYS.TRAVEL}>
@@ -1151,7 +1166,16 @@ function App() {
             <Route
               path="/travel/activity-log"
               element={
-                <PermissionRoute ownerOnly>
+                <PermissionRoute ownerOnly moduleKey="travel">
+                  <ActivityLogPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/weaving/activity-log"
+              element={
+                <PermissionRoute ownerOnly moduleKey="weaving">
                   <ActivityLogPage />
                 </PermissionRoute>
               }

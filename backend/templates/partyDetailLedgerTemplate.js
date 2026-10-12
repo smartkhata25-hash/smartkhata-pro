@@ -1,6 +1,7 @@
 // 📁 templates/partyDetailLedgerTemplate.js
 
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -19,10 +20,7 @@ const safeNumber = (value) => {
   return Number.isFinite(num) ? num : 0;
 };
 
-const money = (value) => {
-  const num = safeNumber(value);
-  return num.toFixed(2);
-};
+const money = formatMoney;
 
 const showMoney = (value) => {
   if (value === null || value === undefined || value === "") {

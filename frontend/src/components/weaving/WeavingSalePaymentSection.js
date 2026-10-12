@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import { requestWeavingConfirmation } from './WeavingFeedbackModal';
 import { t } from '../../i18n/i18n';
@@ -55,10 +56,7 @@ export const confirmExcessPayment = (form, total) => {
     return Promise.resolve(true);
   }
 
-  const money = (value) =>
-    Number(value || 0).toLocaleString('en-PK', {
-      maximumFractionDigits: 2,
-    });
+  const money = formatMoneyDisplay;
 
   return requestWeavingConfirmation({
     title: t('weaving.salesCleanup.excessTitle'),
@@ -300,9 +298,7 @@ export default function WeavingSalePaymentSection({ form, onChange, total, accou
           {t('weaving.salesPro.finalAmount')}:{' '}
           <b className="text-slate-800">
             Rs.{' '}
-            {Number(total || 0).toLocaleString('en-PK', {
-              maximumFractionDigits: 2,
-            })}
+            {formatMoneyDisplay(total)}
           </b>
         </span>
 
@@ -311,9 +307,7 @@ export default function WeavingSalePaymentSection({ form, onChange, total, accou
             {t('weaving.salesCleanup.receivedAmount')}:{' '}
             <b className="text-emerald-700">
               Rs.{' '}
-              {received.toLocaleString('en-PK', {
-                maximumFractionDigits: 2,
-              })}
+              {formatMoneyDisplay(received)}
             </b>
           </span>
         )}
@@ -323,9 +317,7 @@ export default function WeavingSalePaymentSection({ form, onChange, total, accou
             {t('weaving.salesPro.balance')}:{' '}
             <b className="text-amber-700">
               Rs.{' '}
-              {balance.toLocaleString('en-PK', {
-                maximumFractionDigits: 2,
-              })}
+              {formatMoneyDisplay(balance)}
             </b>
           </span>
         )}
@@ -335,9 +327,7 @@ export default function WeavingSalePaymentSection({ form, onChange, total, accou
             {t('weaving.salesCleanup.excess')}:{' '}
             <b className="text-blue-700">
               Rs.{' '}
-              {(received - Number(total || 0)).toLocaleString('en-PK', {
-                maximumFractionDigits: 2,
-              })}
+              {formatMoneyDisplay(received - Number(total || 0))}
             </b>
           </span>
         )}

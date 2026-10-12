@@ -59,6 +59,10 @@ app.use(
 );
 app.use("/api", require("./routes/travelDashboardRoutes"));
 app.use("/api/travel/bookings", require("./routes/travelBookingRoutes"));
+app.use(
+  "/api/travel/purchase-invoices",
+  require("./routes/travelPurchaseInvoiceRoutes"),
+);
 app.use("/api/travel/print", require("./routes/travelPrintRoutes"));
 app.use("/api/travel/refunds", require("./routes/travelRefundRoutes"));
 app.use("/api/travel/payments", require("./routes/travelPaymentRoutes"));

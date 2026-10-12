@@ -7,15 +7,27 @@ const Installation = require("../models/Installation");
 const UserDevice = require("../models/UserDevice");
 
 const {
-  ALL_PERMISSIONS,
   DEFAULT_STAFF_PERMISSIONS,
   sanitizePermissions,
+  getAllowedPermissions,
+  getEffectivePermissions,
+  getPermissionModules,
+  getPermissionCatalog,
 } = require("../utils/permissionList");
 
 const { logActivity } = require("../utils/activityLogger");
 
 const STAFF_FIELDS =
-  "_id name fullName email mobile accountRole staffStatus permissions mustChangePassword isDeleted createdAt updatedAt";
+  "_id name fullName email mobile accountRole staffStatus permissions permissionModules mustChangePassword isDeleted createdAt updatedAt";
+
+const validateSubmittedPermissions = (permissions, moduleConfig) => {
+  const clean = sanitizePermissions(permissions);
+  const allowed = new Set(getAllowedPermissions(moduleConfig));
+  const invalid = permissions.filter(
+    (permission) => !clean.includes(permission) || !allowed.has(permission),
+  );
+  return { clean, invalid: [...new Set(invalid)] };
+};
 
 const normalizeEmail = (email = "") =>
   String(email || "")
@@ -95,10 +107,19 @@ const createStaff = async (req, res) => {
       });
     }
 
-    const cleanPermissions =
-      permissions === undefined
-        ? DEFAULT_STAFF_PERMISSIONS
-        : sanitizePermissions(permissions);
+    const submittedPermissions =
+      permissions === undefined ? DEFAULT_STAFF_PERMISSIONS : permissions;
+    const { clean: cleanPermissions, invalid } = validateSubmittedPermissions(
+      submittedPermissions,
+      req.user,
+    );
+
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        message: "One or more permissions are unavailable for enabled business modules",
+        invalidPermissions: invalid,
+      });
+    }
 
     const hashedPassword = await bcrypt.hash(String(password), 12);
 
@@ -115,6 +136,7 @@ const createStaff = async (req, res) => {
       createdByOwner: ownerId,
 
       permissions: cleanPermissions,
+      permissionModules: getPermissionModules(cleanPermissions),
       staffStatus: "active",
       mustChangePassword: true,
       isDeleted: false,
@@ -124,6 +146,7 @@ const createStaff = async (req, res) => {
       req,
       action: "create",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,
@@ -214,8 +237,23 @@ const getStaffList = async (req, res) => {
       User.countDocuments(query),
     ]);
 
+    const safeStaff = staff.map((staffUser) => {
+      const permissions = getEffectivePermissions(
+        staffUser.permissions || [],
+        req.user,
+        staffUser.permissionModules,
+      );
+      return {
+        ...staffUser,
+        permissions,
+        dormantPermissionCount: (staffUser.permissions || []).filter(
+          (permission) => !permissions.includes(permission),
+        ).length,
+      };
+    });
+
     return res.json({
-      staff,
+      staff: safeStaff,
       pagination: {
         page: safePage,
         limit: safeLimit,
@@ -249,6 +287,12 @@ const getStaffById = async (req, res) => {
       });
     }
 
+    const effectivePermissions = getEffectivePermissions(
+      staff.permissions || [],
+      req.user,
+      staff.permissionModules,
+    );
+
     return res.json({
       staff: {
         _id: staff._id,
@@ -258,13 +302,17 @@ const getStaffById = async (req, res) => {
         mobile: staff.mobile,
         accountRole: staff.accountRole,
         staffStatus: staff.staffStatus,
-        permissions: staff.permissions || [],
+        permissions: effectivePermissions,
+        dormantPermissions: (staff.permissions || []).filter(
+          (permission) => !effectivePermissions.includes(permission),
+        ),
         mustChangePassword: Boolean(staff.mustChangePassword),
         createdAt: staff.createdAt,
         updatedAt: staff.updatedAt,
       },
 
-      availablePermissions: ALL_PERMISSIONS,
+      availablePermissions: getAllowedPermissions(req.user),
+      permissionCatalog: getPermissionCatalog(req.user),
     });
   } catch (error) {
     console.error("Get Staff Error:", error);
@@ -365,6 +413,7 @@ const updateStaff = async (req, res) => {
       req,
       action: "update",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,
@@ -424,9 +473,26 @@ const updateStaffPermissions = async (req, res) => {
     }
 
     const oldPermissions = [...(staff.permissions || [])];
-    const cleanPermissions = sanitizePermissions(permissions);
+    const { clean: cleanPermissions, invalid } = validateSubmittedPermissions(
+      permissions,
+      req.user,
+    );
 
-    staff.permissions = cleanPermissions;
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        message: "One or more permissions are unavailable for enabled business modules",
+        invalidPermissions: invalid,
+      });
+    }
+
+    const allowed = new Set(getAllowedPermissions(req.user));
+    const preservedDormantPermissions = oldPermissions.filter(
+      (permission) => !allowed.has(permission),
+    );
+    const storedPermissions = [...new Set([...preservedDormantPermissions, ...cleanPermissions])];
+
+    staff.permissions = storedPermissions;
+    staff.permissionModules = getPermissionModules(cleanPermissions);
 
     await staff.save();
 
@@ -434,6 +500,7 @@ const updateStaffPermissions = async (req, res) => {
       req,
       action: "permission_update",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,
@@ -442,7 +509,7 @@ const updateStaffPermissions = async (req, res) => {
         permissions: oldPermissions,
       },
       after: {
-        permissions: cleanPermissions,
+        permissions: storedPermissions,
       },
     });
 
@@ -524,6 +591,7 @@ const updateStaffStatus = async (req, res) => {
       req,
       action: status === "blocked" ? "block" : "unblock",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,
@@ -590,6 +658,7 @@ const resetStaffPassword = async (req, res) => {
       req,
       action: "password_reset",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,
@@ -669,6 +738,7 @@ const deleteStaff = async (req, res) => {
       req,
       action: "delete",
       module: "staff",
+      moduleScope: "shared",
       entityType: "User",
       entityId: staff._id,
       title: staff.fullName || staff.name,

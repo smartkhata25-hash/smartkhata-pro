@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import WeavingEmployeeSetupModal from '../../components/weaving/WeavingEmployeeSetupModal';
 import WeavingQuickEmployeeModal from '../../components/weaving/WeavingQuickEmployeeModal';
 import { employeeText } from '../../components/weaving/weavingEmployeeMasterUtils';
@@ -63,7 +64,7 @@ const getInitials = (name = '') =>
     .join('')
     .toUpperCase() || 'E';
 
-const formatMoney = (value) => Number(value || 0).toLocaleString('en-GB');
+const formatMoney = formatMoneyDisplay;
 
 const formatEmployeeSalary = (employee = {}) => {
   const unitKey =

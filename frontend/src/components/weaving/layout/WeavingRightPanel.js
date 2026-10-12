@@ -18,6 +18,7 @@ import { getWeavingPayrollSummary } from '../../../services/weavingPayrollServic
 import { getWeavingDashboardSummary } from '../../../services/weavingReportService';
 import { hasAnyPermission, hasPermission } from '../../../utils/permissionHelper';
 import { buildWeavingRouteState } from '../../../utils/weavingContext';
+import { formatMoneyDisplay } from '../../../utils/money';
 import BalanceBreakdownModal from '../../BalanceBreakdownModal';
 import {
   EMPTY_WEAVING_DASHBOARD_SUMMARY,
@@ -64,7 +65,7 @@ const formatPanelValue = (value, format) => {
   }
 
   if (format === 'currency') {
-    return `${t('currency.rs')} ${formatCompactNumber(value)}`;
+    return `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
   }
 
   if (format === 'kg') {

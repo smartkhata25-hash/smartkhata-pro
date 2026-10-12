@@ -59,6 +59,7 @@ import {
   openBackendPrintWindow,
 } from '../../utils/backendPrintDocument';
 import { generateWhatsAppLink } from '../../utils/whatsapp';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import {
   TravelActionButton,
@@ -171,10 +172,7 @@ const getItemTravelers = (booking, item) =>
 const renderRoute = (from, to) => [from, to].filter(Boolean).join(' → ') || '-';
 
 const formatPlainMoney = (amount, currency = 'PKR') =>
-  `${currency || 'PKR'} ${numberValue(amount).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  `${currency || 'PKR'} ${formatMoneyDisplay(amount)}`;
 
 const getPaxLabel = (paxType) => {
   if (paxType === 'child') {

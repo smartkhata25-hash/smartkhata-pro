@@ -23,7 +23,12 @@ const renderRows = (items = []) =>
                 : ""
             }
           </td>
-          <td class="right">${escapeHtml(item.amount)}</td>
+          <td class="right pax-rate-cell">
+            ${(item.paxRateLines || ["—"])
+              .map((line) => `<div>${escapeHtml(line)}</div>`)
+              .join("")}
+          </td>
+          <td class="right amount-cell">${escapeHtml(item.amount)}</td>
         </tr>
       `,
     )
@@ -46,7 +51,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
     <meta charset="utf-8" />
     <title>${escapeHtml(data.documentTitle)}</title>
     <style>
-      @page { size: A4; margin: 16mm; }
+      @page { size: A4; margin: 12mm 14mm; }
       * { box-sizing: border-box; }
       body {
         margin: 0;
@@ -56,14 +61,14 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
         line-height: 1.45;
       }
       .page { width: 100%; }
-      .topline { height: 4px; background: #0891b2; margin-bottom: 18px; }
+      .topline { height: 4px; background: #0891b2; margin-bottom: 14px; }
       .header {
         align-items: flex-start;
         border-bottom: 1px solid #e2e8f0;
         display: flex;
         justify-content: space-between;
         gap: 24px;
-        padding-bottom: 14px;
+        padding-bottom: 12px;
       }
       h1, h2, h3, p { margin: 0; }
       h1 { color: #0f172a; font-size: 24px; letter-spacing: 0; }
@@ -73,7 +78,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       .muted { color: #64748b; }
       .right { text-align: right; }
       .center { text-align: center; }
-      .section { margin-top: 16px; }
+      .section { margin-top: 12px; }
       .grid {
         display: grid;
         gap: 10px;
@@ -94,7 +99,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       .value { font-size: 13px; font-weight: 800; margin-top: 2px; }
       table {
         border-collapse: collapse;
-        margin-top: 8px;
+        margin-top: 6px;
         width: 100%;
       }
       th {
@@ -105,13 +110,31 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       }
       th, td {
         border: 1px solid #e2e8f0;
-        padding: 8px;
+        padding: 7px;
         vertical-align: top;
       }
+      .services-table { table-layout: fixed; }
+      .services-table thead { display: table-header-group; }
+      .services-table td {
+        overflow-wrap: anywhere;
+        word-break: normal;
+      }
+      .services-table tbody tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .pax-rate-cell {
+        color: #334155;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .pax-rate-cell div + div { margin-top: 3px; }
+      .amount-cell { white-space: nowrap; }
       ul { margin: 4px 0 0 16px; padding: 0; }
+      ul li + li { margin-top: 2px; }
       .totals {
         margin-left: auto;
-        margin-top: 14px;
+        margin-top: 12px;
         width: 280px;
       }
       .total-line {
@@ -119,7 +142,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
         border-bottom: 1px solid #e2e8f0;
         display: flex;
         justify-content: space-between;
-        padding: 7px 0;
+        padding: 5px 0;
       }
       .total-line.strong {
         border-bottom: 2px solid #0891b2;
@@ -130,7 +153,7 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
       .footer {
         border-top: 1px solid #e2e8f0;
         color: #64748b;
-        margin-top: 28px;
+        margin-top: 18px;
         padding-top: 12px;
       }
     </style>
@@ -196,9 +219,9 @@ const renderTravelInvoiceHtml = (data, options = {}) => `
 
       <section class="section">
         <h3>Booked Services</h3>
-        <table>
+        <table class="services-table">
           <thead>
-            <tr><th class="center" style="width: 44px;">#</th><th>Service</th><th class="right" style="width: 130px;">Amount</th></tr>
+            <tr><th class="center" style="width: 40px;">#</th><th>Service</th><th class="right" style="width: 145px;">Pax &times; Rate</th><th class="right" style="width: 125px;">Amount</th></tr>
           </thead>
           <tbody>
             ${renderRows(data.items)}

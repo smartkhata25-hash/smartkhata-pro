@@ -27,6 +27,7 @@ import { t } from '../../i18n/i18n';
 import { fetchTravelReportSummary } from '../../services/travelMasterService';
 import { getLocalDateInputValue } from '../../utils/localDateTime';
 import { hasPermission } from '../../utils/permissionHelper';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import {
     TravelErrorModal,
@@ -138,11 +139,7 @@ const getReportViewFromParams = (searchParams) => {
   return REPORT_VIEW_VALUES.has(view) ? view : 'overview';
 };
 
-const compactMoney = (value) =>
-  Number(value || 0).toLocaleString('en-GB', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  });
+const compactMoney = formatMoneyDisplay;
 
 const EmptyChart = ({ message }) => (
   <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-center">

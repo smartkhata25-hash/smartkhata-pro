@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { t } from '../i18n/i18n';
 import './LedgerTable.css';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
@@ -285,19 +286,19 @@ const LedgerTable = ({
                     if (col === 'debit')
                       return (
                         <td key={col} className="amount-debit">
-                          {(e.credit || 0).toFixed(2)}
+                          {formatMoneyDisplay(e.credit)}
                         </td>
                       );
                     if (col === 'credit')
                       return (
                         <td key={col} className="amount-credit">
-                          {(e.debit || 0).toFixed(2)}
+                          {formatMoneyDisplay(e.debit)}
                         </td>
                       );
                     if (col === 'balance')
                       return (
                         <td key={col} className="amount-balance">
-                          {(e.balance || 0).toFixed(2)}
+                          {formatMoneyDisplay(e.balance)}
                         </td>
                       );
                     if (col === 'attachment')
@@ -358,24 +359,24 @@ const LedgerTable = ({
                   if (col === 'debit')
                     return (
                       <td key={col} className="amount-debit">
-                        {ledgerData.reduce((s, e) => s + (e.credit || 0), 0).toFixed(2)}
+                        {formatMoneyDisplay(ledgerData.reduce((s, e) => s + (e.credit || 0), 0))}
                       </td>
                     );
 
                   if (col === 'credit')
                     return (
                       <td key={col} className="amount-credit">
-                        {ledgerData.reduce((s, e) => s + (e.debit || 0), 0).toFixed(2)}
+                        {formatMoneyDisplay(ledgerData.reduce((s, e) => s + (e.debit || 0), 0))}
                       </td>
                     );
 
                   if (col === 'balance')
                     return (
                       <td key={col} className="amount-balance">
-                        {(ledgerData.length > 0
+                        {formatMoneyDisplay(ledgerData.length > 0
                           ? ledgerData[ledgerData.length - 1].balance || 0
                           : openingBalance
-                        ).toFixed(2)}
+                        )}
                       </td>
                     );
 

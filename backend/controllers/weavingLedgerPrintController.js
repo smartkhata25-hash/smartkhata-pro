@@ -1,4 +1,5 @@
 const { generatePdfFromHtml } = require("../services/pdfService");
+const { formatMoney } = require("../utils/money");
 const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 const commercial = require("../services/weaving/weavingCommercialService");
 const {
@@ -17,8 +18,7 @@ const escapeHtml = (value) =>
     })[character],
   );
 
-const money = (value) =>
-  Number(value || 0).toLocaleString("en-PK", { minimumFractionDigits: 2 });
+const money = formatMoney;
 
 const renderDocument = ({ ledger, header, autoPrint = false }) => {
   const rows = ledger.rows

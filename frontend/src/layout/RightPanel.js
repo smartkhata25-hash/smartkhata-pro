@@ -5,6 +5,7 @@ import { FaSyncAlt } from 'react-icons/fa';
 import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import BalanceBreakdownModal from '../components/BalanceBreakdownModal';
+import { formatMoneyDisplay } from '../utils/money';
 
 const Section = ({ title, children }) => {
   const [open, setOpen] = useState(true);
@@ -43,10 +44,7 @@ const StatCard = ({ label, value, color, onClick }) => (
 
     <div className="text-lg font-bold mt-1">
       Rs.{' '}
-      {Number(value || 0).toLocaleString('en-GB', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      })}
+      {formatMoneyDisplay(value)}
     </div>
   </button>
 );

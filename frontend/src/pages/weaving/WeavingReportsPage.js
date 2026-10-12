@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -42,10 +43,7 @@ import {
   getWeavingPayrollCycleOptions,
 } from '../../utils/weavingPayrollCycle';
 
-const money = (value) =>
-  Number(value || 0).toLocaleString('en-GB', {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoneyDisplay;
 
 const emptySummary = {
   employees: 0,

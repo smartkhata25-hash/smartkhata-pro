@@ -9,6 +9,7 @@ import {
 } from 'react-icons/fa';
 
 import { fetchTravelReportSummary } from '../../../services/travelMasterService';
+import { formatMoneyDisplay } from '../../../utils/money';
 
 import TravelProfitDetailDrawer from './TravelProfitDetailDrawer';
 
@@ -75,11 +76,7 @@ const getSafeNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
-const formatMoney = (value) =>
-  getSafeNumber(value).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
+const formatMoney = formatMoneyDisplay;
 
 const TravelProfitSummaryModal = ({ isOpen, onClose, data = null }) => {
   const requestIdRef = useRef(0);

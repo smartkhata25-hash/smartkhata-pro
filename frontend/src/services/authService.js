@@ -1,22 +1,25 @@
 // 📁 src/services/authService.js
 import axios from 'axios';
+import { shouldHandleSessionExpiry } from './authRequestPolicy';
 // 🔥 GLOBAL INTERCEPTOR (TOKEN EXPIRE HANDLE)
-axios.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      alert('Session expire ho gaya hai, dobara login karein');
+if (axios.__smartKhaataSessionInterceptorId === undefined) {
+  axios.__smartKhaataSessionInterceptorId = axios.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (shouldHandleSessionExpiry(error)) {
+        alert('Session expire ho gaya hai, dobara login karein');
 
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('userId');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('userId');
 
-      window.location.href = '/login';
+        window.location.href = '/#/login';
+      }
+
+      return Promise.reject(error);
     }
-
-    return Promise.reject(error);
-  }
-);
+  );
+}
 
 const API = `${process.env.REACT_APP_API_BASE_URL}/api/auth`;
 

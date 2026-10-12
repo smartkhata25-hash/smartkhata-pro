@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import { FaWhatsapp } from 'react-icons/fa';
 
@@ -608,7 +609,7 @@ const SupplierLedgerHeader = ({
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {totalCredit.toFixed(2)}
+              Rs. {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -622,7 +623,7 @@ const SupplierLedgerHeader = ({
           >
             <div style={{ color: '#dc2626', fontWeight: 600 }}>{t('ledger.totalCredit')}</div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {totalDebit.toFixed(2)}
+              Rs. {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -638,7 +639,7 @@ const SupplierLedgerHeader = ({
               {isMobile ? 'Balance' : t('ledger.closingBalance')}
             </div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {closingBalance.toFixed(2)}
+              Rs. {formatMoneyDisplay(closingBalance)}
             </div>
             {!isMobile && (
               <div

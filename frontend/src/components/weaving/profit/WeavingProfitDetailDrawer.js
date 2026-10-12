@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { formatMoneyDisplay } from '../../../utils/money';
 import { FaChevronLeft, FaChevronRight, FaSpinner, FaTimes } from 'react-icons/fa';
 
 import { t } from '../../../i18n/i18n';
@@ -10,7 +11,7 @@ const number = (value) =>
     : Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 
 const money = (value) =>
-  value === null || value === undefined ? '\u2014' : `${t('currency.rs')} ${number(value)}`;
+  value === null || value === undefined ? '\u2014' : `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 
 const ProfitabilityTable = ({ rows, type }) => (
   <div className="overflow-x-auto">

@@ -1,4 +1,5 @@
 import { t } from '../../i18n/i18n';
+import { formatMoneyDisplay } from '../../utils/money';
 import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -58,9 +59,7 @@ const textarea =
 const today = () => getBusinessDateInputValue();
 
 const money = (value) =>
-  `Rs. ${Number(value || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-  })}`;
+  `Rs. ${formatMoneyDisplay(value)}`;
 
 const dueFrom = (date, days) => {
   if (!date || !Number(days)) return '';

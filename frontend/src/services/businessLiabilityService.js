@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { formatMoneyDisplay } from '../utils/money';
 
 import {
   appendBusinessValueModuleScopeParam,
@@ -347,10 +348,7 @@ export const calculateLiabilityProgress = (liability = {}) => {
 };
 
 export const formatLiabilityAmount = (value) => {
-  return Number(value || 0).toLocaleString('en-PK', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
+  return formatMoneyDisplay(value);
 };
 
 export const BUSINESS_LIABILITY_STATUS = {

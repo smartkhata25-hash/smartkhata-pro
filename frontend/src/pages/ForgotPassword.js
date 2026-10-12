@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { t } from '../i18n/i18n';
+import AuthSubmitButton from '../components/AuthSubmitButton';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const inFlightRef = useRef(false);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
+    if (inFlightRef.current) return;
+
     if (!navigator.onLine) {
       alert(t('auth.internetRequired'));
       return;
@@ -18,6 +23,7 @@ export default function ForgotPassword() {
       return;
     }
 
+    inFlightRef.current = true;
     setLoading(true);
 
     try {
@@ -46,6 +52,7 @@ export default function ForgotPassword() {
     } catch (err) {
       alert(t('common.serverError'));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -75,6 +82,7 @@ export default function ForgotPassword() {
           <p style={{ fontSize: '13px', color: '#6b7280' }}>{t('auth.forgotPassword')}</p>
         </div>
 
+        <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '16px' }}>
           <label
             style={{
@@ -93,11 +101,6 @@ export default function ForgotPassword() {
               placeholder={t('auth.enterEmail')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !loading) {
-                  handleSubmit();
-                }
-              }}
               disabled={loading}
               style={{
                 width: '100%',
@@ -119,10 +122,11 @@ export default function ForgotPassword() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={loading}
+        <AuthSubmitButton
+          type="submit"
+          loading={loading}
+          idleLabel={t('auth.continue')}
+          loadingLabel={t('auth.sendingCode')}
           className="btn btn-primary"
           style={{
             width: '100%',
@@ -132,9 +136,8 @@ export default function ForgotPassword() {
             opacity: loading ? 0.7 : 1,
             cursor: loading ? 'not-allowed' : 'pointer',
           }}
-        >
-          {loading ? t('auth.sendingCode') : t('auth.continue')}
-        </button>
+        />
+        </form>
 
         <div
           style={{

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { formatMoney } = require("../utils/money");
 
 const BusinessLiability = require("../models/BusinessLiability");
 const BusinessLiabilityPayment = require("../models/BusinessLiabilityPayment");
@@ -249,9 +250,7 @@ exports.createLiabilityPayment = async (req, res) => {
     if (paymentAmount > remainingBefore) {
       return res.status(400).json({
         success: false,
-        message: `Payment cannot exceed remaining amount of Rs. ${remainingBefore.toLocaleString(
-          "en-PK",
-        )}`,
+        message: `Payment cannot exceed remaining amount of Rs. ${formatMoney(remainingBefore)}`,
       });
     }
 

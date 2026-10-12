@@ -85,7 +85,7 @@ test("TravelBooking schema serialization and hydration preserve repeated item oc
   );
 });
 
-test("travel print preserves duplicate traveler names and both passenger rows", () => {
+test("travel print removes repeated top-table traveler names but preserves occurrence details", () => {
   const print = buildTravelInvoicePrint({
     serviceType: "air_ticket",
     travelers: [{ _id: travelerA, fullName: "Muhammad Arshad" }],
@@ -102,7 +102,9 @@ test("travel print preserves duplicate traveler names and both passenger rows", 
     }],
   }, { travelInvoice: { header: {}, settings: {}, layout: {} } });
   const details = print.items[0].details.join("\n");
-  assert.match(details, /Muhammad Arshad, Muhammad Arshad/);
+  assert.doesNotMatch(details, /Muhammad Arshad/);
   assert.match(details, /FIRST/);
   assert.match(details, /SECOND/);
+  assert.match(details, /T1/);
+  assert.match(details, /T2/);
 });

@@ -1,4 +1,5 @@
 import WeavingProductionContext from '../../components/weaving/WeavingProductionContext';
+import { formatMoneyDisplay } from '../../utils/money';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FaEye as Eye,
@@ -28,8 +29,7 @@ import { hasPermission } from '../../utils/permissionHelper';
 import { t } from '../../i18n/i18n';
 
 const tr = (key) => t(`weaving.beams.${key}`);
-const money = (value) =>
-  new Intl.NumberFormat('en-PK', { maximumFractionDigits: 2 }).format(Number(value || 0));
+const money = formatMoneyDisplay;
 const badge = {
   available: 'bg-emerald-50 text-emerald-700',
   knotting: 'bg-cyan-50 text-cyan-700',

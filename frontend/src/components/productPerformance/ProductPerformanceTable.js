@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import { t } from '../../i18n/i18n';
 import { formatBusinessDateForDisplay } from '../../utils/localDateTime';
@@ -111,9 +112,7 @@ const formatNumber = (value, maximumFractionDigits = 2) => {
 };
 
 const formatCurrency = (value) => {
-  return `${t('currency.rs')} ${new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 0,
-  }).format(Math.round(getSafeNumber(value)))}`;
+  return `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 };
 
 const formatDate = (value) => {

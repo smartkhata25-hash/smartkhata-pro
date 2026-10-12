@@ -1,10 +1,17 @@
-const { hasPermission } = require("../utils/permissionList");
+const { hasPermission, isPermissionAvailable } = require("../utils/permissionList");
 
 const requirePermission = (...requiredPermissions) => {
   return (req, res, next) => {
     try {
       const accountRole = req.user?.accountRole;
       const permissions = req.user?.permissions || [];
+      const availablePermissions = requiredPermissions.filter((permission) =>
+        isPermissionAvailable(permission, req.user),
+      );
+
+      if (requiredPermissions.length > 0 && availablePermissions.length === 0) {
+        return res.status(403).json({ message: "This business module is disabled" });
+      }
 
       // Owner کو ہر اجازت حاصل ہوگی
       if (accountRole === "owner") {
@@ -21,7 +28,7 @@ const requirePermission = (...requiredPermissions) => {
         return next();
       }
 
-      const allowed = requiredPermissions.some((permission) =>
+      const allowed = availablePermissions.some((permission) =>
         hasPermission(permissions, permission),
       );
 
@@ -48,6 +55,14 @@ const requireAllPermissions = (...requiredPermissions) => {
     try {
       const accountRole = req.user?.accountRole;
       const permissions = req.user?.permissions || [];
+
+      if (
+        requiredPermissions.some(
+          (permission) => !isPermissionAvailable(permission, req.user),
+        )
+      ) {
+        return res.status(403).json({ message: "This business module is disabled" });
+      }
 
       if (accountRole === "owner") {
         return next();

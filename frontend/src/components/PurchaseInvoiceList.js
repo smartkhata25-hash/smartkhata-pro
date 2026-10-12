@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate } from 'react-router-dom';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { t } from '../i18n/i18n';
@@ -347,10 +348,7 @@ const PurchaseInvoiceList = () => {
 
           <span className="font-bold text-blue-700 truncate">
             Rs.{' '}
-            {Number(summary.totalPurchases || 0).toLocaleString('en-PK', {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {formatMoneyDisplay(summary.totalPurchases)}
           </span>
         </div>
       </div>
@@ -542,12 +540,12 @@ const PurchaseInvoiceList = () => {
 
                     <td className="border p-2 break-words">{getSupplierOrPartyName(inv)}</td>
 
-                    <td className="border p-2 text-center">Rs. {total.toFixed(2)}</td>
+                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(total)}</td>
 
-                    <td className="border p-2 text-center">Rs. {paid.toFixed(2)}</td>
+                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(paid)}</td>
 
                     <td className="border p-2 text-center whitespace-nowrap">
-                      Rs. {balance.toFixed(2)}
+                      Rs. {formatMoneyDisplay(balance)}
                     </td>
 
                     <td className="border p-2">

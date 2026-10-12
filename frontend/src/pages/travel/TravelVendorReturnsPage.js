@@ -286,6 +286,18 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
 
   const [formState, setFormState] = useState(createInitialForm);
 
+  const returnPrefill = useMemo(() => {
+    const vendorType = searchParams.get('vendorType') === 'party' ? 'party' : 'vendor';
+
+    return {
+      invoiceId: searchParams.get('invoiceId') || '',
+      vendorType,
+      vendorId: vendorType === 'vendor' ? searchParams.get('vendorId') || '' : '',
+      vendorPartyId: vendorType === 'party' ? searchParams.get('vendorPartyId') || '' : '',
+    };
+  }, [searchParams]);
+  const appliedPrefillRef = useRef('');
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -399,8 +411,24 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
 
       const safeAccounts = Array.isArray(accountData) ? accountData : [];
 
-      setVendors(safeVendors);
-      setParties(safeParties);
+      setVendors((current) => [
+        ...safeVendors,
+        ...current.filter(
+          (record) =>
+            !safeVendors.some(
+              (vendor) => String(vendor._id) === String(record._id)
+            ),
+        ),
+      ]);
+      setParties((current) => [
+        ...safeParties,
+        ...current.filter(
+          (record) =>
+            !safeParties.some(
+              (party) => String(party._id) === String(record._id)
+            ),
+        ),
+      ]);
       setPaymentAccounts(safeAccounts);
 
       setFormState((current) => ({
@@ -427,6 +455,37 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
   }, [formVisible, loadReferences]);
 
   useEffect(() => {
+    const counterpartyId = returnPrefill.vendorPartyId || returnPrefill.vendorId;
+    const prefillKey = [
+      returnPrefill.vendorType,
+      counterpartyId,
+      returnPrefill.invoiceId,
+    ].join(':');
+
+    if (
+      !formVisible ||
+      !counterpartyId ||
+      !returnPrefill.invoiceId ||
+      appliedPrefillRef.current === prefillKey
+    ) {
+      return;
+    }
+
+    appliedPrefillRef.current = prefillKey;
+    setFormState((current) => ({
+      ...current,
+      vendorType: returnPrefill.vendorType,
+      vendorId: returnPrefill.vendorId,
+      vendorPartyId: returnPrefill.vendorPartyId,
+      originalInvoiceId: returnPrefill.invoiceId,
+      originalInvoiceNumber: '',
+      serviceLabel: '',
+      originalCost: '',
+      vendorReturnAmount: '',
+    }));
+  }, [formVisible, returnPrefill]);
+
+  useEffect(() => {
     if (!formVisible || (!formState.vendorId && !formState.vendorPartyId)) {
       setInvoices([]);
       return undefined;
@@ -436,15 +495,62 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
 
     const loadInvoices = async () => {
       try {
+        const matchesPrefillVendor =
+          formState.vendorType === returnPrefill.vendorType &&
+          String(formState.vendorPartyId || formState.vendorId) ===
+            String(returnPrefill.vendorPartyId || returnPrefill.vendorId);
+        const requestedInvoiceId = matchesPrefillVendor ? returnPrefill.invoiceId : '';
         const rows = await fetchTravelVendorReturnInvoices({
           vendorType: formState.vendorType,
           vendorId: formState.vendorId,
           vendorPartyId: formState.vendorPartyId,
+          invoiceId: requestedInvoiceId,
           limit: 100,
         });
 
         if (active) {
-          setInvoices(Array.isArray(rows) ? rows : []);
+          const safeRows = Array.isArray(rows) ? rows : [];
+          const contextInvoice = requestedInvoiceId
+            ? safeRows.find(
+                (invoice) => String(invoice._id) === String(requestedInvoiceId)
+              ) || null
+            : null;
+
+          setInvoices(safeRows);
+
+          if (contextInvoice?.vendor?._id) {
+            const setCounterparties =
+              contextInvoice.vendor.vendorType === 'party' ? setParties : setVendors;
+
+            setCounterparties((current) =>
+              current.some(
+                (record) => String(record._id) === String(contextInvoice.vendor._id)
+              )
+                ? current
+                : [...current, contextInvoice.vendor]
+            );
+          }
+
+          if (contextInvoice) {
+            setFormError('');
+            setFormState((current) => ({
+              ...current,
+              originalInvoiceId: contextInvoice._id,
+              originalInvoiceNumber: getInvoiceLabel(contextInvoice),
+              serviceLabel: contextInvoice.serviceLabel || '',
+              originalCost: String(contextInvoice.eligibleCost || ''),
+              vendorReturnAmount:
+                contextInvoice.remainingEligibleCost > 0
+                  ? String(contextInvoice.remainingEligibleCost)
+                  : '',
+            }));
+
+            if (!contextInvoice.canReturn) {
+              setFormError(t('travel.purchaseInvoices.returnFullyUsed'));
+            }
+          } else if (requestedInvoiceId) {
+            setFormError(t('travel.purchaseInvoices.prefillUnavailable'));
+          }
         }
       } catch (error) {
         console.error('Travel vendor return invoices failed:', error);
@@ -462,7 +568,13 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
     return () => {
       active = false;
     };
-  }, [formState.vendorId, formState.vendorPartyId, formState.vendorType, formVisible]);
+  }, [
+    formState.vendorId,
+    formState.vendorPartyId,
+    formState.vendorType,
+    formVisible,
+    returnPrefill,
+  ]);
 
   const updateField = useCallback((field, value) => {
     setFormState((current) => ({
@@ -504,7 +616,17 @@ const TravelVendorReturnsPage = ({ forceFormVisible = false, embedded = false })
           invoice?.eligibleCost !== undefined && invoice?.eligibleCost !== null
             ? String(invoice.eligibleCost)
             : current.originalCost,
+        vendorReturnAmount:
+          invoice?.remainingEligibleCost > 0
+            ? String(invoice.remainingEligibleCost)
+            : '',
       }));
+
+      setFormError(
+        invoice && invoice.canReturn === false
+          ? t('travel.purchaseInvoices.returnFullyUsed')
+          : ''
+      );
     },
     [invoices]
   );
@@ -995,7 +1117,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
                 <option value="">{t('travel.vendorReturns.noInvoice')}</option>
 
                 {invoices.map((invoice) => (
-                  <option key={invoice._id} value={invoice._id}>
+                  <option key={invoice._id} value={invoice._id} disabled={invoice.canReturn === false}>
                     {getInvoiceLabel(invoice)}
                   </option>
                 ))}
@@ -1038,6 +1160,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
               <input
                 type="number"
                 min="0.01"
+                max={selectedInvoice?.remainingEligibleCost || undefined}
                 step="0.01"
                 value={formState.vendorReturnAmount}
                 onChange={(event) => updateField('vendorReturnAmount', event.target.value)}

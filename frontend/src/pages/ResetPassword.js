@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { t } from '../i18n/i18n';
+import AuthSubmitButton from '../components/AuthSubmitButton';
 
 export default function ResetPassword() {
   const savedEmail = sessionStorage.getItem('resetPasswordEmail') || '';
@@ -20,8 +21,13 @@ export default function ResetPassword() {
 
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const verifyInFlightRef = useRef(false);
+  const resetInFlightRef = useRef(false);
 
-  const handleVerifyOtp = async () => {
+  const handleVerifyOtp = async (event) => {
+    event?.preventDefault();
+    if (verifyInFlightRef.current) return;
+
     if (!navigator.onLine) {
       alert(t('auth.internetRequired'));
       return;
@@ -45,6 +51,7 @@ export default function ResetPassword() {
       return;
     }
 
+    verifyInFlightRef.current = true;
     setVerifyingOtp(true);
 
     try {
@@ -74,11 +81,15 @@ export default function ResetPassword() {
     } catch (err) {
       alert(t('common.serverError'));
     } finally {
+      verifyInFlightRef.current = false;
       setVerifyingOtp(false);
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
+    if (resetInFlightRef.current) return;
+
     if (!navigator.onLine) {
       alert(t('auth.internetRequired'));
       return;
@@ -105,6 +116,7 @@ export default function ResetPassword() {
       return;
     }
 
+    resetInFlightRef.current = true;
     setLoading(true);
 
     try {
@@ -135,6 +147,7 @@ export default function ResetPassword() {
     } catch (err) {
       alert(t('common.serverError'));
     } finally {
+      resetInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -204,7 +217,7 @@ export default function ResetPassword() {
         </div>
 
         {!otpVerified && (
-          <>
+          <form onSubmit={handleVerifyOtp}>
             <div style={{ marginBottom: '16px' }}>
               <label
                 style={{
@@ -230,11 +243,7 @@ export default function ResetPassword() {
                       otp: e.target.value.replace(/\D/g, ''),
                     })
                   }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !verifyingOtp) {
-                      handleVerifyOtp();
-                    }
-                  }}
+                  disabled={verifyingOtp}
                   style={{
                     width: '100%',
                     paddingLeft: '35px',
@@ -256,10 +265,11 @@ export default function ResetPassword() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleVerifyOtp}
-              disabled={verifyingOtp}
+            <AuthSubmitButton
+              type="submit"
+              loading={verifyingOtp}
+              idleLabel={t('auth.verifyOtp')}
+              loadingLabel={t('auth.verifyingOtp')}
               className="btn btn-primary"
               style={{
                 width: '100%',
@@ -269,14 +279,12 @@ export default function ResetPassword() {
                 opacity: verifyingOtp ? 0.7 : 1,
                 cursor: verifyingOtp ? 'not-allowed' : 'pointer',
               }}
-            >
-              {verifyingOtp ? t('auth.verifyingOtp') : t('auth.verifyOtp')}
-            </button>
-          </>
+            />
+          </form>
         )}
 
         {otpVerified && (
-          <>
+          <form onSubmit={handleSubmit}>
             <div
               style={{
                 marginBottom: '14px',
@@ -373,11 +381,7 @@ export default function ResetPassword() {
                       confirmPassword: e.target.value,
                     })
                   }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !loading) {
-                      handleSubmit();
-                    }
-                  }}
+                  disabled={loading}
                   style={{
                     width: '100%',
                     paddingLeft: '35px',
@@ -413,10 +417,11 @@ export default function ResetPassword() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={loading}
+            <AuthSubmitButton
+              type="submit"
+              loading={loading}
+              idleLabel={t('auth.resetPassword')}
+              loadingLabel={t('auth.resettingPassword')}
               className="btn btn-primary"
               style={{
                 width: '100%',
@@ -426,10 +431,8 @@ export default function ResetPassword() {
                 opacity: loading ? 0.7 : 1,
                 cursor: loading ? 'not-allowed' : 'pointer',
               }}
-            >
-              {loading ? t('auth.resettingPassword') : t('auth.resetPassword')}
-            </button>
-          </>
+            />
+          </form>
         )}
 
         <div

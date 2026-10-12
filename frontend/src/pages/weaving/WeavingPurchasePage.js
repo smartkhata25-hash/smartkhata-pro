@@ -1,4 +1,5 @@
 import { t } from '../../i18n/i18n';
+import { formatMoneyDisplay } from '../../utils/money';
 import WeavingProductionContext, {
   contractIsOpen,
   ContractProgress,
@@ -164,10 +165,7 @@ const dueFrom = (date, days) => {
   return value.toISOString().slice(0, 10);
 };
 
-const money = (value) =>
-  Number(value || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoneyDisplay;
 
 const recoveryKey = (kind) => `weaving:purchase:unsaved:${kind}`;
 const restorePurchase = (kind) => {

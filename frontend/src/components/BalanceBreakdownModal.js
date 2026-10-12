@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { t } from '../i18n/i18n';
+import { formatMoneyDisplay } from '../utils/money';
 
 const BalanceBreakdownModal = ({
   isOpen = false,
@@ -30,11 +31,7 @@ const BalanceBreakdownModal = ({
     return Number.isFinite(number) ? number : 0;
   };
 
-  const formatMoney = (value) =>
-    safeNumber(value).toLocaleString('en-GB', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    });
+  const formatMoney = formatMoneyDisplay;
 
   const normalizedItems = useMemo(() => {
     if (!Array.isArray(items)) {

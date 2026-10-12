@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -164,7 +165,7 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
     </div>
 
     <div class="opening-info">
-      ${escapeHtml(t("ledger.opening", lang))}: ${opening.toFixed(2)}
+      ${escapeHtml(t("ledger.opening", lang))}: ${formatMoney(opening)}
     </div>
 
     <table>
@@ -186,15 +187,15 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
                 .map((row) => {
                   const moneyIn =
                     row.moneyIn !== null && row.moneyIn !== undefined
-                      ? safeNumber(row.moneyIn).toFixed(2)
+                      ? formatMoney(row.moneyIn)
                       : "-";
 
                   const moneyOut =
                     row.moneyOut !== null && row.moneyOut !== undefined
-                      ? safeNumber(row.moneyOut).toFixed(2)
+                      ? formatMoney(row.moneyOut)
                       : "-";
 
-                  const balance = safeNumber(row.balance).toFixed(2);
+                  const balance = formatMoney(row.balance);
 
                   return `
                     <tr>
@@ -229,9 +230,9 @@ const generateCustomerLedgerHTML = (data, pageSize = "A5") => {
             ${escapeHtml(t("totals", lang))}:
           </td>
 
-          <td>${totalMoneyIn.toFixed(2)}</td>
-          <td>${totalMoneyOut.toFixed(2)}</td>
-          <td>${closingBalance.toFixed(2)}</td>
+          <td>${formatMoney(totalMoneyIn)}</td>
+          <td>${formatMoney(totalMoneyOut)}</td>
+          <td>${formatMoney(closingBalance)}</td>
         </tr>
       </tbody>
     </table>

@@ -15,12 +15,13 @@ import { fetchTravelDashboardSummary } from '../../services/travelMasterService'
 import { hasAnyPermission, hasPermission } from '../../utils/permissionHelper';
 import TravelProfitSummaryModal from '../../components/travel/reports/TravelProfitSummaryModal';
 import { TravelErrorModal } from '../../components/travel/master/TravelMasterUI';
+import { formatMoneyDisplay } from '../../utils/money';
 
 const formatDashboardValue = (value, format) => {
   const safeValue = Number(value || 0);
 
   if (format === 'currency') {
-    return `${t('currency.rs')} ${safeValue.toLocaleString('en-GB')}`;
+    return `${t('currency.rs')} ${formatMoneyDisplay(safeValue)}`;
   }
 
   return safeValue.toLocaleString('en-GB');

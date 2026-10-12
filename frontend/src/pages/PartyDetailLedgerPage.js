@@ -1,6 +1,7 @@
 // src/pages/PartyDetailLedgerPage.js
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
@@ -498,7 +499,7 @@ const PartyDetailLedgerPage = () => {
   const renderAmount = (value) => {
     const num = Number(value);
 
-    return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+    return Number.isFinite(num) ? formatMoneyDisplay(num) : '0';
   };
 
   return (

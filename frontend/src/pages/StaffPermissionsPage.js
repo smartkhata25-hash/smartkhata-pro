@@ -1,7 +1,7 @@
 // src/pages/StaffPermissionsPage.js
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { getStaffById, updateStaffPermissions } from '../services/staffService';
 
@@ -112,10 +112,12 @@ const groupPermissions = (permissions = []) => {
 
 const StaffPermissionsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
 
   const [staff, setStaff] = useState(null);
   const [availablePermissions, setAvailablePermissions] = useState([]);
+  const [permissionCatalog, setPermissionCatalog] = useState([]);
   const [selectedPermissions, setSelectedPermissions] = useState([]);
   const [originalPermissions, setOriginalPermissions] = useState([]);
 
@@ -146,6 +148,7 @@ const StaffPermissionsPage = () => {
 
         setStaff(result.staff);
         setAvailablePermissions(available);
+        setPermissionCatalog(result.permissionCatalog || []);
         setSelectedPermissions(permissions);
         setOriginalPermissions(permissions);
 
@@ -173,10 +176,28 @@ const StaffPermissionsPage = () => {
     }
   }, [id]);
 
-  const groupedPermissions = useMemo(
-    () => groupPermissions(availablePermissions),
-    [availablePermissions]
-  );
+  const groupedPermissions = useMemo(() => {
+    if (!permissionCatalog.length) return groupPermissions(availablePermissions);
+
+    return permissionCatalog.reduce((result, section) => {
+      (section.groups || []).forEach((group) => {
+        const key = `${section.key}:${group.key}`;
+        result[key] = (group.permissions || []).map((permission) => {
+          const parts = String(permission).split('.');
+          const action = parts.slice(1).join('.');
+          return {
+            value: permission,
+            action,
+            label: ACTION_LABELS[action] || formatLabel(action),
+            sectionKey: section.key,
+            sectionLabel: section.label,
+            groupLabel: MODULE_LABELS[group.key] || formatLabel(group.key),
+          };
+        });
+      });
+      return result;
+    }, {});
+  }, [availablePermissions, permissionCatalog]);
 
   const filteredModules = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -186,7 +207,7 @@ const StaffPermissionsPage = () => {
     }
 
     return Object.entries(groupedPermissions).reduce((result, [moduleName, permissions]) => {
-      const moduleLabel = MODULE_LABELS[moduleName] || formatLabel(moduleName);
+      const moduleLabel = permissions[0]?.groupLabel || MODULE_LABELS[moduleName] || formatLabel(moduleName);
 
       const moduleMatches = moduleLabel.toLowerCase().includes(query);
 
@@ -296,7 +317,7 @@ const StaffPermissionsPage = () => {
       return;
     }
 
-    navigate('/staff');
+    navigate('/staff', { state: location.state });
   };
 
   const handleSave = async () => {
@@ -410,14 +431,21 @@ const StaffPermissionsPage = () => {
             {Object.keys(filteredModules).length === 0 ? (
               <div className="text-center py-10 text-gray-500">کوئی Permission نہیں ملی</div>
             ) : (
-              Object.entries(filteredModules).map(([moduleName, permissions]) => {
+              Object.entries(filteredModules).map(([moduleName, permissions], index, entries) => {
                 const fullySelected = isModuleFullySelected(moduleName);
 
                 const partiallySelected = isModulePartiallySelected(moduleName);
 
                 const isExpanded = expandedModules[moduleName] !== false;
 
+                const sectionLabel = permissions[0]?.sectionLabel;
+                const previousSectionLabel = entries[index - 1]?.[1]?.[0]?.sectionLabel;
+
                 return (
+                  <React.Fragment key={moduleName}>
+                  {sectionLabel && sectionLabel !== previousSectionLabel && (
+                    <h2 className="pt-2 text-lg font-bold text-gray-800">{sectionLabel}</h2>
+                  )}
                   <div
                     key={moduleName}
                     className="border border-gray-200 rounded-xl overflow-hidden"
@@ -444,7 +472,7 @@ const StaffPermissionsPage = () => {
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <h2 className="font-bold text-gray-800">
-                              {MODULE_LABELS[moduleName] || formatLabel(moduleName)}
+                              {permissions[0]?.groupLabel || MODULE_LABELS[moduleName] || formatLabel(moduleName)}
                             </h2>
 
                             <p className="text-xs text-gray-500 mt-0.5">
@@ -499,6 +527,7 @@ const StaffPermissionsPage = () => {
                       </div>
                     )}
                   </div>
+                  </React.Fragment>
                 );
               })
             )}

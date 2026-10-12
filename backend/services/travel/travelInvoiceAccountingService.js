@@ -323,6 +323,8 @@ const pushVendorCostRow = ({
   costAmount,
   paidAmount,
   description,
+  serviceType = "",
+  sourceId = null,
 }) => {
   const cost = roundMoney(costAmount);
 
@@ -355,6 +357,8 @@ const pushVendorCostRow = ({
     amount: cost,
     paidAmount: paid,
     description,
+    serviceType,
+    sourceId: sourceId ? String(sourceId) : null,
   });
 };
 
@@ -379,6 +383,8 @@ const collectVendorCostRows = (booking) => {
           paidAmount: component.estimatedVendorPaidBase,
           description:
             component.label || serviceTypeLabel(component.componentType),
+          serviceType: component.componentType || item.itemType,
+          sourceId: component._id || item._id,
         });
       });
 
@@ -401,6 +407,8 @@ const collectVendorCostRows = (booking) => {
           description: `${item.title || serviceTypeLabel(item.itemType)} ${
             row.paxType || "passenger"
           } row ${rowIndex + 1}`,
+          serviceType: item.itemType,
+          sourceId: item._id,
         });
       });
 
@@ -415,6 +423,8 @@ const collectVendorCostRows = (booking) => {
       costAmount: item.estimatedCostBase,
       paidAmount: item.estimatedVendorPaidBase,
       description: item.title || serviceTypeLabel(item.itemType),
+      serviceType: item.itemType,
+      sourceId: item._id,
     });
   });
 
@@ -1144,6 +1154,10 @@ module.exports = {
   TRAVEL_INVOICE_ORIGIN,
 
   assertAccountingEditsAllowed,
+
+  collectVendorCostRows,
+
+  getVendorCostKey,
 
   hasAccountingChanges,
 

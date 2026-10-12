@@ -4,6 +4,7 @@ import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
+import { formatMoneyDisplay } from '../utils/money';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -33,11 +34,7 @@ const AccountTransactionTable = ({
     return Number.isFinite(number) ? number : 0;
   };
 
-  const formatMoney = (value) =>
-    getSafeNumber(value).toLocaleString('en-GB', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    });
+  const formatMoney = formatMoneyDisplay;
 
   const formatDateForInput = (date) => {
     return getBusinessDateInputValue(date);
@@ -512,7 +509,7 @@ const AccountTransactionTable = ({
                   Number(selectedAccount.balance || 0) >= 0 ? 'text-blue-700' : 'text-red-600'
                 }`}
               >
-                Balance Rs. {Number(selectedAccount.balance || 0).toFixed(2)}
+                Balance Rs. {formatMoneyDisplay(selectedAccount.balance)}
               </div>
             )
           ) : (

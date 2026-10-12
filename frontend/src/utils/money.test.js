@@ -1,4 +1,5 @@
 import {
+  formatMoneyDisplay,
   getInvoiceItemMoney,
   moneyNumber,
   roundMoney,
@@ -6,6 +7,26 @@ import {
 } from './money';
 
 describe('money helpers', () => {
+  test.each([
+    [0, '0'],
+    [1000, '1,000'],
+    [100000, '1,00,000'],
+    [1500000, '15,00,000'],
+    [12345678, '1,23,45,678'],
+    ['1500.00', '1,500'],
+    ['1500.50', '1,500.50'],
+    ['1500.05', '1,500.05'],
+    [-1500000, '-15,00,000'],
+  ])('formats displayed money %s as %s', (value, expected) => {
+    expect(formatMoneyDisplay(value)).toBe(expected);
+  });
+
+  test('supports fixed meaningful precision without producing invalid output', () => {
+    expect(formatMoneyDisplay(12.5, { minimumFractionDigits: 2 })).toBe('12.50');
+    expect(formatMoneyDisplay(undefined)).toBe('0');
+    expect(formatMoneyDisplay('not-a-number', { fallback: '-' })).toBe('-');
+  });
+
   test.each(['1', '12', '12.', '12.0', '12.05', '0.5', '0.50'])(
     'preserves valid money typing state %s',
     (value) => {

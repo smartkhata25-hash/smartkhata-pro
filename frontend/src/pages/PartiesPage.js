@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import PageLayout from '../components/PageLayout';
 import LedgerTable from '../components/LedgerTable';
 import PartyForm from '../components/PartyForm';
@@ -758,7 +759,7 @@ const PartiesPage = () => {
                         marginTop: 3,
                       }}
                     >
-                      Rs. {balance.toFixed(2)}
+                      Rs. {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 

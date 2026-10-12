@@ -1,7 +1,7 @@
 // src/pages/StaffFormPage.js
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { createStaff, getStaffById, updateStaff } from '../services/staffService';
 
@@ -16,6 +16,7 @@ const EMPTY_FORM = {
 
 const StaffFormPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
 
   const isEditMode = Boolean(id);
@@ -137,15 +138,17 @@ const StaffFormPage = () => {
 
         alert('Staff information کامیابی سے Update ہو گئی');
       } else {
-        await createStaff({
+        const result = await createStaff({
           ...cleanData,
           password: form.password,
         });
 
         alert('Staff user کامیابی سے Create ہو گیا');
+        navigate(`/staff/${result.staff._id}/permissions`, { state: location.state });
+        return;
       }
 
-      navigate('/staff');
+      navigate('/staff', { state: location.state });
     } catch (err) {
       console.error('Staff save error:', err);
 
@@ -193,7 +196,7 @@ const StaffFormPage = () => {
 
               <button
                 type="button"
-                onClick={() => navigate('/staff')}
+                onClick={() => navigate('/staff', { state: location.state })}
                 className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50"
               >
                 ← Back
@@ -350,7 +353,7 @@ const StaffFormPage = () => {
 
               <button
                 type="button"
-                onClick={() => navigate('/staff')}
+                onClick={() => navigate('/staff', { state: location.state })}
                 disabled={loading}
                 className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-50 disabled:opacity-50"
               >

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   FaBalanceScale,
@@ -63,9 +64,7 @@ const EMPTY_RECOVERY_FORM = {
 };
 
 const money = (value) =>
-  `${t('currency.rs')} ${Number(value || 0).toLocaleString('en-GB', {
-    maximumFractionDigits: 2,
-  })}`;
+  `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 
 const getId = (value) => String(value?._id || value || '');
 

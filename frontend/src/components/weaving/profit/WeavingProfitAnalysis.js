@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../../utils/money';
 import {
   FaBoxes,
   FaChartBar,
@@ -38,7 +39,7 @@ const number = (value) =>
     : Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 
 const money = (value) =>
-  value === null || value === undefined ? '\u2014' : `${t('currency.rs')} ${number(value)}`;
+  value === null || value === undefined ? '\u2014' : `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 
 const ProfitMetric = ({ label, value, format = 'money', provisional = false, tone = 'slate', onClick }) => {
   const styles = {

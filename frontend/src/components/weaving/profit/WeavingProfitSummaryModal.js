@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../../utils/money';
 import { FaArrowRight, FaChevronRight, FaExclamationTriangle, FaSpinner, FaTimes } from 'react-icons/fa';
 
 import { t } from '../../../i18n/i18n';
@@ -10,7 +11,7 @@ const EMPTY_FILTERS = { preset: 'this_month', from: '', to: '' };
 const number = (value) => Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 const money = (value, provisional = false) => value === null || value === undefined
   ? t('weaving.profitSummary.pending')
-  : `${provisional ? '~ ' : ''}${t('currency.rs')} ${number(value)}`;
+  : `${provisional ? '~ ' : ''}${t('currency.rs')} ${formatMoneyDisplay(value)}`;
 
 const SummaryRow = ({ label, value, provisional = false, tone, onClick, strong = false }) => {
   const content = <><span className={`min-w-0 text-sm ${strong ? 'font-black' : 'font-bold'} text-slate-700 sm:text-base`}>{label}</span><span className="flex items-center gap-2"><span className={`whitespace-nowrap text-right text-sm font-black sm:text-base ${tone}`}>{money(value, provisional)}</span>{onClick && <FaChevronRight className="text-xs text-slate-400" aria-hidden="true" />}</span></>;

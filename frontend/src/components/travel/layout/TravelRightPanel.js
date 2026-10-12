@@ -13,6 +13,7 @@ import {
 import { t } from '../../../i18n/i18n';
 import { formatDateWithOptionalTime } from '../../../utils/localDateTime';
 import { buildTravelRouteState } from '../../../utils/travelContext';
+import { formatMoneyDisplay } from '../../../utils/money';
 import BalanceBreakdownModal from '../../BalanceBreakdownModal';
 
 import {
@@ -44,10 +45,7 @@ const formatPanelValue = (value, format) => {
   const safeValue = safeNumber(value);
 
   if (format === 'currency') {
-    return `${t('currency.rs')} ${safeValue.toLocaleString('en-GB', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    })}`;
+    return `${t('currency.rs')} ${formatMoneyDisplay(safeValue)}`;
   }
 
   return safeValue.toLocaleString('en-GB');

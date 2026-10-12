@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { t } from '../i18n/i18n';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 
@@ -92,7 +93,7 @@ const QuotationDrawer = ({
                     </span>
                     <span className="block text-xs text-gray-500">
                       {formatBusinessDateForDisplay(quotation.quotationDate)} ·{' '}
-                      {Number(quotation.grandTotal || 0).toLocaleString()}
+                      {formatMoneyDisplay(quotation.grandTotal)}
                     </span>
                   </button>
 

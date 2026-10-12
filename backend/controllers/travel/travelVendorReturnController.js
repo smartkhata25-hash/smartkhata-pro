@@ -810,6 +810,9 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
       : null;
     const search = cleanString(req.query.search);
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 100);
+    const invoiceId = req.query.invoiceId
+      ? toObjectId(req.query.invoiceId, "travel invoice")
+      : null;
     const query = {
       userId,
       isActive: true,
@@ -818,6 +821,21 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
       accountingPosted: true,
       status: { $in: [...POSTING_STATUSES] },
     };
+    const vendor =
+      vendorId || vendorPartyId
+        ? await resolveTravelVendorCounterparty({
+            userId,
+            source: {
+              vendorType: vendorPartyId ? "party" : "vendor",
+              vendorId,
+              vendorPartyId,
+            },
+          })
+        : null;
+
+    if (invoiceId) {
+      query._id = invoiceId;
+    }
 
     if (vendorPartyId) {
       query.$or = [
@@ -850,8 +868,8 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
       .limit(limit)
       .lean();
 
-    return res.json(
-      invoices.map((invoice) => {
+    const response = await Promise.all(
+      invoices.map(async (invoice) => {
         const costRows = vendorId
           ? collectVendorCostRows(invoice, {
               vendorType: "vendor",
@@ -866,19 +884,57 @@ exports.getTravelVendorReturnInvoices = async (req, res) => {
         const eligibleCost = roundMoney(
           costRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
         );
+        const priorRefundRecovery =
+          eligibleCost > 0
+            ? await sumPriorRefundRecoveries({
+                userId,
+                invoiceId: invoice._id,
+                vendorId,
+                vendorType: vendorPartyId ? "party" : "vendor",
+                vendorPartyId,
+              })
+            : 0;
+        const priorVendorReturns =
+          eligibleCost > 0
+            ? await sumPriorVendorReturns({
+                userId,
+                invoiceId: invoice._id,
+                vendorId,
+                vendorType: vendorPartyId ? "party" : "vendor",
+                vendorPartyId,
+              })
+            : 0;
+        const remainingEligibleCost = roundMoney(
+          Math.max(eligibleCost - priorRefundRecovery - priorVendorReturns, 0),
+        );
 
         return {
           ...invoice,
           invoiceId: invoice._id,
           invoiceNumber: invoice.invoiceNumber || invoice.bookingNumber,
           eligibleCost,
+          priorRefundRecovery,
+          priorVendorReturns,
+          remainingEligibleCost,
+          canReturn: remainingEligibleCost > 0,
           serviceLabel:
-            costRows.length === 1
-              ? costRows[0].label
-              : invoice.serviceType || "Travel service",
+            [...new Set(costRows.map((row) => row.label).filter(Boolean))].join(", ") ||
+            invoice.serviceType ||
+            "Travel service",
+          vendor: vendor
+            ? {
+                _id: vendor.id,
+                name: vendor.name,
+                phone: vendor.phone,
+                email: vendor.email,
+                vendorType: vendor.vendorType,
+              }
+            : null,
         };
       }),
     );
+
+    return res.json(response);
   } catch (error) {
     return sendError(res, error, "Travel vendor return invoice fetch failed");
   }

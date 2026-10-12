@@ -50,6 +50,15 @@ const userSchema = new mongoose.Schema(
       default: [],
     },
 
+    // Undefined means a legacy staff record. Once present, module access has
+    // been explicitly reviewed by the owner. Disabled modules are removed from
+    // this list while their permission selections remain stored.
+    permissionModules: {
+      type: [String],
+      enum: Object.values(MODULE_KEYS),
+      default: undefined,
+    },
+
     staffStatus: {
       type: String,
       enum: ["active", "blocked"],

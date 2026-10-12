@@ -32,6 +32,18 @@ const cleanObject = (value) => {
   }
 };
 
+const resolveActivityModuleScope = ({ requestedScope = "", originalUrl = "", module = "" }) => {
+  const cleanScope = String(requestedScope).trim().toLowerCase();
+  const cleanModule = String(module).trim().toLowerCase();
+  if (["travel", "trading", "weaving", "both", "shared"].includes(cleanScope)) {
+    return cleanScope;
+  }
+  if (cleanModule === "staff" || cleanModule.startsWith("staff.")) return "shared";
+  if (String(originalUrl).startsWith("/api/travel") || cleanModule.startsWith("travel.")) return "travel";
+  if (String(originalUrl).startsWith("/api/weaving") || cleanModule.startsWith("weaving.")) return "weaving";
+  return "trading";
+};
+
 const logActivity = async ({
   req,
   action,
@@ -75,19 +87,11 @@ const logActivity = async ({
       .trim()
       .toLowerCase();
 
-    const resolvedModuleScope =
-      requestedScope === "travel" ||
-      requestedScope === "trading" ||
-      requestedScope === "weaving" ||
-      requestedScope === "both"
-        ? requestedScope
-        : req.originalUrl?.startsWith("/api/travel") ||
-            cleanModule.startsWith("travel.")
-          ? "travel"
-          : req.originalUrl?.startsWith("/api/weaving") ||
-              cleanModule.startsWith("weaving.")
-            ? "weaving"
-          : "trading";
+    const resolvedModuleScope = resolveActivityModuleScope({
+      requestedScope,
+      originalUrl: req.originalUrl,
+      module: cleanModule,
+    });
 
     const activity = await ActivityLog.create({
       businessOwnerId,
@@ -179,4 +183,5 @@ const createActivityLogger = ({
 module.exports = {
   logActivity,
   createActivityLogger,
+  resolveActivityModuleScope,
 };

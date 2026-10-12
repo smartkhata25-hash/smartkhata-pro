@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -177,8 +178,8 @@ td.description {
         <td>${escapeHtml(row.rackNo || "-")}</td>
         <td class="description">${escapeHtml(row.description || "-")}</td>
         <td>${escapeHtml(row.unit || "-")}</td>
-        ${showCost ? `<td>${formatNumber(row.unitCost)}</td>` : ""}
-        <td>${formatNumber(row.salePrice)}</td>
+        ${showCost ? `<td>${formatMoney(row.unitCost)}</td>` : ""}
+        <td>${formatMoney(row.salePrice)}</td>
         <td>${formatNumber(row.stock)}</td>
       </tr>`,
               )

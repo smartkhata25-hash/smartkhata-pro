@@ -48,6 +48,7 @@ import { fetchTravelReminderSettings } from '../../services/travelReminderServic
 import { t } from '../../i18n/i18n';
 import useFormPersist from '../../hooks/useFormPersist';
 import { hasPermission } from '../../utils/permissionHelper';
+import { formatMoneyDisplay } from '../../utils/money';
 
 import {
   TravelActionButton,
@@ -454,10 +455,7 @@ const clearUmrahHotelPricingBreakdown = (pricing = {}) => {
 };
 
 const formatMoney = (amount, currency = DEFAULT_TRAVEL_CURRENCY) =>
-  `${currency || DEFAULT_TRAVEL_CURRENCY} ${Number(amount || 0).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  `${currency || DEFAULT_TRAVEL_CURRENCY} ${formatMoneyDisplay(amount)}`;
 
 const applyServiceDefaults = (item, service) => {
   const defaultCost =

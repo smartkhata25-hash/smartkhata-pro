@@ -1,4 +1,5 @@
 const { t } = require("../i18n/i18n");
+const { formatMoney } = require("../utils/money");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -160,13 +161,13 @@ td.left {
   </div>
 
   <div class="summary">
-    ${t("ledger.opening", lang)}: ${summary.opening.toFixed(2)} |
-    ${t("ledger.totalDebit", lang)}: ${summary.totalDebit.toFixed(2)} |
-    ${t("ledger.totalCredit", lang)}: ${summary.totalCredit.toFixed(2)} |
+    ${t("ledger.opening", lang)}: ${formatMoney(summary.opening)} |
+    ${t("ledger.totalDebit", lang)}: ${formatMoney(summary.totalDebit)} |
+    ${t("ledger.totalCredit", lang)}: ${formatMoney(summary.totalCredit)} |
     ${t("ledger.closing", lang)}: ${
       summary.closingBalance < 0
-        ? `(${Math.abs(summary.closingBalance).toFixed(2)})`
-        : summary.closingBalance.toFixed(2)
+        ? `(${formatMoney(Math.abs(summary.closingBalance))})`
+        : formatMoney(summary.closingBalance)
     }
   </div>
 
@@ -199,9 +200,9 @@ td.left {
                 : ""
             }
           </td>
-          <td>${row.debit !== null ? row.debit.toFixed(2) : "-"}</td>
-          <td>${row.credit !== null ? row.credit.toFixed(2) : "-"}</td>
-          <td>${row.balance.toFixed(2)}</td>
+          <td>${row.debit !== null ? formatMoney(row.debit) : "-"}</td>
+          <td>${row.credit !== null ? formatMoney(row.credit) : "-"}</td>
+          <td>${formatMoney(row.balance)}</td>
         </tr>
       `,
               )
@@ -215,9 +216,9 @@ td.left {
 
       <tr class="totals-row">
         <td colspan="3" class="right">${t("totals", lang)}:</td>
-        <td>${summary.totalDebit.toFixed(2)}</td>
-        <td>${summary.totalCredit.toFixed(2)}</td>
-        <td>${summary.closingBalance.toFixed(2)}</td>
+        <td>${formatMoney(summary.totalDebit)}</td>
+        <td>${formatMoney(summary.totalCredit)}</td>
+        <td>${formatMoney(summary.closingBalance)}</td>
       </tr>
     </tbody>
   </table>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { useSearchParams } from 'react-router-dom';
 import { FaHistory, FaMoneyBillWave, FaReceipt, FaWallet } from 'react-icons/fa';
 import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
@@ -37,10 +38,7 @@ const fresh = (type, no = '') => ({
   description: '',
 });
 
-const money = (value) =>
-  Number(value || 0).toLocaleString('en-PK', {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoneyDisplay;
 const dateRange = (preset, from, to) => {
   const now = new Date(); const day = (value) => value.toISOString().slice(0, 10); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (preset === 'custom') return { from, to };

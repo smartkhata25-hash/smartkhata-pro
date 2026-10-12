@@ -1,6 +1,7 @@
 // 📁 src/pages/SupplierLedgerPage.js
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
@@ -343,7 +344,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {totalDebit.toFixed(2)}
+              Rs. {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -367,7 +368,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.totalCredit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {totalCredit.toFixed(2)}
+              Rs. {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -391,7 +392,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.closingBalance')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {closingBalance.toFixed(2)}
+              Rs. {formatMoneyDisplay(closingBalance)}
             </div>
             <div
               style={{

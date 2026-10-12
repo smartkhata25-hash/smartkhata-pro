@@ -1,25 +1,36 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { register } from '../services/authService';
 import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
+import AuthSubmitButton from '../components/AuthSubmitButton';
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', code: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const inFlightRef = useRef(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (inFlightRef.current) return;
+
+    inFlightRef.current = true;
+    setLoading(true);
+
     try {
       const res = await register(form);
       alert(res.msg || t('alerts.registered'));
 
       if (res.msg === 'User registered successfully') {
         setForm({ name: '', email: '', password: '', code: '' });
-        navigate('/#/login');
+        navigate('/login');
       }
     } catch (err) {
       alert(err.response?.data?.msg || 'Registration failed');
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
     }
   };
 
@@ -182,18 +193,19 @@ export default function RegisterPage() {
           </div>
 
           {/* Button */}
-          <button
+          <AuthSubmitButton
             type="submit"
             className="btn btn-primary"
+            loading={loading}
+            idleLabel={t('register')}
+            loadingLabel={t('auth.registering')}
             style={{
               width: '100%',
               padding: '10px',
               fontWeight: '600',
               fontSize: '15px',
             }}
-          >
-            {t('register')}
-          </button>
+          />
         </form>
 
         {/* Bottom Link */}

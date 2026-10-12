@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 
 import { useNavigate } from 'react-router-dom';
 
@@ -468,7 +469,7 @@ const PurchaseReturnList = () => {
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 whitespace-nowrap">
-                    {Number(row.totalAmount || 0).toFixed(2)}
+                    {formatMoneyDisplay(row.totalAmount)}
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 capitalize">

@@ -82,6 +82,14 @@ export const travelSidebarItems = Object.freeze([
     permission: 'travel.bookings.view',
   },
   {
+    key: 'travelPurchaseInvoices',
+    to: '/travel/purchase-invoices',
+    labelKey: 'travel.purchaseInvoices.title',
+    icon: FaClipboardList,
+    module: MODULE_KEYS.TRAVEL,
+    allPermissions: ['travel.bookings.view', 'travel.vendors.view'],
+  },
+  {
     key: 'travelReturns',
     to: '/travel/returns',
     labelKey: 'travel.returns.title',

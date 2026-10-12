@@ -4,6 +4,7 @@
  * Professional accounting print layout
  * Supports A4 + A5
  */
+const { formatMoney } = require("../utils/money");
 
 const generateAgingReportHTML = (data, pageSize = "A5") => {
   const { documentTitle, reportDate, summary, rows } = data;
@@ -136,11 +137,11 @@ td.right {
   <!-- SUMMARY -->
 
   <div class="summary">
-    0-30: ${summary.totalRecent.toFixed(2)} |
-    31-60: ${summary.totalMid1.toFixed(2)} |
-    61-90: ${summary.totalMid2.toFixed(2)} |
-    90+: ${summary.totalOldest.toFixed(2)} |
-    Total: ${summary.grandTotal.toFixed(2)}
+    0-30: ${formatMoney(summary.totalRecent)} |
+    31-60: ${formatMoney(summary.totalMid1)} |
+    61-90: ${formatMoney(summary.totalMid2)} |
+    90+: ${formatMoney(summary.totalOldest)} |
+    Total: ${formatMoney(summary.grandTotal)}
   </div>
 
   <!-- TABLE -->
@@ -165,11 +166,11 @@ td.right {
           (row) => `
         <tr>
           <td class="left">${row.customer}</td>
-          <td class="right">${row.recent.toFixed(2)}</td>
-          <td class="right">${row.mid1.toFixed(2)}</td>
-          <td class="right">${row.mid2.toFixed(2)}</td>
-          <td class="right">${row.oldest.toFixed(2)}</td>
-          <td class="right">${row.total.toFixed(2)}</td>
+          <td class="right">${formatMoney(row.recent)}</td>
+          <td class="right">${formatMoney(row.mid1)}</td>
+          <td class="right">${formatMoney(row.mid2)}</td>
+          <td class="right">${formatMoney(row.oldest)}</td>
+          <td class="right">${formatMoney(row.total)}</td>
         </tr>
       `,
         )
@@ -179,11 +180,11 @@ td.right {
 
       <tr class="totals-row">
         <td class="right">Grand Total</td>
-        <td>${summary.totalRecent.toFixed(2)}</td>
-        <td>${summary.totalMid1.toFixed(2)}</td>
-        <td>${summary.totalMid2.toFixed(2)}</td>
-        <td>${summary.totalOldest.toFixed(2)}</td>
-        <td>${summary.grandTotal.toFixed(2)}</td>
+        <td>${formatMoney(summary.totalRecent)}</td>
+        <td>${formatMoney(summary.totalMid1)}</td>
+        <td>${formatMoney(summary.totalMid2)}</td>
+        <td>${formatMoney(summary.totalOldest)}</td>
+        <td>${formatMoney(summary.grandTotal)}</td>
       </tr>
 
     </tbody>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import axios from 'axios';
 import { Bar } from 'react-chartjs-2';
 import {
@@ -290,7 +291,7 @@ const CashFlowChart = () => {
           }}
         >
           <strong>{t('dashboard.totalInflow')}</strong>
-          <div style={{ fontSize: 20, color: '#16a34a' }}>Rs. {totalInflow.toLocaleString()}</div>
+          <div style={{ fontSize: 20, color: '#16a34a' }}>Rs. {formatMoneyDisplay(totalInflow)}</div>
         </div>
 
         <div
@@ -302,7 +303,7 @@ const CashFlowChart = () => {
           }}
         >
           <strong>{t('dashboard.totalOutflow')}</strong>
-          <div style={{ fontSize: 20, color: '#dc2626' }}>Rs. {totalOutflow.toLocaleString()}</div>
+          <div style={{ fontSize: 20, color: '#dc2626' }}>Rs. {formatMoneyDisplay(totalOutflow)}</div>
         </div>
 
         <div
@@ -320,7 +321,7 @@ const CashFlowChart = () => {
               color: netCash >= 0 ? '#16a34a' : '#dc2626',
             }}
           >
-            Rs. {netCash.toLocaleString()}
+            Rs. {formatMoneyDisplay(netCash)}
           </div>
         </div>
       </div>

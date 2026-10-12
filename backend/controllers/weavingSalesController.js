@@ -8,6 +8,7 @@ const WeavingPakkiSettlement = require("../models/WeavingPakkiSettlement");
 const { generatePdfFromHtml } = require("../services/pdfService");
 const service = require("../services/weaving/weavingSalesService");
 const { logActivity } = require("../utils/activityLogger");
+const { formatMoney } = require("../utils/money");
 const uid = (req) => req.user?.id || req.userId;
 const fail = (res, error, message) => {
   if (error.code === 11000) {
@@ -358,11 +359,7 @@ const esc = (value) =>
         char
       ],
   );
-const money = (value) =>
-  Number(value || 0).toLocaleString("en-PK", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+const money = formatMoney;
 const parchiHtml = ({
   title,
   number,

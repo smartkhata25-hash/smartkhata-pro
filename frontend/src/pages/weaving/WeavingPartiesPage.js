@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { useSearchParams } from 'react-router-dom';
 import {
   FaEdit,
@@ -44,7 +45,7 @@ const compactField =
 const balanceKind = (value) =>
   Number(value) > 0 ? 'receivable' : Number(value) < 0 ? 'payable' : 'settled';
 
-const money = (value) => `Rs. ${Math.abs(Number(value || 0)).toLocaleString('en-PK')}`;
+const money = (value) => `Rs. ${formatMoneyDisplay(Math.abs(Number(value || 0)))}`;
 
 export default function WeavingPartiesPage() {
   const [params, setParams] = useSearchParams();
@@ -640,7 +641,7 @@ export default function WeavingPartiesPage() {
                               sendWhatsAppReminder({
                                 phone: row.phone,
                                 customerName: row.name,
-                                balance: Math.abs(row.balance).toLocaleString(),
+                                balance: formatMoneyDisplay(Math.abs(row.balance)),
                                 businessName: 'Smart Khata',
                                 lang: 'en',
                               })

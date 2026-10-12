@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import {
 useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -626,7 +627,7 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
       sendWhatsAppReminder({
         phone: vendor?.phone,
         customerName: vendor?.name,
-        balance: getVendorBalance(vendor).toFixed(2),
+        balance: formatMoneyDisplay(getVendorBalance(vendor)),
         businessName,
         lang: getCurrentLanguage(),
         template: whatsAppTemplate,
@@ -797,7 +798,7 @@ setPageError(error?.response?.data?.message || t('travel.vendors.restoreFailed')
                   sendWhatsAppReminder({
                     phone: vendor?.phone,
                     customerName: vendor?.name,
-                    balance: getVendorBalance(vendor).toFixed(2),
+                    balance: formatMoneyDisplay(getVendorBalance(vendor)),
                     businessName,
                     lang: getCurrentLanguage(),
                     template: whatsAppTemplate,

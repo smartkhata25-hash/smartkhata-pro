@@ -68,6 +68,9 @@ export const getStaffById = async (staffId) => {
       availablePermissions: Array.isArray(response.data?.availablePermissions)
         ? response.data.availablePermissions
         : [],
+      permissionCatalog: Array.isArray(response.data?.permissionCatalog)
+        ? response.data.permissionCatalog
+        : [],
     };
   } catch (error) {
     throwServiceError(error, 'Failed to fetch staff details');

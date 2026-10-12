@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCustomerDetailedLedger } from '../services/customerDetailLedgerService';
@@ -715,22 +716,22 @@ export default function CustomerDetailLedgerPage() {
         <>
           <div className="card">
             <div style={{ fontSize: 12, color: '#6b7280' }}>{t('ledger.opening')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.opening.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.opening)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#16a34a' }}>{t('credit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.debit.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.debit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#dc2626' }}>{t('debit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.credit.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.credit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#2563eb' }}>{t('ledger.closing')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {summary.closing.toFixed(2)}</div>
+            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.closing)}</div>
           </div>
         </>
       }
@@ -770,9 +771,9 @@ export default function CustomerDetailLedgerPage() {
 
                 <tr>
                   <th colSpan={12} style={{ textAlign: 'center', fontSize: 12 }}>
-                    {t('debit')}: {summary.debit.toFixed(2)} &nbsp; | &nbsp; {t('credit')}:{' '}
-                    {summary.credit.toFixed(2)} &nbsp; | &nbsp; {t('ledger.closing')}:{' '}
-                    {summary.closing.toFixed(2)}
+                    {t('debit')}: {formatMoneyDisplay(summary.debit)} &nbsp; | &nbsp; {t('credit')}:{' '}
+                    {formatMoneyDisplay(summary.credit)} &nbsp; | &nbsp; {t('ledger.closing')}:{' '}
+                    {formatMoneyDisplay(summary.closing)}
                   </th>
                 </tr>
               </thead>
@@ -816,9 +817,9 @@ export default function CustomerDetailLedgerPage() {
 
                           <td style={{ width: '10%' }}>{it.quantity}</td>
 
-                          <td style={{ width: '15%' }}>{it.rate.toFixed(2)}</td>
+                          <td style={{ width: '15%' }}>{formatMoneyDisplay(it.rate)}</td>
 
-                          <td style={{ width: '20%' }}>{it.total.toFixed(2)}</td>
+                          <td style={{ width: '20%' }}>{formatMoneyDisplay(it.total)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -831,21 +832,21 @@ export default function CustomerDetailLedgerPage() {
                     <tr>
                       <td align="right">{t('credit')}:</td>
                       <td align="right" className="amount-debit">
-                        {blk.debit ? blk.debit.toFixed(2) : '—'}
+                        {blk.debit ? formatMoneyDisplay(blk.debit) : '—'}
                       </td>
                     </tr>
 
                     <tr>
                       <td align="right">{t('debit')}:</td>
                       <td align="right" className="amount-credit">
-                        {blk.credit ? blk.credit.toFixed(2) : '—'}
+                        {blk.credit ? formatMoneyDisplay(blk.credit) : '—'}
                       </td>
                     </tr>
 
                     <tr>
                       <td align="right">{t('balance')}:</td>
                       <td align="right" className="amount-balance">
-                        {blk.balance.toFixed(2)}
+                        {formatMoneyDisplay(blk.balance)}
                       </td>
                     </tr>
                   </tbody>

@@ -1,7 +1,9 @@
 // src/pages/StaffManagementPage.js
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { isTravelContext } from '../utils/travelContext';
+import { isWeavingContext } from '../utils/weavingContext';
 
 import {
   activateStaff,
@@ -23,6 +25,13 @@ const EMPTY_PAGINATION = {
 
 const StaffManagementPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const activityPath = isTravelContext(location)
+    ? '/travel/activity-log'
+    : isWeavingContext(location)
+      ? '/weaving/activity-log'
+      : '/activity-log';
+  const navigateWithContext = (path) => navigate(path, { state: location.state });
 
   const [staff, setStaff] = useState([]);
   const [pagination, setPagination] = useState(EMPTY_PAGINATION);
@@ -214,7 +223,7 @@ const StaffManagementPage = () => {
                 <PermissionGuard permission={FRONTEND_PERMISSIONS.STAFF.VIEW_ACTIVITY}>
                   <button
                     type="button"
-                    onClick={() => navigate('/activity-log')}
+                    onClick={() => navigateWithContext(activityPath)}
                     className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50"
                   >
                     📋 Activity Log
@@ -224,7 +233,7 @@ const StaffManagementPage = () => {
                 <PermissionGuard permission={FRONTEND_PERMISSIONS.STAFF.CREATE}>
                   <button
                     type="button"
-                    onClick={() => navigate('/staff/new')}
+                    onClick={() => navigateWithContext('/staff/new')}
                     className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
                   >
                     + Add Staff
@@ -368,7 +377,7 @@ const StaffManagementPage = () => {
                               <button
                                 type="button"
                                 disabled={busy}
-                                onClick={() => navigate(`/staff/${staffUser._id}/edit`)}
+                                onClick={() => navigateWithContext(`/staff/${staffUser._id}/edit`)}
                                 className="px-3 py-1.5 rounded-md bg-yellow-100 text-yellow-800 text-xs font-semibold hover:bg-yellow-200 disabled:opacity-50"
                               >
                                 Edit
@@ -381,7 +390,7 @@ const StaffManagementPage = () => {
                               <button
                                 type="button"
                                 disabled={busy}
-                                onClick={() => navigate(`/staff/${staffUser._id}/permissions`)}
+                                onClick={() => navigateWithContext(`/staff/${staffUser._id}/permissions`)}
                                 className="px-3 py-1.5 rounded-md bg-purple-100 text-purple-700 text-xs font-semibold hover:bg-purple-200 disabled:opacity-50"
                               >
                                 Permissions

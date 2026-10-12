@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { useNavigate } from 'react-router-dom';
 import { t, getCurrentLanguage } from '../i18n/i18n';
 import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
@@ -553,7 +554,7 @@ const PartyLedgerHeader = ({
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {Number(totalDebit || 0).toFixed(2)}
+              Rs. {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -567,7 +568,7 @@ const PartyLedgerHeader = ({
           >
             <div style={{ color: '#dc2626', fontWeight: 600 }}>{t('ledger.totalCredit')}</div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {Number(totalCredit || 0).toFixed(2)}
+              Rs. {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -584,7 +585,7 @@ const PartyLedgerHeader = ({
             </div>
 
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {Number(closingBalance || 0).toFixed(2)}
+              Rs. {formatMoneyDisplay(closingBalance)}
             </div>
 
             {!isMobile && (

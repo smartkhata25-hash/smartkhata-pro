@@ -33,6 +33,7 @@ import { hasPermission } from '../utils/permissionHelper';
 import { getBusinessDateInputValue } from '../utils/localDateTime';
 import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
+import { formatMoneyDisplay } from '../utils/money';
 
 const MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
@@ -173,11 +174,7 @@ const normalizeScope = (scope, fallback = MODULE_SCOPES.TRADING) =>
     ? String(scope || '').toLowerCase()
     : fallback;
 
-const formatMoney = (value) =>
-  Number(value || 0).toLocaleString('en-GB', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
+const formatMoney = formatMoneyDisplay;
 
 const scopeLabel = (scope) => {
   const normalized = normalizeScope(scope);

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { getAllExpenses, deleteExpense } from '../services/expenseService';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { t } from '../i18n/i18n';
@@ -588,7 +589,7 @@ const ExpenseList = () => {
                     </td>
 
                     <td className="expense-amount-col px-1.5 py-1 md:p-2 border whitespace-nowrap">
-                      {Number(e.amount || 0).toFixed(2)}
+                      {formatMoneyDisplay(e.amount)}
                     </td>
 
                     <td className="expense-actions-col px-1.5 py-1 md:p-2 border">

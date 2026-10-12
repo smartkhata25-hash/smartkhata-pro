@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { useNavigate } from 'react-router-dom';
 import {
   FaBalanceScale,
@@ -28,10 +29,7 @@ const emptySummary = {
   netPosition: 0,
 };
 
-const formatMoney = (value) =>
-  Number(value || 0).toLocaleString('en-GB', {
-    maximumFractionDigits: 2,
-  });
+const formatMoney = formatMoneyDisplay;
 
 const getEmployeeInitials = (name = '') => {
   const words = String(name || '')

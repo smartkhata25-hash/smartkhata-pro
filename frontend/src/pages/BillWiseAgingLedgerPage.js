@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
 import { getCurrentLanguage, t } from '../i18n/i18n';
+import { formatMoneyDisplay } from '../utils/money';
 import {
   getCustomerBillWiseAging,
   getPartyBillWiseAging,
@@ -10,11 +11,7 @@ import {
 
 const API = process.env.REACT_APP_API_BASE_URL;
 
-const formatAmount = (value) =>
-  Number(value || 0).toLocaleString('en-PK', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+const formatAmount = formatMoneyDisplay;
 
 const formatDateKey = (value) => {
   if (!value) return '-';

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -58,13 +59,7 @@ const EMPTY_ENTRY_FORM = {
 
 const classNames = (...values) => values.filter(Boolean).join(' ');
 
-const money = (value) => {
-  const amount = Number(value || 0);
-
-  return amount.toLocaleString('en-GB', {
-    maximumFractionDigits: 2,
-  });
-};
+const money = formatMoneyDisplay;
 
 const numberLabel = (value) =>
   Number(value || 0).toLocaleString('en-GB', {

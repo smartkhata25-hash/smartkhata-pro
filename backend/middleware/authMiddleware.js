@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { normalizeModuleConfig } = require("../utils/moduleConfig");
+const { getEffectivePermissions } = require("../utils/permissionList");
 
 const protect = async (req, res, next) => {
   try {
@@ -17,7 +18,7 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id).select(
-      "_id role accountRole businessOwnerId staffStatus permissions isDeleted enabledModules defaultModule",
+      "_id role accountRole businessOwnerId staffStatus permissions permissionModules isDeleted enabledModules defaultModule",
     );
 
     // Deleted یا موجود نہ ہونے والا User
@@ -74,7 +75,14 @@ const protect = async (req, res, next) => {
       id: businessOwnerId,
       role: user.role,
       accountRole,
-      permissions: user.permissions || [],
+      permissions:
+        accountRole === "staff"
+          ? getEffectivePermissions(
+              user.permissions || [],
+              moduleConfig,
+              user.permissionModules,
+            )
+          : user.permissions || [],
       businessOwnerId,
       actorId: user._id,
       enabledModules: moduleConfig.enabledModules,

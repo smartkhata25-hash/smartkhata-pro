@@ -2,6 +2,7 @@ import React from 'react';
 import { FaCheckCircle, FaSave } from 'react-icons/fa';
 
 import { t } from '../../../../i18n/i18n';
+import { formatMoneyDisplay } from '../../../../utils/money';
 import { TravelActionButton } from '../../master/TravelMasterUI';
 import { Section } from './BookingFormControls';
 
@@ -31,7 +32,7 @@ const BookingReviewPanel = ({ customer, selectedTravelers, totals, saving, onSub
               {t('travel.booking.fields.estimatedSellingBase')}
             </p>
             <p className="mt-1 text-lg font-black text-emerald-800">
-              {totals.baseCurrency} {totals.selling.toLocaleString('en-GB')}
+              {totals.baseCurrency} {formatMoneyDisplay(totals.selling)}
             </p>
           </div>
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
@@ -39,7 +40,7 @@ const BookingReviewPanel = ({ customer, selectedTravelers, totals, saving, onSub
               {t('travel.booking.fields.estimatedCostBase')}
             </p>
             <p className="mt-1 text-lg font-black text-rose-800">
-              {totals.baseCurrency} {totals.cost.toLocaleString('en-GB')}
+              {totals.baseCurrency} {formatMoneyDisplay(totals.cost)}
             </p>
           </div>
           <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
@@ -47,7 +48,7 @@ const BookingReviewPanel = ({ customer, selectedTravelers, totals, saving, onSub
               {t('travel.booking.fields.estimatedProfit')}
             </p>
             <p className="mt-1 text-lg font-black text-cyan-800">
-              {totals.baseCurrency} {totals.profit.toLocaleString('en-GB')}
+              {totals.baseCurrency} {formatMoneyDisplay(totals.profit)}
             </p>
           </div>
         </div>

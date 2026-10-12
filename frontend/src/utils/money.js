@@ -14,6 +14,26 @@ export const roundMoney = (value) => {
 
 export const moneyNumber = (value) => roundMoney(value || 0);
 
+/**
+ * Formats a monetary value for display using Pakistani lakh/crore grouping.
+ * This helper never mutates or rounds the value used by calculations; the
+ * fraction options only control its rendered representation.
+ */
+export const formatMoneyDisplay = (
+  value,
+  { minimumFractionDigits, maximumFractionDigits = 2, fallback = '0' } = {}
+) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+
+  const displayMinimum = minimumFractionDigits ?? (Number.isInteger(number) ? 0 : Math.min(2, maximumFractionDigits));
+
+  return number.toLocaleString('en-IN', {
+    minimumFractionDigits: displayMinimum,
+    maximumFractionDigits,
+  });
+};
+
 export const getInvoiceItemMoney = (item = {}) => ({
   price: moneyNumber(item.rate),
   total: moneyNumber(

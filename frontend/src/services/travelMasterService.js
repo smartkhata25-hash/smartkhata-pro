@@ -630,6 +630,22 @@ export const mergeTravelParties = async (payload = {}) => {
 
 export const fetchTravelBookings = fetchBookingList;
 
+export const fetchTravelPurchaseInvoices = async (params = {}) => {
+  const response = await axios.get(
+    `${TRAVEL_API}/purchase-invoices`,
+    getConfig(normalizeParams(params))
+  );
+  const payload = response.data || {};
+  const rows = Array.isArray(payload.data) ? payload.data : [];
+
+  return {
+    data: rows,
+    total: Number(payload.total || rows.length),
+    page: Number(payload.page || 1),
+    limit: Number(payload.limit || 50),
+  };
+};
+
 export const fetchTravelBookingById = async (id) => {
   const response = await axios.get(`${TRAVEL_API}/bookings/${id}`, getConfig());
 

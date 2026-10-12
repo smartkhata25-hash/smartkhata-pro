@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import { createRefund, updateRefund, getRefundById } from '../services/refundService';
 import { getInvoiceById } from '../services/salesService';
 import { getCustomerBalance } from '../services/customerLedgerService';
@@ -1491,7 +1492,7 @@ disabled:opacity-60 disabled:cursor-not-allowed"
             {/* 💰 Total Amount */}
             <div className="flex items-center gap-2 text-xs md:text-sm font-semibold text-gray-700 order-1 md:order-none">
               <span>{t('total')}:</span>
-              <span className="bg-gray-100 px-2 py-1 rounded">Rs. {totalAmount.toFixed(2)}</span>
+              <span className="bg-gray-100 px-2 py-1 rounded">Rs. {formatMoneyDisplay(totalAmount)}</span>
             </div>
           </div>
         </div>

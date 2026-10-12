@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { hasPermission } from '../utils/permissionHelper';
 import {
+  formatMoneyDisplay,
   getInvoiceItemMoney,
   moneyNumber,
   roundMoney,
@@ -1743,19 +1744,19 @@ const PurchaseInvoiceForm = () => {
                   {/* RIGHT SIDE — Totals */}
                   <div className="col-span-4 text-right space-y-1 text-sm">
                     <p>
-                      {t('total')}: Rs. {totalAmount.toFixed(2)}
+                      {t('total')}: Rs. {formatMoneyDisplay(totalAmount)}
                     </p>
                     <p>
-                      {t('discount')}: Rs. {finalDiscount.toFixed(2)}
+                      {t('discount')}: Rs. {formatMoneyDisplay(finalDiscount)}
                     </p>
                     <p className="text-lg font-bold">
-                      {t('netTotal')}: Rs. {grandTotal.toFixed(2)}
+                      {t('netTotal')}: Rs. {formatMoneyDisplay(grandTotal)}
                     </p>
                     <p>
-                      {t('paid')}: Rs. {numericPaidAmount.toFixed(2)}
+                      {t('paid')}: Rs. {formatMoneyDisplay(numericPaidAmount)}
                     </p>
                     <p className="text-red-600 font-semibold">
-                      {t('remaining')}: Rs. {(grandTotal - numericPaidAmount).toFixed(2)}
+                      {t('remaining')}: Rs. {formatMoneyDisplay(grandTotal - numericPaidAmount)}
                     </p>
                   </div>
                 </div>

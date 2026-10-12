@@ -10,7 +10,7 @@ import Select from 'react-select';
 import { t } from '../i18n/i18n';
 import useFormPersist from '../hooks/useFormPersist';
 import { hasPermission } from '../utils/permissionHelper';
-import { sanitizeMoneyInput } from '../utils/money';
+import { formatMoneyDisplay, sanitizeMoneyInput } from '../utils/money';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -992,10 +992,10 @@ const PayBillForm = () => {
               <div className="flex justify-between font-semibold text-sm">
                 <span>{t('common.total')}</span>
                 <span>
-                  {(
+                  {formatMoneyDisplay(
                     paymentEntries.reduce((sum, p) => sum + Number(p.amount || 0), 0) +
                     Number(formData.discountAmount || 0)
-                  ).toFixed(2)}
+                  )}
                 </span>
               </div>
             </div>
@@ -1088,9 +1088,9 @@ const PayBillForm = () => {
                     <td className="border p-1">{formatBusinessDateForDisplay(e.date)}</td>
                     <td className="border p-1">{e.billNo || '-'}</td>
                     <td className="border p-1">{e.description || '-'}</td>
-                    <td className="border p-1 text-right">{e.debit?.toFixed(2) || '0.00'}</td>
-                    <td className="border p-1 text-right">{e.credit?.toFixed(2) || '0.00'}</td>
-                    <td className="border p-1 text-right">{e.balance?.toFixed(2) || '0.00'}</td>
+                    <td className="border p-1 text-right">{formatMoneyDisplay(e.debit)}</td>
+                    <td className="border p-1 text-right">{formatMoneyDisplay(e.credit)}</td>
+                    <td className="border p-1 text-right">{formatMoneyDisplay(e.balance)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { formatMoneyDisplay } from '../utils/money';
 
 import {
   BUSINESS_VALUE_MODULE_SCOPES,
@@ -202,12 +203,7 @@ export const getPresetComponents = (preset, { moduleScope } = {}) => {
 };
 
 export const formatBusinessValueAmount = (value) => {
-  const safeValue = Number(value || 0);
-
-  return safeValue.toLocaleString('en-PK', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
+  return formatMoneyDisplay(value);
 };
 
 export const getComponentValue = (businessValueData, componentKey) => {

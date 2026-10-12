@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from '../../components/weaving/WeavingSaleSaveOutput';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -57,10 +58,7 @@ const today = () => getBusinessDateInputValue();
 
 const key = () => window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-const money = (value) =>
-  Number(value || 0).toLocaleString('en-PK', {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoneyDisplay;
 
 const Field = ({ label, children, className = '' }) => (
   <label className={`block text-sm font-medium text-slate-700 ${className}`}>

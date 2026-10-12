@@ -11,16 +11,11 @@ import {
 } from 'recharts';
 
 import { t } from '../i18n/i18n';
+import { formatMoneyDisplay } from '../utils/money';
 
-const formatAmount = (value) => Number(value || 0).toLocaleString('en-PK', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const formatAmount = formatMoneyDisplay;
 
-const formatAxisAmount = (value) => Number(value || 0).toLocaleString('en-PK', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
+const formatAxisAmount = formatMoneyDisplay;
 
 const TrialBalanceComparisonChart = ({ data, scope }) => {
   const chartHeight = Math.max(430, data.length * 48 + 80);

@@ -1,6 +1,7 @@
 // src/components/MonthlySalesChart.js
 
 import React, { useEffect, useState } from 'react';
+import { formatMoneyDisplay } from '../utils/money';
 import axios from 'axios';
 import { Bar } from 'react-chartjs-2';
 import {
@@ -142,7 +143,7 @@ const MonthlySalesChart = () => {
 
         callbacks: {
           label: function (context) {
-            return `${t('sales')}: Rs. ${context.raw.toLocaleString()}`;
+            return `${t('sales')}: Rs. ${formatMoneyDisplay(context.raw)}`;
           },
         },
       },
@@ -163,7 +164,7 @@ const MonthlySalesChart = () => {
 
         ticks: {
           callback: function (value) {
-            return 'Rs. ' + value.toLocaleString();
+            return 'Rs. ' + formatMoneyDisplay(value);
           },
         },
 
@@ -280,7 +281,7 @@ const MonthlySalesChart = () => {
               color: '#2563eb',
             }}
           >
-            Rs. {totalSales.toLocaleString()}
+            Rs. {formatMoneyDisplay(totalSales)}
           </div>
         </div>
 
@@ -300,7 +301,7 @@ const MonthlySalesChart = () => {
               color: '#16a34a',
             }}
           >
-            Rs. {avgSales.toLocaleString()}
+            Rs. {formatMoneyDisplay(avgSales)}
           </div>
         </div>
       </div>

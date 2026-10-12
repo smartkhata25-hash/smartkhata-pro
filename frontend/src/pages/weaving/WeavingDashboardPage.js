@@ -17,6 +17,7 @@ import { listWeavingLooms } from '../../services/weavingOperationsService';
 import { getWeavingDashboardSummary } from '../../services/weavingReportService';
 import { buildWeavingRouteState } from '../../utils/weavingContext';
 import { hasPermission } from '../../utils/permissionHelper';
+import { formatMoneyDisplay } from '../../utils/money';
 
 const EMPTY_VALUE = '\u2014';
 
@@ -42,7 +43,7 @@ const formatDashboardValue = (value, format) => {
     if (value.status === 'pending' || value.amount === null || value.amount === undefined) {
       return t('weaving.profitSummary.costingPendingShort');
     }
-    const formatted = `${t('currency.rs')} ${Number(value.amount || 0).toLocaleString('en-GB')}`;
+    const formatted = `${t('currency.rs')} ${formatMoneyDisplay(value.amount)}`;
     if (value.status === 'complete' || value.status === 'exact') return formatted;
     return <span className="flex flex-wrap items-center gap-2"><span>~ {formatted}</span><span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800">{t('weaving.profitSummary.provisional')}</span></span>;
   }
@@ -62,7 +63,7 @@ const formatDashboardValue = (value, format) => {
   }
 
   if (format === 'currency') {
-    return `${t('currency.rs')} ${safeValue.toLocaleString('en-GB')}`;
+    return `${t('currency.rs')} ${formatMoneyDisplay(safeValue)}`;
   }
 
   if (format === 'meters') {

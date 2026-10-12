@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { formatMoneyDisplay } from '../../utils/money';
 import { FaTimes } from 'react-icons/fa';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from './WeavingSaleSaveOutput';
 
@@ -27,10 +28,7 @@ const control =
 
 const key = () => window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
-const money = (value) =>
-  Number(value || 0).toLocaleString('en-PK', {
-    maximumFractionDigits: 2,
-  });
+const money = formatMoneyDisplay;
 
 const MiniField = ({ label, children, className = '' }) => (
   <label className={`block min-w-0 ${className}`}>

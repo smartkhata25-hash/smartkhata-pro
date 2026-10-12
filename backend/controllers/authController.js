@@ -13,6 +13,7 @@ const PasswordReset = require("../models/PasswordReset");
 const { generateDeviceId } = require("../utils/deviceHelper");
 
 const { logActivity } = require("../utils/activityLogger");
+const { getEffectivePermissions } = require("../utils/permissionList");
 
 const createBaseAccountsForUser = require("../utils/createBaseAccounts");
 const createDefaultExpenseTitlesForUser = require("../utils/createDefaultExpenseTitles");
@@ -294,6 +295,10 @@ const loginUser = async (req, res) => {
           expiresIn: "180d",
         },
       );
+      const effectivePermissions =
+        accountRole === "staff"
+          ? getEffectivePermissions(user.permissions || [], moduleConfig, user.permissionModules)
+          : user.permissions || [];
 
       // Login activity context
       req.actorId = user._id;
@@ -304,7 +309,7 @@ const loginUser = async (req, res) => {
         businessOwnerId,
         role: user.role,
         accountRole,
-        permissions: user.permissions || [],
+        permissions: effectivePermissions,
         enabledModules: moduleConfig.enabledModules,
         defaultModule: moduleConfig.defaultModule,
       };
@@ -313,6 +318,7 @@ const loginUser = async (req, res) => {
         req,
         action: "login",
         module: "auth",
+        moduleScope: "shared",
         entityType: "User",
         entityId: user._id,
         title: user.fullName || user.name,
@@ -335,7 +341,7 @@ const loginUser = async (req, res) => {
 
           accountRole,
           businessOwnerId,
-          permissions: user.permissions || [],
+          permissions: effectivePermissions,
           staffStatus: user.staffStatus || "active",
           mustChangePassword: Boolean(user.mustChangePassword),
 
@@ -435,6 +441,14 @@ const loginUser = async (req, res) => {
     }
 
     const moduleConfig = normalizeModuleConfig(businessOwner);
+    const effectivePermissions =
+      accountRole === "staff"
+        ? getEffectivePermissions(
+            offlineUser.permissions || [],
+            moduleConfig,
+            offlineUser.permissionModules,
+          )
+        : offlineUser.permissions || [];
 
     const token = jwt.sign(
       {
@@ -458,7 +472,7 @@ const loginUser = async (req, res) => {
 
         accountRole,
         businessOwnerId,
-        permissions: offlineUser.permissions || [],
+        permissions: effectivePermissions,
         staffStatus: offlineUser.staffStatus || "active",
         mustChangePassword: Boolean(offlineUser.mustChangePassword),
 

@@ -42,7 +42,7 @@ const contextFromSources = (contract, source = {}) => {
     contractNo: production?.contractNo || "", contractType: production?.contractType || "", contractQuantity: production?.quantity ?? null, contractUnit: production?.unit || "" };
 };
 
-const productionIdentity = async (userId, payload, { source = null, existing = null, session = null, requireIdentity = true } = {}) => {
+const productionIdentity = async (userId, payload, { source = null, existing = null, session = null, requireIdentity = true, requireQuality = true } = {}) => {
   const readContract = (value) => value ? WeavingContract.findOne({ _id: value, userId }).session(session).lean() : null;
   const upstream = await readContract(source?.contractId);
   const inherited = contextFromSources(upstream, source || {});
@@ -74,7 +74,7 @@ const productionIdentity = async (userId, payload, { source = null, existing = n
   if (fabricQualityId && !await WeavingFabricQuality.exists({ _id: fabricQualityId, userId }).session(session)) throw fail("Selected Fabric Quality not found");
   if (ownershipType && !["own", "party"].includes(ownershipType)) throw fail("Invalid production ownership");
   if (ownershipType === "party" && (!ownerPartyId || !await WeavingParty.exists({ _id: ownerPartyId, userId }).session(session))) throw fail("Select a valid production Party");
-  if (requireIdentity && !existing && (!fabricQualityId || !ownershipType)) throw fail("Select one Fabric Quality and Own Production or a production Party");
+  if (requireIdentity && !existing && (!ownershipType || (requireQuality && !fabricQualityId))) throw fail("Select one Fabric Quality and Own Production or a production Party");
   return { contractId, fabricQualityId, ownershipType, ownerPartyId };
 };
 const receiptIdentity = (userId, payload, issue, session, existing = null) => productionIdentity(userId, payload, { source: issue, session, existing, requireIdentity: false });
@@ -115,7 +115,8 @@ const purchaseLineContext = async (userId, payload, line, previous = null) => {
     } else if (production.ownershipType !== "own") throw fail("Own Yarn cannot be used for a Party-owned Conversion Contract");
   } else if (payload.purchaseType === "yarn" && line.destinationType === "direct_sizing") {
     production = await productionIdentity(userId, { fabricQualityId: line.productionFabricQualityId,
-      ownershipType: payload.yarnSource === "party" ? "party" : "own", ownerPartyId: payload.yarnSource === "party" ? payload.partyId : null }, { existing: previous });
+      ownershipType: payload.yarnSource === "party" ? "party" : "own", ownerPartyId: payload.yarnSource === "party" ? payload.partyId : null },
+    { existing: previous, requireQuality: false });
   }
   if (fulfillmentContractId) {
     const contract = await read(fulfillmentContractId);

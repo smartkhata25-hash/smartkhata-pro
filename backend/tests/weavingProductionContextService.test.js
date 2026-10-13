@@ -64,6 +64,85 @@ test("purchase links separate procurement and production, including legacy gener
   await assert.rejects(context.purchaseLineContext("user", payload, { ...line, productionContractId: "cc" }), /Own Yarn/);
 }));
 
+test("no-contract Direct Sizing keeps production ownership mandatory while quality is optional", () => withIdentityModels(async () => {
+  const ownPayload = { purchaseType: "yarn", yarnSource: "own", partyId: "supplier" };
+  const directLine = { yarnId: "yarn", destinationType: "direct_sizing" };
+
+  const withoutQuality = await context.purchaseLineContext("user", ownPayload, directLine);
+  assert.equal(withoutQuality.productionContractId, null);
+  assert.equal(withoutQuality.productionFabricQualityId, null);
+
+  const withQuality = await context.purchaseLineContext("user", ownPayload, { ...directLine, productionFabricQualityId: "quality" });
+  assert.equal(withQuality.productionFabricQualityId, "quality");
+
+  await assert.rejects(
+    context.purchaseLineContext("user", ownPayload, { ...directLine, productionFabricQualityId: "missing-quality" }),
+    /Selected Fabric Quality not found/
+  );
+  await assert.rejects(
+    context.purchaseLineContext("user", { purchaseType: "yarn", yarnSource: "party", partyId: "missing-owner" }, directLine),
+    /valid production Party/
+  );
+  await assert.rejects(
+    context.productionIdentity("user", {}, { requireQuality: false }),
+    /Own Production or a production Party/
+  );
+}));
+
+test("Production Contract remains authoritative when Direct Sizing quality is omitted or conflicts", () => withIdentityModels(async () => {
+  const payload = { purchaseType: "yarn", yarnSource: "own", partyId: "supplier" };
+  const line = { yarnId: "yarn", destinationType: "direct_sizing", productionContractId: "sc" };
+  const inherited = await context.purchaseLineContext("user", payload, line);
+  assert.equal(inherited.productionFabricQualityId, "quality");
+  await assert.rejects(
+    context.purchaseLineContext("user", payload, { ...line, productionFabricQualityId: "other" }),
+    /must match the Production Contract/
+  );
+}));
+
+test("Godown purchase context is unchanged and does not acquire production quality", () => withIdentityModels(async () => {
+  const result = await context.purchaseLineContext(
+    "user",
+    { purchaseType: "yarn", yarnSource: "own", partyId: "supplier" },
+    { yarnId: "yarn", destinationType: "godown" }
+  );
+  assert.equal(result.productionContractId, null);
+  assert.equal(result.productionFabricQualityId, null);
+}));
+
+test("Direct Sizing line normalization accepts null quality but still requires a Sizing Party", async () => {
+  const Yarn = require("../models/WeavingYarn");
+  const originals = [Contract.findOne, Quality.exists, Party.exists, Yarn.findOne];
+  Contract.findOne = () => query(null);
+  Quality.exists = (filter) => query(filter._id === "quality" ? { _id: "quality" } : null);
+  Party.exists = (filter) => query(filter.serviceTypes === "sizing" && filter._id === "sizing" ? { _id: "sizing" } : null);
+  Yarn.findOne = (filter) => query(filter._id === "yarn" ? { _id: "yarn", name: "20/1 Cotton", millBrand: "Mill" } : null);
+  try {
+    const normalize = require("../services/weaving/weavingCommercialService")._test.normalizePurchaseLines;
+    const payload = { purchaseType: "yarn", yarnSource: "own", partyId: "supplier", lines: [{
+      yarnId: "yarn", destinationType: "direct_sizing", sizingPartyId: "sizing",
+      productionFabricQualityId: "", quantityKg: 10, quantityLbs: 22.046226218, rate: 5,
+    }] };
+    const [withoutQuality] = await normalize("user", payload);
+    assert.equal(withoutQuality.productionFabricQualityId, null);
+    assert.equal(withoutQuality.sizingPartyId, "sizing");
+    assert.equal(withoutQuality.quantity, 10);
+    assert.equal(withoutQuality.quantityLbs, 22.05);
+    assert.equal(withoutQuality.amount, 110.25);
+
+    const [withQuality] = await normalize("user", { ...payload, lines: [{ ...payload.lines[0], productionFabricQualityId: "quality" }] });
+    assert.equal(withQuality.productionFabricQualityId, "quality");
+    assert.equal(withQuality.amount, withoutQuality.amount);
+
+    await assert.rejects(
+      normalize("user", { ...payload, lines: [{ ...payload.lines[0], sizingPartyId: "" }] }),
+      /Sizing Party is required/
+    );
+  } finally {
+    [Contract.findOne, Quality.exists, Party.exists, Yarn.findOne] = originals;
+  }
+});
+
 test("Conversion inward matches the owner, and Fabric purchase fulfillment stays a separate route", () => withIdentityModels(async () => {
   const inward = await context.purchaseLineContext("user", { purchaseType: "yarn", yarnSource: "party", partyId: "customer" }, { productionContractId: "cc", yarnId: "yarn" });
   assert.equal(inward.productionContractId, "cc");

@@ -1623,7 +1623,7 @@ export default function WeavingPurchasePage() {
                         {showProduction && !row.productionContractId && (
                           <div className="min-w-0">
                             <SearchableCreatableSelect
-                              label="Production Quality"
+                              label="Production Quality (Optional)"
                               placeholder="Search quality"
                               options={meta.fabrics}
                               value={row.productionFabricQualityId || ''}
@@ -2957,7 +2957,7 @@ export default function WeavingPurchasePage() {
                         {showProduction && !row.productionContractId && (
                           <div className="min-w-0">
                             <SearchableCreatableSelect
-                              label="Production Quality"
+                              label="Production Quality (Optional)"
                               placeholder="Search quality"
                               options={meta.fabrics}
                               value={row.productionFabricQualityId || ''}

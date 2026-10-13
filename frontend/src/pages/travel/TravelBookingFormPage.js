@@ -126,6 +126,8 @@ import TravelerDuplicateConfirmationModal from '../../components/travel/bookings
 import TravelCurrencyRateModal from '../../components/travel/bookings/form/TravelCurrencyRateModal';
 import {
   applyCustomerReceiptAmountChange,
+  buildInvoiceExtraPaymentWarnings,
+  calculateInvoicePaymentSummary,
   normalizeCustomerReceiptForPayload,
 } from '../../components/travel/bookings/form/bookingPaymentUtils';
 import {
@@ -719,6 +721,7 @@ const TravelBookingFormPage = () => {
   const quickAddLocksRef = useRef(new Set());
   const customerTravelerLocksRef = useRef(new Set());
   const hotelModalDraftRef = useRef(null);
+  const extraPaymentConfirmationRef = useRef(false);
 
   const isEditMode = Boolean(id);
 
@@ -1203,73 +1206,27 @@ const TravelBookingFormPage = () => {
   );
 
   const totals = useMemo(() => {
-    const customerKey = getCustomerCounterpartyValue(formState);
-    const customer = customerCounterparties.find((record) => record._id === customerKey);
-    const previousCustomerBalance = numberValue(customer?.balance);
-    const customerBalance = accountingLocked
-      ? previousCustomerBalance
-      : numberValue(previousCustomerBalance + localTotals.customerBalance);
-    const vendorBalances = vendorCostSummary.groups.map((group) => {
-      const vendor = vendorCounterparties.find((record) => record._id === group.key);
-      const previousPayable = vendor?.counterpartyType === 'party'
-        ? -numberValue(vendor?.balance)
-        : numberValue(vendor?.balance);
-      const payment = effectiveVendorPayments.find(
-        (candidate) => getVendorCounterpartyKey(candidate) === group.key
-      );
-      const balance = accountingLocked
-        ? previousPayable
-        : numberValue(
-            previousPayable +
-              numberValue(group.totalCostBase) -
-              numberValue(payment?.paidAmount)
-          );
-      return {
-        ...group,
-        name: vendor ? getVendorLabel(vendor) : group.key,
-        previousBalance: previousPayable,
-        paymentNow: numberValue(payment?.paidAmount),
-        balance,
-        payable: Math.max(balance, 0),
-        advance: Math.max(-balance, 0),
-      };
+    const invoiceSummary = calculateInvoicePaymentSummary({
+      localTotals,
+      vendorGroups: vendorCostSummary.groups,
+      vendorPayments: effectiveVendorPayments,
     });
     return {
       ...localTotals,
-      previousCustomerBalance,
-      customerBalance,
-      due: Math.max(customerBalance, 0),
-      customerAdvance: Math.max(-customerBalance, 0),
-      vendorBalances,
-      vendorPayable: vendorBalances.reduce((sum, row) => sum + row.payable, 0),
-      vendorAdvance: vendorBalances.reduce((sum, row) => sum + row.advance, 0),
+      ...invoiceSummary,
+      vendorPaid: invoiceSummary.vendorPaidNow,
     };
-  }, [accountingLocked, customerCounterparties, effectiveVendorPayments, formState, localTotals, vendorCostSummary.groups, vendorCounterparties]);
+  }, [effectiveVendorPayments, localTotals, vendorCostSummary.groups]);
 
   const advanceWarnings = useMemo(() => {
-    const rows = [];
-    if (totals.customerAdvance > 0) {
-      rows.push({
-        key: 'customer',
-        label: 'Customer',
-        name: customerCounterparties.find(
-          (record) => record._id === getCustomerCounterpartyValue(formState)
-        )?.name || 'Customer',
-        amount: totals.net,
-        paymentNow: numberValue(formState.receivedAmount),
-        advance: totals.customerAdvance,
-      });
-    }
-    totals.vendorBalances.filter((row) => row.advance > 0).forEach((row) => rows.push({
-      key: row.key,
-      label: 'Vendor',
-      name: row.name,
-      amount: row.totalCostBase,
-      paymentNow: row.paymentNow,
-      advance: row.advance,
-    }));
-    return rows;
-  }, [customerCounterparties, formState, totals]);
+    const customerName = customerCounterparties.find(
+      (record) => record._id === getCustomerCounterpartyValue(formState)
+    )?.name || 'Customer';
+    const vendorNames = Object.fromEntries(
+      vendorCounterparties.map((record) => [record._id, getVendorLabel(record)])
+    );
+    return buildInvoiceExtraPaymentWarnings(totals, { customerName, vendorNames });
+  }, [customerCounterparties, formState, totals, vendorCounterparties]);
 
   const modalFields = useMemo(() => {
     if (!modal) {
@@ -3125,6 +3082,16 @@ const TravelBookingFormPage = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmExtraPaymentAndSave = () => {
+    if (extraPaymentConfirmationRef.current || !advanceConfirmationStatus) return;
+    extraPaymentConfirmationRef.current = true;
+    const status = advanceConfirmationStatus;
+    setAdvanceConfirmationStatus('');
+    void submitBooking(status, true).finally(() => {
+      extraPaymentConfirmationRef.current = false;
+    });
   };
 
   const renderTravelerPicker = (item, index) => {
@@ -5669,24 +5636,29 @@ const TravelBookingFormPage = () => {
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="advance-confirmation-title">
           <div className="w-full max-w-lg overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-2xl">
             <div className="bg-gradient-to-r from-emerald-700 to-teal-700 px-5 py-4 text-white">
-              <h2 id="advance-confirmation-title" className="text-lg font-black">Advance Payment Confirmation</h2>
+              <h2 id="advance-confirmation-title" className="text-lg font-black">Extra Payment Confirmation</h2>
             </div>
             <div className="space-y-3 p-5">
               {advanceWarnings.map((row) => (
                 <div key={row.key} className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                   <div className="font-black text-slate-900">{row.label}: {row.name}</div>
-                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                    <div><span className="block font-bold text-slate-500">Invoice / Cost</span>{formatMoney(row.amount, baseCurrency)}</div>
-                    <div><span className="block font-bold text-slate-500">Payment Now</span>{formatMoney(row.paymentNow, baseCurrency)}</div>
-                    <div><span className="block font-bold text-emerald-700">Advance After</span>{formatMoney(row.advance, baseCurrency)}</div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                    <div><span className="block font-bold text-slate-500">{row.key === 'customer' ? 'Invoice Total' : 'Vendor Cost'}</span>{formatMoney(row.amount, baseCurrency)}</div>
+                    <div><span className="block font-bold text-slate-500">{row.key === 'customer' ? 'Received Now' : 'Paid Now'}</span>{formatMoney(row.paymentNow, baseCurrency)}</div>
+                    <div><span className="block font-bold text-slate-500">{row.key === 'customer' ? 'Invoice Due' : 'Vendor Due'}</span>{formatMoney(row.due, baseCurrency)}</div>
+                    <div><span className="block font-bold text-emerald-700">Extra Payment</span>{formatMoney(row.extraPayment, baseCurrency)}</div>
                   </div>
+                  <p className="mt-2 text-xs font-semibold leading-5 text-slate-600">
+                    {row.key === 'customer'
+                      ? `This payment exceeds the current invoice by ${formatMoney(row.extraPayment, baseCurrency)}. The full receipt will be recorded in the customer ledger. The final ledger balance depends on any existing outstanding amounts or advances.`
+                      : `This payment exceeds this invoice's cost for this vendor by ${formatMoney(row.extraPayment, baseCurrency)}. The full payment will be recorded in that vendor's ledger, whose final balance also reflects existing transactions.`}
+                  </p>
                 </div>
               ))}
-              <p className="text-sm font-semibold leading-6 text-slate-600">This extra amount will remain as advance in the customer/vendor Travel Ledger and will automatically adjust against future invoices.</p>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
-              <TravelActionButton variant="secondary" onClick={() => setAdvanceConfirmationStatus('')}>Cancel</TravelActionButton>
-              <TravelActionButton variant="success" onClick={() => { const status = advanceConfirmationStatus; setAdvanceConfirmationStatus(''); void submitBooking(status, true); }}>Continue &amp; Confirm</TravelActionButton>
+              <TravelActionButton variant="secondary" disabled={saving} onClick={() => setAdvanceConfirmationStatus('')}>Cancel</TravelActionButton>
+              <TravelActionButton variant="success" disabled={saving} onClick={confirmExtraPaymentAndSave}>Confirm &amp; Save</TravelActionButton>
             </div>
           </div>
         </div>
@@ -5953,8 +5925,10 @@ const TravelBookingFormPage = () => {
 
                               <p className="text-[10px] font-bold text-slate-500">
                                 Cost {formatMoney(group.totalCostBase, baseCurrency)} ·{' '}
-                                {vendorBalance?.advance > 0 ? 'Advance ' : 'Payable '}
-                                {formatMoney(vendorBalance?.advance || vendorBalance?.payable || 0, baseCurrency)}
+                                Due {formatMoney(vendorBalance?.invoiceVendorDue || 0, baseCurrency)}
+                                {vendorBalance?.extraVendorPayment > 0
+                                  ? ` · Extra ${formatMoney(vendorBalance.extraVendorPayment, baseCurrency)}`
+                                  : ''}
                               </p>
                             </div>
 
@@ -6040,57 +6014,51 @@ const TravelBookingFormPage = () => {
 
               <div className="grid grid-cols-2 gap-2">
                 <MiniTotal
-                  labelKey="travel.booking.fields.grossSale"
-                  value={formatMoney(totals.selling, baseCurrency)}
+                  label="Invoice Total"
+                  value={formatMoney(totals.invoiceTotal, baseCurrency)}
+                  accent="text-blue-700"
                   icon={FaFileInvoiceDollar}
                 />
 
                 <MiniTotal
-                  labelKey="travel.booking.fields.netSale"
-                  value={formatMoney(totals.net, baseCurrency)}
-                  accent="text-blue-700"
-                  icon={FaCoins}
+                  label="Customer Received"
+                  value={formatMoney(totals.customerReceived, baseCurrency)}
+                  accent="text-emerald-700"
+                  icon={FaMoneyBillWave}
                 />
 
                 <MiniTotal
-                  label={totals.customerAdvance > 0 ? 'Customer Advance' : totals.due > 0 ? 'Customer Due' : 'Customer Balance'}
-                  value={formatMoney(totals.customerAdvance || totals.due, baseCurrency)}
-                  accent={totals.customerAdvance > 0 ? 'text-emerald-700' : totals.due > 0 ? 'text-rose-700' : 'text-slate-700'}
+                  label="Customer Due"
+                  value={formatMoney(totals.customerDue, baseCurrency)}
+                  accent={totals.customerDue > 0 ? 'text-rose-700' : 'text-slate-700'}
                   icon={FaWallet}
                 />
 
                 <MiniTotal
-                  labelKey="travel.booking.fields.estimatedCostBase"
-                  value={formatMoney(totals.cost, baseCurrency)}
+                  label="Estimated Cost"
+                  value={formatMoney(totals.estimatedCost, baseCurrency)}
                   icon={FaCoins}
                 />
 
                 <MiniTotal
-                  labelKey="travel.booking.fields.vendorPaidAmount"
-                  value={formatMoney(totals.vendorPaid, baseCurrency)}
+                  label="Vendor Paid Now"
+                  value={formatMoney(totals.vendorPaidNow, baseCurrency)}
                   accent="text-amber-700"
                   icon={FaMoneyBillWave}
                 />
 
                 <MiniTotal
-                  labelKey="travel.booking.fields.vendorPayable"
-                  value={formatMoney(totals.vendorPayable, baseCurrency)}
+                  label="Vendor Due"
+                  value={formatMoney(totals.vendorDue, baseCurrency)}
                   accent="text-orange-700"
-                  icon={FaUserTie}
-                />
-
-                <MiniTotal
-                  label="Vendor Advance"
-                  value={formatMoney(totals.vendorAdvance, baseCurrency)}
-                  accent="text-emerald-700"
                   icon={FaUserTie}
                 />
 
                 <div className="col-span-2">
                   <MiniTotal
-                    labelKey="travel.booking.fields.estimatedProfit"
-                    value={formatMoney(totals.profit, baseCurrency)}
-                    accent={totals.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}
+                    label="Estimated Profit"
+                    value={formatMoney(totals.estimatedProfit, baseCurrency)}
+                    accent={totals.estimatedProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}
                     icon={FaFileInvoiceDollar}
                   />
                 </div>

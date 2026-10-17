@@ -220,6 +220,20 @@ const calculatePaxSourceTotals = (rows = []) =>
     }
   );
 
+const isMultiCityTicket = (item) =>
+  item?.itemType === 'air_ticket' && item?.ticketDetails?.journeyType === 'multi_city';
+
+const calculateMultiCitySourceTotals = (item) =>
+  (item?.ticketDetails?.sectors || []).reduce(
+    (totals, sector) => {
+      const sectorTotals = calculatePaxSourceTotals(sector?.paxPricing || []);
+      totals.cost += sectorTotals.cost;
+      totals.selling += sectorTotals.selling;
+      return totals;
+    },
+    { cost: 0, selling: 0 }
+  );
+
 const calculateQuantitySourceTotals = (pricing) => {
   const quantity = numberValue(pricing?.quantity);
 
@@ -423,7 +437,7 @@ const DetailGroup = ({ title, icon: Icon, children, tone = 'cyan' }) => {
   );
 };
 
-const PaxPricingTable = ({ rows, currency }) => {
+const PaxPricingTable = ({ rows, currency, defaultVendor = null }) => {
   const activeRows = (rows || []).filter((row) => numberValue(row?.count) > 0);
 
   if (!activeRows.length) {
@@ -468,7 +482,7 @@ const PaxPricingTable = ({ rows, currency }) => {
               </span>
 
               <span className="truncate text-sm font-bold text-violet-700">
-                {getVendorName(getBookingVendor(row))}
+                {getVendorName(getBookingVendor(row) || defaultVendor)}
               </span>
             </div>
           );
@@ -665,6 +679,9 @@ const QuantityPricingDetails = ({ pricing, currency }) => {
 
 const renderAirTicketDetails = (booking, item) => {
   const details = item.ticketDetails || {};
+  const multiCity = details.journeyType === 'multi_city';
+  const sectors = Array.isArray(details.sectors) ? details.sectors : [];
+  const hasMultiCitySectors = multiCity && sectors.length > 0;
 
   const passengerTickets = details.passengerTickets || [];
   const passengerOccurrences = buildTravelerOccurrences(
@@ -681,44 +698,49 @@ const renderAirTicketDetails = (booking, item) => {
           tone="cyan"
         />
 
-        <InfoCard
-          icon={FaPlaneDeparture}
-          label={t('travel.booking.fields.airline')}
-          value={details.airline}
-          tone="blue"
-        />
-
-        <InfoCard
-          icon={FaRoute}
-          label={t('travel.booking.fields.route')}
-          value={renderRoute(details.origin, details.destination)}
-          tone="violet"
-        />
-
-        <InfoCard
-          icon={FaCalendarAlt}
-          label={t('travel.booking.fields.departureDateTime')}
-          value={formatDateTime(details.departureDateTime)}
-          tone="emerald"
-        />
-
-        {details.returnOrigin || details.returnDestination || details.returnDateTime ? (
+        {!hasMultiCitySectors && (
           <>
             <InfoCard
+              icon={FaPlaneDeparture}
+              label={t('travel.booking.fields.airline')}
+              value={details.airline}
+              tone="blue"
+            />
+
+            <InfoCard
               icon={FaRoute}
-              label={t('travel.booking.fields.returnRoute')}
-              value={renderRoute(details.returnOrigin, details.returnDestination)}
+              label={t('travel.booking.fields.route')}
+              value={renderRoute(details.origin, details.destination)}
               tone="violet"
             />
 
             <InfoCard
               icon={FaCalendarAlt}
-              label={t('travel.booking.fields.returnDateTime')}
-              value={formatDateTime(details.returnDateTime)}
+              label={t('travel.booking.fields.departureDateTime')}
+              value={formatDateTime(details.departureDateTime)}
               tone="emerald"
             />
+
+            {details.journeyType === 'round_trip' &&
+            (details.returnOrigin || details.returnDestination || details.returnDateTime) ? (
+              <>
+                <InfoCard
+                  icon={FaRoute}
+                  label={t('travel.booking.fields.returnRoute')}
+                  value={renderRoute(details.returnOrigin, details.returnDestination)}
+                  tone="violet"
+                />
+
+                <InfoCard
+                  icon={FaCalendarAlt}
+                  label={t('travel.booking.fields.returnDateTime')}
+                  value={formatDateTime(details.returnDateTime)}
+                  tone="emerald"
+                />
+              </>
+            ) : null}
           </>
-        ) : null}
+        )}
 
         <InfoCard
           icon={FaSuitcaseRolling}
@@ -732,6 +754,42 @@ const renderAirTicketDetails = (booking, item) => {
           value={details.baggage}
         />
       </div>
+
+      {hasMultiCitySectors && (
+        <div className="space-y-3">
+          <p className="text-xs font-black uppercase tracking-wide text-slate-400">
+            Multi-City Sectors
+          </p>
+          {sectors.map((sector, sectorIndex) => (
+            <article
+              key={sector._id || sectorIndex}
+              className="rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/60 via-white to-blue-50/40 p-3"
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-cyan-600 text-xs font-black text-white">
+                  {sectorIndex + 1}
+                </span>
+                <p className="text-sm font-black text-slate-900">Sector {sectorIndex + 1}</p>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <InfoCard icon={FaPlaneDeparture} label="Airline" value={getObjectName(sector.airlineId, sector.airline || '-')} tone="blue" />
+                <InfoCard icon={FaRoute} label="Route" value={renderRoute(getObjectName(sector.originAirportId, sector.origin || ''), getObjectName(sector.destinationAirportId, sector.destination || ''))} tone="violet" />
+                <InfoCard icon={FaCalendarAlt} label="Departure" value={formatDateTime(sector.departureDateTime)} tone="emerald" />
+              </div>
+              {Array.isArray(sector.paxPricing) && sector.paxPricing.length > 0 && (
+                <div className="mt-3">
+                  <PaxPricingTable
+                    rows={sector.paxPricing}
+                    currency={item.costCurrency || item.sellingCurrency || 'PKR'}
+                    defaultVendor={getBookingVendor(sector)}
+                  />
+                </div>
+              )}
+            </article>
+          ))}
+          {sectors.length === 0 && <EmptyState text="No multi-city sectors found." />}
+        </div>
+      )}
 
       {passengerTickets.length > 0 ? (
         <div className="space-y-2">
@@ -1349,6 +1407,19 @@ const TravelBookingDetailPage = () => {
           map.set(String(rowVendor._id), rowVendor);
         }
       });
+
+      (item.ticketDetails?.sectors || []).forEach((sector) => {
+        const sectorVendor = getBookingVendor(sector);
+        if (sectorVendor && typeof sectorVendor === 'object') {
+          map.set(String(sectorVendor._id), sectorVendor);
+        }
+        (sector.paxPricing || []).forEach((row) => {
+          const rowVendor = getBookingVendor(row);
+          if (rowVendor && typeof rowVendor === 'object') {
+            map.set(String(rowVendor._id), rowVendor);
+          }
+        });
+      });
     });
 
     return [...map.values()];
@@ -1385,6 +1456,16 @@ const TravelBookingDetailPage = () => {
         item.umrahDetails.components.forEach((component) =>
           add(component, component.estimatedCostBase, component.estimatedVendorPaidBase)
         );
+        return;
+      }
+
+      if (isMultiCityTicket(item) && Array.isArray(item.ticketDetails?.sectors)) {
+        item.ticketDetails.sectors.forEach((sector) => {
+          (sector.paxPricing || []).forEach((row) => {
+            const effectiveVendor = getBookingVendor(row) ? row : sector;
+            add(effectiveVendor, row.estimatedCostBase);
+          });
+        });
         return;
       }
 
@@ -1740,6 +1821,12 @@ const TravelBookingDetailPage = () => {
         };
 
         if (
+          isMultiCityTicket(item) &&
+          Array.isArray(item.ticketDetails?.sectors) &&
+          item.ticketDetails.sectors.length > 0
+        ) {
+          itemTotals = calculateMultiCitySourceTotals(item);
+        } else if (
           ['air_ticket', 'visit_visa'].includes(item.itemType) &&
           Array.isArray(item.paxPricing) &&
           item.paxPricing.length > 0
@@ -1868,6 +1955,7 @@ const TravelBookingDetailPage = () => {
               </div>
 
               {['air_ticket', 'visit_visa'].includes(item.itemType) &&
+                !isMultiCityTicket(item) &&
                 Array.isArray(item.paxPricing) &&
                 item.paxPricing.length > 0 && (
                   <PaxPricingTable rows={item.paxPricing} currency={currency} />

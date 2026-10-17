@@ -403,10 +403,15 @@ const PurchaseInvoiceForm = () => {
 
   const handleQtyRateChange = (index, field, value) => {
     const updated = [...items];
+    const numericValue = Number(value);
 
-    updated[index][field] = Number(value);
+    updated[index][field] = Number.isFinite(numericValue) ? numericValue : 0;
 
-    updated[index].amount = (updated[index].quantity || 0) * (updated[index].rate || 0);
+    if (field === 'quantity' || field === 'rate') {
+      updated[index].amount = roundMoney(
+        (updated[index].quantity || 0) * (updated[index].rate || 0)
+      );
+    }
 
     setItems(updated);
   };

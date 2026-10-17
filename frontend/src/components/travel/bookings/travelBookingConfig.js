@@ -260,6 +260,66 @@ export const createEmptyPaxPricingRow = (paxType = 'adult') => ({
 
 export const createDefaultPaxPricing = () => [createEmptyPaxPricingRow('adult')];
 
+let multiCitySectorSequence = 0;
+
+const createSectorKey = () => {
+  multiCitySectorSequence += 1;
+  return `sector-${Date.now().toString(36)}-${multiCitySectorSequence.toString(36)}`;
+};
+
+export const createEmptyMultiCitySector = (origin = '') => ({
+  uiKey: createSectorKey(),
+  airline: '',
+  airlineId: '',
+  origin,
+  originAirportId: '',
+  destination: '',
+  destinationAirportId: '',
+  departureDateTime: '',
+  vendorType: 'vendor',
+  vendorId: '',
+  vendorPartyId: '',
+  paxPricing: [createEmptyPaxPricingRow('adult')],
+});
+
+export const appendMultiCitySector = (sectors = []) => {
+  const nextSectors = sectors.map((sector) => ({ ...sector }));
+  const previous = nextSectors[nextSectors.length - 1];
+  const nextSector = createEmptyMultiCitySector(previous?.destination || '');
+  nextSector.originAirportId = previous?.destinationAirportId || '';
+  return [...nextSectors, nextSector];
+};
+
+export const removeMultiCitySectorAt = (sectors = [], sectorIndex) =>
+  sectors.filter((_, index) => index !== sectorIndex).map((sector) => ({ ...sector }));
+
+export const insertMultiCityPricingRow = (
+  sectors = [],
+  sectorIndex,
+  paxType,
+  rowIndex = null
+) =>
+  sectors.map((sector, index) => {
+    if (index !== sectorIndex) return { ...sector };
+    const paxPricing = (sector.paxPricing || []).map((row) => ({ ...row }));
+    const insertAt = Number.isInteger(rowIndex) ? rowIndex + 1 : paxPricing.length;
+    paxPricing.splice(insertAt, 0, { ...createEmptyPaxPricingRow(paxType), count: 1 });
+    return { ...sector, legacyFallback: false, paxPricing };
+  });
+
+export const removeMultiCityPricingRowAt = (sectors = [], sectorIndex, rowIndex) =>
+  sectors.map((sector, index) =>
+    index === sectorIndex
+      ? {
+          ...sector,
+          legacyFallback: false,
+          paxPricing: (sector.paxPricing || []).filter(
+            (_, priceIndex) => priceIndex !== rowIndex
+          ),
+        }
+      : { ...sector }
+  );
+
 export const createEmptyQuantityPricing = (itemType = 'service') => {
   const unitLabels = {
     transport: 'Vehicle',
@@ -338,6 +398,7 @@ export const defaultTicketDetails = {
   baggage: '',
   taxes: '',
   passengerTickets: [],
+  sectors: [],
 };
 
 export const defaultVisaDetails = {
@@ -624,7 +685,9 @@ const preparePaxPricingForForm = (rows = []) => {
   }
 
   return rows.map((row) => ({
-    uiKey: row?.uiKey || createPaxRowKey(),
+    _id: getRecordId(row) || undefined,
+
+    uiKey: getRecordId(row) || row?.uiKey || createPaxRowKey(),
 
     paxType: row?.paxType || 'adult',
 
@@ -706,6 +769,22 @@ const prepareTicketPassengerForForm = (passenger = {}) => ({
   departureDateTime: normalizeDateForInput(passenger.departureDateTime, true),
 
   returnDateTime: normalizeDateForInput(passenger.returnDateTime, true),
+});
+
+const prepareMultiCitySectorForForm = (sector = {}) => ({
+  ...createEmptyMultiCitySector(),
+  ...sector,
+  uiKey: getRecordId(sector) || sector.uiKey || createSectorKey(),
+  airlineId: getRecordId(sector.airlineId),
+  originAirportId: getRecordId(sector.originAirportId),
+  destinationAirportId: getRecordId(sector.destinationAirportId),
+  vendorType: sector.vendorType === 'party' || sector.vendorPartyId ? 'party' : 'vendor',
+  vendorId: getRecordId(sector.vendorId),
+  vendorPartyId: getRecordId(sector.vendorPartyId),
+  departureDateTime: normalizeDateForInput(sector.departureDateTime, true),
+  paxPricing: Array.isArray(sector.paxPricing) && sector.paxPricing.length
+    ? preparePaxPricingForForm(sector.paxPricing)
+    : [createEmptyPaxPricingRow('adult')],
 });
 
 const prepareVisaTravelerForForm = (traveler = {}) => ({
@@ -811,6 +890,29 @@ const prepareBookingItemForForm = (item = {}) => {
   const preparedPassengerTickets = Array.isArray(item.ticketDetails?.passengerTickets)
     ? item.ticketDetails.passengerTickets.map(prepareTicketPassengerForForm)
     : [];
+  const savedSectors = Array.isArray(item.ticketDetails?.sectors)
+    ? item.ticketDetails.sectors.map(prepareMultiCitySectorForForm)
+    : [];
+  const legacyMultiCitySector =
+    item.ticketDetails?.journeyType === 'multi_city' &&
+    savedSectors.length === 0
+      ? [
+          prepareMultiCitySectorForForm({
+            airline: item.ticketDetails?.airline,
+            airlineId: item.ticketDetails?.airlineId,
+            origin: item.ticketDetails?.origin,
+            originAirportId: item.ticketDetails?.originAirportId,
+            destination: item.ticketDetails?.destination,
+            destinationAirportId: item.ticketDetails?.destinationAirportId,
+            departureDateTime: item.ticketDetails?.departureDateTime,
+            vendorType: item.vendorType,
+            vendorId: item.vendorId,
+            vendorPartyId: item.vendorPartyId,
+            paxPricing: item.paxPricing,
+            legacyFallback: true,
+          }),
+        ]
+      : [];
   const preparedTravelerVisas = Array.isArray(item.visaDetails?.travelerVisas)
     ? item.visaDetails.travelerVisas.map(prepareVisaTravelerForForm)
     : [];
@@ -880,6 +982,8 @@ const prepareBookingItemForForm = (item = {}) => {
       departureDateTime: normalizeDateForInput(item.ticketDetails?.departureDateTime, true),
 
       returnDateTime: normalizeDateForInput(item.ticketDetails?.returnDateTime, true),
+
+      sectors: savedSectors.length ? savedSectors : legacyMultiCitySector,
 
       passengerTickets,
     },

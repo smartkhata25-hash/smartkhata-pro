@@ -347,8 +347,27 @@ const InvoiceTable = ({
                     </td>
 
                     {/* Amount */}
-                    <td className="border px-0 py-0 md:p-0 text-center font-semibold">
-                      {formatMoneyDisplay(item.amount)}
+                    <td className="border p-0">
+                      <input
+                        type="number"
+                        value={item.amount || ''}
+                        onChange={(e) => {
+                          if (!item.productId && !item.search) return;
+
+                          const updated = [...items];
+                          const enteredAmount = Number(e.target.value);
+                          const amount = Number.isFinite(enteredAmount) ? enteredAmount : 0;
+                          const enteredQty = Number(updated[index].quantity);
+                          const qty = Number.isFinite(enteredQty) ? enteredQty : 0;
+
+                          updated[index].amount = amount;
+                          updated[index].rate = qty > 0 ? roundMoney(amount / qty) : 0;
+
+                          setItems(updated);
+                        }}
+                        onFocus={clearOnFocus}
+                        className="w-full border-0 p-0 text-center h-6 no-spinner"
+                      />
                     </td>
 
                     {/* Sale Price */}

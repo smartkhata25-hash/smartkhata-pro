@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FaEraser, FaHistory, FaSave, FaTimes, FaUsers } from 'react-icons/fa';
+import { FaEraser, FaFilePdf, FaHistory, FaPrint, FaSave, FaTimes, FaUsers } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
@@ -10,8 +10,11 @@ import {
   fetchTravelCustomers,
   fetchTravelParties,
   fetchTravelPaymentAccounts,
+  getTravelReceivePaymentPdfUrl,
+  getTravelReceivePaymentPrintUrl,
 } from '../../services/travelMasterService';
 import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/localDateTime';
+import { downloadBackendPdf, openBackendPrintWindow } from '../../utils/backendPrintDocument';
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
@@ -173,6 +176,8 @@ const TravelReceivePaymentPage = ({ modeActions = null }) => {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [receiptAction, setReceiptAction] = useState('');
+  const [savedReceipt, setSavedReceipt] = useState(null);
 
   const [formError, setFormError] = useState('');
 
@@ -284,6 +289,10 @@ const TravelReceivePaymentPage = ({ modeActions = null }) => {
           time: payment.time || '',
           notes: payment.description || '',
         });
+        setSavedReceipt({
+          id: getRecordId(payment.journalEntryId),
+          number: payment.billNo || payment._id,
+        });
         setLoadedPaymentId(paymentId);
       })
       .catch((error) => {
@@ -358,6 +367,11 @@ const TravelReceivePaymentPage = ({ modeActions = null }) => {
           })
         : await createTravelReceivePayment(formState);
 
+      setSavedReceipt({
+        id: getRecordId(saved.journalEntryId),
+        number: saved.payment?.billNo || saved.payment?._id || paymentId,
+      });
+
       if (paymentId) {
         navigate('/travel/payments/received');
         return;
@@ -402,6 +416,35 @@ const TravelReceivePaymentPage = ({ modeActions = null }) => {
       setFormError(getTravelErrorMessage(error, t('travel.payments.saveFailed')));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!savedReceipt?.id || receiptAction) return;
+
+    try {
+      setReceiptAction('print');
+      await openBackendPrintWindow({ url: getTravelReceivePaymentPrintUrl(savedReceipt.id) });
+    } catch (error) {
+      setFormError(error.message || t('alerts.printWindowBlocked'));
+    } finally {
+      setReceiptAction('');
+    }
+  };
+
+  const handleDownloadReceipt = async () => {
+    if (!savedReceipt?.id || receiptAction) return;
+
+    try {
+      setReceiptAction('pdf');
+      await downloadBackendPdf({
+        url: getTravelReceivePaymentPdfUrl(savedReceipt.id),
+        fileName: `TravelReceivePaymentReceipt-${savedReceipt.number || savedReceipt.id}.pdf`,
+      });
+    } catch (error) {
+      setFormError(error.message || t('pdf.shareFailed'));
+    } finally {
+      setReceiptAction('');
     }
   };
 
@@ -566,6 +609,24 @@ const TravelReceivePaymentPage = ({ modeActions = null }) => {
           )}
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+            <TravelActionButton
+              icon={FaPrint}
+              variant="success"
+              onClick={handlePrintReceipt}
+              disabled={!savedReceipt?.id || saving || Boolean(receiptAction)}
+              title={savedReceipt?.id ? `Print saved receipt ${savedReceipt.number}` : 'Save the payment before printing'}
+            >
+              {receiptAction === 'print' ? 'Opening...' : 'Print Receipt'}
+            </TravelActionButton>
+            <TravelActionButton
+              icon={FaFilePdf}
+              variant="danger"
+              onClick={handleDownloadReceipt}
+              disabled={!savedReceipt?.id || saving || Boolean(receiptAction)}
+              title={savedReceipt?.id ? `Download saved receipt ${savedReceipt.number}` : 'Save the payment before downloading'}
+            >
+              {receiptAction === 'pdf' ? 'Downloading...' : 'Download PDF'}
+            </TravelActionButton>
             {!paymentId && (
               <TravelActionButton icon={FaEraser} variant="secondary" onClick={resetCreateForm} disabled={saving}>
                 {t('clear')}

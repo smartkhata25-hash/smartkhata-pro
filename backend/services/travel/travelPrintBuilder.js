@@ -183,7 +183,23 @@ const amountsReconcile = (left, right) => {
 };
 
 const buildPaxRateLines = (item = {}, baseCurrency = "PKR") => {
-  const rows = (Array.isArray(item.paxPricing) ? item.paxPricing : []).filter(
+  const multiCitySectors =
+    cleanText(item?.ticketDetails?.journeyType).toLowerCase() === "multi_city" &&
+    Array.isArray(item?.ticketDetails?.sectors)
+      ? item.ticketDetails.sectors
+      : [];
+  const sectorRows = multiCitySectors.flatMap((sector, sectorIndex) =>
+    (Array.isArray(sector?.paxPricing) ? sector.paxPricing : []).map((row) => ({
+      ...row,
+      sectorIndex,
+    })),
+  );
+  const rows = (sectorRows.length > 0
+    ? sectorRows
+    : Array.isArray(item.paxPricing)
+      ? item.paxPricing
+      : []
+  ).filter(
     (row) => Number(row?.count) > 0,
   );
 
@@ -220,6 +236,14 @@ const buildPaxRateLines = (item = {}, baseCurrency = "PKR") => {
   }
 
   const currency = String(item.sellingCurrency || baseCurrency || "PKR").toUpperCase();
+
+  if (sectorRows.length > 0) {
+    return rows.map((row) => {
+      const paxLabel = humanize(row.paxType || "adult");
+      return `Sector ${row.sectorIndex + 1} ${paxLabel}: ${Number(row.count)} Ã— ${formatMoney(Number(row.sellingPrice), currency)}`;
+    });
+  }
+
   const groupedRates = new Map();
 
   rows.forEach((row) => {
@@ -490,7 +514,7 @@ const getPassengerLabel = (passenger, index, topTravelerIndex) => {
 };
 
 const buildPassengerFlightDetails = (ticket = {}, topTravelerIndex) => {
-  const canShowReturn = cleanText(ticket.journeyType).toLowerCase() !== "one_way";
+  const canShowReturn = cleanText(ticket.journeyType).toLowerCase() === "round_trip";
   const shared = {
     airline: getDisplayName(ticket.airlineId, ticket.airline),
     route: buildRoute(
@@ -653,6 +677,9 @@ const buildItemDetails = (booking, item) => {
 
   if (type === "air_ticket") {
     const ticket = item.ticketDetails || {};
+    const isMultiCity = cleanText(ticket.journeyType).toLowerCase() === "multi_city";
+    const hasMultiCitySectors =
+      isMultiCity && Array.isArray(ticket.sectors) && ticket.sectors.length > 0;
     const airline = getDisplayName(ticket.airlineId, ticket.airline);
     const route = buildRoute(
       getLocationName(ticket.origin, ticket.originAirportId),
@@ -663,16 +690,29 @@ const buildItemDetails = (booking, item) => {
       getLocationName(ticket.returnDestination, ticket.returnDestinationAirportId),
     );
 
-    if (airline) details.push(`Airline: ${airline}`);
-    if (route) details.push(`Route: ${route}`);
-    if (formatDateTime(ticket.departureDateTime)) {
-      details.push(`Departure: ${formatDateTime(ticket.departureDateTime)}`);
-    }
-    const canShowReturn = cleanText(ticket.journeyType).toLowerCase() !== "one_way";
+    if (hasMultiCitySectors) {
+      (ticket.sectors || []).forEach((sector, sectorIndex) => {
+        const sectorAirline = getDisplayName(sector.airlineId, sector.airline);
+        const sectorRoute = buildRoute(
+          getLocationName(sector.origin, sector.originAirportId),
+          getLocationName(sector.destination, sector.destinationAirportId),
+        );
+        const sectorDeparture = formatDateTime(sector.departureDateTime);
+        const values = [sectorAirline, sectorRoute, sectorDeparture].filter(Boolean);
+        if (values.length > 0) details.push(`Sector ${sectorIndex + 1}: ${values.join(" | ")}`);
+      });
+    } else {
+      if (airline) details.push(`Airline: ${airline}`);
+      if (route) details.push(`Route: ${route}`);
+      if (formatDateTime(ticket.departureDateTime)) {
+        details.push(`Departure: ${formatDateTime(ticket.departureDateTime)}`);
+      }
+      const canShowReturn = cleanText(ticket.journeyType).toLowerCase() === "round_trip";
 
-    if (canShowReturn && returnRoute) details.push(`Return Route: ${returnRoute}`);
-    if (canShowReturn && formatDateTime(ticket.returnDateTime)) {
-      details.push(`Return: ${formatDateTime(ticket.returnDateTime)}`);
+      if (canShowReturn && returnRoute) details.push(`Return Route: ${returnRoute}`);
+      if (canShowReturn && formatDateTime(ticket.returnDateTime)) {
+        details.push(`Return: ${formatDateTime(ticket.returnDateTime)}`);
+      }
     }
     if (cleanText(ticket.travelClass)) details.push(`Class: ${cleanText(ticket.travelClass)}`);
     if (cleanText(ticket.pnr)) details.push(`PNR: ${cleanText(ticket.pnr)}`);
@@ -684,9 +724,11 @@ const buildItemDetails = (booking, item) => {
       details.push(`Passenger Details: ${row}`),
     );
 
-    buildPassengerFlightDetails(ticket, topTravelerIndex).forEach((row) =>
-      details.push(row),
-    );
+    if (!hasMultiCitySectors) {
+      buildPassengerFlightDetails(ticket, topTravelerIndex).forEach((row) =>
+        details.push(row),
+      );
+    }
 
     buildTicketBaggageDetails(ticket).forEach((row) => details.push(row));
   }

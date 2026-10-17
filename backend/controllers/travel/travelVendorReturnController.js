@@ -215,6 +215,42 @@ const collectVendorCostRows = (invoice, vendor) => {
       return;
     }
 
+    const multiCitySectors =
+      item.itemType === "air_ticket" &&
+      item.ticketDetails?.journeyType === "multi_city" &&
+      Array.isArray(item.ticketDetails?.sectors)
+        ? item.ticketDetails.sectors
+        : null;
+
+    if (multiCitySectors) {
+      multiCitySectors.forEach((sector, sectorIndex) => {
+        const matchingSectorCost = roundMoney(
+          (sector.paxPricing || []).reduce((sum, row) => {
+            const effectiveVendor = row.vendorId || row.vendorPartyId ? row : sector;
+            const rowKey = getVendorMatchKey({
+              vendorType: effectiveVendor.vendorType === "party" ? "party" : "vendor",
+              vendorId: effectiveVendor.vendorId,
+              vendorPartyId: effectiveVendor.vendorPartyId,
+            });
+
+            return rowKey === vendorKey
+              ? sum + Number(row.estimatedCostBase || 0)
+              : sum;
+          }, 0),
+        );
+
+        if (matchingSectorCost > 0) {
+          rows.push({
+            id: sector._id || item._id,
+            label: `${item.title || "Air ticket"} - Sector ${sectorIndex + 1}`,
+            amount: matchingSectorCost,
+          });
+        }
+      });
+
+      return;
+    }
+
     const rowVendorMode =
       Array.isArray(item.paxPricing) &&
       item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));

@@ -391,6 +391,36 @@ const collectVendorCostRows = (booking) => {
       return;
     }
 
+    const multiCitySectors =
+      item.itemType === "air_ticket" &&
+      item.ticketDetails?.journeyType === "multi_city" &&
+      Array.isArray(item.ticketDetails?.sectors)
+        ? item.ticketDetails.sectors
+        : null;
+
+    if (multiCitySectors) {
+      multiCitySectors.forEach((sector, sectorIndex) => {
+        (sector.paxPricing || []).forEach((row, rowIndex) => {
+          const effectiveVendor = row.vendorId || row.vendorPartyId ? row : sector;
+          pushVendorCostRow({
+            rows,
+            vendorId: effectiveVendor.vendorId,
+            vendorType: effectiveVendor.vendorType,
+            vendorPartyId: effectiveVendor.vendorPartyId,
+            costAmount: row.estimatedCostBase,
+            paidAmount: 0,
+            description: `${item.title || "Air ticket"} sector ${sectorIndex + 1} ${
+              row.paxType || "passenger"
+            } row ${rowIndex + 1}`,
+            serviceType: item.itemType,
+            sourceId: sector._id || item._id,
+          });
+        });
+      });
+
+      return;
+    }
+
     const rowVendorMode =
       Array.isArray(item.paxPricing) &&
       item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
@@ -623,6 +653,29 @@ const buildAccountingSnapshot = (source = {}) =>
         vendorPartyId: String(row.vendorPartyId || ""),
         estimatedCostBase: roundMoney(row.estimatedCostBase),
         estimatedSellingBase: roundMoney(row.estimatedSellingBase),
+      })),
+
+      multiCitySectors: (item.ticketDetails?.sectors || []).map((sector) => ({
+        airlineId: String(sector.airlineId || ""),
+        originAirportId: String(sector.originAirportId || ""),
+        destinationAirportId: String(sector.destinationAirportId || ""),
+        origin: sector.origin || "",
+        destination: sector.destination || "",
+        departureDateTime: sector.departureDateTime || null,
+        vendorType: sector.vendorType || "vendor",
+        vendorId: String(sector.vendorId || ""),
+        vendorPartyId: String(sector.vendorPartyId || ""),
+        paxPricing: (sector.paxPricing || []).map((row) => ({
+          paxType: row.paxType || "adult",
+          count: Number(row.count || 0),
+          costPrice: roundMoney(row.costPrice),
+          sellingPrice: roundMoney(row.sellingPrice),
+          vendorType: row.vendorType || "vendor",
+          vendorId: String(row.vendorId || ""),
+          vendorPartyId: String(row.vendorPartyId || ""),
+          estimatedCostBase: roundMoney(row.estimatedCostBase),
+          estimatedSellingBase: roundMoney(row.estimatedSellingBase),
+        })),
       })),
 
       components: (item.umrahDetails?.components || []).map((component) => ({

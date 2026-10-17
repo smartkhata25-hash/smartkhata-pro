@@ -40,6 +40,8 @@ export const voidPurchase = async (id, reason) => unwrap(await axios.post(`${URL
 export const getPurchaseHistory = async (params) => unwrap(await axios.get(`${URL}/purchase-history`, cfg(params)));
 export const listPayments = async (params = {}) => unwrap(await axios.get(`${URL}/payments`, cfg(params)));
 export const getPaymentById = async (id) => unwrap(await axios.get(`${URL}/payments/${id}`, cfg()));
+export const getWeavingPaymentPrintUrl = (id) => `${URL}/payments/${id}/print`;
+export const getWeavingPaymentPdfUrl = (id) => `${URL}/payments/${id}/pdf`;
 export const createMoneyTransaction = async (body) => unwrap(await axios.post(`${URL}/payments`, multipart(body), cfg()));
 export const updateMoneyTransaction = async (id, body) => unwrap(await axios.put(`${URL}/payments/${id}`, multipart(body), cfg()));
 export const voidMoneyTransaction = async (id, reason = '') => unwrap(await axios.post(`${URL}/payments/${id}/void`, { reason }, cfg()));

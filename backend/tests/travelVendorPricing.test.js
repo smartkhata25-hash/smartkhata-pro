@@ -4,7 +4,9 @@ const assert = require("node:assert/strict");
 const {
   collectEffectiveVendorCosts,
   normalizePaxPricing,
+  normalizeTicketDetails,
   normalizeVendorPayments,
+  _test: { applyEstimatedTotals },
 } = require("../services/travel/travelBookingService");
 const {
   _test: { buildAccountingSnapshot, collectVendorCostRows },
@@ -177,4 +179,127 @@ test("accounting snapshot changes when row vendors or vendor payments change", (
   };
 
   assert.notEqual(buildAccountingSnapshot(source), buildAccountingSnapshot(changed));
+});
+
+test("multi-city sectors normalize ids and calculate independent pricing without double count", () => {
+  const sectorId = "64f000000000000000000101";
+  const rowId = "64f000000000000000000102";
+  const ticketDetails = normalizeTicketDetails({
+    journeyType: "multi_city",
+    sectors: [
+      {
+        _id: sectorId,
+        airline: "PIA",
+        origin: "LHE",
+        destination: "DXB",
+        departureDateTime: "2026-11-01T10:00:00.000Z",
+        vendorId: vendorA,
+        paxPricing: [
+          { _id: rowId, paxType: "adult", count: 2, costPrice: 100, sellingPrice: 150 },
+          { paxType: "child", count: 1, costPrice: 60, sellingPrice: 90 },
+        ],
+      },
+      {
+        airline: "Emirates",
+        origin: "DXB",
+        destination: "LHR",
+        departureDateTime: "2026-11-03T12:00:00.000Z",
+        vendorId: vendorB,
+        paxPricing: [
+          { paxType: "adult", count: 1, costPrice: 200, sellingPrice: 260 },
+          { paxType: "infant", count: 1, costPrice: 25, sellingPrice: 40, vendorId: vendorA },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(String(ticketDetails.sectors[0]._id), sectorId);
+  assert.equal(String(ticketDetails.sectors[0].paxPricing[0]._id), rowId);
+
+  const result = applyEstimatedTotals(
+    [
+      {
+        itemType: "air_ticket",
+        costCurrency: "PKR",
+        sellingCurrency: "PKR",
+        costPrice: 999999,
+        sellingPrice: 999999,
+        paxPricing: [{ count: 99, costPrice: 999, sellingPrice: 999 }],
+        ticketDetails,
+      },
+    ],
+    { baseCurrency: "PKR", costRates: new Map(), saleRates: new Map() },
+  );
+
+  assert.equal(result.costTotal, 485);
+  assert.equal(result.sellingTotal, 690);
+  assert.equal(result.bookingItems[0].estimatedCostBase, 485);
+  assert.equal(result.bookingItems[0].ticketDetails.sectors[1].paxPricing[1].estimatedCostBase, 25);
+
+  const converted = applyEstimatedTotals(
+    [{ ...result.bookingItems[0], costCurrency: "USD", sellingCurrency: "USD" }],
+    {
+      baseCurrency: "PKR",
+      costRates: new Map([["USD", 280.123456]]),
+      saleRates: new Map([["USD", 281.654321]]),
+    },
+  );
+  assert.equal(converted.costTotal, 135859.88);
+  assert.equal(converted.sellingTotal, 194341.48);
+  assert.equal(
+    converted.bookingItems[0].ticketDetails.sectors
+      .flatMap((sector) => sector.paxPricing)
+      .reduce((sum, row) => sum + row.estimatedCostBase, 0),
+    135859.88,
+  );
+});
+
+test("multi-city accounting uses sector defaults and row vendor overrides", () => {
+  const item = {
+    _id: "item-multi",
+    itemType: "air_ticket",
+    title: "Multi-city ticket",
+    estimatedCostBase: 485,
+    ticketDetails: {
+      journeyType: "multi_city",
+      sectors: [
+        {
+          _id: "sector-1",
+          vendorId: vendorA,
+          paxPricing: [
+            { paxType: "adult", estimatedCostBase: 200 },
+            { paxType: "child", estimatedCostBase: 60 },
+          ],
+        },
+        {
+          _id: "sector-2",
+          vendorId: vendorB,
+          paxPricing: [
+            { paxType: "adult", estimatedCostBase: 200 },
+            { paxType: "infant", vendorId: vendorA, estimatedCostBase: 25 },
+          ],
+        },
+      ],
+    },
+  };
+
+  const groups = collectEffectiveVendorCosts([item], { requireAssigned: true });
+  assert.equal(groups.get(`vendor:${vendorA}`), 285);
+  assert.equal(groups.get(`vendor:${vendorB}`), 200);
+
+  const accountingRows = collectVendorCostRows({ bookingItems: [item] });
+  assert.equal(
+    accountingRows.filter((row) => row.vendorId === vendorA).reduce((sum, row) => sum + row.amount, 0),
+    285,
+  );
+  assert.equal(
+    accountingRows.filter((row) => row.vendorId === vendorB).reduce((sum, row) => sum + row.amount, 0),
+    200,
+  );
+
+  const returnRows = collectReturnVendorCostRows({ bookingItems: [item] }, {
+    vendorType: "vendor",
+    vendorId: vendorA,
+  });
+  assert.equal(returnRows.reduce((sum, row) => sum + row.amount, 0), 285);
 });

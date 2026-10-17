@@ -60,10 +60,31 @@ export const fetchBackendPrintHtml = async (url, options = {}) => {
   return response.text();
 };
 
-export const openBackendPrintWindow = async ({ url, method = 'GET', body }) => {
+export const reserveBackendPrintWindow = () => {
   const printWindow = window.open('', '_blank');
 
   if (!printWindow) {
+    throw new Error('Print window blocked');
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(
+    '<!doctype html><html><head><title>Preparing invoice...</title></head><body style="font-family:sans-serif;padding:24px">Preparing invoice...</body></html>'
+  );
+  printWindow.document.close();
+
+  return printWindow;
+};
+
+export const openBackendPrintWindow = async ({
+  url,
+  method = 'GET',
+  body,
+  targetWindow = null,
+}) => {
+  const printWindow = targetWindow || reserveBackendPrintWindow();
+
+  if (printWindow.closed) {
     throw new Error('Print window blocked');
   }
 

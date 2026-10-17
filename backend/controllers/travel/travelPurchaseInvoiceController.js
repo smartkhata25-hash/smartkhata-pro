@@ -265,6 +265,12 @@ exports.getTravelPurchaseInvoices = async (req, res) => {
           },
           { "bookingItems.vendorId": { $in: vendorMatches.vendorIds } },
           { "bookingItems.paxPricing.vendorId": { $in: vendorMatches.vendorIds } },
+          { "bookingItems.ticketDetails.sectors.vendorId": { $in: vendorMatches.vendorIds } },
+          {
+            "bookingItems.ticketDetails.sectors.paxPricing.vendorId": {
+              $in: vendorMatches.vendorIds,
+            },
+          },
           {
             "bookingItems.umrahDetails.components.vendorId": {
               $in: vendorMatches.vendorIds,
@@ -273,6 +279,16 @@ exports.getTravelPurchaseInvoices = async (req, res) => {
           { "bookingItems.vendorPartyId": { $in: vendorMatches.partyIds } },
           {
             "bookingItems.paxPricing.vendorPartyId": {
+              $in: vendorMatches.partyIds,
+            },
+          },
+          {
+            "bookingItems.ticketDetails.sectors.vendorPartyId": {
+              $in: vendorMatches.partyIds,
+            },
+          },
+          {
+            "bookingItems.ticketDetails.sectors.paxPricing.vendorPartyId": {
               $in: vendorMatches.partyIds,
             },
           },

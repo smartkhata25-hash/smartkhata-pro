@@ -742,6 +742,28 @@ const calculateComponentSourceTotals = (component = {}) => {
 
 const calculateItemSourceTotals = (item = {}) => {
   if (
+    item.itemType === "air_ticket" &&
+    item.ticketDetails?.journeyType === "multi_city" &&
+    Array.isArray(item.ticketDetails?.sectors) &&
+    item.ticketDetails.sectors.length > 0
+  ) {
+    const totals = item.ticketDetails.sectors.reduce(
+      (result, sector) => {
+        const sectorTotals = calculatePaxTotals(sector.paxPricing || []);
+        result.sellingTotal += sectorTotals.sellingTotal;
+        result.costTotal += sectorTotals.costTotal;
+        return result;
+      },
+      { sellingTotal: 0, costTotal: 0 },
+    );
+
+    return {
+      sellingTotal: roundMoney(totals.sellingTotal),
+      costTotal: roundMoney(totals.costTotal),
+    };
+  }
+
+  if (
     item.itemType === "hotel" &&
     Array.isArray(item.hotelDetails?.roomPricing) &&
     item.hotelDetails.roomPricing.length > 0
@@ -850,6 +872,34 @@ const normalizeTicketPassenger = (passenger = {}) => ({
   baggage: cleanString(passenger.baggage),
 });
 
+const normalizeMultiCitySector = (sector = {}) => {
+  const vendorCounterparty = normalizeVendorCounterpartyInput(sector);
+
+  return {
+    ...(sector._id
+      ? { _id: ensureObjectIdString(sector._id, "multi-city sector ID") }
+      : {}),
+    airline: cleanString(sector.airline),
+    airlineId: ensureObjectIdString(sector.airlineId, "sector airline ID") || null,
+    origin: cleanUpperString(sector.origin),
+    originAirportId:
+      ensureObjectIdString(sector.originAirportId, "sector origin airport ID") || null,
+    destination: cleanUpperString(sector.destination),
+    destinationAirportId:
+      ensureObjectIdString(sector.destinationAirportId, "sector destination airport ID") || null,
+    departureDateTime: nullableDate(sector.departureDateTime),
+    vendorType: vendorCounterparty.vendorType,
+    vendorId: vendorCounterparty.vendorId || null,
+    vendorPartyId: vendorCounterparty.vendorPartyId || null,
+    paxPricing: (Array.isArray(sector.paxPricing) ? sector.paxPricing : []).map((row) => ({
+      ...normalizePaxPricing([row])[0],
+      ...(row?._id
+        ? { _id: ensureObjectIdString(row._id, "sector passenger pricing row ID") }
+        : {}),
+    })),
+  };
+};
+
 const normalizeTicketDetails = (details = {}) => {
   const journeyType = normalizeJourneyType(details.journeyType);
 
@@ -871,6 +921,9 @@ const normalizeTicketDetails = (details = {}) => {
 
   const passengerTickets = Array.isArray(details.passengerTickets)
     ? details.passengerTickets.map(normalizeTicketPassenger)
+    : [];
+  const sectors = Array.isArray(details.sectors)
+    ? details.sectors.map(normalizeMultiCitySector)
     : [];
 
   passengerTickets.forEach((passenger) => {
@@ -940,6 +993,8 @@ const normalizeTicketDetails = (details = {}) => {
     taxes: moneyNumber(details.taxes),
 
     passengerTickets,
+
+    sectors,
   };
 };
 
@@ -1383,6 +1438,18 @@ const collectItemReferences = (collector, item) => {
   (item.paxPricing || []).forEach((row) => {
     addReference(collector, "vendorIds", row.vendorId);
     addReference(collector, "vendorPartyIds", row.vendorPartyId);
+  });
+
+  (item.ticketDetails?.sectors || []).forEach((sector) => {
+    addReference(collector, "vendorIds", sector.vendorId);
+    addReference(collector, "vendorPartyIds", sector.vendorPartyId);
+    addReference(collector, "airlineIds", sector.airlineId);
+    addReference(collector, "airportIds", sector.originAirportId);
+    addReference(collector, "airportIds", sector.destinationAirportId);
+    (sector.paxPricing || []).forEach((row) => {
+      addReference(collector, "vendorIds", row.vendorId);
+      addReference(collector, "vendorPartyIds", row.vendorPartyId);
+    });
   });
 
   item.travelerIds.forEach((id) => addReference(collector, "travelerIds", id));
@@ -1965,7 +2032,67 @@ const applyEstimatedTotals = (items, currencySettings) => {
 
     nextItem.estimatedCostBase = roundMoney(estimatedCostBase);
 
-    if (Array.isArray(nextItem.paxPricing) && nextItem.paxPricing.length > 0) {
+    const multiCitySectors =
+      nextItem.itemType === "air_ticket" &&
+      nextItem.ticketDetails?.journeyType === "multi_city" &&
+      Array.isArray(nextItem.ticketDetails?.sectors) &&
+      nextItem.ticketDetails.sectors.length > 0
+        ? nextItem.ticketDetails.sectors
+        : null;
+
+    if (multiCitySectors) {
+      nextItem.ticketDetails.sectors = multiCitySectors.map((sector) => ({
+        ...sector,
+        paxPricing: (sector.paxPricing || []).map((row) => ({
+          ...row,
+          estimatedCostBase: roundMoney(
+            estimateBaseAmount(
+              Number(row.count || 0) * Number(row.costPrice || 0),
+              nextItem.costCurrency,
+              currencySettings,
+              "cost",
+            ),
+          ),
+          estimatedSellingBase: roundMoney(
+            estimateBaseAmount(
+              Number(row.count || 0) * Number(row.sellingPrice || 0),
+              nextItem.sellingCurrency,
+              currencySettings,
+              "sale",
+            ),
+          ),
+        })),
+      }));
+
+      const sectorRows = nextItem.ticketDetails.sectors.flatMap(
+        (sector) => sector.paxPricing || [],
+      );
+      const costDelta = roundMoney(
+        nextItem.estimatedCostBase -
+          sectorRows.reduce((sum, row) => sum + Number(row.estimatedCostBase || 0), 0),
+      );
+      const sellingDelta = roundMoney(
+        nextItem.estimatedSellingBase -
+          sectorRows.reduce((sum, row) => sum + Number(row.estimatedSellingBase || 0), 0),
+      );
+      const costAdjustment = [...sectorRows]
+        .reverse()
+        .find((row) => Number(row.estimatedCostBase || 0) > 0);
+      const sellingAdjustment = [...sectorRows]
+        .reverse()
+        .find((row) => Number(row.estimatedSellingBase || 0) > 0);
+
+      if (costAdjustment) {
+        costAdjustment.estimatedCostBase = roundMoney(
+          costAdjustment.estimatedCostBase + costDelta,
+        );
+      }
+      if (sellingAdjustment) {
+        sellingAdjustment.estimatedSellingBase = roundMoney(
+          sellingAdjustment.estimatedSellingBase + sellingDelta,
+        );
+      }
+    } else if (Array.isArray(nextItem.paxPricing) && nextItem.paxPricing.length > 0) {
       nextItem.paxPricing = nextItem.paxPricing.map((row) => ({
         ...row,
         estimatedCostBase: roundMoney(
@@ -2099,6 +2226,7 @@ const assertRequiredCurrencyRates = (items, settings, status) => {
       });
       return;
     }
+
     const totals = calculateItemSourceTotals(item);
     assertRate(totals.costTotal, item.costCurrency, "cost");
     assertRate(totals.sellingTotal, item.sellingCurrency, "sale");
@@ -2147,6 +2275,27 @@ const collectEffectiveVendorCosts = (items = [], { requireAssigned = false } = {
       return;
     }
 
+    const multiCitySectors =
+      item.itemType === "air_ticket" &&
+      item.ticketDetails?.journeyType === "multi_city" &&
+      Array.isArray(item.ticketDetails?.sectors) &&
+      item.ticketDetails.sectors.length > 0
+        ? item.ticketDetails.sectors
+        : null;
+
+    if (multiCitySectors) {
+      multiCitySectors.forEach((sector, sectorIndex) => {
+        (sector.paxPricing || []).forEach((row, rowIndex) =>
+          add(
+            getVendorKey(row) ? row : sector,
+            row.estimatedCostBase,
+            `${itemLabel} sector ${sectorIndex + 1} ${row.paxType || "passenger"} row ${rowIndex + 1}`,
+          ),
+        );
+      });
+      return;
+    }
+
     const rowVendorMode =
       Array.isArray(item.paxPricing) &&
       item.paxPricing.some((row) => Boolean(row.vendorId || row.vendorPartyId));
@@ -2190,6 +2339,19 @@ const validateVendorPaymentsAgainstCosts = ({
 
 const getItemDateRange = (item) => {
   if (item.itemType === "air_ticket") {
+    const sectorDates = (item.ticketDetails?.sectors || [])
+      .map((sector) => sector.departureDateTime)
+      .filter(Boolean)
+      .map((date) => new Date(date))
+      .sort((left, right) => left.getTime() - right.getTime());
+
+    if (sectorDates.length > 0) {
+      return {
+        start: sectorDates[0],
+        end: sectorDates[sectorDates.length - 1],
+      };
+    }
+
     const passengerDates = (item.ticketDetails?.passengerTickets || [])
       .flatMap((passenger) => [
         passenger.departureDateTime,
@@ -2362,6 +2524,61 @@ const buildBookingPayload = async (body = {}, req, existingBooking = null) => {
   const bookingItems = rawItems.map((item) =>
     normalizeBookingItem(item, serviceType),
   );
+
+  if (POSTING_STATUSES.has(status)) {
+    bookingItems.forEach((item, itemIndex) => {
+      if (item.itemType !== "air_ticket" || item.ticketDetails?.journeyType !== "multi_city") {
+        return;
+      }
+
+      const sectors = item.ticketDetails.sectors || [];
+      const existingItem = existingBooking?.bookingItems?.[itemIndex];
+      const isLegacyMultiCity =
+        existingItem?.ticketDetails?.journeyType === "multi_city" &&
+        (!Array.isArray(existingItem.ticketDetails?.sectors) ||
+          existingItem.ticketDetails.sectors.length === 0);
+
+      if (sectors.length < 2 && !isLegacyMultiCity) {
+        throw createHttpError(400, `Multi-City item ${itemIndex + 1} requires at least two sectors`);
+      }
+
+      let previousDeparture = null;
+      sectors.forEach((sector, sectorIndex) => {
+        if (!sector.airlineId && !sector.airline) {
+          throw createHttpError(400, `Airline is required in sector ${sectorIndex + 1}`);
+        }
+        if ((!sector.originAirportId && !sector.origin) || (!sector.destinationAirportId && !sector.destination)) {
+          throw createHttpError(400, `Origin and destination are required in sector ${sectorIndex + 1}`);
+        }
+        if (
+          (sector.originAirportId && sector.destinationAirportId && String(sector.originAirportId) === String(sector.destinationAirportId)) ||
+          (!sector.originAirportId && !sector.destinationAirportId && sector.origin === sector.destination)
+        ) {
+          throw createHttpError(400, `Origin and destination must differ in sector ${sectorIndex + 1}`);
+        }
+        if (!sector.departureDateTime) {
+          throw createHttpError(400, `Departure date and time are required in sector ${sectorIndex + 1}`);
+        }
+        if (previousDeparture && sector.departureDateTime <= previousDeparture) {
+          throw createHttpError(400, "Multi-City sector departures must be in chronological order");
+        }
+        previousDeparture = sector.departureDateTime;
+
+        const totalPassengers = (sector.paxPricing || []).reduce(
+          (sum, row) => sum + Number(row.count || 0),
+          0,
+        );
+        if (!(totalPassengers > 0)) {
+          throw createHttpError(400, `At least one passenger is required in sector ${sectorIndex + 1}`);
+        }
+        (sector.paxPricing || []).forEach((row, rowIndex) => {
+          if (Number(row.count || 0) > 0 && !(Number(row.sellingPrice || 0) > 0)) {
+            throw createHttpError(400, `Selling price is required in sector ${sectorIndex + 1}, row ${rowIndex + 1}`);
+          }
+        });
+      });
+    });
+  }
 
   const vendorPaymentsSupplied = Object.prototype.hasOwnProperty.call(
     body,
@@ -2658,6 +2875,13 @@ const populateBooking = (query) =>
       "bookingItems.paxPricing.vendorPartyId",
       "name phone email role moduleScope",
     )
+    .populate("bookingItems.ticketDetails.sectors.airlineId", "name iataCode icaoCode country")
+    .populate("bookingItems.ticketDetails.sectors.originAirportId", "name code iataCode city country")
+    .populate("bookingItems.ticketDetails.sectors.destinationAirportId", "name code iataCode city country")
+    .populate("bookingItems.ticketDetails.sectors.vendorId", "name phone travelVendorType moduleScope")
+    .populate("bookingItems.ticketDetails.sectors.vendorPartyId", "name phone email role moduleScope")
+    .populate("bookingItems.ticketDetails.sectors.paxPricing.vendorId", "name phone travelVendorType moduleScope")
+    .populate("bookingItems.ticketDetails.sectors.paxPricing.vendorPartyId", "name phone email role moduleScope")
     .populate("bookingItems.hotelDetails.hotelId", "name city country")
     .populate("bookingItems.umrahDetails.makkahHotelId", "name city country")
     .populate("bookingItems.umrahDetails.madinahHotelId", "name city country")

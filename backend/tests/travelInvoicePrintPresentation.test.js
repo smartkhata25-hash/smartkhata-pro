@@ -313,6 +313,86 @@ test("one-way Air Ticket never prints stale return fields", () => {
   assert.doesNotMatch(built.items[0].details.join("\n"), /Return/);
 });
 
+test("multi-city Air Ticket prints ordered sectors and sector rate lines without internal costs", () => {
+  const built = buildInvoice({
+    sellingTotal: 690,
+    netSale: 690,
+    bookingItems: [{
+      itemType: "air_ticket",
+      title: "Multi-city Air Ticket",
+      sellingCurrency: "PKR",
+      sellingPrice: 690,
+      estimatedSellingBase: 690,
+      ticketDetails: {
+        journeyType: "multi_city",
+        origin: "STALE",
+        destination: "STALE",
+        returnOrigin: "STALE",
+        returnDestination: "STALE",
+        sectors: [
+          {
+            airline: "PIA",
+            origin: "LHE",
+            destination: "DXB",
+            departureDateTime: "2026-11-01T10:00:00+05:00",
+            paxPricing: [
+              { paxType: "adult", count: 2, sellingPrice: 150, estimatedSellingBase: 300, costPrice: 100 },
+              { paxType: "child", count: 1, sellingPrice: 90, estimatedSellingBase: 90, costPrice: 60 },
+            ],
+          },
+          {
+            airline: "Emirates",
+            origin: "DXB",
+            destination: "LHR",
+            departureDateTime: "2026-11-03T12:00:00+05:00",
+            paxPricing: [
+              { paxType: "adult", count: 1, sellingPrice: 260, estimatedSellingBase: 260, costPrice: 200 },
+              { paxType: "infant", count: 1, sellingPrice: 40, estimatedSellingBase: 40, costPrice: 25 },
+            ],
+          },
+        ],
+      },
+    }],
+  });
+  const details = built.items[0].details.join("\n");
+
+  assert.match(details, /Sector 1: PIA \| LHE to DXB \| 01\/11\/2026, 10:00 AM/);
+  assert.match(details, /Sector 2: Emirates \| DXB to LHR \| 03\/11\/2026, 12:00 PM/);
+  assert.ok(details.indexOf("Sector 1") < details.indexOf("Sector 2"));
+  assert.doesNotMatch(details, /STALE|Return Route/);
+  assert.deepEqual(built.items[0].paxRateLines, [
+    "Sector 1 Adult: 2 Ã— PKR 150",
+    "Sector 1 Child: 1 Ã— PKR 90",
+    "Sector 2 Adult: 1 Ã— PKR 260",
+    "Sector 2 Infant: 1 Ã— PKR 40",
+  ]);
+  assert.doesNotMatch(JSON.stringify(built), /costPrice|vendorId/);
+});
+
+test("legacy multi-city Air Ticket without sectors keeps its saved outbound itinerary", () => {
+  const built = buildInvoice({
+    bookingItems: [{
+      itemType: "air_ticket",
+      sellingPrice: 100,
+      ticketDetails: {
+        journeyType: "multi_city",
+        airline: "PIA",
+        origin: "LHE",
+        destination: "DXB",
+        departureDateTime: "2026-11-01T10:00:00+05:00",
+        returnOrigin: "DXB",
+        returnDestination: "LHE",
+      },
+    }],
+  });
+  const details = built.items[0].details.join("\n");
+
+  assert.match(details, /Airline: PIA/);
+  assert.match(details, /Route: LHE to DXB/);
+  assert.match(details, /Departure: 01\/11\/2026, 10:00 AM/);
+  assert.doesNotMatch(details, /Return Route/);
+});
+
 test("passenger-specific flight differences are labeled without repeating shared facts", () => {
   const built = buildInvoice({
     travelers: [{ _id: "64f000000000000000000031", fullName: "Top Traveler" }],

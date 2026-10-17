@@ -249,6 +249,8 @@ exports.getTravelBookings = async (req, res) => {
         $or: [
           { "bookingItems.vendorId": selectedVendorId },
           { "bookingItems.paxPricing.vendorId": selectedVendorId },
+          { "bookingItems.ticketDetails.sectors.vendorId": selectedVendorId },
+          { "bookingItems.ticketDetails.sectors.paxPricing.vendorId": selectedVendorId },
           { "bookingItems.umrahDetails.components.vendorId": selectedVendorId },
         ],
       });
@@ -308,6 +310,16 @@ exports.getTravelBookings = async (req, res) => {
             },
           },
           {
+            "bookingItems.ticketDetails.sectors.vendorId": {
+              $in: matchingVendors.map((vendor) => vendor._id),
+            },
+          },
+          {
+            "bookingItems.ticketDetails.sectors.paxPricing.vendorId": {
+              $in: matchingVendors.map((vendor) => vendor._id),
+            },
+          },
+          {
             "bookingItems.umrahDetails.components.vendorId": {
               $in: matchingVendors.map((vendor) => vendor._id),
             },
@@ -319,6 +331,16 @@ exports.getTravelBookings = async (req, res) => {
           },
           {
             "bookingItems.paxPricing.vendorPartyId": {
+              $in: matchingVendorParties.map((party) => party._id),
+            },
+          },
+          {
+            "bookingItems.ticketDetails.sectors.vendorPartyId": {
+              $in: matchingVendorParties.map((party) => party._id),
+            },
+          },
+          {
+            "bookingItems.ticketDetails.sectors.paxPricing.vendorPartyId": {
               $in: matchingVendorParties.map((party) => party._id),
             },
           },

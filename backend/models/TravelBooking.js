@@ -356,6 +356,38 @@ const ticketPassengerSchema = new mongoose.Schema(
   },
 );
 
+const multiCityPaxPricingRowSchema = new mongoose.Schema(
+  {
+    paxType: { type: String, enum: PAX_TYPES, required: true },
+    count: { type: Number, min: 0, default: 0 },
+    costPrice: amountField,
+    sellingPrice: amountField,
+    vendorId: { type: mongoose.Schema.Types.ObjectId, ref: "Supplier", default: null },
+    vendorType: { type: String, enum: ["vendor", "party"], default: "vendor" },
+    vendorPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "Party", default: null },
+    estimatedCostBase: amountField,
+    estimatedSellingBase: amountField,
+  },
+  { _id: true },
+);
+
+const multiCitySectorSchema = new mongoose.Schema(
+  {
+    airline: { type: String, trim: true, default: "" },
+    airlineId: { type: mongoose.Schema.Types.ObjectId, ref: "TravelAirline", default: null },
+    origin: { type: String, trim: true, uppercase: true, default: "" },
+    originAirportId: { type: mongoose.Schema.Types.ObjectId, ref: "TravelAirport", default: null },
+    destination: { type: String, trim: true, uppercase: true, default: "" },
+    destinationAirportId: { type: mongoose.Schema.Types.ObjectId, ref: "TravelAirport", default: null },
+    departureDateTime: { type: Date, default: null },
+    vendorId: { type: mongoose.Schema.Types.ObjectId, ref: "Supplier", default: null },
+    vendorType: { type: String, enum: ["vendor", "party"], default: "vendor" },
+    vendorPartyId: { type: mongoose.Schema.Types.ObjectId, ref: "Party", default: null },
+    paxPricing: { type: [multiCityPaxPricingRowSchema], default: [] },
+  },
+  { _id: true },
+);
+
 const visaTravelerSchema = new mongoose.Schema(
   {
     travelerId: {
@@ -740,6 +772,11 @@ const bookingItemSchema = new mongoose.Schema(
 
       passengerTickets: {
         type: [ticketPassengerSchema],
+        default: [],
+      },
+
+      sectors: {
+        type: [multiCitySectorSchema],
         default: [],
       },
     },
@@ -1498,6 +1535,30 @@ travelBookingSchema.index({
 travelBookingSchema.index({
   userId: 1,
   "bookingItems.paxPricing.vendorPartyId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.ticketDetails.sectors.vendorId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.ticketDetails.sectors.vendorPartyId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.ticketDetails.sectors.paxPricing.vendorId": 1,
+  updatedAt: -1,
+});
+
+travelBookingSchema.index({
+  userId: 1,
+  "bookingItems.ticketDetails.sectors.paxPricing.vendorPartyId": 1,
   updatedAt: -1,
 });
 

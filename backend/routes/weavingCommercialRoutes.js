@@ -1,6 +1,7 @@
 const express = require("express");
 const ctrl = require("../controllers/weavingCommercialController");
 const weavingLedgerPrint = require("../controllers/weavingLedgerPrintController");
+const weavingPaymentPrint = require("../controllers/weavingPaymentPrintController");
 const sizing = require("../controllers/weavingSizingController");
 const protect = require("../middleware/authMiddleware");
 const { requireModule } = require("../middleware/moduleMiddleware");
@@ -30,6 +31,8 @@ router.put("/purchases/:id", requirePermission("weaving.purchases.edit"), upload
 router.post("/purchases/:id/void", requirePermission("weaving.purchases.void"), ctrl.voidPurchase);
 router.get("/purchase-history", requirePermission("weaving.purchases.view"), ctrl.purchaseHistory);
 router.get("/payments", requirePermission("weaving.payments.view"), ctrl.listPayments);
+router.get("/payments/:id/print", requirePermission("weaving.payments.view"), (req, res) => { req.params.format = "print"; return weavingPaymentPrint.paymentReceiptOutput(req, res); });
+router.get("/payments/:id/pdf", requirePermission("weaving.payments.view"), (req, res) => { req.params.format = "pdf"; return weavingPaymentPrint.paymentReceiptOutput(req, res); });
 router.get("/payments/:id", requirePermission("weaving.payments.view"), ctrl.getPayment);
 router.post("/payments", requirePermission("weaving.payments.create"), upload.array("attachments", 3), ctrl.returnExistingPayment, ctrl.createPayment);
 router.put("/payments/:id", requirePermission("weaving.payments.edit"), upload.array("attachments", 3), ctrl.updatePayment);

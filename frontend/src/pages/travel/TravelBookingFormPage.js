@@ -6,10 +6,15 @@ import {
   FaClipboardList,
   FaCoins,
   FaExchangeAlt,
+  FaFilePdf,
   FaFileInvoiceDollar,
   FaMoneyBillWave,
   FaPaperclip,
+  FaPlaneArrival,
+  FaPlaneDeparture,
   FaPlus,
+  FaPrint,
+  FaRoute,
   FaSave,
   FaTimes,
   FaTrash,
@@ -40,6 +45,8 @@ import {
   fetchTravelServices,
   fetchTravelers,
   fetchTravelVendors,
+  getTravelBookingPdfUrl,
+  getTravelBookingPrintUrl,
   updateTravelCurrencyDefaultRate,
   updateTravelBooking,
 } from '../../services/travelMasterService';
@@ -49,6 +56,11 @@ import { t } from '../../i18n/i18n';
 import useFormPersist from '../../hooks/useFormPersist';
 import { hasPermission } from '../../utils/permissionHelper';
 import { formatMoneyDisplay } from '../../utils/money';
+import {
+  downloadBackendPdf,
+  openBackendPrintWindow,
+  reserveBackendPrintWindow,
+} from '../../utils/backendPrintDocument';
 
 import {
   TravelActionButton,
@@ -58,9 +70,11 @@ import {
 import { TravelBookingReminderControls } from '../../components/travel/reminders/TravelReminderCenter';
 
 import {
+  appendMultiCitySector,
   bookingItemTypeOptions,
   createEmptyBookingItem,
   createEmptyHotelRoomPricingRow,
+  createEmptyMultiCitySector,
   createEmptyPaxPricingRow,
   createEmptyTicketPassenger,
   createEmptyUmrahComponent,
@@ -68,7 +82,10 @@ import {
   createInitialBookingForm,
   hotelRoomTypeOptions,
   JOURNEY_TYPES,
+  insertMultiCityPricingRow,
   prepareBookingForForm,
+  removeMultiCityPricingRowAt,
+  removeMultiCitySectorAt,
   normalizeReminderSettingsForForm,
   travelBookingCurrencyOptions,
   UMRAH_COMPONENT_TYPES,
@@ -124,6 +141,13 @@ import BookingRelationModal from '../../components/travel/bookings/form/BookingR
 import MatchingTravelersModal from '../../components/travel/bookings/form/MatchingTravelersModal';
 import TravelerDuplicateConfirmationModal from '../../components/travel/bookings/form/TravelerDuplicateConfirmationModal';
 import TravelCurrencyRateModal from '../../components/travel/bookings/form/TravelCurrencyRateModal';
+import TravelBookingDocumentButtons from '../../components/travel/bookings/form/TravelBookingDocumentButtons';
+import {
+  createTravelBookingFormFingerprint,
+  getTravelDocumentSaveChoices,
+  getTravelInvoicePdfFileName,
+  TRAVEL_DOCUMENT_ACTIONS,
+} from '../../components/travel/bookings/form/travelBookingDocumentActions';
 import {
   applyCustomerReceiptAmountChange,
   buildInvoiceExtraPaymentWarnings,
@@ -722,6 +746,10 @@ const TravelBookingFormPage = () => {
   const customerTravelerLocksRef = useRef(new Set());
   const hotelModalDraftRef = useRef(null);
   const extraPaymentConfirmationRef = useRef(false);
+  const lastSavedFingerprintRef = useRef('');
+  const pendingSubmitOptionsRef = useRef(null);
+  const bookingSubmitLockRef = useRef(false);
+  const documentActionLockRef = useRef(false);
 
   const isEditMode = Boolean(id);
 
@@ -739,6 +767,8 @@ const TravelBookingFormPage = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [documentActionLoading, setDocumentActionLoading] = useState(false);
+  const [documentPrompt, setDocumentPrompt] = useState(null);
 
   const [customers, setCustomers] = useState([]);
   const [parties, setParties] = useState([]);
@@ -756,6 +786,7 @@ const TravelBookingFormPage = () => {
 
   const [expandedItems, setExpandedItems] = useState({});
   const [openRowVendorKeys, setOpenRowVendorKeys] = useState({});
+  const [collapsedSectorKeys, setCollapsedSectorKeys] = useState({});
   const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
 
   const [modal, setModal] = useState(null);
@@ -1001,6 +1032,7 @@ const TravelBookingFormPage = () => {
         setReminderBusinessSettings(latestReminderSettings || null);
         setCurrencySettings(latestCurrencySettings || null);
         setFormState(finalBooking);
+        lastSavedFingerprintRef.current = createTravelBookingFormFingerprint(finalBooking);
 
         void ensureReferencesLoaded(getBookingOptionalReferenceKeys(finalBooking));
       } catch (error) {
@@ -1463,6 +1495,122 @@ const TravelBookingFormPage = () => {
         paxPricing: rows,
       };
     });
+  };
+
+  const updateJourneyType = (itemIndex, journeyType) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}), journeyType };
+
+      if (journeyType === 'multi_city' && !(ticketDetails.sectors || []).length) {
+        const firstSector = {
+          ...createEmptyMultiCitySector(),
+          airline: ticketDetails.airline || '',
+          airlineId: ticketDetails.airlineId || '',
+          origin: ticketDetails.origin || '',
+          originAirportId: ticketDetails.originAirportId || '',
+          destination: ticketDetails.destination || '',
+          destinationAirportId: ticketDetails.destinationAirportId || '',
+          departureDateTime: ticketDetails.departureDateTime || '',
+          vendorType: item.vendorType || 'vendor',
+          vendorId: item.vendorId || '',
+          vendorPartyId: item.vendorPartyId || '',
+          paxPricing: (item.paxPricing || []).map((row) => ({ ...row })),
+        };
+        const secondSector = createEmptyMultiCitySector(firstSector.destination || '');
+        ticketDetails.sectors = [firstSector, secondSector];
+      }
+
+      return { ...item, ticketDetails };
+    });
+  };
+
+  const updateMultiCitySector = (itemIndex, sectorIndex, updates) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}) };
+      const sectors = (ticketDetails.sectors || []).map((sector, index) =>
+        index === sectorIndex
+          ? { ...sector, legacyFallback: false, ...updates }
+          : { ...sector }
+      );
+      return { ...item, ticketDetails: { ...ticketDetails, sectors } };
+    });
+  };
+
+  const addMultiCitySector = (itemIndex) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}) };
+      const sectors = appendMultiCitySector(ticketDetails.sectors || []);
+      return { ...item, ticketDetails: { ...ticketDetails, sectors } };
+    });
+  };
+
+  const removeMultiCitySector = (itemIndex, sectorIndex) => {
+    updateItem(itemIndex, (item) => ({
+      ...item,
+      ticketDetails: {
+        ...(item.ticketDetails || {}),
+        sectors: removeMultiCitySectorAt(item.ticketDetails?.sectors || [], sectorIndex),
+      },
+    }));
+  };
+
+  const updateMultiCitySectorVendor = (itemIndex, sectorIndex, value, record) => {
+    updateMultiCitySector(
+      itemIndex,
+      sectorIndex,
+      applyVendorCounterpartyToItem(
+        {},
+        getCounterpartySelection(value, record, 'vendor')
+      )
+    );
+  };
+
+  const updateMultiCityPricingRow = (itemIndex, sectorIndex, rowIndex, updates) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}) };
+      const sectors = (ticketDetails.sectors || []).map((sector, index) => {
+        if (index !== sectorIndex) return { ...sector };
+        const paxPricing = (sector.paxPricing || []).map((row, priceIndex) =>
+          priceIndex === rowIndex ? { ...row, ...updates } : { ...row }
+        );
+        return { ...sector, legacyFallback: false, paxPricing };
+      });
+      return { ...item, ticketDetails: { ...ticketDetails, sectors } };
+    });
+  };
+
+  const addMultiCityPricingRow = (itemIndex, sectorIndex, paxType, rowIndex = null) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}) };
+      const sectors = insertMultiCityPricingRow(
+        ticketDetails.sectors || [],
+        sectorIndex,
+        paxType,
+        rowIndex
+      );
+      return { ...item, ticketDetails: { ...ticketDetails, sectors } };
+    });
+  };
+
+  const removeMultiCityPricingRow = (itemIndex, sectorIndex, rowIndex) => {
+    updateItem(itemIndex, (item) => {
+      const ticketDetails = { ...(item.ticketDetails || {}) };
+      const sectors = removeMultiCityPricingRowAt(
+        ticketDetails.sectors || [],
+        sectorIndex,
+        rowIndex
+      );
+      return { ...item, ticketDetails: { ...ticketDetails, sectors } };
+    });
+  };
+
+  const updateMultiCityRowVendor = (itemIndex, sectorIndex, rowIndex, value, record) => {
+    updateMultiCityPricingRow(
+      itemIndex,
+      sectorIndex,
+      rowIndex,
+      applyVendorCounterpartyToItem({}, getCounterpartySelection(value, record, 'vendor'))
+    );
   };
 
   const updateQuantityPricing = (itemIndex, field, value) => {
@@ -2519,6 +2667,8 @@ const TravelBookingFormPage = () => {
 
     const componentIndex = context.componentIndex;
     const rowIndex = context.rowIndex;
+    const sectorIndex = context.sectorIndex;
+    const sectorRowIndex = context.sectorRowIndex;
 
     if (type === 'customer') {
       setCustomers((current) => upsertRecord(current, record));
@@ -2577,7 +2727,26 @@ const TravelBookingFormPage = () => {
     if (type === 'vendor') {
       setVendors((current) => upsertRecord(current, record));
 
-      if (Number.isInteger(itemIndex) && Number.isInteger(rowIndex)) {
+      if (
+        Number.isInteger(itemIndex) &&
+        Number.isInteger(sectorIndex) &&
+        Number.isInteger(sectorRowIndex)
+      ) {
+        updateMultiCityRowVendor(
+          itemIndex,
+          sectorIndex,
+          sectorRowIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
+      } else if (Number.isInteger(itemIndex) && Number.isInteger(sectorIndex)) {
+        updateMultiCitySectorVendor(
+          itemIndex,
+          sectorIndex,
+          `vendor:${record._id}`,
+          buildCounterpartyOption(record, 'vendor')
+        );
+      } else if (Number.isInteger(itemIndex) && Number.isInteger(rowIndex)) {
         updatePaxRowVendorCounterparty(
           itemIndex,
           rowIndex,
@@ -2832,9 +3001,86 @@ const TravelBookingFormPage = () => {
       }
 
       const calculatedItemTotals = calculateBookingItemSourceTotals(item);
+      const isMultiCityTicket =
+        item.itemType === 'air_ticket' && item.ticketDetails?.journeyType === 'multi_city';
+
+      if (isMultiCityTicket) {
+        const sectors = Array.isArray(item.ticketDetails?.sectors)
+          ? item.ticketDetails.sectors
+          : [];
+        const legacyOnly =
+          sectors.length === 1 && sectors[0]?.legacyFallback === true && isEditMode;
+
+        if (isConfirming && sectors.length < 2 && !legacyOnly) {
+          return `At least two sectors are required in Multi-City item ${index + 1}.`;
+        }
+
+        let previousDeparture = null;
+        for (let sectorIndex = 0; sectorIndex < sectors.length; sectorIndex += 1) {
+          const sector = sectors[sectorIndex];
+          if (legacyOnly && sector.legacyFallback === true) {
+            continue;
+          }
+          const origin = sector.originAirportId || String(sector.origin || '').trim();
+          const destination =
+            sector.destinationAirportId || String(sector.destination || '').trim();
+
+          if (isConfirming && !sector.airlineId && !String(sector.airline || '').trim()) {
+            return `Airline is required in sector ${sectorIndex + 1}.`;
+          }
+          if (isConfirming && (!origin || !destination)) {
+            return `Origin and destination are required in sector ${sectorIndex + 1}.`;
+          }
+          if (isConfirming && String(origin) === String(destination)) {
+            return `Origin and destination must differ in sector ${sectorIndex + 1}.`;
+          }
+          if (isConfirming && !sector.departureDateTime) {
+            return `Departure date and time are required in sector ${sectorIndex + 1}.`;
+          }
+          if (
+            isConfirming &&
+            previousDeparture &&
+            new Date(sector.departureDateTime).getTime() <= previousDeparture
+          ) {
+            return 'Multi-City sector departures must be in chronological order.';
+          }
+          if (sector.departureDateTime) {
+            previousDeparture = new Date(sector.departureDateTime).getTime();
+          }
+
+          const sectorRows = Array.isArray(sector.paxPricing) ? sector.paxPricing : [];
+          if (
+            isConfirming &&
+            sectorRows.reduce((sum, row) => sum + numberValue(row.count), 0) <= 0
+          ) {
+            return `At least one passenger is required in sector ${sectorIndex + 1}.`;
+          }
+          for (let rowIndex = 0; rowIndex < sectorRows.length; rowIndex += 1) {
+            const row = sectorRows[rowIndex];
+            if (
+              isConfirming &&
+              numberValue(row.count) > 0 &&
+              numberValue(row.sellingPrice) <= 0
+            ) {
+              return `Selling Price is required in sector ${sectorIndex + 1}, row ${rowIndex + 1}.`;
+            }
+            if (
+              isConfirming &&
+              numberValue(row.count) > 0 &&
+              numberValue(row.costPrice) > 0 &&
+              !row.vendorId &&
+              !row.vendorPartyId &&
+              !sector.vendorId &&
+              !sector.vendorPartyId
+            ) {
+              return `Vendor is required for every cost row in sector ${sectorIndex + 1}.`;
+            }
+          }
+        }
+      }
 
       if (
-        ['air_ticket', 'visit_visa'].includes(item.itemType) ||
+        (!isMultiCityTicket && ['air_ticket', 'visit_visa'].includes(item.itemType)) ||
         (item.itemType === 'umrah_package' &&
           item.umrahDetails?.packageMode !== 'custom_component_package')
       ) {
@@ -2879,6 +3125,7 @@ const TravelBookingFormPage = () => {
       if (
         isConfirming &&
         numberValue(calculatedItemTotals.cost) > 0 &&
+        !isMultiCityTicket &&
         !isRowVendorMode(item) &&
         !item.vendorId &&
         !item.vendorPartyId
@@ -2997,6 +3244,27 @@ const TravelBookingFormPage = () => {
             delete payloadRow.uiKey;
             return payloadRow;
           }),
+          ticketDetails: {
+            ...(item.ticketDetails || {}),
+            sectors: (
+              item.ticketDetails?.sectors?.length === 1 &&
+              item.ticketDetails.sectors[0]?.legacyFallback === true
+                ? []
+                : item.ticketDetails?.sectors || []
+            ).map((sector) => {
+              const payloadSector = {
+                ...sector,
+                paxPricing: (sector.paxPricing || []).map((row) => {
+                  const payloadRow = { ...row };
+                  delete payloadRow.uiKey;
+                  return payloadRow;
+                }),
+              };
+              delete payloadSector.uiKey;
+              delete payloadSector.legacyFallback;
+              return payloadSector;
+            }),
+          },
           umrahDetails: {
             ...(item.umrahDetails || {}),
             components: (item.umrahDetails?.components || []).map((component) => ({
@@ -3025,13 +3293,108 @@ const TravelBookingFormPage = () => {
     return payload;
   };
 
-  const submitBooking = async (status, advanceConfirmed = false, repostConfirmed = false) => {
+  const closeReservedPrintWindow = (options = {}) => {
+    const targetWindow = options?.targetWindow;
+    if (targetWindow && !targetWindow.closed) {
+      targetWindow.close();
+    }
+  };
+
+  const performInvoiceDocumentAction = async (
+    action,
+    bookingId,
+    bookingRecord = {},
+    targetWindow = null
+  ) => {
+    if (!bookingId || !action || documentActionLockRef.current) return false;
+
+    try {
+      documentActionLockRef.current = true;
+      setDocumentActionLoading(true);
+      setFormError('');
+
+      if (action === TRAVEL_DOCUMENT_ACTIONS.PRINT) {
+        await openBackendPrintWindow({
+          url: getTravelBookingPrintUrl(bookingId),
+          targetWindow,
+        });
+      } else {
+        await downloadBackendPdf({
+          url: getTravelBookingPdfUrl(bookingId),
+          fileName: getTravelInvoicePdfFileName({ ...bookingRecord, _id: bookingId }),
+        });
+      }
+
+      return true;
+    } catch (error) {
+      closeReservedPrintWindow({ targetWindow });
+      setFormError(
+        error?.message ||
+          (action === TRAVEL_DOCUMENT_ACTIONS.PRINT
+            ? 'Unable to open the invoice print window.'
+            : 'Unable to download the invoice PDF.')
+      );
+      return false;
+    } finally {
+      documentActionLockRef.current = false;
+      setDocumentActionLoading(false);
+    }
+  };
+
+  const hasUnsavedInvoiceChanges = Boolean(
+    isEditMode &&
+      lastSavedFingerprintRef.current &&
+      createTravelBookingFormFingerprint(formState) !== lastSavedFingerprintRef.current
+  );
+
+  const handleDocumentRequest = (action) => {
+    if (saving || loading || documentActionLoading) return;
+
+    if (isEditMode && !hasUnsavedInvoiceChanges) {
+      void performInvoiceDocumentAction(action, id, formState);
+      return;
+    }
+
+    setDocumentPrompt({ action });
+  };
+
+  const handleDocumentSaveChoice = (status) => {
+    if (!documentPrompt || saving || documentActionLoading) return;
+
+    let targetWindow = null;
+    if (documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT) {
+      try {
+        targetWindow = reserveBackendPrintWindow();
+      } catch (error) {
+        setFormError(error?.message || 'Print window blocked');
+        return;
+      }
+    }
+
+    const options = {
+      documentAction: documentPrompt.action,
+      targetWindow,
+    };
+    setDocumentPrompt(null);
+    void submitBooking(status, false, false, options);
+  };
+
+  const submitBooking = async (
+    status,
+    advanceConfirmed = false,
+    repostConfirmed = false,
+    options = {}
+  ) => {
+    pendingSubmitOptionsRef.current = options;
+
     if (isEditMode && !canEdit) {
+      closeReservedPrintWindow(options);
       setFormError(t('travel.alerts.permissionDenied'));
       return;
     }
 
     if (!isEditMode && !canCreate) {
+      closeReservedPrintWindow(options);
       setFormError(t('travel.alerts.permissionDenied'));
       return;
     }
@@ -3039,6 +3402,7 @@ const TravelBookingFormPage = () => {
     const validationError = validateBooking(status);
 
     if (validationError) {
+      closeReservedPrintWindow(options);
       setFormError(validationError);
       return;
     }
@@ -3057,7 +3421,13 @@ const TravelBookingFormPage = () => {
       return;
     }
 
+    if (bookingSubmitLockRef.current) {
+      closeReservedPrintWindow(options);
+      return;
+    }
+
     try {
+      bookingSubmitLockRef.current = true;
       setSaving(true);
       setFormError('');
 
@@ -3073,13 +3443,29 @@ const TravelBookingFormPage = () => {
         : await createTravelBooking(payload);
 
       clearDraft();
+      lastSavedFingerprintRef.current = createTravelBookingFormFingerprint(formState);
 
-      navigate(`/travel/bookings/${saved._id}`);
+      if (options.documentAction) {
+        await performInvoiceDocumentAction(
+          options.documentAction,
+          saved._id,
+          saved,
+          options.targetWindow
+        );
+        navigate(`/travel/bookings/${saved._id}/edit`, { replace: !isEditMode });
+      } else {
+        navigate(`/travel/bookings/${saved._id}`);
+      }
+
+      pendingSubmitOptionsRef.current = null;
+      return saved;
     } catch (error) {
+      closeReservedPrintWindow(options);
       console.error('Travel invoice save failed:', error);
 
       setFormError(error?.response?.data?.message || t('travel.booking.alerts.saveFailed'));
     } finally {
+      bookingSubmitLockRef.current = false;
       setSaving(false);
     }
   };
@@ -3089,7 +3475,8 @@ const TravelBookingFormPage = () => {
     extraPaymentConfirmationRef.current = true;
     const status = advanceConfirmationStatus;
     setAdvanceConfirmationStatus('');
-    void submitBooking(status, true).finally(() => {
+    const options = pendingSubmitOptionsRef.current || {};
+    void submitBooking(status, true, false, options).finally(() => {
       extraPaymentConfirmationRef.current = false;
     });
   };
@@ -3950,6 +4337,276 @@ const TravelBookingFormPage = () => {
     });
   };
 
+  const renderMultiCitySectors = (item, itemIndex) => {
+    const sectors = Array.isArray(item.ticketDetails?.sectors)
+      ? item.ticketDetails.sectors
+      : [];
+    const totals = calculateBookingItemSourceTotals(item);
+
+    return (
+      <div className="space-y-3 rounded-xl border border-cyan-100 bg-gradient-to-br from-cyan-50/60 via-white to-blue-50/40 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-black text-slate-900">
+              <FaRoute className="text-cyan-600" aria-hidden="true" />
+              Multi-City Sectors
+            </p>
+            <p className="text-[11px] font-semibold text-slate-500">
+              Each sector has independent passenger pricing and vendor allocation.
+            </p>
+          </div>
+
+          {!accountingLocked && (
+            <button
+              type="button"
+              onClick={() => addMultiCitySector(itemIndex)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-3 text-xs font-extrabold text-white shadow-sm"
+              title="Add new sector"
+              aria-label="Add new sector"
+            >
+              <FaPlus aria-hidden="true" />
+              Add Sector
+            </button>
+          )}
+        </div>
+
+        {sectors.map((sector, sectorIndex) => {
+          const sectorKey = sector._id || sector.uiKey || `sector-${sectorIndex}`;
+          const collapsed = Boolean(collapsedSectorKeys[sectorKey]);
+          const rows = Array.isArray(sector.paxPricing) ? sector.paxPricing : [];
+          const sectorTotals = rows.reduce(
+            (result, row) => {
+              const count = numberValue(row.count);
+              result.cost += count * numberValue(row.costPrice);
+              result.selling += count * numberValue(row.sellingPrice);
+              return result;
+            },
+            { cost: 0, selling: 0 }
+          );
+
+          return (
+            <section key={sectorKey} className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
+              <header className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-cyan-600 text-xs font-black text-white">
+                    {sectorIndex + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-black text-slate-800">
+                      Sector {sectorIndex + 1} — {sector.origin || 'Origin'} → {sector.destination || 'Destination'}
+                    </p>
+                    <p className="text-[10px] font-semibold text-slate-500">
+                      Cost {formatMoney(sectorTotals.cost, item.costCurrency)} · Sale {formatMoney(sectorTotals.selling, item.sellingCurrency)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsedSectorKeys((current) => ({
+                        ...current,
+                        [sectorKey]: !current[sectorKey],
+                      }))
+                    }
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-100 bg-white text-cyan-700"
+                    title={collapsed ? 'Expand sector' : 'Collapse sector'}
+                    aria-label={collapsed ? `Expand sector ${sectorIndex + 1}` : `Collapse sector ${sectorIndex + 1}`}
+                  >
+                    {collapsed ? <FaChevronDown aria-hidden="true" /> : <FaChevronUp aria-hidden="true" />}
+                  </button>
+                  {!accountingLocked && (
+                    <button
+                      type="button"
+                      onClick={() => removeMultiCitySector(itemIndex, sectorIndex)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600"
+                      title="Delete sector"
+                      aria-label={`Delete sector ${sectorIndex + 1}`}
+                    >
+                      <FaTrash aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              </header>
+
+              {!collapsed && (
+                <div className="space-y-3 p-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <TravelCompactAutocomplete
+                      labelKey="travel.booking.fields.airline"
+                      value={sector.airlineId || ''}
+                      records={activeAirlines}
+                      getLabel={getAirlineLabel}
+                      getMeta={getAirlineMeta}
+                      placeholderKey="travel.airlines.search"
+                      emptyKey="travel.airlines.empty"
+                      disabled={accountingLocked}
+                      onChange={(value, airline) =>
+                        updateMultiCitySector(itemIndex, sectorIndex, {
+                          airlineId: value ? getRecordId(airline) : '',
+                          airline: value ? getAirlineText(airline) : '',
+                        })
+                      }
+                    />
+                    {!sector.airlineId && (
+                      <TextField
+                        labelKey="travel.booking.fields.airlineText"
+                        value={sector.airline}
+                        disabled={accountingLocked}
+                        onChange={(value) => updateMultiCitySector(itemIndex, sectorIndex, { airline: value })}
+                      />
+                    )}
+
+                    <div className="relative">
+                      <FaPlaneDeparture className="pointer-events-none absolute right-2 top-1 text-cyan-500" aria-hidden="true" />
+                      <TravelCompactAutocomplete
+                        labelKey="travel.booking.fields.originAirport"
+                        value={sector.originAirportId || ''}
+                        records={activeAirports}
+                        getLabel={getAirportLabel}
+                        getMeta={getAirportMeta}
+                        placeholderKey="travel.airports.search"
+                        emptyKey="travel.airports.empty"
+                        disabled={accountingLocked}
+                        onChange={(value, airport) =>
+                          updateMultiCitySector(itemIndex, sectorIndex, {
+                            originAirportId: value ? getRecordId(airport) : '',
+                            origin: value ? getAirportText(airport) : '',
+                          })
+                        }
+                      />
+                    </div>
+                    {!sector.originAirportId && (
+                      <TextField
+                        labelKey="travel.booking.fields.originText"
+                        value={sector.origin}
+                        disabled={accountingLocked}
+                        onChange={(value) => updateMultiCitySector(itemIndex, sectorIndex, { origin: value })}
+                      />
+                    )}
+
+                    <div className="relative">
+                      <FaPlaneArrival className="pointer-events-none absolute right-2 top-1 text-violet-500" aria-hidden="true" />
+                      <TravelCompactAutocomplete
+                        labelKey="travel.booking.fields.destinationAirport"
+                        value={sector.destinationAirportId || ''}
+                        records={activeAirports}
+                        getLabel={getAirportLabel}
+                        getMeta={getAirportMeta}
+                        placeholderKey="travel.airports.search"
+                        emptyKey="travel.airports.empty"
+                        disabled={accountingLocked}
+                        onChange={(value, airport) =>
+                          updateMultiCitySector(itemIndex, sectorIndex, {
+                            destinationAirportId: value ? getRecordId(airport) : '',
+                            destination: value ? getAirportText(airport) : '',
+                          })
+                        }
+                      />
+                    </div>
+                    {!sector.destinationAirportId && (
+                      <TextField
+                        labelKey="travel.booking.fields.destinationText"
+                        value={sector.destination}
+                        disabled={accountingLocked}
+                        onChange={(value) => updateMultiCitySector(itemIndex, sectorIndex, { destination: value })}
+                      />
+                    )}
+
+                    <TextField
+                      labelKey="travel.booking.fields.departureDateTime"
+                      type="datetime-local"
+                      value={sector.departureDateTime}
+                      disabled={accountingLocked}
+                      onChange={(value) => updateMultiCitySector(itemIndex, sectorIndex, { departureDateTime: value })}
+                    />
+
+                    <TravelCompactAutocomplete
+                      labelKey="travel.booking.fields.vendor"
+                      value={getVendorCounterpartyValue(sector)}
+                      records={vendorCounterparties}
+                      disabled={accountingLocked}
+                      getLabel={getVendorLabel}
+                      getMeta={getVendorMeta}
+                      placeholderKey="travel.placeholders.vendorName"
+                      onChange={(value, record) => updateMultiCitySectorVendor(itemIndex, sectorIndex, value, record)}
+                      onQuickAdd={canManageVendors ? (query) => quickAddRecord('vendor', query, { itemIndex, sectorIndex }) : null}
+                      onAddDetails={canManageVendors ? (query) => openModal('vendor', 'details', { query, itemIndex, sectorIndex }) : null}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <p className="text-xs font-black text-slate-800">Passenger Pricing</p>
+                    {!accountingLocked && (
+                      <div className="flex gap-2">
+                        {[
+                          ['adult', 'Adult', 'border-cyan-200 bg-cyan-50 text-cyan-700'],
+                          ['child', 'Child', 'border-violet-200 bg-violet-50 text-violet-700'],
+                          ['infant', 'Infant', 'border-amber-200 bg-amber-50 text-amber-700'],
+                        ].map(([paxType, label, colors]) => (
+                          <button
+                            key={paxType}
+                            type="button"
+                            onClick={() => addMultiCityPricingRow(itemIndex, sectorIndex, paxType)}
+                            className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2 text-xs font-extrabold ${colors}`}
+                            title={`Add ${label} row`}
+                            aria-label={`Add ${label} row to sector ${sectorIndex + 1}`}
+                          >
+                            <FaPlus aria-hidden="true" /> {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[820px] space-y-2">
+                      {rows.map((row, rowIndex) => {
+                        const rowKey = row._id || row.uiKey || `${sectorKey}-${rowIndex}`;
+                        const vendorKey = `sector-row-${sectorKey}-${rowKey}`;
+                        const showVendor = Boolean(row.vendorId || row.vendorPartyId || openRowVendorKeys[vendorKey]);
+                        return (
+                          <div key={rowKey} className={`grid items-end gap-2 rounded-lg border border-slate-200 p-2 ${showVendor ? 'grid-cols-[75px_70px_1fr_1fr_1.4fr_112px]' : 'grid-cols-[75px_70px_1fr_1fr_112px]'}`}>
+                            <span className="pb-3 text-xs font-black capitalize text-slate-700">{row.paxType || 'adult'}</span>
+                            <label><FieldLabel>Qty</FieldLabel><input type="number" min="0" step="1" value={row.count ?? ''} disabled={accountingLocked} onChange={(event) => updateMultiCityPricingRow(itemIndex, sectorIndex, rowIndex, { count: event.target.value })} className={fieldClass} /></label>
+                            <MoneyField labelKey="travel.booking.fields.costPrice" value={row.costPrice} disabled={accountingLocked} currency={item.costCurrency} side="cost" baseCurrency={baseCurrency} onRateClick={openCurrencyRateModal} onChange={(value) => updateMultiCityPricingRow(itemIndex, sectorIndex, rowIndex, { costPrice: value })} />
+                            <MoneyField labelKey="travel.booking.fields.sellingPrice" value={row.sellingPrice} disabled={accountingLocked} currency={item.sellingCurrency} side="sale" baseCurrency={baseCurrency} onRateClick={openCurrencyRateModal} onChange={(value) => updateMultiCityPricingRow(itemIndex, sectorIndex, rowIndex, { sellingPrice: value })} />
+                            {showVendor && <TravelCompactAutocomplete labelKey="travel.booking.fields.vendor" value={getVendorCounterpartyValue(row)} records={vendorCounterparties} disabled={accountingLocked} getLabel={getVendorLabel} getMeta={getVendorMeta} placeholderKey="travel.placeholders.vendorName" onChange={(value, record) => updateMultiCityRowVendor(itemIndex, sectorIndex, rowIndex, value, record)} onQuickAdd={canManageVendors ? (query) => quickAddRecord('vendor', query, { itemIndex, sectorIndex, sectorRowIndex: rowIndex }) : null} onAddDetails={canManageVendors ? (query) => openModal('vendor', 'details', { query, itemIndex, sectorIndex, sectorRowIndex: rowIndex }) : null} />}
+                            <div className="flex h-10 items-center justify-end gap-2">
+                              {!accountingLocked && <>
+                                <button type="button" onClick={() => addMultiCityPricingRow(itemIndex, sectorIndex, row.paxType || 'adult', rowIndex)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700" title="Add matching row" aria-label="Add matching passenger row"><FaPlus aria-hidden="true" /></button>
+                                <button type="button" onClick={() => setOpenRowVendorKeys((current) => ({ ...current, [vendorKey]: true }))} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-700" title="Choose row vendor" aria-label="Choose row vendor"><FaUserTie aria-hidden="true" /></button>
+                                <button type="button" onClick={() => removeMultiCityPricingRow(itemIndex, sectorIndex, rowIndex)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600" title="Delete pricing row" aria-label="Delete pricing row"><FaTrash aria-hidden="true" /></button>
+                              </>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          );
+        })}
+
+        {sectors.length === 0 && (
+          <p className="rounded-lg border border-dashed border-cyan-200 p-4 text-center text-xs font-semibold text-slate-500">
+            Add at least two sectors before confirming this Multi-City invoice.
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 gap-2 border-t border-cyan-100 pt-3 sm:grid-cols-4">
+          <label><FieldLabel>{t('travel.fields.currency')}</FieldLabel><CurrencySelect value={item.costCurrency} disabled={accountingLocked} onChange={(value) => updateItemCurrency(itemIndex, value)} /></label>
+          <div className="rounded-lg border bg-white px-3 py-2"><p className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400"><FaCoins /> Total Cost</p><p className="font-black">{formatMoney(totals.cost, item.costCurrency)}</p></div>
+          <div className="rounded-lg border border-cyan-100 bg-white px-3 py-2"><p className="flex items-center gap-1 text-[10px] font-bold uppercase text-cyan-500"><FaFileInvoiceDollar /> Total Sale</p><p className="font-black text-cyan-700">{formatMoney(totals.selling, item.sellingCurrency)}</p></div>
+          <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2"><p className="flex items-center gap-1 text-[10px] font-bold uppercase text-emerald-500"><FaMoneyBillWave /> Profit</p><p className="font-black text-emerald-700">{formatMoney(totals.selling - totals.cost, item.sellingCurrency)}</p></div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAdvancedDetails = (item, index) => {
     if (!expandedItems[index]) {
       return null;
@@ -3970,9 +4627,7 @@ const TravelBookingFormPage = () => {
               <select
                 value={details.journeyType || 'one_way'}
                 disabled={accountingLocked}
-                onChange={(event) =>
-                  updateItemDetails(index, 'ticketDetails', 'journeyType', event.target.value)
-                }
+                onChange={(event) => updateJourneyType(index, event.target.value)}
                 className={selectClass}
               >
                 {JOURNEY_TYPES.map((type) => (
@@ -4023,7 +4678,9 @@ const TravelBookingFormPage = () => {
             />
           </div>
 
-          {details.sameFlightForAll !== false && (
+          {details.journeyType === 'multi_city' && renderMultiCitySectors(item, index)}
+
+          {details.journeyType !== 'multi_city' && details.sameFlightForAll !== false && (
             <div className="grid grid-cols-1 gap-3 rounded-lg border border-cyan-100 bg-cyan-50/30 p-3 sm:grid-cols-2 lg:grid-cols-4">
               <TravelCompactAutocomplete
                 labelKey="travel.booking.fields.airline"
@@ -5418,7 +6075,9 @@ const TravelBookingFormPage = () => {
     const useComponents =
       item.itemType === 'umrah_package' &&
       item.umrahDetails?.packageMode === 'custom_component_package';
-    const rowVendorsActive = !useComponents && isRowVendorMode(item);
+    const isMultiCity =
+      item.itemType === 'air_ticket' && item.ticketDetails?.journeyType === 'multi_city';
+    const rowVendorsActive = !useComponents && !isMultiCity && isRowVendorMode(item);
 
     return (
       <div
@@ -5533,7 +6192,7 @@ const TravelBookingFormPage = () => {
               </>
             )}
 
-            {!useComponents && (
+            {!useComponents && !isMultiCity && (
               <div>
                 <TravelCompactAutocomplete
                   labelKey="travel.booking.fields.vendor"
@@ -5564,6 +6223,7 @@ const TravelBookingFormPage = () => {
 
           {!useComponents &&
             ['air_ticket', 'visit_visa'].includes(item.itemType) &&
+            !isMultiCity &&
             renderPaxPricing(item, index)}
 
           {!useComponents &&
@@ -5592,10 +6252,94 @@ const TravelBookingFormPage = () => {
   const showCustomerPayment = numberValue(formState.receivedAmount) > 0;
 
   const canSubmitFinal = !saving && !loading && (!isEditMode || !accountingLocked);
+  const canSaveDocumentVersion = isEditMode ? canEdit : canCreate;
+  const documentSaveChoices = getTravelDocumentSaveChoices({
+    isEditMode,
+    postedInvoiceEditing,
+    currentStatus: formState.status,
+  });
 
   return (
     <div className="min-h-full min-w-0 overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/60 p-3 sm:p-4 md:p-5 lg:p-6">
       <TravelErrorModal open={Boolean(formError)} message={formError} onClose={() => setFormError('')} />
+
+      {documentPrompt && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="travel-document-action-title"
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-xl border border-cyan-200 bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-cyan-700 to-blue-700 px-5 py-4 text-white">
+              <h2 id="travel-document-action-title" className="text-lg font-black">
+                {documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT
+                  ? 'Print Invoice'
+                  : 'Download Invoice PDF'}
+              </h2>
+            </div>
+            <div className="space-y-3 p-5">
+              <p className="text-sm font-semibold leading-6 text-slate-700">
+                {isEditMode
+                  ? 'This form contains changes that are not part of the last saved invoice. Save a new version before continuing, or use the last saved version.'
+                  : 'An official invoice must be saved before it can be printed or downloaded. Choose how you want to save it.'}
+              </p>
+
+              {postedInvoiceEditing && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+                  Saving this posted invoice requires the existing accounting entries to be safely reposted. Printing the last saved version does not repost accounting.
+                </p>
+              )}
+
+              {!canSaveDocumentVersion && (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">
+                  You do not have permission to save this invoice. You may only use the last saved version.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 p-4">
+              <TravelActionButton
+                variant="secondary"
+                disabled={saving || documentActionLoading}
+                onClick={() => setDocumentPrompt(null)}
+              >
+                Cancel
+              </TravelActionButton>
+
+              {isEditMode && (
+                <TravelActionButton
+                  icon={documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT ? FaPrint : FaFilePdf}
+                  variant="secondary"
+                  disabled={saving || documentActionLoading}
+                  onClick={() => {
+                    const action = documentPrompt.action;
+                    setDocumentPrompt(null);
+                    void performInvoiceDocumentAction(action, id, formState);
+                  }}
+                >
+                  {documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT
+                    ? 'Print Last Saved'
+                    : 'PDF Last Saved'}
+                </TravelActionButton>
+              )}
+
+              {canSaveDocumentVersion &&
+                documentSaveChoices.map((choice) => (
+                  <TravelActionButton
+                    key={choice.status}
+                    icon={documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT ? FaPrint : FaFilePdf}
+                    variant={choice.status === 'confirmed' || choice.requiresRepost ? 'success' : 'soft'}
+                    disabled={saving || documentActionLoading}
+                    onClick={() => handleDocumentSaveChoice(choice.status)}
+                  >
+                    {choice.label} &amp;{' '}
+                    {documentPrompt.action === TRAVEL_DOCUMENT_ACTIONS.PRINT ? 'Print' : 'PDF'}
+                  </TravelActionButton>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <TravelerDuplicateConfirmationModal
         open={Boolean(duplicateTravelerPrompt)}
@@ -5657,7 +6401,17 @@ const TravelBookingFormPage = () => {
               ))}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
-              <TravelActionButton variant="secondary" disabled={saving} onClick={() => setAdvanceConfirmationStatus('')}>Cancel</TravelActionButton>
+              <TravelActionButton
+                variant="secondary"
+                disabled={saving}
+                onClick={() => {
+                  closeReservedPrintWindow(pendingSubmitOptionsRef.current || {});
+                  pendingSubmitOptionsRef.current = null;
+                  setAdvanceConfirmationStatus('');
+                }}
+              >
+                Cancel
+              </TravelActionButton>
               <TravelActionButton variant="success" disabled={saving} onClick={confirmExtraPaymentAndSave}>Confirm &amp; Save</TravelActionButton>
             </div>
           </div>
@@ -5676,7 +6430,15 @@ const TravelBookingFormPage = () => {
               </p>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
-              <TravelActionButton variant="secondary" disabled={saving} onClick={() => setRepostConfirmation(null)}>
+              <TravelActionButton
+                variant="secondary"
+                disabled={saving}
+                onClick={() => {
+                  closeReservedPrintWindow(pendingSubmitOptionsRef.current || {});
+                  pendingSubmitOptionsRef.current = null;
+                  setRepostConfirmation(null);
+                }}
+              >
                 Cancel
               </TravelActionButton>
               <TravelActionButton
@@ -5685,7 +6447,12 @@ const TravelBookingFormPage = () => {
                 onClick={() => {
                   const confirmation = repostConfirmation;
                   setRepostConfirmation(null);
-                  void submitBooking(confirmation.status, confirmation.advanceConfirmed, true);
+                  void submitBooking(
+                    confirmation.status,
+                    confirmation.advanceConfirmed,
+                    true,
+                    pendingSubmitOptionsRef.current || {}
+                  );
                 }}
               >
                 Update &amp; Repost
@@ -6130,6 +6897,17 @@ const TravelBookingFormPage = () => {
                   Accounting Posted
                 </div>
               )}
+
+              <TravelBookingDocumentButtons
+                disabled={
+                  saving ||
+                  loading ||
+                  documentActionLoading ||
+                  (!isEditMode && !canCreate)
+                }
+                onPrint={() => handleDocumentRequest(TRAVEL_DOCUMENT_ACTIONS.PRINT)}
+                onPdf={() => handleDocumentRequest(TRAVEL_DOCUMENT_ACTIONS.PDF)}
+              />
             </div>
           </div>
         </section>

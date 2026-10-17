@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { formatMoneyDisplay } from '../../utils/money';
 import { useSearchParams } from 'react-router-dom';
-import { FaHistory, FaMoneyBillWave, FaReceipt, FaWallet } from 'react-icons/fa';
+import { FaFilePdf, FaHistory, FaMoneyBillWave, FaPrint, FaReceipt, FaWallet } from 'react-icons/fa';
 import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
 import WeavingRecordDetailModal from '../../components/weaving/WeavingRecordDetailModal';
 import { useWeavingFeedback } from '../../components/weaving/WeavingFeedbackModal';
@@ -10,11 +10,14 @@ import {
   getCommercialMeta,
   getCounterpartyBalance,
   getPaymentById,
+  getWeavingPaymentPdfUrl,
+  getWeavingPaymentPrintUrl,
   listPayments,
   updateMoneyTransaction,
   voidMoneyTransaction,
 } from '../../services/weavingCommercialService';
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
+import { downloadBackendPdf, openBackendPrintWindow } from '../../utils/backendPrintDocument';
 
 const input =
   'mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
@@ -81,6 +84,8 @@ export default function WeavingPaymentsPage() {
   const [balance, setBalance] = useState(0);
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [receiptAction, setReceiptAction] = useState('');
+  const [savedReceipt, setSavedReceipt] = useState(null);
   const [editingId, setEditingId] = useState('');
   const [filters, setFilters] = useState({ search: '', date: 'all', from: '', to: '', paymentMethod: '', paymentAccountId: '' });
   const [notice, setNotice] = useState(null);
@@ -192,24 +197,33 @@ export default function WeavingPaymentsPage() {
     setSaving(true);
 
     try {
-      await (editingId ? updateMoneyTransaction(editingId, form) : createMoneyTransaction(form));
+      const saved = await (editingId ? updateMoneyTransaction(editingId, form) : createMoneyTransaction(form));
+
+      setSavedReceipt(saved);
 
       setNotice({
         text: tab === 'receive' ? 'Receipt posted successfully' : 'Payment posted successfully',
       });
 
-      const [options, history] = await Promise.all([
-        getCommercialMeta({ force: true }),
-        listPayments(),
-      ]);
-
-      setMeta(options);
-      setRows(history);
-
-      setForm(fresh(tab, tab === 'receive' ? options.nextReceiptNo : options.nextPaymentNo));
       setEditingId('');
-
       setBalance(0);
+      setForm(fresh(tab));
+
+      try {
+        const [options, history] = await Promise.all([
+          getCommercialMeta({ force: true }),
+          listPayments(),
+        ]);
+
+        setMeta(options);
+        setRows(history);
+        setForm(fresh(tab, tab === 'receive' ? options.nextReceiptNo : options.nextPaymentNo));
+      } catch (refreshError) {
+        console.error('Weaving payment refresh failed after posting:', refreshError);
+        setNotice({
+          text: `${tab === 'receive' ? 'Receipt' : 'Payment'} posted successfully, but the payment lists could not be refreshed`,
+        });
+      }
     } catch (error) {
       setNotice({
         error: true,
@@ -219,6 +233,37 @@ export default function WeavingPaymentsPage() {
       setSaving(false);
     }
   };
+
+  const handleReceiptPrint = async (transaction) => {
+    if (!transaction?._id || receiptAction) return;
+
+    try {
+      setReceiptAction(`print:${transaction._id}`);
+      await openBackendPrintWindow({ url: getWeavingPaymentPrintUrl(transaction._id) });
+    } catch (error) {
+      setNotice({ error: true, text: error.message || 'Could not print payment receipt' });
+    } finally {
+      setReceiptAction('');
+    }
+  };
+
+  const handleReceiptPdf = async (transaction) => {
+    if (!transaction?._id || receiptAction) return;
+
+    try {
+      setReceiptAction(`pdf:${transaction._id}`);
+      await downloadBackendPdf({
+        url: getWeavingPaymentPdfUrl(transaction._id),
+        fileName: `Weaving-${transaction.type === 'receive' ? 'Receipt' : 'Payment'}-${transaction.transactionNo || transaction._id}.pdf`,
+      });
+    } catch (error) {
+      setNotice({ error: true, text: error.message || 'Could not download payment receipt' });
+    } finally {
+      setReceiptAction('');
+    }
+  };
+
+  const printableFormReceipt = savedReceipt?.type === tab ? savedReceipt : null;
 
   return (
     <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-emerald-50/50 p-3 sm:p-5">
@@ -385,7 +430,29 @@ export default function WeavingPaymentsPage() {
                 />
               </Field>
 
-              <div className="flex justify-end gap-2 sm:col-span-2 lg:col-span-4">
+              <div className="flex flex-wrap justify-end gap-2 sm:col-span-2 lg:col-span-4">
+                <button
+                  type="button"
+                  disabled={!printableFormReceipt || Boolean(receiptAction)}
+                  onClick={() => handleReceiptPrint(printableFormReceipt)}
+                  title={printableFormReceipt ? `Print saved transaction ${printableFormReceipt.transactionNo}` : 'Save the payment before printing'}
+                  className="inline-flex items-center gap-2 rounded-md border border-emerald-600 px-4 py-2 font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FaPrint />
+                  {receiptAction === `print:${printableFormReceipt?._id}` ? 'Opening...' : 'Print Receipt'}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!printableFormReceipt || Boolean(receiptAction)}
+                  onClick={() => handleReceiptPdf(printableFormReceipt)}
+                  title={printableFormReceipt ? `Download saved transaction ${printableFormReceipt.transactionNo}` : 'Save the payment before downloading'}
+                  className="inline-flex items-center gap-2 rounded-md border border-rose-600 px-4 py-2 font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FaFilePdf />
+                  {receiptAction === `pdf:${printableFormReceipt?._id}` ? 'Downloading...' : 'Download PDF'}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => { setEditingId(''); setForm(fresh(tab, tab === 'receive' ? meta.nextReceiptNo : meta.nextPaymentNo)); }}
@@ -435,7 +502,7 @@ export default function WeavingPaymentsPage() {
 
                 <tbody>
                   {historyRows.map((row) => (
-                    <tr key={row._id} onClick={async () => { const detail = await getPaymentById(row._id); setForm({ ...fresh(detail.type, detail.transactionNo), ...detail, partyId: detail.partyId?._id || detail.partyId, paymentAccountId: detail.paymentAccountId?._id || detail.paymentAccountId }); setEditingId(detail._id); setTab(detail.type); setParams({ tab: detail.type }); }} className="cursor-pointer border-t hover:bg-emerald-50">
+                    <tr key={row._id} onClick={async () => { const detail = await getPaymentById(row._id); setForm({ ...fresh(detail.type, detail.transactionNo), ...detail, partyId: detail.partyId?._id || detail.partyId, paymentAccountId: detail.paymentAccountId?._id || detail.paymentAccountId }); setSavedReceipt(detail); setEditingId(detail._id); setTab(detail.type); setParams({ tab: detail.type }); }} className="cursor-pointer border-t hover:bg-emerald-50">
                       <td className="px-4 py-3 font-semibold">{row.transactionNo}</td>
 
                       <td className="px-4 py-3">{row.date}</td>
@@ -453,7 +520,13 @@ export default function WeavingPaymentsPage() {
                       <td className="px-4 py-3">{row.paymentAccountId?.name}</td>
 
                       <td className="px-4 py-3 capitalize">{row.paymentMethod}</td>
-                      <td className="px-4 py-3"><button type="button" title="Delete" onClick={async (event) => { event.stopPropagation(); if (!window.confirm('Are you sure you want to delete this record?')) return; await voidMoneyTransaction(row._id, 'Deleted from payment list'); setRows((current) => current.filter((item) => item._id !== row._id)); }} className="text-rose-700">Delete</button></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <button type="button" title="Print Receipt" aria-label={`Print ${row.transactionNo}`} disabled={Boolean(receiptAction)} onClick={(event) => { event.stopPropagation(); handleReceiptPrint(row); }} className="text-emerald-700 disabled:opacity-50"><FaPrint /></button>
+                          <button type="button" title="Download PDF" aria-label={`Download ${row.transactionNo} PDF`} disabled={Boolean(receiptAction)} onClick={(event) => { event.stopPropagation(); handleReceiptPdf(row); }} className="text-rose-700 disabled:opacity-50"><FaFilePdf /></button>
+                          <button type="button" title="Delete" onClick={async (event) => { event.stopPropagation(); if (!window.confirm('Are you sure you want to delete this record?')) return; await voidMoneyTransaction(row._id, 'Deleted from payment list'); setRows((current) => current.filter((item) => item._id !== row._id)); }} className="text-rose-700">Delete</button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

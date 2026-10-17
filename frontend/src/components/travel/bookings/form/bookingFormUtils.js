@@ -28,6 +28,11 @@ export const sanitizeDraftState = (state) => ({
     ticketDetails: {
       ...(item.ticketDetails || {}),
 
+      sectors: (item.ticketDetails?.sectors || []).map((sector) => ({
+        ...sector,
+        paxPricing: (sector.paxPricing || []).map((row) => ({ ...row })),
+      })),
+
       pnr: '',
 
       ticketNumber: '',
@@ -523,6 +528,28 @@ export const calculateUmrahComponentSourceTotals = (component = {}) => {
 
 export const calculateBookingItemSourceTotals = (item = {}) => {
   if (
+    item.itemType === 'air_ticket' &&
+    item.ticketDetails?.journeyType === 'multi_city' &&
+    Array.isArray(item.ticketDetails?.sectors) &&
+    item.ticketDetails.sectors.length > 0
+  ) {
+    const sectorTotals = item.ticketDetails.sectors.reduce(
+      (totals, sector) => {
+        const pricing = calculatePaxPricingTotals(sector.paxPricing);
+        totals.selling += pricing?.selling || 0;
+        totals.cost += pricing?.cost || 0;
+        return totals;
+      },
+      { selling: 0, cost: 0 }
+    );
+
+    return {
+      selling: roundMoney(sectorTotals.selling),
+      cost: roundMoney(sectorTotals.cost),
+    };
+  }
+
+  if (
     item.itemType === 'hotel' &&
     Array.isArray(item.hotelDetails?.roomPricing) &&
     item.hotelDetails.roomPricing.length > 0
@@ -756,6 +783,63 @@ export const deriveVendorCostGroups = (formState = {}, currencySettings = null) 
           component,
           estimateAmount(totals.cost, component.costCurrency, settings, 'cost'),
           component.label || component.componentType || description
+        );
+      });
+      return;
+    }
+
+    const multiCitySectors =
+      item.itemType === 'air_ticket' &&
+      item.ticketDetails?.journeyType === 'multi_city' &&
+      Array.isArray(item.ticketDetails?.sectors) &&
+      item.ticketDetails.sectors.length > 0
+        ? item.ticketDetails.sectors
+        : null;
+
+    if (multiCitySectors) {
+      const entries = multiCitySectors.flatMap((sector, sectorIndex) =>
+        (sector.paxPricing || []).map((row, rowIndex) => ({
+          sector,
+          sectorIndex,
+          row,
+          rowIndex,
+        }))
+      );
+      const rowCosts = entries.map(({ row }) =>
+        roundMoney(
+          estimateAmount(
+            parseQuantity(row?.count, 0) * parseMoney(row?.costPrice),
+            item.costCurrency,
+            settings,
+            'cost'
+          )
+        )
+      );
+      const itemCostBase = roundMoney(
+        estimateAmount(
+          calculateBookingItemSourceTotals(item).cost,
+          item.costCurrency,
+          settings,
+          'cost'
+        )
+      );
+      const delta = roundMoney(
+        itemCostBase - rowCosts.reduce((sum, amount) => sum + amount, 0)
+      );
+      const adjustmentIndex = [...rowCosts]
+        .map((amount, index) => ({ amount, index }))
+        .reverse()
+        .find(({ amount }) => amount > 0)?.index;
+      if (adjustmentIndex !== undefined) {
+        rowCosts[adjustmentIndex] = roundMoney(rowCosts[adjustmentIndex] + delta);
+      }
+
+      entries.forEach(({ sector, sectorIndex, row, rowIndex }, entryIndex) => {
+        const source = getVendorCounterpartyKey(row) ? row : sector;
+        addCost(
+          source,
+          rowCosts[entryIndex],
+          `${description} (Sector ${sectorIndex + 1}, ${String(row?.paxType || 'adult')}, row ${rowIndex + 1})`
         );
       });
       return;

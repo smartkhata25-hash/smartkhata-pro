@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FaEraser, FaHistory, FaMoneyBillWave, FaSave, FaTimes, FaUserTie } from 'react-icons/fa';
+import { FaEraser, FaFilePdf, FaHistory, FaMoneyBillWave, FaPrint, FaSave, FaTimes, FaUserTie } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
 import {
@@ -8,8 +8,11 @@ import {
   fetchTravelParties,
   fetchTravelPaymentAccounts,
   fetchTravelVendors,
+  getTravelVendorPaymentPdfUrl,
+  getTravelVendorPaymentPrintUrl,
 } from '../../services/travelMasterService';
 import { getLocalDateInputValue, getLocalTimeInputValue } from '../../utils/localDateTime';
+import { downloadBackendPdf, openBackendPrintWindow } from '../../utils/backendPrintDocument';
 import {
   TravelActionButton,
   TravelCompactAutocomplete,
@@ -188,6 +191,8 @@ const TravelVendorPaymentPage = ({ modeActions = null }) => {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [receiptAction, setReceiptAction] = useState('');
+  const [savedReceipt, setSavedReceipt] = useState(null);
 
   const [formError, setFormError] = useState('');
 
@@ -382,6 +387,11 @@ const TravelVendorPaymentPage = ({ modeActions = null }) => {
         amount: numericAmount,
       });
 
+      setSavedReceipt({
+        id: getRecordId(saved.journalEntryId),
+        number: saved.payment?.billNo || saved.payment?._id,
+      });
+
       const savedVendorId = getRecordId(saved?.vendor);
       const isSavedParty =
         saved?.vendor?.counterpartyType === 'party' || saved?.vendor?.entityType === 'party';
@@ -425,6 +435,35 @@ const TravelVendorPaymentPage = ({ modeActions = null }) => {
       setFormError(getTravelErrorMessage(error, t('travel.payments.saveFailed')));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!savedReceipt?.id || receiptAction) return;
+
+    try {
+      setReceiptAction('print');
+      await openBackendPrintWindow({ url: getTravelVendorPaymentPrintUrl(savedReceipt.id) });
+    } catch (error) {
+      setFormError(error.message || t('alerts.printWindowBlocked'));
+    } finally {
+      setReceiptAction('');
+    }
+  };
+
+  const handleDownloadReceipt = async () => {
+    if (!savedReceipt?.id || receiptAction) return;
+
+    try {
+      setReceiptAction('pdf');
+      await downloadBackendPdf({
+        url: getTravelVendorPaymentPdfUrl(savedReceipt.id),
+        fileName: `TravelVendorPaymentReceipt-${savedReceipt.number || savedReceipt.id}.pdf`,
+      });
+    } catch (error) {
+      setFormError(error.message || t('pdf.shareFailed'));
+    } finally {
+      setReceiptAction('');
     }
   };
 
@@ -598,6 +637,24 @@ const TravelVendorPaymentPage = ({ modeActions = null }) => {
           </div>
 
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+            <TravelActionButton
+              icon={FaPrint}
+              variant="success"
+              onClick={handlePrintReceipt}
+              disabled={!savedReceipt?.id || saving || Boolean(receiptAction)}
+              title={savedReceipt?.id ? `Print saved receipt ${savedReceipt.number}` : 'Save the payment before printing'}
+            >
+              {receiptAction === 'print' ? 'Opening...' : 'Print Receipt'}
+            </TravelActionButton>
+            <TravelActionButton
+              icon={FaFilePdf}
+              variant="danger"
+              onClick={handleDownloadReceipt}
+              disabled={!savedReceipt?.id || saving || Boolean(receiptAction)}
+              title={savedReceipt?.id ? `Download saved receipt ${savedReceipt.number}` : 'Save the payment before downloading'}
+            >
+              {receiptAction === 'pdf' ? 'Downloading...' : 'Download PDF'}
+            </TravelActionButton>
             <TravelActionButton icon={FaEraser} variant="secondary" onClick={resetCreateForm} disabled={saving}>
               {t('clear')}
             </TravelActionButton>

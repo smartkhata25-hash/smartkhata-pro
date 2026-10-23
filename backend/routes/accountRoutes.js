@@ -7,6 +7,10 @@ const { getAccountsSummary } = require("../controllers/accountController");
 const authenticate = require("../middleware/authMiddleware");
 const { requirePermission } = require("../middleware/permissionMiddleware");
 const { PERMISSIONS } = require("../utils/permissionList");
+const accountPermission = (standardPermission, installmentsPermission) => (req, res, next) => {
+  const scope = String(req.query.moduleScope || req.query.scope || req.body?.moduleScope || '').toLowerCase();
+  return requirePermission(scope === 'installments' ? installmentsPermission : standardPermission)(req, res, next);
+};
 
 // 🔍 OPTIONAL Middleware for validation (you can extend this)
 const validateAccount = (req, res, next) => {
@@ -22,7 +26,7 @@ const validateAccount = (req, res, next) => {
 router.post(
   "/",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.CREATE),
+  accountPermission(PERMISSIONS.ACCOUNTS.CREATE, PERMISSIONS.INSTALLMENTS_ACCOUNTS.CREATE),
   validateAccount,
   accountController.createAccount,
 );
@@ -30,122 +34,114 @@ router.post(
 router.get(
   "/",
   authenticate,
-  requirePermission(
-    PERMISSIONS.ACCOUNTS.VIEW,
-    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
-  ),
+  accountPermission(PERMISSIONS.ACCOUNTS.VIEW, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW),
   accountController.getAccounts,
 );
 
 router.post(
   "/transfer",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.TRANSFER),
   accountController.transferBetweenAccounts,
 );
 
 router.get(
   "/transfer/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.TRANSFER),
   accountController.getAccountTransfer,
 );
 
 router.put(
   "/transfer/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.TRANSFER),
   accountController.updateAccountTransfer,
 );
 
 router.post(
   "/adjustment",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.ADJUST),
   accountController.adjustAccountBalance,
 );
 
 router.get(
   "/adjustment/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.ADJUST),
   accountController.getAccountAdjustment,
 );
 
 router.put(
   "/adjustment/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.ADJUST),
   accountController.updateAccountAdjustment,
 );
 
 router.post(
   "/owner-transaction",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.MANAGE),
   accountController.createOwnerTransaction,
 );
 
 router.get(
   "/owner-transaction/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.MANAGE),
   accountController.getOwnerTransaction,
 );
 
 router.put(
   "/owner-transaction/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.MANAGE),
   accountController.updateOwnerTransaction,
 );
 
 router.put(
   "/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.EDIT),
+  accountPermission(PERMISSIONS.ACCOUNTS.EDIT, PERMISSIONS.INSTALLMENTS_ACCOUNTS.EDIT),
   accountController.updateAccount,
 );
 
 router.delete(
   "/:id",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.DELETE),
+  accountPermission(PERMISSIONS.ACCOUNTS.DELETE, PERMISSIONS.INSTALLMENTS_ACCOUNTS.MANAGE),
   accountController.deleteAccount,
 );
 
 router.get(
   "/cash-summary",
   authenticate,
-  requirePermission(
-    PERMISSIONS.ACCOUNTS.VIEW,
-    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
-  ),
+  accountPermission(PERMISSIONS.ACCOUNTS.VIEW, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW),
   accountController.getCashSummary,
 );
 
 router.get(
   "/bank-summary",
   authenticate,
-  requirePermission(
-    PERMISSIONS.ACCOUNTS.VIEW,
-    PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS,
-  ),
+  accountPermission(PERMISSIONS.ACCOUNTS.VIEW, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW),
   accountController.getBankSummary,
 );
 
-router.get("/summary", authenticate, getAccountsSummary);
+router.get("/summary", authenticate, accountPermission(PERMISSIONS.ACCOUNTS.VIEW, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW), getAccountsSummary);
 
 router.get(
   "/balance-summary",
   authenticate,
+  accountPermission(PERMISSIONS.ACCOUNTS.VIEW, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW),
   accountController.getBalanceSnapshot,
 );
 
 router.get(
   "/:id/transactions",
   authenticate,
-  requirePermission(PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS),
+  accountPermission(PERMISSIONS.ACCOUNTS.VIEW_TRANSACTIONS, PERMISSIONS.INSTALLMENTS_ACCOUNTS.VIEW_TRANSACTIONS),
   accountController.getAccountTransactions,
 );
 

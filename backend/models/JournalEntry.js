@@ -115,6 +115,11 @@ const journalEntrySchema = new mongoose.Schema(
         "travel_commission",
         "travel_refund",
         "travel_adjustment",
+        "installments_customer_receipt",
+        "installments_customer_advance",
+        "installments_supplier_payment",
+        "installments_savings_payout",
+        "installments_advance_allocation",
       ],
       default: "manual",
     },
@@ -126,7 +131,7 @@ const journalEntrySchema = new mongoose.Schema(
 
     moduleScope: {
       type: String,
-      enum: ["trading", "travel", "weaving", "both"],
+      enum: ["trading", "travel", "weaving", "installments", "both"],
       default: "trading",
       index: true,
     },
@@ -156,6 +161,7 @@ const journalEntrySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       default: null,
     },
+    idempotencyKey: { type: String, trim: true, default: null },
     isReversed: {
       type: Boolean,
       default: false,
@@ -245,6 +251,10 @@ journalEntrySchema.index({
   isDeleted: 1,
 });
 journalEntrySchema.index({ sourceType: 1 });
+journalEntrySchema.index(
+  { createdBy: 1, moduleScope: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } },
+);
 
 // Customer Ledger queries
 journalEntrySchema.index({

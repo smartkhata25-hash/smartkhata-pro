@@ -10,7 +10,10 @@ const AccountDetailPage = () => {
 
   const navigate = useNavigate();
 
-  const canViewAccountTransactions = hasPermission('accounts.view_transactions');
+  const pathIsInstallments = location.pathname.startsWith('/installments/accounts');
+  const canViewAccountTransactions = pathIsInstallments
+    ? hasPermission('installments.accounts.view_transactions')
+    : hasPermission('accounts.view_transactions');
 
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -22,16 +25,20 @@ const AccountDetailPage = () => {
   const isCashView =
     pathname === '/accounts/cash' ||
     pathname === '/travel/accounts/cash' ||
-    pathname === '/weaving/accounts/cash';
+    pathname === '/weaving/accounts/cash' ||
+    pathname === '/installments/accounts/cash';
   const isBankView =
     pathname === '/accounts/bank' ||
     pathname === '/travel/accounts/bank' ||
-    pathname === '/weaving/accounts/bank';
+    pathname === '/weaving/accounts/bank' ||
+    pathname === '/installments/accounts/bank';
   const isTravelScoped =
     pathname.startsWith('/travel/accounts') || queryParams.get('moduleScope') === 'travel';
   const isWeavingScoped =
     pathname.startsWith('/weaving/accounts') || queryParams.get('moduleScope') === 'weaving';
-  const moduleScope = isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading';
+  const isInstallmentsScoped =
+    pathname.startsWith('/installments/accounts') || queryParams.get('moduleScope') === 'installments';
+  const moduleScope = isInstallmentsScoped ? 'installments' : isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading';
   const requestedAccountId = queryParams.get('accountId') || '';
   const bankAccountCategories = useMemo(() => new Set(['bank', 'online', 'cheque', 'wallet']), []);
 
@@ -63,18 +70,53 @@ const AccountDetailPage = () => {
     [moduleScope]
   );
 
+  const buildOperationalTransactions = useCallback((txns = []) => {
+    const safeTransactions = Array.isArray(txns) ? txns.filter(Boolean) : [];
+    if (!isInstallmentsScoped) return safeTransactions;
+
+    const transactionsById = new Map(
+      safeTransactions
+        .filter((transaction) => transaction?._id)
+        .map((transaction) => [String(transaction._id), transaction])
+    );
+    const pairedReversalIds = new Set();
+
+    safeTransactions.forEach((transaction) => {
+      if (!transaction?.isReversal || !transaction?.reversalOf) return;
+      const original = transactionsById.get(String(transaction.reversalOf));
+      if (!original?.isReversed) return;
+
+      pairedReversalIds.add(String(transaction._id));
+      pairedReversalIds.add(String(original._id));
+    });
+
+    return safeTransactions.filter(
+      (transaction) => !pairedReversalIds.has(String(transaction?._id || ''))
+    );
+  }, [isInstallmentsScoped]);
+
   const buildAccountState = useCallback(
     (account, txns = []) => {
       const activityBalance = calculateBalanceFromTxns(txns);
 
-      if (!isTravelScoped) {
+      if (!isTravelScoped && !isInstallmentsScoped) {
         return {
           ...account,
           balance: activityBalance,
         };
       }
 
-      const actualBalance = getSafeBalance(account);
+      const scopedBalance = getSafeBalance(account);
+      const actualBalance = Number.isFinite(Number(account.actualBalance)) ? Number(account.actualBalance) : scopedBalance;
+
+      if (isInstallmentsScoped) {
+        return {
+          ...account,
+          actualBalance,
+          installmentsActivityBalance: activityBalance,
+          balance: scopedBalance,
+        };
+      }
 
       return {
         ...account,
@@ -83,7 +125,7 @@ const AccountDetailPage = () => {
         balance: actualBalance,
       };
     },
-    [calculateBalanceFromTxns, getSafeBalance, isTravelScoped]
+    [calculateBalanceFromTxns, getSafeBalance, isInstallmentsScoped, isTravelScoped]
   );
 
   const loadSingleAccount = useCallback(
@@ -110,7 +152,7 @@ const AccountDetailPage = () => {
         account._id,
         { moduleScope }
       );
-      const safeTxns = Array.isArray(txns) ? txns : [];
+      const safeTxns = buildOperationalTransactions(txns);
 
       txnCacheRef.current[cacheKey] = safeTxns;
 
@@ -118,7 +160,7 @@ const AccountDetailPage = () => {
 
       setSelectedAccount(buildAccountState(account, safeTxns));
     },
-    [buildAccountState, canViewAccountTransactions, getTxnCacheKey, moduleScope]
+    [buildAccountState, buildOperationalTransactions, canViewAccountTransactions, getTxnCacheKey, moduleScope]
   );
 
   useEffect(() => {
@@ -148,7 +190,7 @@ const AccountDetailPage = () => {
 
               const txns = await getAccountTransactions(acc._id, { moduleScope });
 
-              return Array.isArray(txns) ? txns : [];
+               return buildOperationalTransactions(txns);
             })
           );
 
@@ -273,7 +315,7 @@ const AccountDetailPage = () => {
                 acc._id,
                 { moduleScope }
               );
-              return Array.isArray(txns) ? txns : [];
+             return buildOperationalTransactions(txns);
             })
           );
 
@@ -304,16 +346,25 @@ const AccountDetailPage = () => {
 
           allTxns.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-          const combinedActualBalance = accountsWithBalance.reduce(
+          const combinedDisplayBalance = accountsWithBalance.reduce(
             (sum, account) => sum + getSafeBalance(account),
+            0
+          );
+          const combinedActualBalance = accountsWithBalance.reduce(
+            (sum, account) => sum + Number(account.actualBalance || 0),
+            0
+          );
+          const combinedOpeningBalance = accountsWithBalance.reduce(
+            (sum, account) => sum + Number(account.manualOpeningBalance || 0),
             0
           );
           const combinedTravelActivityBalance = calculateBalanceFromTxns(allTxns);
 
           const combinedWithBalance = {
             ...combined,
-            balance: isTravelScoped ? combinedActualBalance : combinedTravelActivityBalance,
+            balance: isTravelScoped ? combinedActualBalance : isInstallmentsScoped ? combinedDisplayBalance : combinedTravelActivityBalance,
             actualBalance: combinedActualBalance,
+            manualOpeningBalance: combinedOpeningBalance,
             travelActivityBalance: combinedTravelActivityBalance,
           };
 
@@ -346,10 +397,12 @@ const AccountDetailPage = () => {
     canViewAccountTransactions,
     calculateBalanceFromTxns,
     buildAccountState,
+    buildOperationalTransactions,
     getSafeBalance,
     getTxnCacheKey,
     isTravelScoped,
     isWeavingScoped,
+    isInstallmentsScoped,
     bankAccountCategories,
     moduleScope,
     requestedAccountId,
@@ -378,8 +431,8 @@ const AccountDetailPage = () => {
 
       setSelectedAccount({
         ...acc,
-        balance: isTravelScoped ? getSafeBalance(acc) : calculateBalanceFromTxns(allTxns),
-        actualBalance: getSafeBalance(acc),
+        balance: (isTravelScoped || isInstallmentsScoped) ? getSafeBalance(acc) : calculateBalanceFromTxns(allTxns),
+         actualBalance: Number.isFinite(Number(acc.actualBalance)) ? Number(acc.actualBalance) : getSafeBalance(acc),
         travelActivityBalance: calculateBalanceFromTxns(allTxns),
       });
     } else {
@@ -399,6 +452,7 @@ const AccountDetailPage = () => {
           isBankView={isBankView}
           isTravelScoped={isTravelScoped}
           isWeavingScoped={isWeavingScoped}
+          isInstallmentsScoped={isInstallmentsScoped}
         />
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">

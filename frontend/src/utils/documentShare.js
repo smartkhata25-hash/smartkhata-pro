@@ -84,6 +84,7 @@ const openFallbackTextUrl = (fallbackTextUrl, reservedWindow = null) => {
 
 export const sharePdfDocument = async ({
   pdfUrl,
+  pdfBlob: suppliedPdfBlob,
   token,
   fetchOptions = {},
   fileName = 'document.pdf',
@@ -95,23 +96,27 @@ export const sharePdfDocument = async ({
   const shouldReserveFallbackWindow = openFallbackText && fallbackTextUrl && !isMobileDevice();
   const reservedFallbackWindow = shouldReserveFallbackWindow ? window.open('', '_blank') : null;
 
-  let response;
+  let blob = suppliedPdfBlob;
 
-  try {
-    response = await fetch(pdfUrl, {
-      ...fetchOptions,
-      headers: buildHeaders(token, fetchOptions),
-    });
+  if (!blob) {
+    let response;
 
-    if (!response.ok) {
-      throw new Error('PDF fetch failed');
+    try {
+      response = await fetch(pdfUrl, {
+        ...fetchOptions,
+        headers: buildHeaders(token, fetchOptions),
+      });
+
+      if (!response.ok) {
+        throw new Error('PDF fetch failed');
+      }
+    } catch (error) {
+      closeReservedWindow(reservedFallbackWindow);
+      throw error;
     }
-  } catch (error) {
-    closeReservedWindow(reservedFallbackWindow);
-    throw error;
-  }
 
-  const blob = await response.blob();
+    blob = await response.blob();
+  }
   const pdfBlob =
     blob.type === 'application/pdf'
       ? blob

@@ -54,7 +54,7 @@ const activityLogSchema = new mongoose.Schema(
 
     moduleScope: {
       type: String,
-      enum: ["trading", "travel", "weaving", "both", "shared"],
+      enum: ["trading", "travel", "weaving", "installments", "both", "shared"],
       default: "trading",
       lowercase: true,
       trim: true,

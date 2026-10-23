@@ -3,7 +3,7 @@ const Account = require("../models/Account");
 const JournalEntry = require("../models/JournalEntry");
 const ExpenseTitle = require("../models/ExpenseTitle");
 const mongoose = require("mongoose");
-const { recalculateAccountBalance } = require("../utils/accountHelper");
+const { recalculateAccountBalance, recalculateAccountBalances } = require("../utils/accountHelper");
 const { isBalanced } = require("../utils/journalHelper");
 const {
   MODULE_SCOPES,
@@ -16,6 +16,7 @@ const {
   applyExpenseTitleScopeFilter,
 } = require("../utils/expenseTitleScope");
 const { clearTravelReportCache } = require("../services/travel/travelReportCacheService");
+const { logActivity } = require("../utils/activityLogger");
 const {
   getSoftDeleteReason,
   recalculateTravelSoftDeleteAccounts,
@@ -30,11 +31,13 @@ const path = require("path");
 
 const TRAVEL_EXPENSE_ORIGIN = "travel_expense";
 const WEAVING_EXPENSE_ORIGIN = "weaving_expense";
+const INSTALLMENTS_EXPENSE_ORIGIN = "installments_expense";
 const TRAVEL_EXPENSE_SCOPES = new Set([MODULE_SCOPES.TRAVEL, MODULE_SCOPES.BOTH]);
 const EXPENSE_BUSINESS_SCOPES = Object.freeze([
   MODULE_SCOPES.TRADING,
   MODULE_SCOPES.TRAVEL,
   MODULE_SCOPES.WEAVING,
+  MODULE_SCOPES.INSTALLMENTS,
   MODULE_SCOPES.BOTH,
 ]);
 const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze(["cash", "bank", "online", "cheque"]);
@@ -52,7 +55,7 @@ const normalizeExpenseModuleScope = (
   const normalized = normalizeModuleScope(value, fallback);
 
   if (!EXPENSE_BUSINESS_SCOPES.includes(normalized)) {
-    throw makeHttpError("Expenses must belong to Trading, Travel or Weaving.", 400);
+    throw makeHttpError("Expenses must belong to Trading, Travel, Weaving or Installments.", 400);
   }
 
   return normalized;
@@ -123,11 +126,22 @@ const assertExpenseAccessible = (expense, moduleScope) => {
 };
 
 const getExpenseOriginModule = (moduleScope) => {
+  if (moduleScope === MODULE_SCOPES.INSTALLMENTS) {
+    return INSTALLMENTS_EXPENSE_ORIGIN;
+  }
   if (moduleScope === MODULE_SCOPES.WEAVING) {
     return WEAVING_EXPENSE_ORIGIN;
   }
 
   return TRAVEL_EXPENSE_SCOPES.has(moduleScope) ? TRAVEL_EXPENSE_ORIGIN : "";
+};
+
+const getAccountPaymentType = (account) => {
+  if (account?.category === "cash") return { expense: "Cash", journal: "cash" };
+  if (account?.category === "cheque") return { expense: "Cheque", journal: "cheque" };
+  if (account?.category === "bank") return { expense: "Bank", journal: "online" };
+  if (account?.category === "online") return { expense: "Online", journal: "online" };
+  throw makeHttpError("Selected payment account has an unsupported category.", 400);
 };
 
 const validateScopedExpenseAccounts = async ({
@@ -196,6 +210,8 @@ const validateScopedExpenseAccounts = async ({
       );
     }
   }
+
+  return accountsById;
 };
 
 // Test-only export; production request handling continues through create/update.
@@ -217,7 +233,8 @@ exports.createExpense = async (req, res) => {
     } = req.body;
 
     const creditEntries = JSON.parse(req.body.creditEntries || "[]");
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
+    const actorId = req.actorId || req.user?.actorId || userId;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID is required" });
@@ -227,8 +244,18 @@ exports.createExpense = async (req, res) => {
       { ...req.query, ...req.body },
       MODULE_SCOPES.TRADING,
     );
+    if (normalizedModuleScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertExpenseScopeEnabled(req, normalizedModuleScope);
+
+    const idempotencyKey = String(req.body.idempotencyKey || req.get("Idempotency-Key") || "").trim();
+    if (normalizedModuleScope === MODULE_SCOPES.INSTALLMENTS && !idempotencyKey) {
+      throw makeHttpError("An idempotency key is required for Installments expenses.", 400);
+    }
+    if (idempotencyKey) {
+      const existing = await Expense.findOne({ userId, moduleScope: normalizedModuleScope, idempotencyKey });
+      if (existing) return res.status(200).json({ message: "Expense was already saved", data: existing, alreadyPosted: true });
+    }
 
     if (!titleId && !category) {
       return res.status(400).json({
@@ -292,13 +319,27 @@ exports.createExpense = async (req, res) => {
         message: "Debit and credit must be equal.",
       });
     }
+    const accountsById = await validateScopedExpenseAccounts({
+      userId,
+      moduleScope: normalizedModuleScope,
+      debitAccountId: finalCategory,
+      creditEntries,
+    });
+    const normalizedCreditEntries = creditEntries.map((entry) => {
+      if (normalizedModuleScope !== MODULE_SCOPES.INSTALLMENTS) return entry;
+      const derived = getAccountPaymentType(accountsById.get(String(entry.account || "")));
+      return { ...entry, paymentType: derived.journal };
+    });
+    const derivedExpensePaymentType = normalizedModuleScope === MODULE_SCOPES.INSTALLMENTS
+      ? getAccountPaymentType(accountsById.get(String(normalizedCreditEntries[0]?.account || ""))).expense
+      : paymentType;
     const lines = [
       {
         account: finalCategory,
         type: "debit",
         amount: numericAmount,
       },
-      ...creditEntries.map((entry) => ({
+      ...normalizedCreditEntries.map((entry) => ({
         account: entry.account,
         type: "credit",
         amount: Number(entry.amount),
@@ -308,13 +349,6 @@ exports.createExpense = async (req, res) => {
           "cash",
       })),
     ];
-
-    await validateScopedExpenseAccounts({
-      userId,
-      moduleScope: normalizedModuleScope,
-      debitAccountId: finalCategory,
-      creditEntries,
-    });
 
     if (!isBalanced(lines)) {
       return res.status(400).json({
@@ -331,16 +365,17 @@ exports.createExpense = async (req, res) => {
       date: businessDate,
       time: businessTime,
       amount: numericAmount,
-      paymentType,
+      paymentType: derivedExpensePaymentType,
       account: null,
       description,
       attachment: attachmentPath,
       userId,
       titleId: titleId || null,
       moduleScope: normalizedModuleScope,
+      createdBy: actorId,
+      updatedBy: actorId,
+      idempotencyKey: idempotencyKey || null,
     });
-
-    await expense.save();
 
     const journal = new JournalEntry({
       date: journalDate,
@@ -351,21 +386,36 @@ exports.createExpense = async (req, res) => {
       originModule: getExpenseOriginModule(normalizedModuleScope),
       moduleScope: normalizedModuleScope,
       referenceId: expense._id,
+      idempotencyKey: idempotencyKey || null,
       lines,
     });
 
-    await journal.save();
-
-    expense.journalEntryId = journal._id;
-    await expense.save();
-
     const allAccounts = [finalCategory, ...creditEntries.map((e) => e.account)];
-    for (const acc of allAccounts) {
-      await recalculateAccountBalance(acc);
+    if (normalizedModuleScope === MODULE_SCOPES.INSTALLMENTS) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await expense.save({ session });
+          await journal.save({ session });
+          expense.journalEntryId = journal._id;
+          await expense.save({ session });
+        });
+      } finally { await session.endSession(); }
+      await recalculateAccountBalances(allAccounts);
+    } else {
+      await expense.save();
+      await journal.save();
+      expense.journalEntryId = journal._id;
+      await expense.save();
+      for (const acc of allAccounts) await recalculateAccountBalance(acc);
     }
 
     if (TRAVEL_EXPENSE_SCOPES.has(normalizedModuleScope)) {
       clearTravelReportCache(userId);
+    }
+
+    if (normalizedModuleScope === MODULE_SCOPES.INSTALLMENTS) {
+      await logActivity({ req, action: "create_expense", module: "installments.expenses", moduleScope: "installments", entityType: "Expense", entityId: expense._id, title: expense.title, after: expense });
     }
 
     res.status(201).json({
@@ -394,11 +444,12 @@ exports.updateExpense = async (req, res) => {
     } = req.body;
 
     const creditEntries = JSON.parse(req.body.creditEntries || "[]");
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const requestedScope = getExpenseScope(
       { ...req.query, ...req.body },
       MODULE_SCOPES.TRADING,
     );
+    if (requestedScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertExpenseScopeEnabled(req, requestedScope);
 
@@ -423,6 +474,9 @@ exports.updateExpense = async (req, res) => {
       MODULE_SCOPES.TRADING,
     );
     assertExpenseAccessible(expense, requestedScope);
+    if (previousModuleScope === MODULE_SCOPES.INSTALLMENTS && expense.journalEntryId) {
+      throw makeHttpError("Posted Installments expenses cannot be edited in place. Archive the expense to create an auditable reversal, then enter the correction.", 409);
+    }
 
     let finalCategory = category;
     let finalTitle = title || "";
@@ -603,8 +657,10 @@ exports.updateExpense = async (req, res) => {
 // ❌ Delete Expense (NO CHANGE)
 exports.deleteExpense = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
-    const actorId = req.actorId || userId;
+    let userId = req.user?.id || req.userId;
+    const actorId = req.actorId || req.user?.actorId || userId;
+    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
+    if (requestedScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
     const expense = await Expense.findOne({
       _id: req.params.id,
       userId,
@@ -616,14 +672,38 @@ exports.deleteExpense = async (req, res) => {
       expense.moduleScope,
       MODULE_SCOPES.TRADING,
     );
-    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
-
     assertExpenseScopeEnabled(req, requestedScope);
     assertExpenseAccessible(expense, requestedScope);
 
     const isTravelDelete =
       expenseScope === MODULE_SCOPES.TRAVEL ||
       (expenseScope === MODULE_SCOPES.BOTH && requestedScope === MODULE_SCOPES.TRAVEL);
+
+    if (expenseScope === MODULE_SCOPES.INSTALLMENTS) {
+      const session = await mongoose.startSession();
+      let accountIds = [];
+      try {
+        await session.withTransaction(async () => {
+          const liveExpense = await Expense.findOne({ _id: req.params.id, userId, isDeleted: false }).session(session);
+          if (!liveExpense) throw makeHttpError("Expense not found", 404);
+          const reversalResult = await reverseTravelJournals({ userId, referenceId: liveExpense._id, originModule: INSTALLMENTS_EXPENSE_ORIGIN, sourceTypes: ["expense"], session, reason: getSoftDeleteReason(req, "Installments expense corrected") });
+          if (!reversalResult.journals.length) throw makeHttpError("Expense journal was not found for reversal", 409);
+          accountIds = reversalResult.accountIds;
+          liveExpense.isDeleted = true;
+          liveExpense.deletedAt = new Date();
+          liveExpense.deletedBy = actorId;
+          liveExpense.deleteReason = getSoftDeleteReason(req, "Installments expense corrected");
+          liveExpense.isReversed = true;
+          liveExpense.reversedAt = new Date();
+          liveExpense.reversedBy = actorId;
+          liveExpense.reversalJournalEntryIds = reversalResult.reversalIds;
+          await liveExpense.save({ session });
+        });
+      } finally { await session.endSession(); }
+      await recalculateTravelSoftDeleteAccounts(accountIds);
+      await logActivity({ req, action: "archive_expense", module: "installments.expenses", moduleScope: "installments", entityType: "Expense", entityId: expense._id, title: expense.title, before: expense, after: { isDeleted: true, isReversed: true } });
+      return res.json({ message: "Installments expense reversed and archived successfully", reversed: true });
+    }
 
     if (isTravelDelete) {
       const session = await mongoose.startSession();
@@ -729,24 +809,48 @@ exports.deleteExpense = async (req, res) => {
 
 exports.getAllExpenses = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
+    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
+    if (requestedScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
     const expenseQuery = {
       userId,
       isDeleted: false,
     };
-    const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
-
     assertExpenseScopeEnabled(req, requestedScope);
 
     applyModuleScopeFilter(expenseQuery, requestedScope);
 
-    const expenses = await Expense.find(expenseQuery)
+    const isInstallments = requestedScope === MODULE_SCOPES.INSTALLMENTS;
+    const page = isInstallments ? Math.max(1, Number(req.query.page) || 1) : 1;
+    const limit = isInstallments ? Math.min(100, Math.max(1, Number(req.query.limit) || 25)) : 0;
+    if (isInstallments) {
+      if (req.query.fromDate || req.query.toDate) {
+        expenseQuery.date = {};
+        if (req.query.fromDate) expenseQuery.date.$gte = getBusinessDateKey(req.query.fromDate, { label: "from date" });
+        if (req.query.toDate) expenseQuery.date.$lte = getBusinessDateKey(req.query.toDate, { label: "to date" });
+      }
+      if (mongoose.Types.ObjectId.isValid(req.query.category)) expenseQuery.category = req.query.category;
+      if (mongoose.Types.ObjectId.isValid(req.query.staffId)) expenseQuery.createdBy = req.query.staffId;
+      if (String(req.query.search || "").trim()) {
+        const safe = String(req.query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expenseQuery.$or = [{ title: new RegExp(safe, "i") }, { description: new RegExp(safe, "i") }];
+      }
+      if (mongoose.Types.ObjectId.isValid(req.query.accountId)) {
+        const matchingJournals = await JournalEntry.find({ createdBy: userId, moduleScope: MODULE_SCOPES.INSTALLMENTS, sourceType: "expense", isDeleted: false, isReversed: { $ne: true }, lines: { $elemMatch: { account: req.query.accountId, type: "credit" } } }).select("referenceId").lean();
+        expenseQuery._id = { $in: matchingJournals.map((row) => row.referenceId) };
+      }
+    }
+
+    const total = isInstallments ? await Expense.countDocuments(expenseQuery) : 0;
+    let expenseFind = Expense.find(expenseQuery)
       .populate("category", "name")
-      .sort({ createdAt: -1 })
-      .lean();
+      .populate("createdBy", "name email")
+      .sort({ date: -1, createdAt: -1 });
+    if (isInstallments) expenseFind = expenseFind.skip((page - 1) * limit).limit(limit);
+    const expenses = await expenseFind.lean();
 
     if (expenses.length === 0) {
-      return res.json([]);
+      return res.json(isInstallments ? { rows: [], page, limit, total, pages: Math.ceil(total / limit) } : []);
     }
 
     const expenseIds = expenses.map((expense) => expense._id);
@@ -758,7 +862,7 @@ exports.getAllExpenses = async (req, res) => {
       isDeleted: false,
     })
       .select("referenceId lines moduleScope")
-      .populate("lines.account", "name")
+      .populate("lines.account", "name code category")
       .lean();
 
     const journalMap = new Map();
@@ -785,10 +889,12 @@ exports.getAllExpenses = async (req, res) => {
           .map((line) => line.account?.name)
           .filter(Boolean)
           .join(", "),
+        paymentAccounts: creditLines.map((line) => line.account).filter(Boolean),
+        referenceNumber: `EXP-${String(expense._id).slice(-6).toUpperCase()}`,
       };
     });
 
-    return res.json(formatted);
+    return res.json(isInstallments ? { rows: formatted, page, limit, total, pages: Math.ceil(total / limit) } : formatted);
   } catch (err) {
     console.error("Get Expenses Error:", err);
 
@@ -801,8 +907,9 @@ exports.getAllExpenses = async (req, res) => {
 // ✅ Get Single Expense (NO BREAK, SAME)
 exports.getExpenseById = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const requestedScope = getExpenseScope(req.query, MODULE_SCOPES.TRADING);
+    if (requestedScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertExpenseScopeEnabled(req, requestedScope);
 

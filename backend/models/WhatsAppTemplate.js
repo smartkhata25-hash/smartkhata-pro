@@ -11,7 +11,7 @@ const whatsAppTemplateSchema = new mongoose.Schema(
 
     moduleScope: {
       type: String,
-      enum: ["trading", "travel"],
+      enum: ["trading", "travel", "installments"],
       required: true,
       index: true,
     },

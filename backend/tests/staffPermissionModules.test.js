@@ -11,16 +11,10 @@ const { requirePermission } = require("../middleware/permissionMiddleware");
 const { resolveActivityModuleScope } = require("../utils/activityLogger");
 const { applyActivityModuleScopeFilter } = require("../controllers/activityController");
 
-const moduleKeys = ["trading", "travel", "weaving"];
-const combinations = [
-  ["trading"],
-  ["travel"],
-  ["weaving"],
-  ["trading", "travel"],
-  ["trading", "weaving"],
-  ["travel", "weaving"],
-  ["trading", "travel", "weaving"],
-];
+const moduleKeys = ["trading", "travel", "weaving", "installments"];
+const combinations = Array.from({ length: (2 ** moduleKeys.length) - 1 }, (_, index) =>
+  moduleKeys.filter((_, bit) => ((index + 1) & (1 << bit)) !== 0),
+);
 
 test("new staff defaults to least privilege", () => {
   assert.deepEqual(DEFAULT_STAFF_PERMISSIONS, []);
@@ -41,6 +35,7 @@ for (const enabledKeys of combinations) {
     }
     assert.equal(allowed.some((value) => value.startsWith("travel.")), enabledKeys.includes("travel"));
     assert.equal(allowed.some((value) => value.startsWith("weaving.")), enabledKeys.includes("weaving"));
+    assert.equal(allowed.some((value) => value.startsWith("installments.")), enabledKeys.includes("installments"));
     assert.equal(allowed.includes("sales.view"), enabledKeys.includes("trading"));
     assert.equal(allowed.some((value) => value.startsWith("staff.")), false);
     assert.equal(allowed.includes("settings.personal_info"), false);

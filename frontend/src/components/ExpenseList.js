@@ -6,10 +6,15 @@ import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { formatBusinessDateForDisplay, getBusinessDateInputValue } from '../utils/localDateTime';
 import { FaEdit, FaTrash } from 'react-icons/fa';
+import { formatInstallmentsDisplayRef } from '../utils/installmentsDisplay';
+import InstallmentsDialog from './installments/InstallmentsDialog';
 
 const ExpenseList = () => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
+  const [installmentsDialog, setInstallmentsDialog] = useState(null);
 
   const [filters, setFilters] = useState({
     search: '',
@@ -17,6 +22,8 @@ const ExpenseList = () => {
     toDate: '',
     category: '',
     paymentMode: '',
+    accountId: '',
+    staffId: '',
   });
 
   const navigate = useNavigate();
@@ -25,24 +32,28 @@ const ExpenseList = () => {
 
   const queryModuleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
   const requestedModuleScope =
-    location.pathname.startsWith('/weaving/expenses') || queryModuleScope === 'weaving'
+    location.pathname.startsWith('/installments/expenses') || queryModuleScope === 'installments'
+      ? 'installments'
+      : location.pathname.startsWith('/weaving/expenses') || queryModuleScope === 'weaving'
       ? 'weaving'
       : location.pathname.startsWith('/travel/expenses') || queryModuleScope === 'travel'
         ? 'travel'
         : 'trading';
   const isTravelExpenseView = requestedModuleScope === 'travel';
   const isWeavingExpenseView = requestedModuleScope === 'weaving';
+  const isInstallmentsExpenseView = requestedModuleScope === 'installments';
   const scopedExpenseParams = useMemo(
     () => (requestedModuleScope === 'trading' ? {} : { moduleScope: requestedModuleScope }),
     [requestedModuleScope]
   );
 
-  const canViewExpenses = hasPermission('expenses.view');
-  const canCreateExpenses = hasPermission('expenses.create');
-  const canEditExpenses = hasPermission('expenses.edit');
-  const canDeleteExpenses = hasPermission('expenses.delete');
+  const canViewExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.view' : 'expenses.view');
+  const canCreateExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.create' : 'expenses.create');
+  const canEditExpenses = !isInstallmentsExpenseView && hasPermission('expenses.edit');
+  const canDeleteExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.archive' : 'expenses.delete');
 
   const updateFilter = (key, value) => {
+    setPage(1);
     setFilters((prev) => ({
       ...prev,
       [key]: value,
@@ -50,12 +61,15 @@ const ExpenseList = () => {
   };
 
   const clearFilters = () => {
+    setPage(1);
     setFilters({
       search: '',
       fromDate: '',
       toDate: '',
       category: '',
       paymentMode: '',
+      accountId: '',
+      staffId: '',
     });
   };
 
@@ -85,6 +99,8 @@ const ExpenseList = () => {
       new Set(expenses.map((expense) => String(expense?.paymentMode || '').trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
   }, [expenses]);
+  const paymentAccountOptions = useMemo(() => Array.from(new Map(expenses.flatMap((expense) => expense.paymentAccounts || []).map((account) => [account._id, account])).values()), [expenses]);
+  const staffOptions = useMemo(() => Array.from(new Map(expenses.map((expense) => expense.createdBy).filter(Boolean).map((staff) => [staff._id, staff])).values()), [expenses]);
 
   const filteredExpenses = useMemo(() => {
     const searchText = filters.search.trim().toLowerCase();
@@ -152,35 +168,36 @@ const ExpenseList = () => {
     }
 
     try {
-      const data = await getAllExpenses(scopedExpenseParams);
-
-      setExpenses(Array.isArray(data) ? data : []);
+      const data = await getAllExpenses(isInstallmentsExpenseView ? { ...scopedExpenseParams, ...filters, page, limit: 25 } : scopedExpenseParams);
+      setExpenses(Array.isArray(data) ? data : data.rows || []);
+      if (!Array.isArray(data)) setPagination({ page: data.page || 1, pages: data.pages || 1, total: data.total || 0 });
     } catch (err) {
-      alert(t('alerts.expenseLoadError'));
+      if (isInstallmentsExpenseView) setInstallmentsDialog({ type: 'error', message: t('alerts.expenseLoadError') });
+      else alert(t('alerts.expenseLoadError'));
       setExpenses([]);
     } finally {
       setLoading(false);
     }
-  }, [canViewExpenses, scopedExpenseParams]);
+  }, [canViewExpenses, scopedExpenseParams, isInstallmentsExpenseView, filters, page]);
 
   useEffect(() => {
     if (!canViewExpenses) {
-      navigate('/dashboard');
+      navigate(isInstallmentsExpenseView ? '/installments/dashboard' : '/dashboard');
       return;
     }
 
     fetchData();
-  }, [canViewExpenses, navigate, fetchData]);
+  }, [canViewExpenses, navigate, fetchData, isInstallmentsExpenseView]);
 
   const handleDelete = async (id) => {
     if (!canDeleteExpenses) {
-      alert('You do not have permission to delete expenses');
+      if (isInstallmentsExpenseView) setInstallmentsDialog({ type: 'error', message: 'You do not have permission to delete expenses' });
+      else alert('You do not have permission to delete expenses');
       return;
     }
 
-    if (!window.confirm(t('alerts.confirmDeleteExpense'))) {
-      return;
-    }
+    if (isInstallmentsExpenseView) { setInstallmentsDialog({ type: 'warning', message: t('installments.expenses.confirmArchive'), inputLabel: t('installments.expenses.archiveReason'), inputValue: '', inputRequired: true, expenseId: id }); return; }
+    if (!window.confirm(t('alerts.confirmDeleteExpense'))) return;
 
     try {
       await deleteExpense(id, scopedExpenseParams);
@@ -189,6 +206,13 @@ const ExpenseList = () => {
     } catch (err) {
       alert(t('alerts.expenseDeleteFailed'));
     }
+  };
+
+  const confirmInstallmentsArchive = async () => {
+    const pending = installmentsDialog;
+    if (!pending?.expenseId || !String(pending.inputValue || '').trim()) return;
+    try { await deleteExpense(pending.expenseId, { ...scopedExpenseParams, reason: pending.inputValue.trim() }); setInstallmentsDialog(null); fetchData(); }
+    catch (err) { setInstallmentsDialog({ type: 'error', message: t('alerts.expenseDeleteFailed') }); }
   };
 
   const formatMobileDate = (value) => {
@@ -211,6 +235,7 @@ const ExpenseList = () => {
 
   return (
     <div className="expense-list-page p-2 sm:p-4 md:p-6 bg-white rounded shadow-md min-w-0 overflow-hidden">
+      {isInstallmentsExpenseView && <InstallmentsDialog open={Boolean(installmentsDialog)} type={installmentsDialog?.type || 'error'} message={installmentsDialog?.message} inputLabel={installmentsDialog?.inputLabel} inputValue={installmentsDialog?.inputValue || ''} inputRequired={installmentsDialog?.inputRequired} onInputChange={(value) => setInstallmentsDialog((current) => ({ ...current, inputValue: value }))} cancelLabel={installmentsDialog?.expenseId ? t('cancel') : ''} confirmLabel={installmentsDialog?.expenseId ? t('installments.committees.management.archive') : undefined} onClose={() => setInstallmentsDialog(null)} onConfirm={installmentsDialog?.expenseId ? confirmInstallmentsArchive : () => setInstallmentsDialog(null)} />}
       <style>{`
         .expense-list-page,
         .expense-list-page *,
@@ -351,6 +376,8 @@ const ExpenseList = () => {
           {t(
             isWeavingExpenseView
               ? 'weaving.sidebar.expenses'
+              : isInstallmentsExpenseView
+                ? 'installments.expenses.title'
               : isTravelExpenseView
                 ? 'travel.reports.expenses.title'
                 : 'expense.allExpenses'
@@ -364,6 +391,8 @@ const ExpenseList = () => {
               navigate(
                 isWeavingExpenseView
                   ? '/weaving/expenses/new'
+                  : isInstallmentsExpenseView
+                    ? '/installments/expenses/new'
                   : isTravelExpenseView
                     ? '/travel/expenses/new'
                     : '/add-expense'
@@ -409,7 +438,7 @@ const ExpenseList = () => {
         </div>
 
         <div className="expense-filter-bottom-row">
-          <select
+          {!isInstallmentsExpenseView && <select
             value={filters.category}
             onChange={(event) => updateFilter('category', event.target.value)}
             className="expense-filter-control"
@@ -421,7 +450,7 @@ const ExpenseList = () => {
                 {category.label}
               </option>
             ))}
-          </select>
+          </select>}
 
           <select
             value={filters.paymentMode}
@@ -436,6 +465,8 @@ const ExpenseList = () => {
               </option>
             ))}
           </select>
+
+          {isInstallmentsExpenseView && <select value={filters.accountId} onChange={(event) => updateFilter('accountId', event.target.value)} className="expense-filter-control"><option value="">{t('installments.reports.allAccounts')}</option>{paymentAccountOptions.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}</select>}
 
           <button
             type="button"
@@ -474,7 +505,7 @@ const ExpenseList = () => {
           className="min-w-0 border border-gray-300 rounded p-2 text-sm"
         />
 
-        <select
+        {!isInstallmentsExpenseView && <select
           value={filters.category}
           onChange={(event) => updateFilter('category', event.target.value)}
           className="min-w-0 border border-gray-300 rounded bg-white p-2 text-sm"
@@ -486,7 +517,7 @@ const ExpenseList = () => {
               {category.label}
             </option>
           ))}
-        </select>
+        </select>}
 
         <select
           value={filters.paymentMode}
@@ -501,6 +532,10 @@ const ExpenseList = () => {
             </option>
           ))}
         </select>
+
+        {isInstallmentsExpenseView && <select value={filters.accountId} onChange={(event) => updateFilter('accountId', event.target.value)} className="min-w-0 border border-gray-300 rounded bg-white p-2 text-sm"><option value="">{t('installments.reports.allAccounts')}</option>{paymentAccountOptions.map((account) => <option key={account._id} value={account._id}>{account.name}</option>)}</select>}
+
+        {isInstallmentsExpenseView && <select value={filters.staffId} onChange={(event) => updateFilter('staffId', event.target.value)} className="min-w-0 border border-gray-300 rounded bg-white p-2 text-sm"><option value="">{t('installments.reports.allStaff')}</option>{staffOptions.map((staff) => <option key={staff._id} value={staff._id}>{staff.name || staff.email}</option>)}</select>}
 
         <button
           type="button"
@@ -540,10 +575,10 @@ const ExpenseList = () => {
 
                   <th className="expense-category-col px-1.5 py-1 md:p-2 border">Category</th>
 
-                  <th className="expense-mode-col px-1.5 py-1 md:p-2 border">
+                  {!isInstallmentsExpenseView && <th className="expense-mode-col px-1.5 py-1 md:p-2 border">
                     <span className="hidden sm:inline">{t('expense.paymentMode')}</span>
                     <span className="sm:hidden">Mode</span>
-                  </th>
+                  </th>}
 
                   <th className="expense-account-col px-1.5 py-1 md:p-2 border">
                     <span className="hidden sm:inline">{t('expense.creditAccounts')}</span>
@@ -554,6 +589,8 @@ const ExpenseList = () => {
                     <span className="hidden sm:inline">{t('common.amount')}</span>
                     <span className="sm:hidden">Amt.</span>
                   </th>
+
+                  {isInstallmentsExpenseView && <><th className="px-1.5 py-1 md:p-2 border">{t('installments.reports.reference')}</th><th className="px-1.5 py-1 md:p-2 border">{t('description')}</th><th className="px-1.5 py-1 md:p-2 border">{t('installments.reports.enteredBy')}</th><th className="px-1.5 py-1 md:p-2 border">{t('status')}</th></>}
 
                   <th className="expense-actions-col px-1.5 py-1 md:p-2 border">
                     {t('common.actions')}
@@ -580,9 +617,9 @@ const ExpenseList = () => {
                       {e.category?.name || '-'}
                     </td>
 
-                    <td className="expense-mode-col px-1.5 py-1 md:p-2 border capitalize break-words">
+                    {!isInstallmentsExpenseView && <td className="expense-mode-col px-1.5 py-1 md:p-2 border capitalize break-words">
                       {e.paymentMode || '-'}
-                    </td>
+                    </td>}
 
                     <td className="expense-account-col px-1.5 py-1 md:p-2 border break-words">
                       {e.creditAccounts || '-'}
@@ -591,6 +628,8 @@ const ExpenseList = () => {
                     <td className="expense-amount-col px-1.5 py-1 md:p-2 border whitespace-nowrap">
                       {formatMoneyDisplay(e.amount)}
                     </td>
+
+                    {isInstallmentsExpenseView && <><td className="px-1.5 py-1 md:p-2 border whitespace-nowrap">{formatInstallmentsDisplayRef(e.referenceNumber, 'reference') || '-'}</td><td className="max-w-52 truncate px-1.5 py-1 md:p-2 border">{e.description || '-'}</td><td className="px-1.5 py-1 md:p-2 border">{e.createdBy?.name || e.createdBy?.email || '-'}</td><td className="px-1.5 py-1 md:p-2 border capitalize">{e.isReversed ? 'reversed' : 'posted'}</td></>}
 
                     <td className="expense-actions-col px-1.5 py-1 md:p-2 border">
                       <div className="flex gap-1 md:gap-2 justify-center items-center">
@@ -638,7 +677,7 @@ const ExpenseList = () => {
 
                 {filteredExpenses.length === 0 && (
                   <tr>
-                    <td colSpan="7" className="text-center p-4">
+                    <td colSpan={isInstallmentsExpenseView ? 10 : 7} className="text-center p-4">
                       {t('expense.noneFound')}
                     </td>
                   </tr>
@@ -646,6 +685,7 @@ const ExpenseList = () => {
               </tbody>
             </table>
           </div>
+          {isInstallmentsExpenseView && pagination.pages > 1 && <div className="mt-3 flex items-center justify-between text-sm"><span>{pagination.total} {t('installments.expenses.records')}</span><div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded border px-3 py-1 disabled:opacity-40">{t('previous')}</button><span className="px-2 py-1">{page} / {pagination.pages}</span><button disabled={page >= pagination.pages} onClick={() => setPage((value) => value + 1)} className="rounded border px-3 py-1 disabled:opacity-40">{t('next')}</button></div></div>}
         </>
       )}
     </div>

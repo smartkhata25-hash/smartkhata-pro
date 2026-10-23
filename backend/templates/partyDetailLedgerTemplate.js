@@ -225,7 +225,7 @@ const renderBlock = (block, lang) => {
 
           <tr>
             <td class="right title-cell">
-              ${label("debit", lang, "Debit")}
+              ${label("credit", lang, "Money Out")}
             </td>
 
             <td class="right amount-cell">
@@ -235,7 +235,7 @@ const renderBlock = (block, lang) => {
 
           <tr>
             <td class="right title-cell">
-              ${label("credit", lang, "Credit")}
+              ${label("debit", lang, "Money In")}
             </td>
 
             <td class="right amount-cell">
@@ -538,12 +538,12 @@ td {
 
     &nbsp; | &nbsp;
 
-    ${label("debit", lang, "Debit")}:
+    ${label("credit", lang, "Money Out")}:
     ${money(summary.totalDebit)}
 
     &nbsp; | &nbsp;
 
-    ${label("credit", lang, "Credit")}:
+    ${label("debit", lang, "Money In")}:
     ${money(summary.totalCredit)}
 
     &nbsp; | &nbsp;
@@ -574,12 +574,12 @@ td {
 
     &nbsp;
 
-    ${label("debit", lang, "Debit")}:
+    ${label("credit", lang, "Money Out")}:
     ${money(summary.totalDebit)}
 
     &nbsp; | &nbsp;
 
-    ${label("credit", lang, "Credit")}:
+    ${label("debit", lang, "Money In")}:
     ${money(summary.totalCredit)}
 
     &nbsp; | &nbsp;

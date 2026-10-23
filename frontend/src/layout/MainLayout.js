@@ -18,6 +18,8 @@ import { fetchTravelReminderSummary as fetchTravelReminderWorkspaceSummary } fro
 
 import { isTravelContext } from '../utils/travelContext';
 import { isWeavingContext } from '../utils/weavingContext';
+import { isInstallmentsContext } from '../utils/installmentsContext';
+import { clearInstallmentsMasterCache } from '../utils/installmentsMasterCache';
 import { t } from '../i18n/i18n';
 
 const EMPTY_DASHBOARD_SUMMARY = {
@@ -181,10 +183,12 @@ const MainLayout = () => {
 
   const isTravelWorkspace = isTravelContext(location);
   const isWeavingWorkspace = isWeavingContext(location);
+  const isInstallmentsWorkspace = isInstallmentsContext(location);
   const isWeavingPayrollWorkspace = location.pathname === '/weaving/payroll';
   const [isPayrollSidebarRevealed, setIsPayrollSidebarRevealed] = useState(false);
 
   const hideWorkspacePanels = isLedgerPage && !isTravelWorkspace && !isWeavingWorkspace;
+  const hideRightPanel = hideWorkspacePanels || isInstallmentsWorkspace;
   const effectiveDesktopSidebarVisible = isWeavingPayrollWorkspace
     ? isPayrollSidebarRevealed
     : isDesktopSidebarVisible;
@@ -441,6 +445,7 @@ const MainLayout = () => {
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/auth/check-device`)
       .then((res) => {
         if (!res.ok) {
+          clearInstallmentsMasterCache();
           localStorage.removeItem('token');
 
           localStorage.removeItem('userId');
@@ -500,10 +505,10 @@ const MainLayout = () => {
    * keep the Right Panel covering the workspace.
    */
   useEffect(() => {
-    if ((isTravelWorkspace || isWeavingWorkspace) && isMobile) {
+    if ((isTravelWorkspace || isWeavingWorkspace || isInstallmentsWorkspace) && isMobile) {
       setIsRightPanelOpen(false);
     }
-  }, [isTravelWorkspace, isWeavingWorkspace, isMobile]);
+  }, [isTravelWorkspace, isWeavingWorkspace, isInstallmentsWorkspace, isMobile]);
 
   /*
    * Load correct dashboard data according
@@ -520,6 +525,10 @@ const MainLayout = () => {
       return;
     }
 
+    if (isInstallmentsWorkspace) {
+      return;
+    }
+
     fetchDashboardAlerts();
   }, [
     fetchDashboardAlerts,
@@ -527,6 +536,7 @@ const MainLayout = () => {
     fetchTravelReminderSummary,
     isTravelWorkspace,
     isWeavingWorkspace,
+    isInstallmentsWorkspace,
   ]);
 
   useEffect(() => {
@@ -596,7 +606,9 @@ const MainLayout = () => {
   };
 
   const visibleDashboardAlerts =
-    isTravelWorkspace || isWeavingWorkspace ? EMPTY_DASHBOARD_ALERTS : dashboardAlerts;
+    isTravelWorkspace || isWeavingWorkspace || isInstallmentsWorkspace
+      ? EMPTY_DASHBOARD_ALERTS
+      : dashboardAlerts;
 
   const rightPanelWidthClass =
     isTravelWorkspace || isWeavingWorkspace ? 'w-80 max-w-[86vw]' : 'w-64';
@@ -763,7 +775,7 @@ const MainLayout = () => {
         </div>
 
         {/* ================= RIGHT PANEL ================= */}
-        {!hideWorkspacePanels && (
+        {!hideRightPanel && (
           <>
             {/* MOBILE RIGHT PANEL */}
             {isMobile && (

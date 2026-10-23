@@ -16,8 +16,10 @@ import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { getBusinessDateInputValue, getBusinessTimeInputValue } from '../utils/localDateTime';
 import { hasKnownExactExpenseTitle } from '../utils/expenseTitleUi';
+import InstallmentsDialog from './installments/InstallmentsDialog';
 
 const ExpenseForm = () => {
+  const [requestKey, setRequestKey] = useState(() => window.crypto?.randomUUID?.() || `expense-${Date.now()}`);
   const [accounts, setAccounts] = useState([]);
   const [allTitles, setAllTitles] = useState([]);
   const [titles, setTitles] = useState([]);
@@ -34,6 +36,7 @@ const ExpenseForm = () => {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [installmentsAlert, setInstallmentsAlert] = useState('');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -58,24 +61,33 @@ const ExpenseForm = () => {
   const [searchParams] = useSearchParams();
   const isTravelExpenseRoute = location.pathname.startsWith('/travel/expenses');
   const isWeavingExpenseRoute = location.pathname.startsWith('/weaving/expenses');
+  const isInstallmentsExpenseRoute = location.pathname.startsWith('/installments/expenses');
   const queryModuleScope = String(searchParams.get('moduleScope') || '').toLowerCase();
   const requestedModuleScope =
-    isWeavingExpenseRoute || queryModuleScope === 'weaving'
+    isInstallmentsExpenseRoute || queryModuleScope === 'installments'
+      ? 'installments'
+      : isWeavingExpenseRoute || queryModuleScope === 'weaving'
       ? 'weaving'
       : isTravelExpenseRoute || queryModuleScope === 'travel'
         ? 'travel'
         : 'trading';
   const isTravelExpenseView = requestedModuleScope === 'travel';
   const isWeavingExpenseView = requestedModuleScope === 'weaving';
-  const canViewExpenses = hasPermission('expenses.view');
-  const canCreateExpenses = hasPermission('expenses.create');
-  const canEditExpenses = hasPermission('expenses.edit');
-  const closePath = isWeavingExpenseView
+  const isInstallmentsExpenseView = requestedModuleScope === 'installments';
+  const notify = (message) => { if (isInstallmentsExpenseView) setInstallmentsAlert(message); else alert(message); };
+  const canViewExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.view' : 'expenses.view');
+  const canCreateExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.create' : 'expenses.create');
+  const canEditExpenses = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.edit' : 'expenses.edit');
+  const closePath = isInstallmentsExpenseView
+    ? '/installments/expenses'
+    : isWeavingExpenseView
     ? '/weaving/expenses'
     : isTravelExpenseView
       ? '/travel/expenses'
       : '/dashboard';
-  const listPath = isWeavingExpenseView
+  const listPath = isInstallmentsExpenseView
+    ? '/installments/expenses'
+    : isWeavingExpenseView
     ? '/weaving/expenses'
     : isTravelExpenseView
       ? '/travel/expenses'
@@ -85,7 +97,7 @@ const ExpenseForm = () => {
     [requestedModuleScope]
   );
 
-  const canManageExpenseTitles = hasPermission('expenses.manage_titles');
+  const canManageExpenseTitles = hasPermission(isInstallmentsExpenseView ? 'installments.expenses.manage_titles' : 'expenses.manage_titles');
 
   const expenseAccounts = accounts.filter((a) => a.type === 'Expense');
   const creditableAccounts = accounts.filter(
@@ -100,13 +112,15 @@ const ExpenseForm = () => {
 
     async function fetchData() {
       if (id && (!canViewExpenses || !canEditExpenses)) {
-        alert('You do not have permission to edit expenses');
+        if (isInstallmentsExpenseView) setInstallmentsAlert('You do not have permission to edit expenses');
+        else alert('You do not have permission to edit expenses');
         navigate(listPath);
         return;
       }
 
       if (!id && !canCreateExpenses) {
-        alert('You do not have permission to create expenses');
+        if (isInstallmentsExpenseView) setInstallmentsAlert('You do not have permission to create expenses');
+        else alert('You do not have permission to create expenses');
         navigate(closePath);
         return;
       }
@@ -123,6 +137,12 @@ const ExpenseForm = () => {
         if (cancelled) return;
 
         setAccounts(Array.isArray(aData) ? aData : []);
+
+        if (!id && requestedModuleScope === 'installments') {
+          const defaultCash = (Array.isArray(aData) ? aData : []).find((account) => account.isActive !== false && account.type === 'Asset' && account.category === 'cash' && String(account.code || '').toUpperCase() === 'HANDCASH')
+            || (Array.isArray(aData) ? aData : []).find((account) => account.isActive !== false && account.type === 'Asset' && account.category === 'cash');
+          if (defaultCash) setCreditEntries([{ account: defaultCash._id, amount: '', paymentType: 'cash' }]);
+        }
 
         const safeTitles = Array.isArray(titleData) ? titleData : [];
 
@@ -170,6 +190,7 @@ const ExpenseForm = () => {
     canCreateExpenses,
     canEditExpenses,
     navigate,
+    isInstallmentsExpenseView,
     requestedModuleScope,
     scopedExpenseOptions,
     closePath,
@@ -283,23 +304,23 @@ const ExpenseForm = () => {
     e.preventDefault();
 
     if (id && !canEditExpenses) {
-      alert('You do not have permission to edit expenses');
+      notify('You do not have permission to edit expenses');
       return;
     }
 
     if (!id && !canCreateExpenses) {
-      alert('You do not have permission to create expenses');
+      notify('You do not have permission to create expenses');
       return;
     }
 
     if (!formData.title && !formData.titleId) {
-      alert(t('alerts.fillRequiredFields'));
+      notify(t('alerts.fillRequiredFields'));
       return;
     }
 
     const creditTotal = calculateCreditTotal();
     if (creditTotal <= 0 || !formData.category) {
-      alert(t('alerts.invalidCreditEntries'));
+      notify(t('alerts.invalidCreditEntries'));
       return;
     }
 
@@ -328,6 +349,7 @@ const ExpenseForm = () => {
       ...formData,
       moduleScope: requestedModuleScope,
       amount: creditTotal.toFixed(2),
+      ...(!id && requestedModuleScope === 'installments' ? { idempotencyKey: requestKey } : {}),
     };
 
     const data = new FormData();
@@ -345,10 +367,11 @@ const ExpenseForm = () => {
       setLoading(true);
       if (id) {
         await updateExpense(id, data, scopedExpenseOptions);
-        alert(t('expense.updated'));
+        notify(t('expense.updated'));
       } else {
         await createExpense(data, scopedExpenseOptions);
-        alert(t('expense.saved'));
+        notify(t('expense.saved'));
+        setRequestKey(window.crypto?.randomUUID?.() || `expense-${Date.now()}`);
       }
 
       if (
@@ -364,7 +387,7 @@ const ExpenseForm = () => {
         resetForm();
       }
     } catch (err) {
-      alert(t('alerts.error') + err.message);
+      notify(t('alerts.error') + err.message);
     } finally {
       setLoading(false);
     }
@@ -373,6 +396,7 @@ const ExpenseForm = () => {
   const calculateCreditTotal = () => {
     return creditEntries.reduce((sum, entry) => sum + parseFloat(entry.amount || 0), 0);
   };
+  const selectedPaymentAccounts = () => creditEntries.map((entry) => accounts.find((account) => account._id === entry.account)?.name).filter(Boolean).join(', ');
 
   const handlePrint = () => {
     const creditTotal = calculateCreditTotal();
@@ -383,7 +407,7 @@ const ExpenseForm = () => {
       <p><strong>${t('title')}:</strong> ${formData.title}</p>
       <p><strong>${t('date')}:</strong> ${formData.date} ${formData.time}</p>
       <p><strong>${t('amount')}:</strong> ${formatMoneyDisplay(creditTotal)}</p>
-      <p><strong>${t('paymentType')}:</strong> ${formData.paymentType}</p>
+      <p><strong>${isInstallmentsExpenseView ? t('installments.reports.paidFrom') : t('paymentType')}:</strong> ${isInstallmentsExpenseView ? selectedPaymentAccounts() : formData.paymentType}</p>
       <p><strong>${t('description')}:</strong> ${formData.description || '-'}</p>
       </body></html>
     `);
@@ -400,7 +424,7 @@ const ExpenseForm = () => {
     doc.text(`${t('title')}: ${formData.title}`, 14, 30);
     doc.text(`${t('date')}: ${formData.date} ${formData.time}`, 14, 38);
     doc.text(`${t('amount')}: ${formatMoneyDisplay(calculateCreditTotal())}`, 14, 46);
-    doc.text(`${t('paymentType')}: ${formData.paymentType}`, 14, 54);
+    doc.text(`${isInstallmentsExpenseView ? t('installments.reports.paidFrom') : t('paymentType')}: ${isInstallmentsExpenseView ? selectedPaymentAccounts() : formData.paymentType}`, 14, 54);
     doc.text(`${t('description')}: ${formData.description || '-'}`, 14, 62);
 
     doc.save('expense-invoice.pdf');
@@ -408,7 +432,9 @@ const ExpenseForm = () => {
 
   return (
     <>
+      {isInstallmentsExpenseView && <InstallmentsDialog open={Boolean(installmentsAlert)} type="error" message={installmentsAlert} onClose={() => setInstallmentsAlert('')} onConfirm={() => setInstallmentsAlert('')} />}
       <form
+        noValidate={isInstallmentsExpenseView}
         onSubmit={(e) => handleSubmit(e, 'close')}
         className="bg-gradient-to-br from-white via-gray-50 to-gray-100 shadow-xl rounded-xl md:rounded-2xl p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-3 border border-gray-200 content-start"
       >
@@ -572,14 +598,12 @@ const ExpenseForm = () => {
               <select
                 name="account"
                 value={entry.account}
-                onChange={(e) =>
-                  setCreditEntries((prev) =>
-                    prev.map((item, i) =>
-                      i === index ? { ...item, account: e.target.value } : item
-                    )
-                  )
-                }
-                className="col-span-5 border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-2 focus:ring-blue-500"
+                onChange={(e) => {
+                  const selectedAccount = creditableAccounts.find((account) => account._id === e.target.value);
+                  const derivedType = selectedAccount?.category === 'cash' ? 'cash' : selectedAccount?.category === 'cheque' ? 'cheque' : 'online';
+                  setCreditEntries((prev) => prev.map((item, i) => i === index ? { ...item, account: e.target.value, ...(isInstallmentsExpenseView ? { paymentType: derivedType } : {}) } : item));
+                }}
+                className={`${isInstallmentsExpenseView ? 'col-span-8' : 'col-span-5'} border border-gray-200 rounded-lg md:rounded-xl px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm shadow-sm focus:ring-2 focus:ring-blue-500`}
                 required
               >
                 <option value="">{t('expense.selectAccount')}</option>
@@ -605,7 +629,7 @@ const ExpenseForm = () => {
                 required
               />
 
-              <select
+              {!isInstallmentsExpenseView && <select
                 value={entry.paymentType}
                 onChange={(e) =>
                   setCreditEntries((prev) =>
@@ -619,7 +643,7 @@ const ExpenseForm = () => {
                 <option value="Cash">{t('payment.cash')}</option>
                 <option value="Cheque">{t('payment.cheque')}</option>
                 <option value="Online">{t('payment.online')}</option>
-              </select>
+              </select>}
 
               {creditEntries.length > 1 && (
                 <button
@@ -756,7 +780,7 @@ const ExpenseForm = () => {
                 disabled={isSavingTitle}
                 onClick={async () => {
                   if (!canManageExpenseTitles) {
-                    alert('You do not have permission to manage expense titles');
+                    notify('You do not have permission to manage expense titles');
                     return;
                   }
                   try {

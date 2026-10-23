@@ -1,0 +1,16 @@
+const router = require('express').Router();
+const controller = require('../controllers/installmentsSupplierController');
+const protect = require('../middleware/authMiddleware');
+const { requireModule } = require('../middleware/moduleMiddleware');
+const { requirePermission } = require('../middleware/permissionMiddleware');
+const { MODULE_KEYS } = require('../utils/moduleConfig');
+router.use(protect, requireModule(MODULE_KEYS.INSTALLMENTS));
+router.get('/next-number', requirePermission('installments.suppliers.create'), controller.nextNumber);
+router.get('/', requirePermission('installments.suppliers.view'), controller.list);
+router.post('/', requirePermission('installments.suppliers.create'), controller.create);
+router.get('/:supplierId', requirePermission('installments.suppliers.view'), controller.detail);
+router.put('/:supplierId', requirePermission('installments.suppliers.edit'), controller.update);
+router.get('/:supplierId/financial-summary', requirePermission('installments.suppliers.archive'), controller.summary);
+router.delete('/:supplierId', requirePermission('installments.suppliers.archive'), controller.archive);
+router.post('/:supplierId/restore', requirePermission('installments.suppliers.restore'), controller.restore);
+module.exports = router;

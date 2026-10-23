@@ -3,7 +3,7 @@ const router = express.Router();
 
 // 🔒 Auth Middleware
 const authMiddleware = require("../middleware/authMiddleware");
-const { requirePermission } = require("../middleware/permissionMiddleware");
+const { requireScopedExpensePermission } = require("../middleware/permissionMiddleware");
 const { PERMISSIONS } = require("../utils/permissionList");
 
 const {
@@ -16,28 +16,28 @@ const {
 router.get(
   "/",
   authMiddleware,
-  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.VIEW, PERMISSIONS.INSTALLMENTS_EXPENSES.VIEW),
   getExpenseTitles,
 );
 
 router.post(
   "/",
   authMiddleware,
-  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES, PERMISSIONS.INSTALLMENTS_EXPENSES.MANAGE_TITLES),
   createExpenseTitle,
 );
 
 router.put(
   "/:id",
   authMiddleware,
-  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES, PERMISSIONS.INSTALLMENTS_EXPENSES.MANAGE_TITLES),
   updateExpenseTitle,
 );
 
 router.delete(
   "/:id",
   authMiddleware,
-  requirePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.MANAGE_TITLES, PERMISSIONS.INSTALLMENTS_EXPENSES.MANAGE_TITLES),
   deleteExpenseTitle,
 );
 

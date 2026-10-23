@@ -14,6 +14,7 @@ const {
   ensureExpenseTitleScopeIndex,
   normalizeExpenseTitleName,
 } = require("../utils/ensureExpenseTitleScopeIndex");
+const { logActivity } = require("../utils/activityLogger");
 
 const makeHttpError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -165,8 +166,9 @@ const reactivateRetiredExpenseTitle = async ({
 
 exports.getExpenseTitles = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const moduleScope = getTitleScope(req.query, MODULE_SCOPES.TRADING);
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertTitleScopeEnabled(req, moduleScope);
 
@@ -206,11 +208,12 @@ exports.createExpenseTitle = async (req, res) => {
   try {
     await ensureExpenseTitleScopeIndex();
 
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const moduleScope = getTitleScope(
       { ...req.query, ...req.body },
       MODULE_SCOPES.TRADING,
     );
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
     const { name, categoryId } = req.body;
 
     assertTitleScopeEnabled(req, moduleScope);
@@ -279,6 +282,8 @@ exports.createExpenseTitle = async (req, res) => {
     await newTitle.save();
     await newTitle.populate("categoryId", "name code type category moduleScope");
 
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) await logActivity({ req, action: "create_expense_title", module: "installments.expenses", moduleScope, entityType: "ExpenseTitle", entityId: newTitle._id, title: newTitle.name, after: newTitle });
+
     res.status(201).json(newTitle);
   } catch (error) {
     if (error.code === 11000) {
@@ -295,9 +300,10 @@ exports.createExpenseTitle = async (req, res) => {
 
 exports.deleteExpenseTitle = async (req, res) => {
   try {
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const { id } = req.params;
     const moduleScope = getTitleScope(req.query, MODULE_SCOPES.TRADING);
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertTitleScopeEnabled(req, moduleScope);
 
@@ -332,6 +338,8 @@ exports.deleteExpenseTitle = async (req, res) => {
     title.isDeleted = true;
     await title.save();
 
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) await logActivity({ req, action: "archive_expense_title", module: "installments.expenses", moduleScope, entityType: "ExpenseTitle", entityId: title._id, title: title.name, after: { isDeleted: true } });
+
     res.json({
       message: "Title deleted successfully",
     });
@@ -346,13 +354,14 @@ exports.updateExpenseTitle = async (req, res) => {
   try {
     await ensureExpenseTitleScopeIndex();
 
-    const userId = req.user?.id || req.userId;
+    let userId = req.user?.id || req.userId;
     const { id } = req.params;
     const { name, categoryId } = req.body;
     const moduleScope = getTitleScope(
       { ...req.query, ...req.body },
       MODULE_SCOPES.TRADING,
     );
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) userId = req.user?.businessOwnerId || userId;
 
     assertTitleScopeEnabled(req, moduleScope);
 
@@ -431,6 +440,8 @@ exports.updateExpenseTitle = async (req, res) => {
 
     await title.save();
     await title.populate("categoryId", "name code type category moduleScope");
+
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS) await logActivity({ req, action: "update_expense_title", module: "installments.expenses", moduleScope, entityType: "ExpenseTitle", entityId: title._id, title: title.name, after: title });
 
     res.json(title);
   } catch (error) {

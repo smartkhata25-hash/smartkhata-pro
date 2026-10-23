@@ -175,6 +175,84 @@ const PERMISSIONS = {
     VIEW: "weaving.view",
   },
 
+  INSTALLMENTS: {
+    VIEW: "installments.view",
+  },
+
+  INSTALLMENTS_MEMBERS: {
+    VIEW: "installments.members.view",
+    CREATE: "installments.members.create",
+    EDIT: "installments.members.edit",
+    DELETE: "installments.members.delete",
+    RESTORE: "installments.members.restore",
+    VIEW_LEDGER: "installments.members.view_ledger",
+  },
+
+  INSTALLMENTS_SUPPLIERS: {
+    VIEW: "installments.suppliers.view",
+    CREATE: "installments.suppliers.create",
+    EDIT: "installments.suppliers.edit",
+    ARCHIVE: "installments.suppliers.archive",
+    RESTORE: "installments.suppliers.restore",
+    VIEW_LEDGER: "installments.suppliers.ledger.view",
+    MANAGE_OPENING: "installments.suppliers.opening.manage",
+  },
+
+  INSTALLMENTS_INVOICES: {
+    VIEW: "installments.invoices.view", CREATE: "installments.invoices.create", EDIT: "installments.invoices.edit", POST: "installments.invoices.post",
+    VIEW_COST: "installments.invoices.view_cost", RECEIVE_PAYMENT: "installments.invoices.receive_payment", PAY_SUPPLIER: "installments.invoices.pay_supplier", PRINT: "installments.invoices.print",
+  },
+
+  INSTALLMENTS_PRODUCTS: { MANAGE: "installments.products.manage" },
+  INSTALLMENTS_ACCOUNTS: {
+    VIEW: "installments.accounts.view", VIEW_TRANSACTIONS: "installments.accounts.view_transactions",
+    CREATE: "installments.accounts.create", EDIT: "installments.accounts.edit", MANAGE: "installments.accounts.manage",
+    TRANSFER: "installments.accounts.transfer", ADJUST: "installments.accounts.adjust", REVERSE: "installments.accounts.reverse",
+  },
+
+  INSTALLMENTS_PAYMENTS: {
+    VIEW_COLLECTIONS: "installments.payments.view_collections",
+    RECEIVE: "installments.payments.receive",
+    VIEW_HISTORY: "installments.payments.view_history",
+    PRINT: "installments.payments.print",
+    WHATSAPP: "installments.payments.whatsapp",
+    PAY_SUPPLIER: "installments.payments.pay_supplier",
+    RETURN_SAVINGS: "installments.payments.return_savings",
+    VIEW_BALANCES: "installments.payments.view_balances",
+    REVERSE: "installments.payments.reverse",
+    VIEW_COLLECTOR_SUMMARY: "installments.payments.view_collector_summary",
+  },
+
+  INSTALLMENTS_COMMITTEES: {
+    MANAGE: "installments.committees.manage",
+    VIEW: "installments.committees.view",
+    CREATE: "installments.committees.create",
+    EDIT: "installments.committees.edit",
+    ARCHIVE: "installments.committees.archive",
+    RESTORE: "installments.committees.restore",
+    VIEW_SCHEDULE: "installments.committees.schedule.view",
+  },
+
+  INSTALLMENTS_OPENING_BALANCES: {
+    MANAGE: "installments.opening_balances.manage",
+  },
+
+  INSTALLMENTS_EXPENSES: {
+    VIEW: "installments.expenses.view",
+    CREATE: "installments.expenses.create",
+    EDIT: "installments.expenses.edit",
+    ARCHIVE: "installments.expenses.archive",
+    MANAGE_TITLES: "installments.expenses.manage_titles",
+  },
+
+  INSTALLMENTS_REPORTS: {
+    PROFIT: "installments.reports.profit",
+    COLLECTIONS: "installments.reports.collections",
+    EXPENSES: "installments.reports.expenses",
+    RECEIVABLES: "installments.reports.receivables",
+    EXPORT: "installments.reports.export",
+  },
+
   WEAVING_MASTERS: {
     VIEW: "weaving.masters.view",
     CREATE: "weaving.masters.create",
@@ -365,6 +443,7 @@ const PERMISSION_SCOPES = Object.freeze({
   TRADING: "trading",
   TRAVEL: "travel",
   WEAVING: "weaving",
+  INSTALLMENTS: "installments",
   SHARED: "shared",
   OWNER: "owner",
 });
@@ -397,6 +476,7 @@ const getPermissionScope = (permission) => {
   if (OWNER_ONLY_PERMISSIONS.has(permission)) return PERMISSION_SCOPES.OWNER;
   if (String(permission).startsWith("travel.")) return PERMISSION_SCOPES.TRAVEL;
   if (String(permission).startsWith("weaving.")) return PERMISSION_SCOPES.WEAVING;
+  if (String(permission).startsWith("installments.")) return PERMISSION_SCOPES.INSTALLMENTS;
   if (TRADING_PERMISSION_OVERRIDES.has(permission)) return PERMISSION_SCOPES.TRADING;
 
   const groupName = Object.keys(PERMISSIONS).find((key) =>
@@ -427,7 +507,7 @@ const getPermissionModules = (permissions = []) => [
   ...new Set(
     sanitizePermissions(permissions)
       .map(getPermissionScope)
-      .filter((scope) => ["trading", "travel", "weaving"].includes(scope)),
+      .filter((scope) => ["trading", "travel", "weaving", "installments"].includes(scope)),
   ),
 ];
 
@@ -447,7 +527,13 @@ const getEffectivePermissions = (
 
 const getPermissionCatalog = (moduleConfig = {}) => {
   const allowed = new Set(getAllowedPermissions(moduleConfig));
-  const labels = { trading: "Trading", travel: "Travel", weaving: "Weaving", shared: "Shared" };
+  const labels = {
+    trading: "Trading",
+    travel: "Travel",
+    weaving: "Weaving",
+    installments: "Committee & Installments",
+    shared: "Shared",
+  };
 
   return Object.entries(labels)
     .filter(([scope]) => scope === "shared" || moduleConfig?.enabledModules?.[scope] === true)

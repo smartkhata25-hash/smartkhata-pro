@@ -29,7 +29,7 @@ const expenseTitleSchema = new mongoose.Schema(
 
     moduleScope: {
       type: String,
-      enum: ["trading", "travel", "weaving", "both"],
+      enum: ["trading", "travel", "weaving", "installments", "both"],
       default: "trading",
       index: true,
     },

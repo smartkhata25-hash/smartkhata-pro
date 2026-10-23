@@ -6,6 +6,12 @@ import {
   clearTravelCacheDomainPrefix,
   TRAVEL_CACHE_DOMAINS,
 } from '../utils/travelMasterCache';
+import {
+  cachedInstallmentsRequest,
+  INSTALLMENTS_CACHE_DOMAINS as INSTALLMENTS_D,
+  INSTALLMENTS_STALE_TIME as INSTALLMENTS_TTL,
+  invalidateInstallmentsExpenseData,
+} from '../utils/installmentsMasterCache';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/expense`;
@@ -31,6 +37,8 @@ const isTravelExpenseScope = (value) => {
   return scope === 'travel' || scope === 'both';
 };
 
+const isInstallmentsExpenseScope = (value) => String(value || '').trim().toLowerCase() === 'installments';
+
 const clearExpenseCaches = (moduleScope) => {
   clearAccountsCache();
 
@@ -50,19 +58,43 @@ export async function createExpense(formData, options = {}) {
   );
 
   clearExpenseCaches(moduleScope);
+  if (isInstallmentsExpenseScope(moduleScope)) invalidateInstallmentsExpenseData();
 
   return response.data;
 }
 
 export async function getAllExpenses(params = {}) {
+  if (isInstallmentsExpenseScope(params.moduleScope || params.scope)) {
+    return cachedInstallmentsRequest(
+      INSTALLMENTS_D.EXPENSES,
+      params,
+      async () => {
+        const response = await axios.get(API_URL, getConfig(params));
+        return Array.isArray(response.data) ? response.data : response.data?.rows ? response.data : [];
+      },
+      { staleTime: INSTALLMENTS_TTL.FINANCIAL }
+    );
+  }
   const response = await axios.get(API_URL, getConfig(params));
 
-  return Array.isArray(response.data) ? response.data : [];
+  return Array.isArray(response.data) ? response.data : response.data?.rows ? response.data : [];
 }
 
 export async function getExpenseById(id, params = {}) {
   if (!id) {
     throw new Error('Expense ID is required');
+  }
+
+  if (isInstallmentsExpenseScope(params.moduleScope || params.scope)) {
+    return cachedInstallmentsRequest(
+      INSTALLMENTS_D.EXPENSE_DETAIL,
+      { id, ...params },
+      async () => {
+        const response = await axios.get(`${API_URL}/${id}`, getConfig(params));
+        return response.data || null;
+      },
+      { staleTime: INSTALLMENTS_TTL.FINANCIAL }
+    );
   }
 
   const response = await axios.get(`${API_URL}/${id}`, getConfig(params));
@@ -80,6 +112,7 @@ export async function updateExpense(id, formData, options = {}) {
   );
 
   clearExpenseCaches(moduleScope);
+  if (isInstallmentsExpenseScope(moduleScope)) invalidateInstallmentsExpenseData();
 
   return response.data;
 }
@@ -89,6 +122,7 @@ export async function deleteExpense(id, options = {}) {
   const response = await axios.delete(`${API_URL}/${id}`, getConfig(options));
 
   clearExpenseCaches(options.moduleScope || options.scope);
+  if (isInstallmentsExpenseScope(options.moduleScope || options.scope)) invalidateInstallmentsExpenseData();
 
   return response.data;
 }

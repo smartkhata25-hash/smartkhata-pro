@@ -23,6 +23,12 @@ app.use("/api/accounts", require("./routes/accountRoutes"));
 app.use("/api/journal", require("./routes/journalEntryRoutes"));
 
 app.use("/api/customers", require("./routes/customerRoutes"));
+app.use("/api/installments/members", require("./routes/installmentsMemberRoutes"));
+app.use("/api/installments/committees", require("./routes/installmentsCommitteeRoutes"));
+app.use("/api/installments/suppliers", require("./routes/installmentsSupplierRoutes"));
+app.use("/api/installments/invoices", require("./routes/installmentsInvoiceRoutes"));
+app.use("/api/installments/payments", require("./routes/installmentsPaymentRoutes"));
+app.use("/api/installments/reports", require("./routes/installmentsReportRoutes"));
 app.use("/api/customer-ledger", require("./routes/ledgerRoutes"));
 app.use("/api/suppliers", require("./routes/supplierRoutes"));
 app.use("/api/parties", require("./routes/partyRoutes"));

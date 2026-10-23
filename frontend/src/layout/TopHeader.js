@@ -6,14 +6,18 @@ import MegaMenu from './MegaMenu';
 
 import menuConfig from './menuConfig';
 import { filterMenuConfigByModules } from '../utils/moduleNavigation';
-import { MODULE_KEYS } from '../utils/moduleConfig';
-import { hasPermission } from '../utils/permissionHelper';
+import { isModuleEnabled, MODULE_KEYS } from '../utils/moduleConfig';
+import { canAccess, hasPermission } from '../utils/permissionHelper';
 import { isTravelContext, buildTravelRouteState } from '../utils/travelContext';
 import {
   weavingSearchConfig,
   weavingTopMenuConfig,
 } from '../components/weaving/layout/weavingNavigationConfig';
 import { isWeavingContext, buildWeavingRouteState } from '../utils/weavingContext';
+import { isInstallmentsContext } from '../utils/installmentsContext';
+import { clearInstallmentsMasterCache } from '../utils/installmentsMasterCache';
+import { installmentsTopMenuConfig } from '../components/installments/layout/installmentsNavigationConfig';
+import InstallmentsHeaderMenu from '../components/installments/layout/InstallmentsHeaderMenu';
 import { getCurrentLanguage, setLanguage } from '../i18n/i18n';
 import { t } from '../i18n/i18n';
 import axios from 'axios';
@@ -336,10 +340,19 @@ const TopHeader = ({
   const location = useLocation();
   const isTravelWorkspace = isTravelContext(location);
   const isWeavingWorkspace = isWeavingContext(location);
-  const calculatorModule = isTravelWorkspace ? 'travel' : isWeavingWorkspace ? 'weaving' : 'trading';
+  const isInstallmentsWorkspace = isInstallmentsContext(location);
+  const calculatorModule = isInstallmentsWorkspace
+    ? 'installments'
+    : isTravelWorkspace
+      ? 'travel'
+      : isWeavingWorkspace
+        ? 'weaving'
+        : 'trading';
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   useEffect(() => setCalculatorOpen(false), [calculatorModule]);
-  const workspaceDashboardPath = isWeavingWorkspace
+  const workspaceDashboardPath = isInstallmentsWorkspace
+    ? '/installments/dashboard'
+    : isWeavingWorkspace
     ? '/weaving/dashboard'
     : isTravelWorkspace
       ? '/travel/dashboard'
@@ -364,6 +377,11 @@ const TopHeader = ({
   };
 
   const handleBack = () => {
+    if (isInstallmentsWorkspace && !navigationService.canGoBack()) {
+      navigate('/installments/dashboard');
+      return;
+    }
+
     if (isWeavingWorkspace && location.state?.returnTo) {
       navigate(location.state.returnTo);
       return;
@@ -393,7 +411,19 @@ const TopHeader = ({
   const userMenuRef = React.useRef(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [openWeavingMobileMenu, setOpenWeavingMobileMenu] = useState('');
+  const [openInstallmentsMobileMenu, setOpenInstallmentsMobileMenu] = useState('');
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  useEffect(() => {
+    if (!isInstallmentsWorkspace) return;
+    setShowMobileMenu(false);
+    setOpenInstallmentsMobileMenu('');
+  }, [isInstallmentsWorkspace, location.pathname, location.search]);
+  useEffect(() => {
+    if (!isInstallmentsWorkspace || !showMobileMenu) return undefined;
+    const closeOnEscape = (event) => { if (event.key === 'Escape') setShowMobileMenu(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [isInstallmentsWorkspace, showMobileMenu]);
 
   const alertCount =
     (dashboardAlerts?.lowStock || 0) +
@@ -403,7 +433,7 @@ const TopHeader = ({
   const travelReminderAlertCount = Number(travelReminderSummary?.attentionCount || 0);
   const visibleAlertCount = isTravelWorkspace
     ? travelReminderAlertCount
-    : isWeavingWorkspace
+    : isWeavingWorkspace || isInstallmentsWorkspace
       ? 0
       : alertCount;
 
@@ -413,9 +443,14 @@ const TopHeader = ({
 
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const hasResolvedModuleConfig = Boolean(
+    user?.enabledModules && typeof user.enabledModules === 'object'
+  );
   const visibleMenuConfig = filterMenuConfigByModules(menuConfig, user);
 
-  const activeMenuConfig = isWeavingWorkspace
+  const activeMenuConfig = isInstallmentsWorkspace
+    ? filterMenuConfigByModules(installmentsTopMenuConfig, user)
+    : isWeavingWorkspace
     ? filterMenuConfigByModules(weavingTopMenuConfig, user)
     : isTravelWorkspace
       ? filterMenuConfigByModules(travelTopMenuConfig, user)
@@ -425,6 +460,45 @@ const TopHeader = ({
     : [];
 
   const isOwner = (user.accountRole || 'owner') === 'owner';
+  const workspaceOptions = hasResolvedModuleConfig ? [
+    {
+      key: MODULE_KEYS.TRADING,
+      label: t('business.modules.trading'),
+      path: '/dashboard',
+      allowed:
+        isModuleEnabled(user, MODULE_KEYS.TRADING) &&
+        (isOwner || visibleMenuConfig.some((item) => item.module === MODULE_KEYS.TRADING)),
+    },
+    {
+      key: MODULE_KEYS.TRAVEL,
+      label: t('business.modules.travel'),
+      path: '/travel/dashboard',
+      allowed: canAccess({ permission: 'travel.view', moduleKey: MODULE_KEYS.TRAVEL, user }),
+    },
+    {
+      key: MODULE_KEYS.WEAVING,
+      label: t('business.modules.weaving'),
+      path: '/weaving/dashboard',
+      allowed: canAccess({ permission: 'weaving.view', moduleKey: MODULE_KEYS.WEAVING, user }),
+    },
+    {
+      key: MODULE_KEYS.INSTALLMENTS,
+      label: t('business.modules.installments'),
+      path: '/installments/dashboard',
+      allowed: canAccess({
+        permission: 'installments.view',
+        moduleKey: MODULE_KEYS.INSTALLMENTS,
+        user,
+      }),
+    },
+  ].filter((workspace) => workspace.allowed) : [];
+  const activeWorkspace = isInstallmentsWorkspace
+    ? MODULE_KEYS.INSTALLMENTS
+    : isWeavingWorkspace
+      ? MODULE_KEYS.WEAVING
+      : isTravelWorkspace
+        ? MODULE_KEYS.TRAVEL
+        : MODULE_KEYS.TRADING;
   const baseUrl = process.env.REACT_APP_API_BASE_URL;
 
   useEffect(() => {
@@ -507,6 +581,8 @@ const TopHeader = ({
           item.terms.some((keyword) => term.includes(keyword))
         );
         navigate(destination?.path || '/weaving/dashboard');
+      } else if (isInstallmentsWorkspace) {
+        navigate('/installments/dashboard');
       } else if (isTravelWorkspace) {
         if (term.includes('balance') && hasPermission('reports.trial_balance', user)) {
           navigate('/travel/trial-balance');
@@ -576,7 +652,7 @@ const TopHeader = ({
     <div className="relative bg-white border-b shadow-sm px-3 sm:px-6 h-14 flex items-center justify-between">
       {/* LEFT SIDE */}
       <div className="flex items-center gap-3 md:gap-6">
-        {!['/dashboard', '/weaving/dashboard', '/login', '/', '/personal-info', '/business-info'].includes(
+        {!['/dashboard', '/weaving/dashboard', '/travel/dashboard', '/installments/dashboard', '/login', '/', '/personal-info', '/business-info'].includes(
           location.pathname
         ) && (
           <button
@@ -601,11 +677,18 @@ const TopHeader = ({
         <div className="flex items-center gap-3">
           {/* Sidebar button */}
           <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-700 transition hover:bg-slate-100 hover:text-blue-700 md:hidden"
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-700 transition hover:bg-slate-100 hover:text-blue-700 ${isInstallmentsWorkspace ? 'lg:hidden' : 'md:hidden'}`}
             type="button"
-            aria-label={t('travel.layout.toggleSidebar')}
-            title={t('travel.layout.toggleSidebar')}
+            aria-label={t(isInstallmentsWorkspace ? 'travel.layout.toggleMenu' : 'travel.layout.toggleSidebar')}
+            aria-controls={isInstallmentsWorkspace ? 'installments-mobile-navigation' : undefined}
+            aria-expanded={isInstallmentsWorkspace ? showMobileMenu : undefined}
+            title={t(isInstallmentsWorkspace ? 'travel.layout.toggleMenu' : 'travel.layout.toggleSidebar')}
             onClick={() => {
+              if (isInstallmentsWorkspace) {
+                setIsSidebarOpen(false);
+                setShowMobileMenu((prev) => !prev);
+                return;
+              }
               setShowMobileMenu(false);
               setIsSidebarOpen((prev) => !prev);
             }}
@@ -614,7 +697,7 @@ const TopHeader = ({
           </button>
 
           {/* Mobile menu */}
-          <button
+          {!isInstallmentsWorkspace && <button
             className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-700 transition hover:bg-slate-100 hover:text-blue-700 xl:hidden"
             type="button"
             aria-label={t('travel.layout.toggleMenu')}
@@ -625,7 +708,7 @@ const TopHeader = ({
             }}
           >
             <FaEllipsisV aria-hidden="true" />
-          </button>
+          </button>}
 
           {/* Logo */}
           <div
@@ -634,70 +717,95 @@ const TopHeader = ({
           >
             <img src="/logo.png" alt="logo" style={{ height: '35px' }} />
           </div>
+
+          {workspaceOptions.length > 0 && (
+            <label className="relative min-w-0">
+              <span className="sr-only">{t('business.modules.switchWorkspace')}</span>
+              <select
+                value={activeWorkspace}
+                onChange={(event) => {
+                  const destination = workspaceOptions.find(
+                    (workspace) => workspace.key === event.target.value
+                  );
+                  if (destination) navigate(destination.path);
+                }}
+                className="h-9 max-w-[92px] rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 min-[390px]:max-w-[132px] sm:max-w-[190px] sm:text-sm"
+              >
+                {workspaceOptions.map((workspace) => (
+                  <option key={workspace.key} value={workspace.key}>
+                    {workspace.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
 
         {/* DESKTOP MENU */}
-        <div className="hidden xl:flex items-center gap-1">
-          {activeMenuConfig.map((menu) => (
-            <MegaMenu
-              key={menu.label}
-              label={menu.label}
-              sections={menu.sections}
-              path={menu.path}
-            />
-          ))}
+        <div className={`${isInstallmentsWorkspace ? 'hidden lg:flex' : 'hidden xl:flex'} items-center gap-1`}>
+          {isInstallmentsWorkspace
+            ? activeMenuConfig.map((item) => (
+                <InstallmentsHeaderMenu key={item.key} menu={item} />
+              ))
+            : activeMenuConfig.map((menu) => (
+                <MegaMenu
+                  key={menu.label}
+                  label={menu.label}
+                  sections={menu.sections}
+                  path={menu.path}
+                />
+              ))}
         </div>
       </div>
 
       {/* MOBILE MENU */}
       {showMobileMenu && (
-        <div className="absolute top-14 left-0 w-full bg-white border-b shadow-md xl:hidden z-40 max-h-[calc(100vh-56px)] overflow-y-auto">
+        <div id={isInstallmentsWorkspace ? 'installments-mobile-navigation' : undefined} className={`absolute inset-x-0 top-14 w-full max-w-full bg-white border-b shadow-md ${isInstallmentsWorkspace ? 'lg:hidden' : 'xl:hidden'} z-40 max-h-[calc(100vh-56px)] overflow-x-hidden overflow-y-auto`}>
           {activeMenuConfig.map((menu, index) => (
             <div key={index} className="border-b">
               <div
                 className={`flex min-h-12 items-center justify-between gap-3 bg-gray-50 px-4 py-3 font-semibold ${
-                  menu.path || isWeavingWorkspace ? 'cursor-pointer hover:bg-gray-100' : ''
+                  menu.path || isWeavingWorkspace || isInstallmentsWorkspace ? 'cursor-pointer hover:bg-gray-100' : ''
                 }`}
-                role={menu.path || isWeavingWorkspace ? 'button' : undefined}
-                tabIndex={menu.path || isWeavingWorkspace ? 0 : undefined}
+                role={menu.path || isWeavingWorkspace || isInstallmentsWorkspace ? 'button' : undefined}
+                tabIndex={menu.path || isWeavingWorkspace || isInstallmentsWorkspace ? 0 : undefined}
+                aria-expanded={!menu.path && (isWeavingWorkspace || isInstallmentsWorkspace) ? (isInstallmentsWorkspace ? openInstallmentsMobileMenu : openWeavingMobileMenu) === menu.label : undefined}
                 onClick={() => {
                   if (menu.path) {
                     handleMobileMenuPath(menu.path);
-                  } else if (isWeavingWorkspace) {
-                    setOpenWeavingMobileMenu((current) =>
-                      current === menu.label ? '' : menu.label
-                    );
+                  } else if (isWeavingWorkspace || isInstallmentsWorkspace) {
+                    const setter = isInstallmentsWorkspace ? setOpenInstallmentsMobileMenu : setOpenWeavingMobileMenu;
+                    setter((current) => current === menu.label ? '' : menu.label);
                   }
                 }}
                 onKeyDown={(event) => {
-                  if ((menu.path || isWeavingWorkspace) && (event.key === 'Enter' || event.key === ' ')) {
+                  if ((menu.path || isWeavingWorkspace || isInstallmentsWorkspace) && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
                     if (menu.path) {
                       handleMobileMenuPath(menu.path);
                     } else {
-                      setOpenWeavingMobileMenu((current) =>
-                        current === menu.label ? '' : menu.label
-                      );
+                      const setter = isInstallmentsWorkspace ? setOpenInstallmentsMobileMenu : setOpenWeavingMobileMenu;
+                      setter((current) => current === menu.label ? '' : menu.label);
                     }
                   }
                 }}
               >
                 <span>{t(menu.label)}</span>
-                {!menu.path && isWeavingWorkspace && (
+                {!menu.path && (isWeavingWorkspace || isInstallmentsWorkspace) && (
                   <FaChevronDown
                     aria-hidden="true"
                     className={`flex-shrink-0 text-xs transition-transform ${
-                      openWeavingMobileMenu === menu.label ? 'rotate-180' : ''
+                      (isInstallmentsWorkspace ? openInstallmentsMobileMenu : openWeavingMobileMenu) === menu.label ? 'rotate-180' : ''
                     }`}
                   />
                 )}
               </div>
 
               {!menu.path &&
-                (!isWeavingWorkspace || openWeavingMobileMenu === menu.label) &&
+                (!(isWeavingWorkspace || isInstallmentsWorkspace) || (isInstallmentsWorkspace ? openInstallmentsMobileMenu : openWeavingMobileMenu) === menu.label) &&
                 menu.sections?.map((section, sIndex) => (
                   <div key={sIndex} className="border-t border-slate-100 py-1">
-                    {isWeavingWorkspace && (
+                    {(isWeavingWorkspace || isInstallmentsWorkspace) && (
                       <div className="px-6 pb-1 pt-2 text-[11px] font-extrabold uppercase text-slate-400">
                         {t(section.title)}
                       </div>
@@ -706,10 +814,21 @@ const TopHeader = ({
                       <div
                         key={iIndex}
                         className="min-h-10 cursor-pointer px-6 py-2 text-sm hover:bg-gray-100"
+                        role={isInstallmentsWorkspace ? 'button' : undefined}
+                        tabIndex={isInstallmentsWorkspace ? 0 : undefined}
                         onClick={() => {
                           setShowMobileMenu(false);
+                          if (isInstallmentsWorkspace) setOpenInstallmentsMobileMenu('');
                           navigate(item.path);
                         }}
+                        onKeyDown={isInstallmentsWorkspace ? (event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setShowMobileMenu(false);
+                            setOpenInstallmentsMobileMenu('');
+                            navigate(item.path);
+                          }
+                        } : undefined}
                       >
                         {t(item.label)}
                       </div>
@@ -722,7 +841,7 @@ const TopHeader = ({
       )}
 
       {/* SEARCH */}
-      <div className="hidden xl:flex flex-1 justify-center px-8">
+      <div className={`${isInstallmentsWorkspace ? 'hidden' : 'hidden xl:flex'} flex-1 justify-center px-8`}>
         <input
           type="text"
           value={searchTerm}
@@ -766,7 +885,7 @@ const TopHeader = ({
           </div>
 
           {/* Notification */}
-          <div
+          {!isInstallmentsWorkspace && <div
             data-right-panel-toggle="true"
             onClick={() => {
               if (isTravelWorkspace && onOpenTravelReminderCenter) {
@@ -823,7 +942,7 @@ const TopHeader = ({
                 {visibleAlertCount}
               </span>
             )}
-          </div>
+          </div>}
         </div>
 
         {/* Travel Right Panel */}
@@ -950,6 +1069,7 @@ const TopHeader = ({
 
               <div
                 onClick={() => {
+                  clearInstallmentsMasterCache();
                   localStorage.removeItem('token');
                   localStorage.removeItem('userId');
                   localStorage.removeItem('user');

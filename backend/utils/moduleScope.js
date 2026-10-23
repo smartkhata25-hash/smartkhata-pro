@@ -2,6 +2,7 @@ const MODULE_SCOPES = Object.freeze({
   TRADING: "trading",
   TRAVEL: "travel",
   WEAVING: "weaving",
+  INSTALLMENTS: "installments",
   BOTH: "both",
   SHARED: "shared",
 });
@@ -66,6 +67,10 @@ const buildModuleScopeFilter = (
         $in: [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED],
       },
     };
+  }
+
+  if (normalizedScope === MODULE_SCOPES.INSTALLMENTS) {
+    return { [field]: { $in: [MODULE_SCOPES.INSTALLMENTS, MODULE_SCOPES.SHARED] } };
   }
 
   if (normalizedScope === MODULE_SCOPES.BOTH) {
@@ -148,6 +153,10 @@ const buildSupplierModuleScopeFilter = (
         $in: [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED],
       },
     };
+  }
+
+  if (normalizedScope === MODULE_SCOPES.INSTALLMENTS) {
+    return { [field]: { $in: [MODULE_SCOPES.INSTALLMENTS, MODULE_SCOPES.SHARED] } };
   }
 
   if (normalizedScope === MODULE_SCOPES.BOTH) {
@@ -259,6 +268,10 @@ const documentMatchesModuleScope = (
     return [MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(
       safeDocumentScope,
     );
+  }
+
+  if (normalizedScope === MODULE_SCOPES.INSTALLMENTS) {
+    return [MODULE_SCOPES.INSTALLMENTS, MODULE_SCOPES.SHARED].includes(safeDocumentScope);
   }
 
   if (normalizedScope === MODULE_SCOPES.BOTH) {

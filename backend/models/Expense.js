@@ -35,12 +35,12 @@ const expenseSchema = new mongoose.Schema(
     },
     paymentType: {
       type: String,
-      enum: ["Cash", "Cheque", "Bank"],
+      enum: ["Cash", "Cheque", "Bank", "Online", "Other"],
       required: true,
     },
     moduleScope: {
       type: String,
-      enum: ["trading", "travel", "weaving", "both"],
+      enum: ["trading", "travel", "weaving", "installments", "both"],
       default: "trading",
       index: true,
     },
@@ -101,10 +101,18 @@ const expenseSchema = new mongoose.Schema(
       ref: "JournalEntry",
       default: null,
     },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    idempotencyKey: { type: String, trim: true, default: null },
   },
   {
     timestamps: true,
   },
+);
+
+expenseSchema.index(
+  { userId: 1, moduleScope: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } },
 );
 
 module.exports = mongoose.model("Expense", expenseSchema);

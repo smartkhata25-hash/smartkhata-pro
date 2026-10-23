@@ -15,6 +15,7 @@ import {
   getEnabledActivityScopes,
   resolveActivityScope,
 } from '../utils/activityScope';
+import { formatInstallmentsDisplayRef } from '../utils/installmentsDisplay';
 
 const EMPTY_PAGINATION = {
   page: 1,
@@ -33,6 +34,12 @@ const INITIAL_FILTERS = {
   page: 1,
   limit: 25,
 };
+
+const displayActivityReference = (activity, value) => (
+  (activity?.moduleScope === 'installments' || String(activity?.module || '').startsWith('installments'))
+    ? formatInstallmentsDisplayRef(value, 'reference')
+    : value
+);
 
 const ACTION_LABELS = {
   login: 'Login',
@@ -613,14 +620,14 @@ const ActivityLogPage = () => {
                       <td className="px-4 py-3 capitalize">{formatText(activity.module)}</td>
 
                       <td className="px-4 py-3">
-                        <div className="font-medium text-gray-800">{activity.title || '-'}</div>
+                        <div className="font-medium text-gray-800">{displayActivityReference(activity, activity.title) || '-'}</div>
 
                         <div className="text-xs text-gray-500 mt-1 max-w-[260px] truncate">
                           {activity.description || '-'}
                         </div>
                       </td>
 
-                      <td className="px-4 py-3">{activity.billNo || '-'}</td>
+                      <td className="px-4 py-3">{displayActivityReference(activity, activity.billNo) || '-'}</td>
 
                       <td className="px-4 py-3 text-center">
                         <button
@@ -804,7 +811,7 @@ const ActivityDetailModal = ({
 
                 <DetailItem label="Entity ID" value={activity.entityId || '-'} />
 
-                <DetailItem label="Bill No" value={activity.billNo || '-'} />
+                <DetailItem label="Bill No" value={displayActivityReference(activity, activity.billNo) || '-'} />
 
                 <DetailItem
                   label="Date & Time"
@@ -816,7 +823,7 @@ const ActivityDetailModal = ({
                 <DetailItem label="Device ID" value={activity.deviceId || '-'} />
               </div>
 
-              <DetailItem label="Title" value={activity.title || '-'} />
+              <DetailItem label="Title" value={displayActivityReference(activity, activity.title) || '-'} />
 
               <DetailItem label="Description" value={activity.description || '-'} />
 

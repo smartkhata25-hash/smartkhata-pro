@@ -253,12 +253,12 @@ td.left {
 
     |
 
-    ${escapeHtml(t("debit", lang))}:
+    ${escapeHtml(t("credit", lang))}:
     ${formatMoney(summary.totalDebit)}
 
     |
 
-    ${escapeHtml(t("credit", lang))}:
+    ${escapeHtml(t("debit", lang))}:
     ${formatMoney(summary.totalCredit)}
 
     |
@@ -285,11 +285,11 @@ td.left {
         </th>
 
         <th style="width:15%">
-          ${escapeHtml(t("debit", lang))}
+          ${escapeHtml(t("credit", lang))}
         </th>
 
         <th style="width:15%">
-          ${escapeHtml(t("credit", lang))}
+          ${escapeHtml(t("debit", lang))}
         </th>
 
         <th style="width:15%">

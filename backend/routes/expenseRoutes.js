@@ -4,7 +4,7 @@ const router = express.Router();
 const upload = require("../middleware/uploadMiddleware");
 const { protect } = require("../middleware/authMiddleware");
 
-const { requirePermission } = require("../middleware/permissionMiddleware");
+const { requireScopedExpensePermission } = require("../middleware/permissionMiddleware");
 const { PERMISSIONS } = require("../utils/permissionList");
 
 const {
@@ -19,7 +19,7 @@ const {
 router.post(
   "/",
   protect,
-  requirePermission(PERMISSIONS.EXPENSES.CREATE),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.CREATE, PERMISSIONS.INSTALLMENTS_EXPENSES.CREATE),
   upload.single("attachment"),
   createExpense,
 );
@@ -28,7 +28,7 @@ router.post(
 router.get(
   "/",
   protect,
-  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.VIEW, PERMISSIONS.INSTALLMENTS_EXPENSES.VIEW),
   getAllExpenses,
 );
 
@@ -36,7 +36,7 @@ router.get(
 router.get(
   "/:id",
   protect,
-  requirePermission(PERMISSIONS.EXPENSES.VIEW),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.VIEW, PERMISSIONS.INSTALLMENTS_EXPENSES.VIEW),
   getExpenseById,
 );
 
@@ -44,7 +44,7 @@ router.get(
 router.put(
   "/:id",
   protect,
-  requirePermission(PERMISSIONS.EXPENSES.EDIT),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.EDIT, PERMISSIONS.INSTALLMENTS_EXPENSES.EDIT),
   upload.single("attachment"),
   updateExpense,
 );
@@ -53,7 +53,7 @@ router.put(
 router.delete(
   "/:id",
   protect,
-  requirePermission(PERMISSIONS.EXPENSES.DELETE),
+  requireScopedExpensePermission(PERMISSIONS.EXPENSES.DELETE, PERMISSIONS.INSTALLMENTS_EXPENSES.ARCHIVE),
   deleteExpense,
 );
 

@@ -35,12 +35,13 @@ const cleanObject = (value) => {
 const resolveActivityModuleScope = ({ requestedScope = "", originalUrl = "", module = "" }) => {
   const cleanScope = String(requestedScope).trim().toLowerCase();
   const cleanModule = String(module).trim().toLowerCase();
-  if (["travel", "trading", "weaving", "both", "shared"].includes(cleanScope)) {
+  if (["travel", "trading", "weaving", "installments", "both", "shared"].includes(cleanScope)) {
     return cleanScope;
   }
   if (cleanModule === "staff" || cleanModule.startsWith("staff.")) return "shared";
   if (String(originalUrl).startsWith("/api/travel") || cleanModule.startsWith("travel.")) return "travel";
   if (String(originalUrl).startsWith("/api/weaving") || cleanModule.startsWith("weaving.")) return "weaving";
+  if (String(originalUrl).startsWith("/api/installments") || cleanModule.startsWith("installments.")) return "installments";
   return "trading";
 };
 

@@ -2,7 +2,7 @@ import { normalizeModuleConfig } from './moduleConfig';
 
 export const getEnabledActivityScopes = (user = {}) => {
   const { enabledModules } = normalizeModuleConfig(user);
-  return ['trading', 'travel', 'weaving'].filter((scope) => enabledModules[scope]);
+  return ['trading', 'travel', 'weaving', 'installments'].filter((scope) => enabledModules[scope]);
 };
 
 export const resolveActivityScope = (user = {}, location = {}) => {
@@ -12,6 +12,8 @@ export const resolveActivityScope = (user = {}, location = {}) => {
     ? 'travel'
     : String(location.pathname || '').startsWith('/weaving')
       ? 'weaving'
+      : String(location.pathname || '').startsWith('/installments')
+        ? 'installments'
       : location.state?.moduleScope;
 
   if (enabledScopes.includes(pathScope)) return pathScope;

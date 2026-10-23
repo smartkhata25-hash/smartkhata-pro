@@ -22,7 +22,7 @@ const accountSchema = new mongoose.Schema({
   },
   moduleScope: {
     type: String,
-    enum: ["trading", "travel", "weaving", "both", "shared"],
+    enum: ["trading", "travel", "weaving", "installments", "both", "shared"],
     default: "trading",
     index: true,
   },

@@ -5,6 +5,7 @@ import { hasPermission } from '../utils/permissionHelper';
 import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
 import { formatMoneyDisplay } from '../utils/money';
+import { formatInstallmentsDisplayRef } from '../utils/installmentsDisplay';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -19,6 +20,7 @@ const AccountTransactionTable = ({
   isBankView = false,
   isTravelScoped = false,
   isWeavingScoped = false,
+  isInstallmentsScoped = false,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,6 +37,23 @@ const AccountTransactionTable = ({
   };
 
   const formatMoney = formatMoneyDisplay;
+  const displayMoney = (value) => `${isInstallmentsScoped ? '' : 'Rs. '}${formatMoney(value)}`;
+  const displayBillNo = (value) => isInstallmentsScoped ? formatInstallmentsDisplayRef(value, 'reference') : value;
+  const getAccountDisplayName = (account = {}) => {
+    const name = String(account.name || '').trim();
+    const code = String(account.code || '').trim();
+    if (name && code && name.toLowerCase() === code.toLowerCase()) return name;
+
+    const duplicatedParts = name.split(/\s*[·|]\s*/).filter(Boolean);
+    if (
+      duplicatedParts.length === 2 &&
+      duplicatedParts[0].toLowerCase() === duplicatedParts[1].toLowerCase()
+    ) {
+      return duplicatedParts[0];
+    }
+
+    return name || code || '-';
+  };
 
   const formatDateForInput = (date) => {
     return getBusinessDateInputValue(date);
@@ -191,6 +210,13 @@ const AccountTransactionTable = ({
   const summary = useMemo(() => {
     return filtered.reduce(
       (totals, txn) => {
+        if (
+          isInstallmentsScoped &&
+          txn.originModule === 'installments_account_opening_balance'
+        ) {
+          return totals;
+        }
+
         totals.moneyIn += getSafeNumber(txn.debit);
         totals.moneyOut += getSafeNumber(txn.credit);
 
@@ -201,15 +227,21 @@ const AccountTransactionTable = ({
         moneyOut: 0,
       }
     );
-  }, [filtered]);
+  }, [filtered, isInstallmentsScoped]);
 
-  const netMovement = summary.moneyIn - summary.moneyOut;
+  const isInstallmentsCashAccount = isCashView || isBankView || ['cash', 'bank', 'online', 'cheque'].includes(String(selectedAccount?.category || '').toLowerCase());
+  const isCreditNormalAccount = selectedAccount?.normalBalance === 'credit';
+  const netMovement = isInstallmentsScoped && !isInstallmentsCashAccount && isCreditNormalAccount
+    ? summary.moneyOut - summary.moneyIn
+    : summary.moneyIn - summary.moneyOut;
+  const installmentsDebitLabel = isInstallmentsCashAccount ? t('installments.moneyIn') : t(isCreditNormalAccount ? 'installments.nonCashDecrease' : 'installments.nonCashIncrease');
+  const installmentsCreditLabel = isInstallmentsCashAccount ? t('installments.moneyOut') : t(isCreditNormalAccount ? 'installments.nonCashIncrease' : 'installments.nonCashDecrease');
+  const moneyInLabel = isInstallmentsScoped ? installmentsDebitLabel : isTravelScoped ? t('travel.accounts.travelCashIn') : 'Total Money In';
 
-  const moneyInLabel = isTravelScoped ? t('travel.accounts.travelCashIn') : 'Total Money In';
+  const moneyOutLabel = isInstallmentsScoped ? installmentsCreditLabel : isTravelScoped ? t('travel.accounts.travelCashOut') : 'Total Money Out';
 
-  const moneyOutLabel = isTravelScoped ? t('travel.accounts.travelCashOut') : 'Total Money Out';
-
-  const netMovementLabel = isTravelScoped ? t('travel.accounts.travelNetMovement') : 'Cash In Hand';
+  const netMovementLabel = isInstallmentsScoped ? t('installments.netMovement') : isTravelScoped ? t('travel.accounts.travelNetMovement') : 'Cash In Hand';
+  const openingBalance = getSafeNumber(selectedAccount?.manualOpeningBalance);
 
   const travelActivityBalance = getSafeNumber(
     selectedAccount?.travelActivityBalance ?? netMovement
@@ -250,9 +282,12 @@ const AccountTransactionTable = ({
   const getTransactionRoute = (txn) => {
     const manualType = getManualType(txn);
     if (manualType) {
-      if (!txn._id || !hasPermission('accounts.edit')) return null;
-      const scope = txn.moduleScope || (isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading');
-      const base = scope === 'weaving' ? '/weaving/accounts' : scope === 'travel' ? '/travel/accounts' : '/accounts';
+      const canEdit = isInstallmentsScoped
+        ? ['installments.accounts.edit', 'installments.accounts.manage', 'installments.accounts.transfer', 'installments.accounts.adjust'].some((permission) => hasPermission(permission))
+        : hasPermission('accounts.edit');
+      if (!txn._id || !canEdit) return null;
+      const scope = txn.moduleScope || (isInstallmentsScoped ? 'installments' : isWeavingScoped ? 'weaving' : isTravelScoped ? 'travel' : 'trading');
+      const base = scope === 'installments' ? '/installments/accounts' : scope === 'weaving' ? '/weaving/accounts' : scope === 'travel' ? '/travel/accounts' : '/accounts';
       return base + '?' + new URLSearchParams({ manualType, manualId: txn._id }).toString();
     }
     const referenceId = getReferenceId(txn);
@@ -384,7 +419,7 @@ const AccountTransactionTable = ({
           moneyType === 'in' ? 'text-emerald-700' : 'text-rose-700'
         }`}
       >
-        Rs. {formatMoney(safeAmount)}
+        {displayMoney(safeAmount)}
       </span>
     );
   };
@@ -412,7 +447,7 @@ const AccountTransactionTable = ({
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="break-words text-sm font-extrabold leading-5 text-slate-950">
-              {txn.billNo || txn.description || '-'}
+              {displayBillNo(txn.billNo) || txn.description || '-'}
             </p>
 
             <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
@@ -437,7 +472,7 @@ const AccountTransactionTable = ({
             </p>
 
             <p className="mt-0.5 break-words text-sm font-extrabold text-emerald-700">
-              {getSafeNumber(txn.debit) > 0 ? `Rs. ${formatMoney(txn.debit)}` : '-'}
+              {getSafeNumber(txn.debit) > 0 ? displayMoney(txn.debit) : '-'}
             </p>
           </div>
 
@@ -447,7 +482,7 @@ const AccountTransactionTable = ({
             </p>
 
             <p className="mt-0.5 break-words text-sm font-extrabold text-rose-700">
-              {getSafeNumber(txn.credit) > 0 ? `Rs. ${formatMoney(txn.credit)}` : '-'}
+              {getSafeNumber(txn.credit) > 0 ? displayMoney(txn.credit) : '-'}
             </p>
           </div>
         </div>
@@ -484,13 +519,13 @@ const AccountTransactionTable = ({
             >
               {accounts.map((account) => (
                 <option key={account._id} value={account._id}>
-                  {account.name}
+                  {getAccountDisplayName(account)}
                 </option>
               ))}
             </select>
           ) : (
             <div className="break-words text-sm font-extrabold text-slate-900">
-              {selectedAccount?.name || '-'}
+              {getAccountDisplayName(selectedAccount)}
             </div>
           )}
 
@@ -501,7 +536,23 @@ const AccountTransactionTable = ({
                   travelActivityBalance >= 0 ? 'text-blue-700' : 'text-red-600'
                 }`}
               >
-                Balance Rs. {formatMoney(travelActivityBalance)}
+                Balance {displayMoney(travelActivityBalance)}
+              </div>
+            ) : isInstallmentsScoped ? (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {t('installments.accounts.scopedBalance')}
+                </div>
+                <div
+                  className={`break-words text-lg font-extrabold ${
+                    Number(selectedAccount.balance || 0) >= 0 ? 'text-blue-700' : 'text-red-600'
+                  }`}
+                >
+                  {displayMoney(selectedAccount.balance)}
+                </div>
+                <div className="text-[10px] font-semibold text-slate-500">
+                  {t('accounts.openingBalance')}: {displayMoney(openingBalance)}
+                </div>
               </div>
             ) : (
               <div
@@ -509,7 +560,7 @@ const AccountTransactionTable = ({
                   Number(selectedAccount.balance || 0) >= 0 ? 'text-blue-700' : 'text-red-600'
                 }`}
               >
-                Balance Rs. {formatMoneyDisplay(selectedAccount.balance)}
+                Balance {displayMoney(selectedAccount.balance)}
               </div>
             )
           ) : (
@@ -528,7 +579,7 @@ const AccountTransactionTable = ({
             </div>
 
             <div className="mt-1 break-words text-xl font-extrabold text-emerald-700">
-              Rs. {formatMoney(summary.moneyIn)}
+              {displayMoney(summary.moneyIn)}
             </div>
           </div>
 
@@ -542,7 +593,7 @@ const AccountTransactionTable = ({
             </div>
 
             <div className="mt-1 break-words text-xl font-extrabold text-rose-700">
-              Rs. {formatMoney(summary.moneyOut)}
+              {displayMoney(summary.moneyOut)}
             </div>
           </div>
 
@@ -564,7 +615,7 @@ const AccountTransactionTable = ({
                 netMovement >= 0 ? 'text-blue-700' : 'text-orange-700'
               }`}
             >
-              Rs. {formatMoney(netMovement)}
+              {displayMoney(netMovement)}
             </div>
           </div>
         </div>
@@ -572,6 +623,11 @@ const AccountTransactionTable = ({
 
       {/* ================= FILTERS ================= */}
       <div className="min-w-0 rounded-xl border border-sky-200 bg-gradient-to-r from-slate-50 via-sky-50/70 to-cyan-50/70 p-2 shadow-sm">
+        <div className="mb-2 flex justify-end print:hidden">
+          <button type="button" onClick={() => window.print()} className="min-h-9 rounded-lg bg-indigo-600 px-3 text-xs font-extrabold text-white shadow-sm hover:bg-indigo-700">
+            {t('accounts.printPdf')}
+          </button>
+        </div>
         {/* MOBILE — Compact 2 Row Filters */}
         <div className="space-y-1.5 md:hidden">
           <input
@@ -589,8 +645,8 @@ const AccountTransactionTable = ({
               className="h-9 min-w-0 rounded-lg border border-violet-200 bg-gradient-to-r from-white to-violet-50 px-2 text-xs font-semibold leading-normal text-slate-700 outline-none shadow-sm focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
             >
               <option value="all">{t('ledger.all')}</option>
-              <option value="debit">Money In</option>
-              <option value="credit">Money Out</option>
+              <option value="debit">{moneyInLabel}</option>
+              <option value="credit">{moneyOutLabel}</option>
             </select>
 
             <select
@@ -677,8 +733,8 @@ const AccountTransactionTable = ({
             className="h-10 min-w-0 rounded-lg border border-violet-200 bg-gradient-to-r from-white to-violet-50 px-3 text-sm font-semibold leading-normal text-slate-700 outline-none shadow-sm focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
           >
             <option value="all">{t('ledger.all')}</option>
-            <option value="debit">Money In</option>
-            <option value="credit">Money Out</option>
+              <option value="debit">{moneyInLabel}</option>
+              <option value="credit">{moneyOutLabel}</option>
           </select>
 
           <select
@@ -743,8 +799,8 @@ const AccountTransactionTable = ({
                     <th className={headerClass}>{t('ledger.source')}</th>
                     <th className={headerClass}>{t('ledger.paymentType')}</th>
                     <th className={`${headerClass} min-w-[280px]`}>{t('description')}</th>
-                    <th className={`${headerClass} text-right`}>Money In</th>
-                    <th className={`${headerClass} text-right`}>Money Out</th>
+                    <th className={`${headerClass} text-right`}>{moneyInLabel}</th>
+                    <th className={`${headerClass} text-right`}>{moneyOutLabel}</th>
                   </tr>
                 </thead>
 
@@ -796,7 +852,7 @@ const AccountTransactionTable = ({
                                 : ''
                             }
                           >
-                            {txn.billNo || '-'}
+                            {displayBillNo(txn.billNo) || '-'}
                           </span>
                         </td>
 
@@ -840,15 +896,15 @@ const AccountTransactionTable = ({
                       colSpan={3}
                       className="border-t-2 border-slate-300 px-3 py-2 text-right font-extrabold text-slate-800"
                     >
-                      Filtered Totals
+                      {isInstallmentsScoped ? t('installments.accounts.movementTotals') : 'Filtered Totals'}
                     </td>
 
                     <td className="whitespace-nowrap border-t-2 border-slate-300 px-3 py-2 text-right font-extrabold text-emerald-700">
-                      Rs. {formatMoney(summary.moneyIn)}
+                      {displayMoney(summary.moneyIn)}
                     </td>
 
                     <td className="whitespace-nowrap border-t-2 border-slate-300 px-3 py-2 text-right font-extrabold text-rose-700">
-                      Rs. {formatMoney(summary.moneyOut)}
+                      {displayMoney(summary.moneyOut)}
                     </td>
                   </tr>
                 </tfoot>
@@ -867,9 +923,9 @@ const AccountTransactionTable = ({
               </p>
 
               <div className="flex shrink-0 items-center gap-3 text-[11px] font-bold">
-                <span className="text-emerald-700">In: Rs. {formatMoney(summary.moneyIn)}</span>
+                <span className="text-emerald-700">In: {displayMoney(summary.moneyIn)}</span>
 
-                <span className="text-rose-700">Out: Rs. {formatMoney(summary.moneyOut)}</span>
+                <span className="text-rose-700">Out: {displayMoney(summary.moneyOut)}</span>
               </div>
             </div>
 

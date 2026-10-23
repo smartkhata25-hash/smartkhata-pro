@@ -12,6 +12,7 @@ import {
   FaWallet,
   FaUser,
 } from 'react-icons/fa';
+import InstallmentsDialog from '../components/installments/InstallmentsDialog';
 
 import {
   getAccounts,
@@ -39,6 +40,7 @@ const MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
   TRAVEL: 'travel',
   WEAVING: 'weaving',
+  INSTALLMENTS: 'installments',
   BOTH: 'both',
   SHARED: 'shared',
 });
@@ -54,6 +56,8 @@ const RESERVED_BALANCING_ACCOUNT_CODES = [
   'ACCOUNT_ADJUSTMENT',
   'TRAVEL_ACCOUNT_ADJUSTMENT',
   'WEAVING_ACCOUNT_ADJUSTMENT',
+  'INSTALLMENTS_OPENING_BALANCE',
+  'INSTALLMENTS_ACCOUNT_ADJUSTMENT',
 ];
 
 const categoryTypeMap = {
@@ -129,6 +133,9 @@ const isManualAdjustmentAccount = (account) =>
   !isCounterpartyAccountName(account.name);
 
 const getPageScope = (location) => {
+  if (location.pathname.startsWith('/installments/accounts')) {
+    return MODULE_SCOPES.INSTALLMENTS;
+  }
   if (location.pathname.startsWith('/travel/accounts')) {
     return MODULE_SCOPES.TRAVEL;
   }
@@ -147,6 +154,7 @@ const buildEmptyForm = (moduleScope) => ({
   category: '',
   moduleScope,
   openingBalance: '0',
+  isActive: true,
 });
 
 const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
@@ -181,6 +189,7 @@ const scopeLabel = (scope) => {
 
   if (normalized === MODULE_SCOPES.TRAVEL) return t('moduleScope.travel');
   if (normalized === MODULE_SCOPES.WEAVING) return t('moduleScope.weaving');
+  if (normalized === MODULE_SCOPES.INSTALLMENTS) return t('moduleScope.installments');
   if (normalized === MODULE_SCOPES.BOTH) return t('moduleScope.both');
   if (normalized === MODULE_SCOPES.SHARED) return t('moduleScope.shared');
 
@@ -206,8 +215,11 @@ const ChartOfAccountsPage = () => {
   const pageModuleScope = getPageScope(location);
   const isTravelScoped = pageModuleScope === MODULE_SCOPES.TRAVEL;
   const isWeavingScoped = pageModuleScope === MODULE_SCOPES.WEAVING;
+  const isInstallmentsScoped = pageModuleScope === MODULE_SCOPES.INSTALLMENTS;
 
-  const canEditAccounts = hasPermission('accounts.edit');
+  const canEditAccounts = isInstallmentsScoped
+    ? ['installments.accounts.create', 'installments.accounts.edit', 'installments.accounts.manage', 'installments.accounts.transfer', 'installments.accounts.adjust'].some((permission) => hasPermission(permission))
+    : hasPermission('accounts.edit');
   const [ownerForm, setOwnerForm] = useState(buildEmptyOwnerForm);
   const [showOwnerForm, setShowOwnerForm] = useState(false);
   const [manualEdit, setManualEdit] = useState(null);
@@ -317,7 +329,7 @@ const ChartOfAccountsPage = () => {
     setShowOwnerForm(false);
     setManualEdit(null);
     const returnTo = location.state?.manualReturnTo;
-    const base = pageModuleScope === 'weaving' ? '/weaving/accounts' : pageModuleScope === 'travel' ? '/travel/accounts' : '/accounts';
+    const base = pageModuleScope === 'installments' ? '/installments/accounts' : pageModuleScope === 'weaving' ? '/weaving/accounts' : pageModuleScope === 'travel' ? '/travel/accounts' : '/accounts';
     if (isEditing && typeof returnTo === 'string' && returnTo.startsWith(base + '/')) {
       // Returning remounts the existing account detail page, reloading balances and rows.
       navigate(returnTo, { replace: true });
@@ -423,6 +435,7 @@ const ChartOfAccountsPage = () => {
       category: account.category || '',
       moduleScope: normalizeScope(account.moduleScope, pageModuleScope),
       openingBalance: String(Number(account.manualOpeningBalance || 0)),
+      isActive: account.isActive !== false,
     });
 
     setEditId(account._id);
@@ -537,8 +550,10 @@ const ChartOfAccountsPage = () => {
   const showOpeningBalanceField = BALANCE_SHEET_ACCOUNT_TYPES.includes(form.type);
   const canModifyAccount = (account) =>
     account?.isSystem !== true &&
-    !(isWeavingScoped && normalizeScope(account?.moduleScope) === MODULE_SCOPES.SHARED);
-  const scopeOptions = isWeavingScoped
+    !((isWeavingScoped || isInstallmentsScoped) && normalizeScope(account?.moduleScope) === MODULE_SCOPES.SHARED);
+  const scopeOptions = isInstallmentsScoped
+    ? [{ value: MODULE_SCOPES.INSTALLMENTS, label: t('moduleScope.installments') }]
+    : isWeavingScoped
     ? [
         {
           value: MODULE_SCOPES.WEAVING,
@@ -585,18 +600,24 @@ const ChartOfAccountsPage = () => {
 
   const headerClass = isTravelScoped
     ? 'border-cyan-200 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-900 text-white'
+    : isInstallmentsScoped
+      ? 'border-indigo-200 bg-gradient-to-r from-slate-950 via-indigo-950 to-violet-900 text-white'
     : isWeavingScoped
       ? 'border-emerald-200 bg-gradient-to-r from-slate-950 via-teal-950 to-emerald-900 text-white'
     : 'border-blue-200 bg-gradient-to-r from-blue-700 to-blue-900 text-white';
 
   const primaryButtonClass = isTravelScoped
     ? 'bg-cyan-500 text-white hover:bg-cyan-600 focus-visible:outline-cyan-300'
+    : isInstallmentsScoped
+      ? 'bg-indigo-600 text-white hover:bg-indigo-700 focus-visible:outline-indigo-300'
     : isWeavingScoped
       ? 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:outline-emerald-300'
     : 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-300';
 
   const openCash = () => {
-    const path = isWeavingScoped
+    const path = isInstallmentsScoped
+      ? '/installments/accounts/cash'
+      : isWeavingScoped
       ? '/weaving/accounts/cash'
       : isTravelScoped
         ? '/travel/accounts/cash'
@@ -617,7 +638,9 @@ const ChartOfAccountsPage = () => {
   };
 
   const openBank = () => {
-    const path = isWeavingScoped
+    const path = isInstallmentsScoped
+      ? '/installments/accounts/bank'
+      : isWeavingScoped
       ? '/weaving/accounts/bank'
       : isTravelScoped
         ? '/travel/accounts/bank'
@@ -772,7 +795,8 @@ const ChartOfAccountsPage = () => {
       </section>
 
       {/* ERROR */}
-      {error && (
+      {isInstallmentsScoped && <InstallmentsDialog open={Boolean(error)} type="error" message={error} onClose={() => setError('')} onConfirm={() => setError('')} />}
+      {!isInstallmentsScoped && error && (
         <div className="mt-2 flex-shrink-0 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
           {error}
         </div>
@@ -785,7 +809,7 @@ const ChartOfAccountsPage = () => {
             {editId ? t('accounts.editAccount') : t('accounts.addNewAccount')}
           </h2>
 
-          <form onSubmit={handleSubmit} className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <form noValidate={isInstallmentsScoped} onSubmit={handleSubmit} className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label className="space-y-1.5 text-sm font-bold text-slate-700">
               <span>{t('accounts.accountName')}</span>
 
@@ -883,6 +907,13 @@ const ChartOfAccountsPage = () => {
                   placeholder="0"
                   className="min-h-10 w-full rounded-md border border-slate-300 px-3 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
+              </label>
+            )}
+
+            {editId && (
+              <label className="flex min-h-10 items-center gap-2 text-sm font-bold text-slate-700">
+                <input type="checkbox" name="isActive" checked={form.isActive !== false} onChange={(event) => setForm((previous) => ({ ...previous, isActive: event.target.checked }))} />
+                <span>{form.isActive !== false ? t('accounts.active') : t('accounts.inactive')}</span>
               </label>
             )}
 
@@ -1349,7 +1380,7 @@ const ChartOfAccountsPage = () => {
                         </td>
 
                         <td className="px-4 py-3 text-right font-extrabold text-slate-900">
-                          Rs. {formatMoney(account.balance)}
+                          {!isInstallmentsScoped && 'Rs. '}{formatMoney(account.balance)}
                         </td>
 
                         <td className="px-4 py-3">
@@ -1453,7 +1484,7 @@ const ChartOfAccountsPage = () => {
                         </p>
 
                         <p className="mt-0.5 truncate font-extrabold text-slate-900">
-                          Rs. {formatMoney(account.balance)}
+                          {!isInstallmentsScoped && 'Rs. '}{formatMoney(account.balance)}
                         </p>
                       </div>
                     </div>

@@ -4,6 +4,7 @@ const EXPENSE_TITLE_SCOPES = Object.freeze([
   MODULE_SCOPES.TRADING,
   MODULE_SCOPES.TRAVEL,
   MODULE_SCOPES.WEAVING,
+  MODULE_SCOPES.INSTALLMENTS,
   MODULE_SCOPES.BOTH,
 ]);
 
@@ -36,6 +37,10 @@ const buildExpenseTitleScopeFilter = (
 
   if (normalizedScope === MODULE_SCOPES.WEAVING) {
     return { [field]: MODULE_SCOPES.WEAVING };
+  }
+
+  if (normalizedScope === MODULE_SCOPES.INSTALLMENTS) {
+    return { [field]: MODULE_SCOPES.INSTALLMENTS };
   }
 
   if (normalizedScope === MODULE_SCOPES.TRAVEL) {
@@ -108,6 +113,10 @@ const documentMatchesExpenseTitleScope = (
 
   if (normalizedScope === MODULE_SCOPES.WEAVING) {
     return safeDocumentScope === MODULE_SCOPES.WEAVING;
+  }
+
+  if (normalizedScope === MODULE_SCOPES.INSTALLMENTS) {
+    return safeDocumentScope === MODULE_SCOPES.INSTALLMENTS;
   }
 
   if (normalizedScope === MODULE_SCOPES.TRAVEL) {

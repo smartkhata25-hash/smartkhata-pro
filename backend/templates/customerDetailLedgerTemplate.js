@@ -226,12 +226,12 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
         </td>
 
         <td>
-          ${escapeHtml(t("debit", lang))}<br />
+          ${escapeHtml(t("credit", lang))}<br />
           ${money(summary.totalDebit)}
         </td>
 
         <td>
-          ${escapeHtml(t("credit", lang))}<br />
+          ${escapeHtml(t("debit", lang))}<br />
           ${money(summary.totalCredit)}
         </td>
 
@@ -303,7 +303,7 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
                   <table class="amount-table">
                     <tbody>
                       <tr>
-                        <td>${escapeHtml(t("debit", lang))}</td>
+                        <td>${escapeHtml(t("credit", lang))}</td>
                         <td>
                           ${
                             blk.debit !== null && blk.debit !== undefined
@@ -314,7 +314,7 @@ const generateCustomerDetailLedgerHTML = (data, pageSize = "A4") => {
                       </tr>
 
                       <tr>
-                        <td>${escapeHtml(t("credit", lang))}</td>
+                        <td>${escapeHtml(t("debit", lang))}</td>
                         <td>
                           ${
                             blk.credit !== null && blk.credit !== undefined

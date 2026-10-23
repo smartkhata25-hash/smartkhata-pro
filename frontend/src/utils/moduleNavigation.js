@@ -55,6 +55,17 @@ export const getDefaultWorkspacePath = (user = null) => {
   const moduleConfig = normalizeModuleConfig(user);
 
   if (
+    moduleConfig.defaultModule === MODULE_KEYS.INSTALLMENTS &&
+    canAccess({
+      permission: 'installments.view',
+      moduleKey: MODULE_KEYS.INSTALLMENTS,
+      user,
+    })
+  ) {
+    return '/installments/dashboard';
+  }
+
+  if (
     moduleConfig.defaultModule === MODULE_KEYS.WEAVING &&
     canAccess({
       permission: 'weaving.view',

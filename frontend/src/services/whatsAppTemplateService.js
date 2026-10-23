@@ -14,7 +14,7 @@ const authConfig = () => ({
 });
 
 const normalizeScope = (moduleScope = 'trading') =>
-  moduleScope === 'travel' ? 'travel' : 'trading';
+  ['travel', 'installments'].includes(moduleScope) ? moduleScope : 'trading';
 
 export const fetchWhatsAppTemplate = async (moduleScope = 'trading', options = {}) => {
   const scope = normalizeScope(moduleScope);

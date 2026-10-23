@@ -7,10 +7,21 @@ const {
 
 const protect = require("../middleware/authMiddleware");
 const { requireModule } = require("../middleware/moduleMiddleware");
-const { requirePermission } = require("../middleware/permissionMiddleware");
+const { requirePermission, ownerOnly } = require("../middleware/permissionMiddleware");
 const { MODULE_KEYS } = require("../utils/moduleConfig");
 
 const router = express.Router();
+
+router.get(
+  "/installments",
+  protect,
+  requireModule(MODULE_KEYS.INSTALLMENTS),
+  requirePermission("installments.members.view"),
+  (req, res) => {
+    req.params.moduleScope = "installments";
+    return getWhatsAppTemplate(req, res);
+  },
+);
 
 router.get("/:moduleScope", protect, getWhatsAppTemplate);
 
@@ -31,6 +42,17 @@ router.put(
   requirePermission("travel.settings"),
   (req, res) => {
     req.params.moduleScope = "travel";
+    return updateWhatsAppTemplate(req, res);
+  },
+);
+
+router.put(
+  "/installments",
+  protect,
+  requireModule(MODULE_KEYS.INSTALLMENTS),
+  ownerOnly,
+  (req, res) => {
+    req.params.moduleScope = "installments";
     return updateWhatsAppTemplate(req, res);
   },
 );

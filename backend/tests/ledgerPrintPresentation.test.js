@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const mongoose = require("mongoose");
 
 const PrintSetting = require("../models/PrintSetting");
@@ -11,6 +13,11 @@ const {
 const generateCustomerLedgerHTML = require("../templates/customerLedgerTemplate");
 const buildPartyLedgerPrint = require("../services/partyLedgerPrintBuilder");
 const generatePartyLedgerHTML = require("../templates/partyLedgerTemplate");
+const buildCustomerDetailLedgerPrint = require("../services/customerDetailLedgerPrintBuilder");
+const generateCustomerDetailLedgerHTML = require("../templates/customerDetailLedgerTemplate");
+const buildPartyDetailLedgerPrint = require("../services/partyDetailLedgerPrintBuilder");
+const generatePartyDetailLedgerHTML = require("../templates/partyDetailLedgerTemplate");
+const { t } = require("../i18n/i18n");
 const {
   renderLedgerBusinessHeader,
 } = require("../templates/ledgerBusinessHeader");
@@ -66,6 +73,32 @@ const settings = () => ({
   },
 });
 
+const textContent = (html) =>
+  String(html)
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const countText = (value, fragment) =>
+  value.split(fragment).length - 1;
+
+const tableRows = (html) =>
+  [...String(html).matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((match) =>
+    [...match[1].matchAll(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)].map(
+      (cell) => textContent(cell[1]),
+    ),
+  );
+
+const blockContaining = (html, classPrefix, billNo) => {
+  const blocks = String(html).split(`<div class="${classPrefix}`);
+  const block = blocks.find((candidate) => candidate.includes(`#${billNo}`));
+
+  assert.ok(block, `Expected a rendered block for bill ${billNo}`);
+  return textContent(block);
+};
+
 test("Travel customer ledger print maps credit to Money In and debit to Money Out", () => {
   const built = buildCustomerLedgerPrint(ledgerInput());
 
@@ -82,10 +115,121 @@ test("Trading customer ledger print uses the same Money In and Money Out convent
   const built = buildCustomerLedgerPrint(ledgerInput());
   const html = generateCustomerLedgerHTML({ ...built, lang: "en" });
 
-  assert.match(html, /7500\.00/);
-  assert.match(html, /18750\.00/);
+  const rows = tableRows(html);
+
+  assert.match(html, /7,500/);
+  assert.match(html, /18,750/);
   assert.equal(built.rows[0].debit, 18750);
   assert.equal(built.rows[1].credit, 7500);
+  assert.deepEqual(rows[0].slice(3, 5), ["Money In", "Money Out"]);
+  assert.deepEqual(rows[1].slice(3, 5), ["-", "18,750"]);
+  assert.deepEqual(rows[2].slice(3, 5), ["7,500", "-"]);
+});
+
+test("customer detailed ledger labels debit as Money Out and credit as Money In", () => {
+  const built = buildCustomerDetailLedgerPrint({
+    customerName: "ELAHI FARM",
+    openingBalance: 0,
+    ledger: [
+      { date: "2026-09-01", billNo: "4021", sourceType: "sale_invoice", debit: 21600, credit: 0 },
+      { date: "2026-09-02", billNo: "RP-1", sourceType: "receive_payment", debit: 0, credit: 5000 },
+      { date: "2026-09-03", billNo: "R-1129", sourceType: "refund_invoice", debit: 0, credit: 2000 },
+    ],
+  });
+
+  assert.equal(built.summary.totalDebit, 21600);
+  assert.equal(built.summary.totalCredit, 7000);
+  assert.equal(built.summary.closingBalance, 14600);
+
+  for (const lang of ["en", "ur"]) {
+    const html = generateCustomerDetailLedgerHTML({ ...built, lang });
+    const documentText = textContent(html);
+    const sale = blockContaining(html, "ledger-block", "4021");
+    const payment = blockContaining(html, "ledger-block", "RP-1");
+    const refund = blockContaining(html, "ledger-block", "R-1129");
+
+    assert.ok(documentText.includes(`${t("credit", lang)} 21,600`));
+    assert.ok(documentText.includes(`${t("debit", lang)} 7,000`));
+    assert.ok(sale.includes(`${t("credit", lang)} 21,600`));
+    assert.ok(payment.includes(`${t("debit", lang)} 5,000`));
+    assert.ok(refund.includes(`${t("debit", lang)} 2,000`));
+    assert.ok(documentText.includes(`${t("ledger.closing", lang)} 14,600`));
+  }
+});
+
+test("party ledger columns align debit with Money Out and credit with Money In", () => {
+  const built = buildPartyLedgerPrint({
+    partyName: "Combined Party",
+    role: "both",
+    openingBalance: 0,
+    ledger: [
+      { date: "2026-09-01", billNo: "D-1", sourceType: "sale_invoice", debit: 10000, credit: 0 },
+      { date: "2026-09-02", billNo: "C-1", sourceType: "receive_payment", debit: 0, credit: 4000 },
+    ],
+  });
+
+  assert.deepEqual(built.summary, {
+    opening: 0,
+    totalDebit: 10000,
+    totalCredit: 4000,
+    closingBalance: 6000,
+  });
+
+  for (const lang of ["en", "ur"]) {
+    const html = generatePartyLedgerHTML({ ...built, lang });
+    const rows = tableRows(html);
+    const documentText = textContent(html);
+
+    assert.deepEqual(rows[0].slice(3, 5), [t("credit", lang), t("debit", lang)]);
+    assert.deepEqual(rows[1].slice(3, 6), ["10,000", "-", "10,000"]);
+    assert.deepEqual(rows[2].slice(3, 6), ["-", "4,000", "6,000"]);
+    assert.deepEqual(rows[3].slice(1, 4), ["10,000", "4,000", "6,000"]);
+    assert.ok(documentText.includes(`${t("credit", lang)}: 10,000`));
+    assert.ok(documentText.includes(`${t("debit", lang)}: 4,000`));
+  }
+});
+
+test("party detailed ledger fixes top summary, blocks, and bottom totals without changing balances", () => {
+  const built = buildPartyDetailLedgerPrint({
+    partyName: "Combined Party",
+    role: "both",
+    openingBalance: 0,
+    ledger: [
+      { date: "2026-09-01", billNo: "D-1", sourceType: "sale_invoice", debit: 10000, credit: 0 },
+      { date: "2026-09-02", billNo: "C-1", sourceType: "receive_payment", debit: 0, credit: 4000 },
+    ],
+  });
+
+  assert.equal(built.blocks[0].balance, 10000);
+  assert.equal(built.blocks[1].balance, 6000);
+  assert.equal(built.summary.closingBalance, 6000);
+
+  for (const lang of ["en", "ur"]) {
+    const html = generatePartyDetailLedgerHTML({ ...built, lang });
+    const documentText = textContent(html);
+    const debitBlock = blockContaining(html, "block ", "D-1");
+    const creditBlock = blockContaining(html, "block ", "C-1");
+
+    assert.equal(countText(documentText, `${t("credit", lang)}: 10,000`), 2);
+    assert.equal(countText(documentText, `${t("debit", lang)}: 4,000`), 2);
+    assert.ok(debitBlock.includes(`${t("credit", lang)} 10,000`));
+    assert.ok(debitBlock.includes(`${t("balance", lang)} 10,000`));
+    assert.ok(creditBlock.includes(`${t("debit", lang)} 4,000`));
+    assert.ok(creditBlock.includes(`${t("balance", lang)} 6,000`));
+  }
+});
+
+test("print and PDF handlers share each corrected ledger template", () => {
+  const controllers = [
+    ["detailLedgerPrintController.js", "generateCustomerDetailLedgerHTML"],
+    ["partyLedgerPrintController.js", "generatePartyLedgerHTML"],
+    ["partyDetailLedgerPrintController.js", "generatePartyDetailLedgerHTML"],
+  ];
+
+  for (const [fileName, renderer] of controllers) {
+    const source = fs.readFileSync(path.join(__dirname, "..", "controllers", fileName), "utf8");
+    assert.equal(countText(source, `const html = ${renderer}(`), 2);
+  }
 });
 
 test("ledger header without a logo renders business details without an image placeholder", () => {
@@ -205,7 +349,7 @@ test("Weaving party ledger adds the business header without changing financial r
   assert.doesNotMatch(html, /<h1>Party Ledger<\/h1>/);
   assert.match(html, /Party: Fabric Buyer/);
   assert.match(html, /From: 2026-09-01 \| To: 2026-09-30/);
-  assert.match(html, /100\.00/);
-  assert.match(html, /40\.00/);
-  assert.match(html, /70\.00/);
+  assert.match(html, /Rs\. 100/);
+  assert.match(html, /Rs\. 40/);
+  assert.match(html, /Rs\. 70/);
 });

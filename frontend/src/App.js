@@ -102,6 +102,30 @@ const TravelVendorReturnDetailPage = lazy(
 );
 const TravelSettingsPage = lazy(() => import('./pages/travel/TravelSettingsPage'));
 const WeavingDashboardPage = lazy(() => import('./pages/weaving/WeavingDashboardPage'));
+const InstallmentsDashboardPage = lazy(
+  () => import('./pages/installments/InstallmentsDashboardPage')
+);
+const InstallmentsMembersPage = lazy(
+  () => import('./pages/installments/InstallmentsMembersPage')
+);
+const InstallmentsCommitteesPage = lazy(
+  () => import('./pages/installments/InstallmentsCommitteesPage')
+);
+const InstallmentsSuppliersPage = lazy(
+  () => import('./pages/installments/InstallmentsSuppliersPage')
+);
+const InstallmentsInvoicesPage = lazy(
+  () => import('./pages/installments/InstallmentsInvoicesPage')
+);
+const InstallmentsInvoiceFormPage = lazy(
+  () => import('./pages/installments/InstallmentsInvoiceFormPage')
+);
+const InstallmentsPaymentsPage = lazy(
+  () => import('./pages/installments/InstallmentsPaymentsPage')
+);
+const InstallmentsReportsPage = lazy(
+  () => import('./pages/installments/InstallmentsReportsPage')
+);
 const WeavingEmployeesPage = lazy(() => import('./pages/weaving/WeavingEmployeesPage'));
 const WeavingEmployeeFormPage = lazy(() => import('./pages/weaving/WeavingEmployeeFormPage'));
 const WeavingEmployeeProfilePage = lazy(() => import('./pages/weaving/WeavingEmployeeProfilePage'));
@@ -351,6 +375,70 @@ function App() {
             }
           >
             <Route path="/dashboard" element={<DashboardPage />} />
+
+            <Route
+              path="/installments/dashboard"
+              element={
+                <PermissionRoute
+                  permission="installments.view"
+                  moduleKey={MODULE_KEYS.INSTALLMENTS}
+                >
+                  <InstallmentsDashboardPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/installments/members"
+              element={
+                <PermissionRoute
+                  permission="installments.members.view"
+                  moduleKey={MODULE_KEYS.INSTALLMENTS}
+                >
+                  <InstallmentsMembersPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/installments/committees"
+              element={
+                <PermissionRoute
+                  anyPermissions={['installments.committees.view', 'installments.committees.manage']}
+                  moduleKey={MODULE_KEYS.INSTALLMENTS}
+                >
+                  <InstallmentsCommitteesPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route
+              path="/installments/suppliers"
+              element={
+                <PermissionRoute
+                  permission="installments.suppliers.view"
+                  moduleKey={MODULE_KEYS.INSTALLMENTS}
+                >
+                  <InstallmentsSuppliersPage />
+                </PermissionRoute>
+              }
+            />
+
+            <Route path="/installments/invoices" element={<PermissionRoute permission="installments.invoices.view" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsInvoicesPage /></PermissionRoute>} />
+            <Route path="/installments/invoices/new" element={<PermissionRoute permission="installments.invoices.create" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsInvoiceFormPage /></PermissionRoute>} />
+            <Route path="/installments/invoices/:id" element={<PermissionRoute permission="installments.invoices.view" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsInvoiceFormPage /></PermissionRoute>} />
+            <Route path="/installments/invoices/:id/edit" element={<PermissionRoute permission="installments.invoices.edit" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsInvoiceFormPage /></PermissionRoute>} />
+            <Route path="/installments/accounts" element={<PermissionRoute permission="installments.accounts.view" moduleKey={MODULE_KEYS.INSTALLMENTS}><ChartOfAccountsPage /></PermissionRoute>} />
+            <Route path="/installments/accounts/cash" element={<PermissionRoute permission="installments.accounts.view_transactions" moduleKey={MODULE_KEYS.INSTALLMENTS}><AccountDetailPage /></PermissionRoute>} />
+            <Route path="/installments/accounts/bank" element={<PermissionRoute permission="installments.accounts.view_transactions" moduleKey={MODULE_KEYS.INSTALLMENTS}><AccountDetailPage /></PermissionRoute>} />
+            <Route path="/installments/payments" element={<PermissionRoute permission="installments.payments.receive" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsPaymentsPage /></PermissionRoute>} />
+            <Route path="/installments/payments/receive" element={<PermissionRoute permission="installments.payments.receive" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsPaymentsPage initialMode="receive" /></PermissionRoute>} />
+            <Route path="/installments/payments/pay-bill" element={<PermissionRoute permission="installments.payments.pay_supplier" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsPaymentsPage initialMode="pay-bill" /></PermissionRoute>} />
+            <Route path="/installments/payments/history" element={<PermissionRoute permission="installments.payments.view_history" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsPaymentsPage initialMode="history" /></PermissionRoute>} />
+            <Route path="/installments/collections/today" element={<PermissionRoute permission="installments.payments.view_collections" moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsPaymentsPage initialMode="collections" /></PermissionRoute>} />
+            <Route path="/installments/expenses" element={<PermissionRoute permission="installments.expenses.view" moduleKey={MODULE_KEYS.INSTALLMENTS}><ExpenseList /></PermissionRoute>} />
+            <Route path="/installments/expenses/new" element={<PermissionRoute permission="installments.expenses.create" moduleKey={MODULE_KEYS.INSTALLMENTS}><ExpenseForm /></PermissionRoute>} />
+            <Route path="/installments/expenses/:id/edit" element={<PermissionRoute permission="installments.expenses.edit" moduleKey={MODULE_KEYS.INSTALLMENTS}><ExpenseForm /></PermissionRoute>} />
+            <Route path="/installments/reports" element={<PermissionRoute anyPermissions={['installments.reports.profit', 'installments.reports.collections', 'installments.reports.expenses', 'installments.reports.receivables']} moduleKey={MODULE_KEYS.INSTALLMENTS}><InstallmentsReportsPage /></PermissionRoute>} />
 
             <Route
               path="/weaving/dashboard"

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 import { clearTravelCacheDomain, TRAVEL_CACHE_DOMAINS } from '../utils/travelMasterCache';
+import { invalidateInstallmentsAccountData } from '../utils/installmentsMasterCache';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL;
 const API_URL = `${BASE_URL}/api/accounts`;
@@ -10,6 +11,7 @@ const MODULE_SCOPES = Object.freeze({
   TRADING: 'trading',
   TRAVEL: 'travel',
   WEAVING: 'weaving',
+  INSTALLMENTS: 'installments',
   BOTH: 'both',
   SHARED: 'shared',
 });
@@ -44,6 +46,12 @@ const normalizeModuleScope = (moduleScope = MODULE_SCOPES.TRADING) => {
     .toLowerCase();
 
   return Object.values(MODULE_SCOPES).includes(cleanScope) ? cleanScope : MODULE_SCOPES.TRADING;
+};
+
+const invalidateInstallmentsAccountsIfNeeded = (moduleScope) => {
+  if ([MODULE_SCOPES.INSTALLMENTS, MODULE_SCOPES.BOTH, MODULE_SCOPES.SHARED].includes(normalizeModuleScope(moduleScope))) {
+    invalidateInstallmentsAccountData();
+  }
 };
 
 const normalizeOptions = (forceRefreshOrOptions = false, maybeOptions = {}) => {
@@ -203,6 +211,7 @@ export const createAccount = async (data, options = {}) => {
   );
 
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(data?.moduleScope || normalizedOptions.moduleScope);
 
   return res.data;
 };
@@ -219,6 +228,7 @@ export const updateAccount = async (id, data, options = {}) => {
   );
 
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(data?.moduleScope || normalizedOptions.moduleScope);
 
   return res.data;
 };
@@ -231,6 +241,7 @@ export const deleteAccount = async (id, options = {}) => {
   );
 
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
 
   return res.data;
 };
@@ -244,6 +255,7 @@ export const transferBetweenAccounts = async (data, options = {}) => {
   );
 
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
 
   return res.data;
 };
@@ -257,6 +269,7 @@ export const adjustAccountBalance = async (data, options = {}) => {
   );
 
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
 
   return res.data;
 };
@@ -278,6 +291,7 @@ export const updateAccountTransfer = async (id, data, options = {}) => {
     authHeaders({ moduleScope: normalizedOptions.moduleScope })
   );
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
   return res.data;
 };
 
@@ -298,6 +312,7 @@ export const updateAccountAdjustment = async (id, data, options = {}) => {
     authHeaders({ moduleScope: normalizedOptions.moduleScope })
   );
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
   return res.data;
 };
 
@@ -309,6 +324,7 @@ export const createOwnerTransaction = async (data, options = {}) => {
     authHeaders({ moduleScope: normalizedOptions.moduleScope })
   );
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
   return res.data;
 };
 
@@ -329,6 +345,7 @@ export const updateOwnerTransaction = async (id, data, options = {}) => {
     authHeaders({ moduleScope: normalizedOptions.moduleScope })
   );
   clearAccountsCache();
+  invalidateInstallmentsAccountsIfNeeded(normalizedOptions.moduleScope);
   return res.data;
 };
 

@@ -4,6 +4,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
 import { canAccess, getStoredUser, isStaffBlocked } from '../utils/permissionHelper';
+import { clearInstallmentsMasterCache } from '../utils/installmentsMasterCache';
 
 const PermissionRoute = ({
   children,
@@ -25,6 +26,7 @@ const PermissionRoute = ({
   }
 
   if (isStaffBlocked(user)) {
+    clearInstallmentsMasterCache();
     localStorage.removeItem('token');
     localStorage.removeItem('userId');
     localStorage.removeItem('user');

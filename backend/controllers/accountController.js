@@ -33,6 +33,10 @@ const WEAVING_ACCOUNT_TRANSFER_ORIGIN = "weaving_account_transfer";
 const TRADING_ACCOUNT_ADJUSTMENT_ORIGIN = "account_adjustment";
 const TRAVEL_ACCOUNT_ADJUSTMENT_ORIGIN = "travel_account_adjustment";
 const WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN = "weaving_account_adjustment";
+const INSTALLMENTS_ACCOUNT_OPENING_ORIGIN = "installments_account_opening_balance";
+const INSTALLMENTS_ACCOUNT_TRANSFER_ORIGIN = "installments_account_transfer";
+const INSTALLMENTS_ACCOUNT_ADJUSTMENT_ORIGIN = "installments_account_adjustment";
+const INSTALLMENTS_OWNER_MONEY_ORIGIN = "installments_owner_money";
 const TRADING_OWNER_MONEY_ORIGIN = "owner_money";
 const TRAVEL_OWNER_MONEY_ORIGIN = "travel_owner_money";
 const WEAVING_OWNER_MONEY_ORIGIN = "weaving_owner_money";
@@ -71,6 +75,14 @@ const WEAVING_ACCOUNT_ORIGINS = Object.freeze([
   WEAVING_ACCOUNT_ADJUSTMENT_ORIGIN,
   WEAVING_OWNER_MONEY_ORIGIN,
 ]);
+const INSTALLMENTS_ACCOUNT_ORIGINS = Object.freeze([
+  "installments_payment",
+  "installments_invoice",
+  INSTALLMENTS_ACCOUNT_OPENING_ORIGIN,
+  INSTALLMENTS_ACCOUNT_TRANSFER_ORIGIN,
+  INSTALLMENTS_ACCOUNT_ADJUSTMENT_ORIGIN,
+  INSTALLMENTS_OWNER_MONEY_ORIGIN,
+]);
 
 const PAYMENT_ACCOUNT_CATEGORIES = Object.freeze([
   "cash",
@@ -104,12 +116,16 @@ const RESERVED_BALANCING_ACCOUNT_CODES = Object.freeze([
   "ACCOUNT_ADJUSTMENT",
   "TRAVEL_ACCOUNT_ADJUSTMENT",
   "WEAVING_ACCOUNT_ADJUSTMENT",
+  "INSTALLMENTS_ACCOUNT_ADJUSTMENT",
   "OWNER_CAPITAL",
   "TRAVEL_OWNER_CAPITAL",
   "WEAVING_OWNER_CAPITAL",
   "OWNER_DRAWINGS",
   "TRAVEL_OWNER_DRAWINGS",
   "WEAVING_OWNER_DRAWINGS",
+  "INSTALLMENTS_OPENING_BALANCE",
+  "INSTALLMENTS_OWNER_CAPITAL",
+  "INSTALLMENTS_OWNER_DRAWINGS",
 ]);
 
 const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
@@ -117,6 +133,16 @@ const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
 const getUserId = (req) => req.user?.id || req.userId;
 
 const getAccountScope = (source = {}) => {
+  const explicit = source.moduleScope || source.scope || source.module;
+  if (explicit) {
+    const clean = String(explicit).trim().toLowerCase();
+    const allowed = [...Object.values(MODULE_SCOPES), "all"];
+    if (!allowed.includes(clean)) {
+      const error = new Error("Invalid account module scope");
+      error.statusCode = 400;
+      throw error;
+    }
+  }
   const requestedScope = getRequestedModuleScope(source, MODULE_SCOPES.TRADING);
 
   if (requestedScope === "all") {
@@ -150,7 +176,8 @@ const assertScopeEnabled = (req, moduleScope) => {
     const anyEnabled =
       enabledModules[MODULE_SCOPES.TRADING] !== false ||
       enabledModules[MODULE_SCOPES.TRAVEL] === true ||
-      enabledModules[MODULE_SCOPES.WEAVING] === true;
+      enabledModules[MODULE_SCOPES.WEAVING] === true ||
+      enabledModules[MODULE_SCOPES.INSTALLMENTS] === true;
 
     if (!anyEnabled) {
       const error = new Error("This business module is not enabled");
@@ -201,6 +228,12 @@ const getWeavingJournalConditions = () => [
     originModule: { $in: WEAVING_ACCOUNT_ORIGINS },
   },
 ];
+const getInstallmentsJournalConditions = () => [
+  { moduleScope: MODULE_SCOPES.INSTALLMENTS },
+  { originModule: { $in: INSTALLMENTS_ACCOUNT_ORIGINS } },
+  { sourceType: { $regex: "^installments_" } },
+  { sourceType: "reversal", originModule: { $in: INSTALLMENTS_ACCOUNT_ORIGINS } },
+];
 
 const getJournalScopeFilter = (scope = MODULE_SCOPES.TRADING) => {
   if (scope === MODULE_SCOPES.TRAVEL) {
@@ -209,6 +242,10 @@ const getJournalScopeFilter = (scope = MODULE_SCOPES.TRADING) => {
 
   if (scope === MODULE_SCOPES.WEAVING) {
     return { $or: getWeavingJournalConditions() };
+  }
+
+  if (scope === MODULE_SCOPES.INSTALLMENTS) {
+    return { $or: getInstallmentsJournalConditions() };
   }
 
   if (scope === MODULE_SCOPES.TRADING) {
@@ -226,6 +263,7 @@ const getJournalScopeFilter = (scope = MODULE_SCOPES.TRADING) => {
           $nor: [
             ...getTravelJournalConditions(),
             ...getWeavingJournalConditions(),
+            ...getInstallmentsJournalConditions(),
           ],
         },
       ],
@@ -265,6 +303,7 @@ const buildCodeConflictQuery = ({
             MODULE_SCOPES.TRADING,
             MODULE_SCOPES.TRAVEL,
             MODULE_SCOPES.WEAVING,
+            MODULE_SCOPES.INSTALLMENTS,
             MODULE_SCOPES.BOTH,
             MODULE_SCOPES.SHARED,
           ],
@@ -335,7 +374,7 @@ const getJournalContextScope = (scope) => {
     cleanScope === MODULE_SCOPES.SHARED
   ) {
     throw makeHttpError(
-      "Trading, Travel or Weaving module context is required.",
+      "Trading, Travel, Weaving or Installments module context is required.",
       400,
     );
   }
@@ -346,9 +385,10 @@ const getJournalContextScope = (scope) => {
     normalized !== MODULE_SCOPES.TRADING &&
     normalized !== MODULE_SCOPES.TRAVEL &&
     normalized !== MODULE_SCOPES.WEAVING
+    && normalized !== MODULE_SCOPES.INSTALLMENTS
   ) {
     throw makeHttpError(
-      "Trading, Travel or Weaving module context is required.",
+      "Trading, Travel, Weaving or Installments module context is required.",
       400,
     );
   }
@@ -380,6 +420,9 @@ const isManualAdjustmentAccount = (account) =>
   !isCounterpartyAccountName(account.name);
 
 const getManualAccountOrigin = (scope, action) => {
+  if (scope === MODULE_SCOPES.INSTALLMENTS) {
+    return { opening: INSTALLMENTS_ACCOUNT_OPENING_ORIGIN, transfer: INSTALLMENTS_ACCOUNT_TRANSFER_ORIGIN, adjustment: INSTALLMENTS_ACCOUNT_ADJUSTMENT_ORIGIN, owner: INSTALLMENTS_OWNER_MONEY_ORIGIN }[action];
+  }
   if (scope === MODULE_SCOPES.TRAVEL) {
     return {
       opening: TRAVEL_ACCOUNT_OPENING_ORIGIN,
@@ -413,6 +456,15 @@ const getAdjustmentSourceType = (scope) =>
   scope === MODULE_SCOPES.TRAVEL ? "travel_adjustment" : "adjustment";
 
 const getSystemAccountConfig = (scope, purpose) => {
+  if (scope === MODULE_SCOPES.INSTALLMENTS) {
+    const variants = {
+      capital: { code: "INSTALLMENTS_OWNER_CAPITAL", name: "Installments Owner Capital", category: "capital", normalBalance: "credit" },
+      drawings: { code: "INSTALLMENTS_OWNER_DRAWINGS", name: "Installments Owner Drawings", category: "drawings", normalBalance: "debit" },
+      adjustment: { code: "INSTALLMENTS_ACCOUNT_ADJUSTMENT", name: "Installments Account Adjustment", category: "other", normalBalance: "credit" },
+      opening: { code: "INSTALLMENTS_OPENING_BALANCE", name: "Installments Opening Balance", category: "other", normalBalance: "credit" },
+    };
+    return { ...variants[purpose], moduleScope: MODULE_SCOPES.INSTALLMENTS };
+  }
   if (scope === MODULE_SCOPES.TRAVEL) {
     if (purpose === "capital") {
       return {
@@ -668,6 +720,7 @@ const getManualOpeningBalanceMap = async ({
       MODULE_SCOPES.TRADING,
       MODULE_SCOPES.TRAVEL,
       MODULE_SCOPES.WEAVING,
+      MODULE_SCOPES.INSTALLMENTS,
     ].includes(scope)
   ) {
     return new Map();
@@ -849,6 +902,7 @@ const attachScopedBalances = async ({ userId, accounts = [], moduleScope }) => {
     accounts: plainAccounts,
     moduleScope,
   });
+  const companyBalanceMap = await getScopedBalanceMap({ userId, accounts: plainAccounts, moduleScope: 'all' });
   const openingBalanceMap = await getManualOpeningBalanceMap({
     userId,
     accounts: plainAccounts,
@@ -859,6 +913,7 @@ const attachScopedBalances = async ({ userId, accounts = [], moduleScope }) => {
     ...account,
     moduleScope: account.moduleScope || MODULE_SCOPES.TRADING,
     balance: balanceMap.get(String(account._id)) || 0,
+    actualBalance: companyBalanceMap.get(String(account._id)) || 0,
     manualOpeningBalance: openingBalanceMap.get(String(account._id)) || 0,
   }));
 };
@@ -902,11 +957,11 @@ exports.createAccount = async (req, res) => {
     assertScopeEnabled(req, moduleScope);
 
     if (
-      accessScope === MODULE_SCOPES.WEAVING &&
-      moduleScope !== MODULE_SCOPES.WEAVING
+      [MODULE_SCOPES.WEAVING, MODULE_SCOPES.INSTALLMENTS].includes(accessScope) &&
+      moduleScope !== accessScope
     ) {
       return res.status(403).json({
-        message: "New accounts created from Weaving must use Weaving scope.",
+        message: `New accounts created from ${accessScope} must use ${accessScope} scope.`,
       });
     }
 
@@ -987,7 +1042,7 @@ exports.getAccounts = async (req, res) => {
 
     const query = {
       userId,
-      isActive: { $ne: false },
+      ...(moduleScope === MODULE_SCOPES.INSTALLMENTS && filter !== "payment" ? {} : { isActive: { $ne: false } }),
     };
 
     applyAccountScopeFilter(query, moduleScope);
@@ -1056,6 +1111,10 @@ exports.updateAccount = async (req, res) => {
       return res.status(404).json({ message: "Account not found" });
     }
 
+    if (accessScope === MODULE_SCOPES.INSTALLMENTS && account.moduleScope === MODULE_SCOPES.SHARED) {
+      return res.status(403).json({ message: "Shared account identity must be managed from the company Accounts workspace." });
+    }
+
     if (account.isSystem) {
       const allowedUpdates = ["name", "category"];
       for (const key of Object.keys(req.body)) {
@@ -1081,11 +1140,11 @@ exports.updateAccount = async (req, res) => {
     assertScopeEnabled(req, nextModuleScope);
 
     if (
-      accessScope === MODULE_SCOPES.WEAVING &&
-      ![MODULE_SCOPES.WEAVING, MODULE_SCOPES.SHARED].includes(nextModuleScope)
+      [MODULE_SCOPES.WEAVING, MODULE_SCOPES.INSTALLMENTS].includes(accessScope) &&
+      ![accessScope, MODULE_SCOPES.SHARED].includes(nextModuleScope)
     ) {
       return res.status(403).json({
-        message: "Weaving accounts cannot modify Trading or Travel accounts.",
+        message: `${accessScope} accounts cannot modify another module's accounts.`,
       });
     }
 
@@ -1116,6 +1175,21 @@ exports.updateAccount = async (req, res) => {
       nextType,
       nextCategory,
     );
+    if (hasOwn(req.body, "isActive")) {
+      const nextActive = req.body.isActive !== false;
+      if (!nextActive && account.isActive !== false) {
+        const balances = await getScopedBalanceMap({ userId, accounts: [account], moduleScope: "all" });
+        if (Math.abs(Number(balances.get(String(account._id)) || 0)) > 0.005) {
+          throw makeHttpError("An account with a non-zero genuine balance cannot be inactivated.", 409);
+        }
+        if (accessScope === MODULE_SCOPES.INSTALLMENTS) {
+          const Invoice = require("../models/InstallmentsInvoice");
+          const draftReference = await Invoice.exists({ businessOwnerId: userId, status: "draft", $or: [{ customerReceiptAccountId: account._id }, { "supplierPayments.accountId": account._id }] });
+          if (draftReference) throw makeHttpError("This account is selected on an active Installments draft and cannot be inactivated.", 409);
+        }
+      }
+      account.isActive = nextActive;
+    }
 
     await account.save();
 
@@ -1159,6 +1233,10 @@ exports.deleteAccount = async (req, res) => {
 
     if (!account) {
       return res.status(404).json({ message: "Account not found" });
+    }
+
+    if (moduleScope === MODULE_SCOPES.INSTALLMENTS && account.moduleScope === MODULE_SCOPES.SHARED) {
+      return res.status(403).json({ message: "Shared accounts cannot be deleted from Installments." });
     }
 
     if (account.isSystem) {
@@ -2094,6 +2172,11 @@ exports.getCashSummary = async (req, res) => {
       _id: scopedCashAccount._id,
       name: scopedCashAccount.name,
       balance: scopedCashAccount.balance || 0,
+      actualBalance: scopedCashAccount.actualBalance || 0,
+      manualOpeningBalance: scopedCashAccount.manualOpeningBalance || 0,
+      category: scopedCashAccount.category,
+      code: scopedCashAccount.code,
+      normalBalance: scopedCashAccount.normalBalance,
       moduleScope: scopedCashAccount.moduleScope,
     });
   } catch (err) {
@@ -2133,6 +2216,7 @@ exports.getBankSummary = async (req, res) => {
         _id: account._id,
         name: account.name,
         balance: account.balance || 0,
+        actualBalance: account.actualBalance || 0,
         moduleScope: account.moduleScope,
       })),
     });
@@ -2175,6 +2259,16 @@ exports.getAccountTransactions = async (req, res) => {
       isDeleted: false,
       ...getJournalScopeFilter(moduleScope),
     };
+    if (req.query.startDate || req.query.endDate) {
+      transactionQuery.date = {};
+      if (req.query.startDate) transactionQuery.date.$gte = new Date(`${req.query.startDate}T00:00:00.000Z`);
+      if (req.query.endDate) transactionQuery.date.$lte = new Date(`${req.query.endDate}T23:59:59.999Z`);
+    }
+    if (req.query.sourceType) transactionQuery.sourceType = String(req.query.sourceType);
+    if (req.query.reference) {
+      const safeReference = String(req.query.reference).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      transactionQuery.$and = [...(transactionQuery.$and || []), { $or: [{ billNo: { $regex: safeReference, $options: "i" } }, { description: { $regex: safeReference, $options: "i" } }] }];
+    }
 
     if (moduleScope === MODULE_SCOPES.TRAVEL) {
       transactionQuery.isReversed = { $ne: true };
@@ -2197,6 +2291,9 @@ exports.getAccountTransactions = async (req, res) => {
           "customerId",
           "supplierId",
           "partyId",
+          "isReversed",
+          "isReversal",
+          "reversalOf",
           "lines",
           "createdAt",
         ].join(" "),
@@ -2206,7 +2303,7 @@ exports.getAccountTransactions = async (req, res) => {
         time: -1,
         createdAt: -1,
       })
-      .limit(200)
+      .limit(Math.min(Math.max(Number(req.query.limit) || 200, 1), 500))
       .lean();
 
     const flatEntries = transactions.flatMap((entry) =>
@@ -2236,6 +2333,9 @@ exports.getAccountTransactions = async (req, res) => {
             customerId: entry.customerId || null,
             supplierId: entry.supplierId || null,
             partyId: entry.partyId || null,
+            isReversed: entry.isReversed === true,
+            isReversal: entry.isReversal === true,
+            reversalOf: entry.reversalOf || null,
             paymentType: line.paymentType || "-",
             accountName: account.name || "",
             accountModuleScope: account.moduleScope || MODULE_SCOPES.TRADING,

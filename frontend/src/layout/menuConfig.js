@@ -50,20 +50,6 @@ const menuConfig = [
   },
 
   {
-    label: 'travel.nav.travel',
-    path: '/travel/dashboard',
-    module: MODULE_KEYS.TRAVEL,
-    permission: 'travel.view',
-  },
-
-  {
-    label: 'weaving.nav.weaving',
-    path: '/weaving/dashboard',
-    module: MODULE_KEYS.WEAVING,
-    permission: 'weaving.view',
-  },
-
-  {
     label: 'customers',
     sections: [
       {

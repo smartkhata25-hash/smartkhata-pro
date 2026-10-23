@@ -21,11 +21,12 @@ const missingScope = {
 const legacyScopeCondition = (scope) => {
   if (scope === MODULE_SCOPES.TRAVEL) return { module: /^travel\./i };
   if (scope === MODULE_SCOPES.WEAVING) return { module: /^weaving\./i };
-  return { module: { $not: /^(travel|weaving)\./i } };
+  if (scope === "installments") return { module: /^installments\./i };
+  return { module: { $not: /^(travel|weaving|installments)\./i } };
 };
 
 const applyActivityModuleScopeFilter = (query, scope, enabledModules = {}) => {
-  const enabled = ["trading", "travel", "weaving"].filter(
+  const enabled = ["trading", "travel", "weaving", "installments"].filter(
     (moduleKey) => enabledModules[moduleKey] === true,
   );
   const selected =
@@ -95,10 +96,9 @@ const getActivities = async (req, res) => {
       isDeleted: false,
     };
 
-    const requestedModuleScope = getRequestedModuleScope(
-      { moduleScope },
-      MODULE_SCOPES.TRADING,
-    );
+    const requestedModuleScope = String(moduleScope).toLowerCase() === "installments"
+      ? "installments"
+      : getRequestedModuleScope({ moduleScope }, MODULE_SCOPES.TRADING);
 
     if (!validateActivityScope(req, res, requestedModuleScope)) return;
 
@@ -404,10 +404,9 @@ const getActivitySummary = async (req, res) => {
 
     const ownerObjectId = new mongoose.Types.ObjectId(ownerId);
 
-    const requestedModuleScope = getRequestedModuleScope(
-      req.query,
-      MODULE_SCOPES.TRADING,
-    );
+    const requestedModuleScope = String(req.query.moduleScope).toLowerCase() === "installments"
+      ? "installments"
+      : getRequestedModuleScope(req.query, MODULE_SCOPES.TRADING);
 
     if (!validateActivityScope(req, res, requestedModuleScope)) return;
 

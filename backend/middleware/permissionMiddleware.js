@@ -96,6 +96,19 @@ const requireAllPermissions = (...requiredPermissions) => {
   };
 };
 
+const requireScopedExpensePermission = (sharedPermission, installmentsPermission) => (
+  req,
+  res,
+  next,
+) => {
+  const requestedScope = String(
+    req.query?.moduleScope || req.body?.moduleScope || "",
+  ).trim().toLowerCase();
+  return requirePermission(
+    requestedScope === "installments" ? installmentsPermission : sharedPermission,
+  )(req, res, next);
+};
+
 const ownerOnly = (req, res, next) => {
   if (req.user?.accountRole !== "owner") {
     return res.status(403).json({
@@ -109,5 +122,6 @@ const ownerOnly = (req, res, next) => {
 module.exports = {
   requirePermission,
   requireAllPermissions,
+  requireScopedExpensePermission,
   ownerOnly,
 };

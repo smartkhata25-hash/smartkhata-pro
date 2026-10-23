@@ -1,0 +1,13 @@
+import axios from 'axios';
+import { cachedInstallmentsRequest, INSTALLMENTS_CACHE_DOMAINS as D, INSTALLMENTS_STALE_TIME as TTL, invalidateInstallmentsSupplierData } from '../utils/installmentsMasterCache';
+const API = `${process.env.REACT_APP_API_BASE_URL}/api/installments/suppliers`;
+const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+const unwrap = (request) => request.then((response) => response.data);
+const after = (request) => unwrap(request).then((result) => { invalidateInstallmentsSupplierData(); return result; });
+export const getInstallmentsSuppliers = (params = {}, options = {}) => cachedInstallmentsRequest(D.SUPPLIERS, params, () => unwrap(axios.get(API, { ...auth(), params })), { staleTime: TTL.MASTER, ...options });
+export const getNextInstallmentsSupplierNumber = () => unwrap(axios.get(`${API}/next-number`, auth()));
+export const getInstallmentsSupplier = (id, params = {}, options = {}) => cachedInstallmentsRequest(D.SUPPLIER_DETAIL, { id, ...params }, () => unwrap(axios.get(`${API}/${id}`, { ...auth(), params })), { staleTime: TTL.FINANCIAL, ...options });
+export const createInstallmentsSupplier = (payload) => after(axios.post(API, payload, auth()));
+export const updateInstallmentsSupplier = (id, payload) => after(axios.put(`${API}/${id}`, payload, auth()));
+export const archiveInstallmentsSupplier = (id) => after(axios.delete(`${API}/${id}`, auth()));
+export const restoreInstallmentsSupplier = (id) => after(axios.post(`${API}/${id}/restore`, {}, auth()));

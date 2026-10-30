@@ -313,4 +313,5 @@ const buildPartyDetailLedgerPrint = ({
   };
 };
 
-module.exports = buildPartyDetailLedgerPrint;
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+module.exports = (...args) => formatReferencesForDisplay(buildPartyDetailLedgerPrint(...args));

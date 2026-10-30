@@ -1,4 +1,5 @@
 const { formatBusinessDate } = require("../utils/businessDate");
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
 
 const safeNumber = (value) => Number(value || 0);
 
@@ -124,6 +125,6 @@ const buildProductLedgerPrintData = ({
 };
 
 module.exports = {
-  buildInventoryReportPrintData,
-  buildProductLedgerPrintData,
+  buildInventoryReportPrintData: (...args) => formatReferencesForDisplay(buildInventoryReportPrintData(...args)),
+  buildProductLedgerPrintData: (...args) => formatReferencesForDisplay(buildProductLedgerPrintData(...args)),
 };

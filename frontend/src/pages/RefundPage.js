@@ -81,7 +81,7 @@ export default function RefundPage() {
                     <div className="text-xs text-gray-600">
                       {safeDate} | Bill #{h.billNo}
                     </div>
-                    <div className="font-semibold text-gray-800">Rs. {h.rate}</div>
+                    <div className="font-semibold text-gray-800">{h.rate}</div>
                   </li>
                 );
               })}

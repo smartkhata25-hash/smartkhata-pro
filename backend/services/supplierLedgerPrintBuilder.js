@@ -124,4 +124,5 @@ const buildSupplierLedgerPrint = ({
   };
 };
 
-module.exports = buildSupplierLedgerPrint;
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+module.exports = (...args) => formatReferencesForDisplay(buildSupplierLedgerPrint(...args));

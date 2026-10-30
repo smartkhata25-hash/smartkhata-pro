@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { formatMoneyDisplay } from '../utils/money';
+import { formatDocumentReference } from '../utils/referenceDisplay';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCustomerDetailedLedger } from '../services/customerDetailLedgerService';
@@ -716,22 +717,22 @@ export default function CustomerDetailLedgerPage() {
         <>
           <div className="card">
             <div style={{ fontSize: 12, color: '#6b7280' }}>{t('ledger.opening')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.opening)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.opening)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#16a34a' }}>{t('credit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.debit)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.debit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#dc2626' }}>{t('debit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.credit)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.credit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#2563eb' }}>{t('ledger.closing')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.closing)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.closing)}</div>
           </div>
         </>
       }
@@ -793,7 +794,7 @@ export default function CustomerDetailLedgerPage() {
               >
                 {/* 🔹 Block Header */}
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  {blk.sourceLabel} #{blk.billNo} — {new Date(blk.date).toLocaleDateString()}
+                  {blk.sourceLabel} #{formatDocumentReference(blk.billNo)} — {new Date(blk.date).toLocaleDateString()}
                 </div>
 
                 {/* 🔹 PRODUCT TABLE */}

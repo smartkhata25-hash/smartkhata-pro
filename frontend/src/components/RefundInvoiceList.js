@@ -349,7 +349,7 @@ const RefundInvoiceList = () => {
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 text-center whitespace-nowrap">
-                    Rs. {formatMoneyDisplay(refund.totalAmount)}
+                    {formatMoneyDisplay(refund.totalAmount)}
                   </td>
 
                   <td className="border px-1.5 py-1 md:p-2 capitalize">{refund.paymentType || '-'}</td>

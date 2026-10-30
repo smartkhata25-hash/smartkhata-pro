@@ -23,6 +23,7 @@ import { sendPdfToWhatsApp } from '../utils/whatsappPdf';
 import { FaEdit, FaTrash } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
 import { hasPermission } from '../utils/permissionHelper';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 
 const SUPPLIER_PAGE_DEFAULTS = {
   searchTerm: '',
@@ -227,6 +228,20 @@ const SuppliersPage = () => {
     },
     [ledgerStartDate, ledgerEndDate, canViewSupplierLedger]
   );
+
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      loadSupplierLedger(selectedSupplierId, ledgerStartDate, ledgerEndDate),
+      loadSuppliers(),
+    ]);
+  }, [
+    selectedSupplierId,
+    ledgerStartDate,
+    ledgerEndDate,
+    loadSupplierLedger,
+    loadSuppliers,
+  ]);
+  const ledgerDelete = useTradingLedgerDelete({ onDeleted: handleLedgerDeleted });
 
   useEffect(() => {
     if (ledgerRestoreRef.current) return;
@@ -878,7 +893,7 @@ const SuppliersPage = () => {
                         marginTop: 2,
                       }}
                     >
-                      Rs. {formatMoneyDisplay(balance)}
+                      {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 
@@ -1102,6 +1117,9 @@ const SuppliersPage = () => {
                   openingBalance={ledgerData?.openingBalance || 0}
                   onRowClick={handleRowClick}
                   onEdit={handleRowClick}
+                  onDeleteEntry={ledgerDelete.deleteEntry}
+                  canDeleteEntry={ledgerDelete.canDeleteEntry}
+                  deletingEntryId={ledgerDelete.deletingEntryId}
                 />
               </div>
             </>

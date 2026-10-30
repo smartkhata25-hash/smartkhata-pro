@@ -42,10 +42,7 @@ const StatCard = ({ label, value, color, onClick }) => (
       {onClick && <span className="text-xs font-semibold opacity-70">View Details →</span>}
     </div>
 
-    <div className="text-lg font-bold mt-1">
-      Rs.{' '}
-      {formatMoneyDisplay(value)}
-    </div>
+    <div className="text-lg font-bold mt-1">{formatMoneyDisplay(value)}</div>
   </button>
 );
 

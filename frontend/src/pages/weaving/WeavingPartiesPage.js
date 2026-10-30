@@ -439,9 +439,9 @@ export default function WeavingPartiesPage() {
   };
 
   return (
-    <div className="h-full min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-white to-teal-50/60 px-3 pb-3 pt-0 sm:px-5 sm:pb-5 sm:pt-0">
-      <div className="mx-auto h-full min-h-0 max-w-[1700px]">
-        <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[390px_minmax(0,1fr)]">
+    <div className="h-full min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-white to-teal-50/60 px-3 pb-3 pt-0 md:pb-5 md:pl-0 md:pr-0">
+      <div className="h-full min-h-0 w-full">
+        <div className="grid h-full min-h-0 gap-0 lg:grid-cols-[340px_minmax(0,1fr)]">
           {/* LEFT SIDE */}
           <section
             className={`${
@@ -581,7 +581,8 @@ export default function WeavingPartiesPage() {
                       <div className="truncate font-semibold text-slate-900">{row.name}</div>
 
                       <div
-                        className={`mt-1 text-xs font-medium ${
+                        title={`${balanceKind(row.balance)[0].toUpperCase() + balanceKind(row.balance).slice(1)}: ${money(row.balance)}`}
+                        className={`mt-1 truncate text-xs font-medium ${
                           balanceKind(row.balance) === 'receivable'
                             ? 'text-blue-700'
                             : balanceKind(row.balance) === 'payable'
@@ -682,7 +683,7 @@ export default function WeavingPartiesPage() {
             }`}
           >
             {/* TABS + ADD NEW */}
-            <div className="mb-2 flex h-11 min-w-0 items-center gap-2 overflow-visible rounded-md border bg-white px-2 shadow-sm">
+            <div className="flex h-11 min-w-0 items-center gap-2 overflow-visible rounded-md border bg-white px-2 shadow-sm">
               <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap">
                 {tabs.map(([key, label]) => (
                   <button

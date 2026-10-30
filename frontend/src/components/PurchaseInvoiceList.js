@@ -347,7 +347,6 @@ const PurchaseInvoiceList = () => {
           <span className="sm:hidden text-xs text-gray-600 whitespace-nowrap">Total</span>
 
           <span className="font-bold text-blue-700 truncate">
-            Rs.{' '}
             {formatMoneyDisplay(summary.totalPurchases)}
           </span>
         </div>
@@ -540,12 +539,12 @@ const PurchaseInvoiceList = () => {
 
                     <td className="border p-2 break-words">{getSupplierOrPartyName(inv)}</td>
 
-                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(total)}</td>
+                    <td className="border p-2 text-center">{formatMoneyDisplay(total)}</td>
 
-                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(paid)}</td>
+                    <td className="border p-2 text-center">{formatMoneyDisplay(paid)}</td>
 
                     <td className="border p-2 text-center whitespace-nowrap">
-                      Rs. {formatMoneyDisplay(balance)}
+                      {formatMoneyDisplay(balance)}
                     </td>
 
                     <td className="border p-2">

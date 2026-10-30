@@ -1,5 +1,6 @@
 const { generatePdfFromHtml } = require("../services/pdfService");
 const { formatMoney } = require("../utils/money");
+const { formatDocumentReference, formatReferenceText } = require("../utils/referenceDisplay");
 const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 const commercial = require("../services/weaving/weavingCommercialService");
 const {
@@ -26,9 +27,9 @@ const renderDocument = ({ ledger, header, autoPrint = false }) => {
       (row) =>
         `<tr><td>${escapeHtml(new Date(row.date).toLocaleDateString("en-GB", {
           timeZone: "Asia/Karachi",
-        }))}</td><td>${escapeHtml(row.reference || "-")}</td><td>${escapeHtml(
+        }))}</td><td>${escapeHtml(formatDocumentReference(row.reference) || "-")}</td><td>${escapeHtml(
           row.type || "-",
-        )}</td><td>${escapeHtml(row.description || "")}</td><td>${money(
+        )}</td><td>${escapeHtml(formatReferenceText(row.description) || "")}</td><td>${money(
           row.debit,
         )}</td><td>${money(row.credit)}</td><td>${money(
           row.runningBalance,

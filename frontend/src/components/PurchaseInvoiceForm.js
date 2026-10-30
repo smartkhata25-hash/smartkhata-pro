@@ -29,12 +29,14 @@ const API = process.env.REACT_APP_API_BASE_URL;
 const PurchaseInvoiceForm = () => {
   const token = localStorage.getItem('token');
   const fileInputRef = useRef();
+  const deleteInFlightRef = useRef(false);
   const { id } = useParams();
   const navigate = useNavigate();
 
   const canViewPurchases = hasPermission('purchases.view');
   const canCreatePurchases = hasPermission('purchases.create');
   const canEditPurchases = hasPermission('purchases.edit');
+  const canDeletePurchases = hasPermission('purchases.delete');
   const canPayPurchaseBill = hasPermission('purchases.pay_bill');
 
   const [isEdit, setIsEdit] = useState(false);
@@ -86,6 +88,7 @@ const PurchaseInvoiceForm = () => {
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [accountError, setAccountError] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [printLoading, setPrintLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
@@ -548,6 +551,35 @@ const PurchaseInvoiceForm = () => {
       shouldSave: shouldSavePurchaseDraft,
     }
   );
+
+  const handleDeletePurchaseInvoice = async () => {
+    if (
+      !isEdit ||
+      !invoiceId ||
+      !canDeletePurchases ||
+      deleteLoading ||
+      deleteInFlightRef.current
+    ) return;
+    if (!window.confirm(`Delete Purchase Invoice #${billNo || ''}?`)) return;
+
+    try {
+      deleteInFlightRef.current = true;
+      setDeleteLoading(true);
+      await purchaseInvoiceService.deletePurchaseInvoice(invoiceId);
+      navigate('/purchase-invoices');
+    } catch (error) {
+      alert(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Failed to delete purchase invoice'
+      );
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeleteLoading(false);
+    }
+  };
 
   const handleProductHistory = (productId) => {
     if (!productId) return;
@@ -1233,7 +1265,7 @@ const PurchaseInvoiceForm = () => {
               {t('date')}: {formatBusinessDateForDisplay(record.invoiceDate)}
             </p>
             <p>
-              {t('rate')}: Rs. {record.price}
+              {t('rate')}: {record.price}
             </p>
             <p>
               {t('qty')}: {record.quantity}
@@ -1624,6 +1656,7 @@ const PurchaseInvoiceForm = () => {
                     {/* SECOND ROW — Buttons */}
                     <div className="flex flex-wrap gap-3 mt-2 md:mt-8">
                       {isEdit && canEditPurchases ? (
+                        <>
                         <button
                           type="button"
                           onClick={handleUpdate}
@@ -1636,6 +1669,19 @@ const PurchaseInvoiceForm = () => {
                         >
                           {saveLoading ? '⏳ Updating...' : `🔁 ${t('updateClose')}`}
                         </button>
+                        {canDeletePurchases && invoiceId && (
+                          <button
+                            type="button"
+                            title="Delete Purchase Invoice"
+                            aria-label="Delete Purchase Invoice"
+                            onClick={handleDeletePurchaseInvoice}
+                            disabled={deleteLoading}
+                            className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            ✕
+                          </button>
+                        )}
+                        </>
                       ) : (
                         !isEdit &&
                         canCreatePurchases && (
@@ -1749,19 +1795,19 @@ const PurchaseInvoiceForm = () => {
                   {/* RIGHT SIDE — Totals */}
                   <div className="col-span-4 text-right space-y-1 text-sm">
                     <p>
-                      {t('total')}: Rs. {formatMoneyDisplay(totalAmount)}
+                      {t('total')}: {formatMoneyDisplay(totalAmount)}
                     </p>
                     <p>
-                      {t('discount')}: Rs. {formatMoneyDisplay(finalDiscount)}
+                      {t('discount')}: {formatMoneyDisplay(finalDiscount)}
                     </p>
                     <p className="text-lg font-bold">
-                      {t('netTotal')}: Rs. {formatMoneyDisplay(grandTotal)}
+                      {t('netTotal')}: {formatMoneyDisplay(grandTotal)}
                     </p>
                     <p>
-                      {t('paid')}: Rs. {formatMoneyDisplay(numericPaidAmount)}
+                      {t('paid')}: {formatMoneyDisplay(numericPaidAmount)}
                     </p>
                     <p className="text-red-600 font-semibold">
-                      {t('remaining')}: Rs. {formatMoneyDisplay(grandTotal - numericPaidAmount)}
+                      {t('remaining')}: {formatMoneyDisplay(grandTotal - numericPaidAmount)}
                     </p>
                   </div>
                 </div>

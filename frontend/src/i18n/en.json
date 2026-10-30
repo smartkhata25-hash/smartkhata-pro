@@ -87,7 +87,7 @@
   "billNo": "Bill No",
   "time": "Time",
   "discountPercent": "Discount %",
-  "discountRS": "Discount Rs",
+  "discountRS": "Discount Amount",
 
   "printInvoice": "Print Invoice",
   "findInvoice": "Find Invoice",
@@ -248,7 +248,7 @@
   "inventory.minimum": "Minimum",
 
   "dashboard.monthlySales": "Monthly Sales",
-  "dashboard.monthlySalesRs": "Monthly Sales (Rs)",
+  "dashboard.monthlySalesRs": "Monthly Sales",
   "dashboard.monthlySalesOverview": "Monthly Sales Overview",
   "dashboard.avgMonthlySales": "Average Monthly Sales",
   "dashboard.noSalesData": "No sales data available for",

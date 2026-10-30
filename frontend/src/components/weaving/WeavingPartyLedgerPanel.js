@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatMoneyDisplay } from '../../utils/money';
 import {
   FaArrowLeft,
@@ -23,6 +23,7 @@ import {
 
 import { hasPermission } from '../../utils/permissionHelper';
 import { sendWhatsAppReminder } from '../../utils/whatsapp';
+import { formatDocumentReference, formatReferenceText } from '../../utils/referenceDisplay';
 import { sendPdfToWhatsApp } from '../../utils/whatsappPdf';
 
 const control =
@@ -94,6 +95,9 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
   const [ledger, setLedger] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const ledgerScrollRef = useRef(null);
+  const loadedPartyIdRef = useRef('');
+  const autoScrolledPartyIdRef = useRef('');
   useWeavingFeedback(error, setError, { type: 'error' });
   const [journalDetail, setJournalDetail] = useState(null);
 
@@ -155,6 +159,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
   useEffect(() => {
     if (!party?._id) {
       setLedger(null);
+      loadedPartyIdRef.current = '';
       return;
     }
 
@@ -166,6 +171,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
     getCounterpartyLedger(party._id, applied)
       .then((data) => {
         if (current) {
+          loadedPartyIdRef.current = String(party._id);
           setLedger(data);
         }
       })
@@ -185,9 +191,31 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
     };
   }, [party?._id, applied]);
 
+  useEffect(() => {
+    const partyId = String(party?._id || '');
+    if (
+      !partyId ||
+      loading ||
+      loadedPartyIdRef.current !== partyId ||
+      autoScrolledPartyIdRef.current === partyId ||
+      !ledger?.rows?.length
+    ) {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const scrollArea = ledgerScrollRef.current;
+      if (!scrollArea) return;
+      scrollArea.scrollTop = scrollArea.scrollHeight;
+      autoScrolledPartyIdRef.current = partyId;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [party?._id, loading, ledger]);
+
   if (!party) {
     return (
-      <div className="flex min-h-[430px] items-center justify-center rounded-md border bg-white text-slate-400">
+      <div className="flex h-full min-h-0 items-center justify-center rounded-md border bg-white text-slate-400">
         Select a party to open its ledger
       </div>
     );
@@ -229,9 +257,9 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
     : [];
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
       {/* NAME + SUMMARY + ACTIONS */}
-      <div className="flex min-h-[48px] flex-wrap items-center gap-2 border-b bg-gradient-to-r from-teal-50 via-emerald-50 to-blue-50 px-3 py-1.5">
+      <div className="flex min-h-[48px] shrink-0 flex-wrap items-center gap-2 border-b bg-gradient-to-r from-teal-50 via-emerald-50 to-blue-50 px-3 py-1.5">
         {onBack && (
           <button
             type="button"
@@ -257,11 +285,11 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
             <FaSpinner className="animate-spin text-lg text-teal-700" />
           </div>
         ) : ledger ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-sm:basis-full">
             {summaryItems.map(([label, value]) => (
               <div
                 key={label}
-                className="flex h-9 min-w-[112px] items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-2.5"
+                className="flex h-9 min-w-[100px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-2.5 sm:min-w-[112px] sm:flex-none"
               >
                 <span className="text-[10px] font-semibold uppercase text-slate-500">{label}</span>
 
@@ -315,7 +343,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
       </div>
 
       {/* DATE FILTER + PRINT / PDF */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
         <input
           type="date"
           aria-label="From date"
@@ -408,11 +436,11 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
 
       {/* LEDGER TABLE */}
       {loading && !ledger ? (
-        <div className="flex h-48 items-center justify-center">
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <FaSpinner className="animate-spin text-2xl text-teal-700" />
         </div>
       ) : ledger ? (
-        <div className="max-h-[calc(100vh-22rem)] overflow-x-auto overflow-y-auto">
+        <div ref={ledgerScrollRef} className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[760px] border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] font-bold uppercase text-white">
               <tr>
@@ -457,7 +485,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
                     </td>
 
                     <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 font-semibold text-slate-800">
-                      {row.reference || '-'}
+                      {formatDocumentReference(row.reference) || '-'}
                     </td>
 
                     <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2">
@@ -467,7 +495,7 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
                     </td>
 
                     <td className="border-r border-slate-200 px-3 py-2 text-slate-600">
-                      {ledgerDescription(row)}
+                      {formatReferenceText(ledgerDescription(row))}
                     </td>
 
                     <td className="whitespace-nowrap border-r border-slate-200 px-3 py-2 text-center font-semibold text-slate-800">
@@ -493,15 +521,17 @@ export default function WeavingPartyLedgerPanel({ party, onBack, onEdit, fullPag
             </tbody>
           </table>
         </div>
-      ) : null}
+      ) : (
+        <div className="min-h-0 flex-1" />
+      )}
       {journalDetail && (
         <WeavingRecordDetailModal
           title="Journal Entry Details"
           fields={[
             ['Date', String(journalDetail.date || '').slice(0, 10)],
-            ['Description', journalDetail.description],
+            ['Description', formatReferenceText(journalDetail.description)],
             ['Source', journalDetail.originModule || journalDetail.sourceType],
-            ['Reference', journalDetail.billNo || journalDetail.referenceId],
+            ['Reference', formatDocumentReference(journalDetail.billNo || journalDetail.referenceId)],
             [
               'Reversal',
               journalDetail.isReversal ? 'Yes' : journalDetail.isReversed ? 'Reversed' : 'No',

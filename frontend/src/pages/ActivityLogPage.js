@@ -16,6 +16,7 @@ import {
   resolveActivityScope,
 } from '../utils/activityScope';
 import { formatInstallmentsDisplayRef } from '../utils/installmentsDisplay';
+import { formatDocumentReference, formatReferenceText } from '../utils/referenceDisplay';
 
 const EMPTY_PAGINATION = {
   page: 1,
@@ -35,7 +36,7 @@ const INITIAL_FILTERS = {
   limit: 25,
 };
 
-const displayActivityReference = (activity, value) => (
+const displayActivityReference = (activity, value) => formatDocumentReference(
   (activity?.moduleScope === 'installments' || String(activity?.module || '').startsWith('installments'))
     ? formatInstallmentsDisplayRef(value, 'reference')
     : value
@@ -623,7 +624,7 @@ const ActivityLogPage = () => {
                         <div className="font-medium text-gray-800">{displayActivityReference(activity, activity.title) || '-'}</div>
 
                         <div className="text-xs text-gray-500 mt-1 max-w-[260px] truncate">
-                          {activity.description || '-'}
+                          {formatReferenceText(activity.description) || '-'}
                         </div>
                       </td>
 
@@ -825,7 +826,7 @@ const ActivityDetailModal = ({
 
               <DetailItem label="Title" value={displayActivityReference(activity, activity.title) || '-'} />
 
-              <DetailItem label="Description" value={activity.description || '-'} />
+              <DetailItem label="Description" value={formatReferenceText(activity.description) || '-'} />
 
               <div>
                 <div className="text-xs font-semibold text-gray-500 uppercase mb-2">User Agent</div>

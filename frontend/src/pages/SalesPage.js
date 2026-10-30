@@ -167,7 +167,7 @@ export default function SalesPage() {
                       </div>
 
                       {/* ✅ Rate (display only) */}
-                      <div className="font-semibold text-gray-800">Rs. {h.rate}</div>
+                      <div className="font-semibold text-gray-800">{h.rate}</div>
                     </li>
                   );
                 })}

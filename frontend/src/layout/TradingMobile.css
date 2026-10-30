@@ -1,0 +1,122 @@
+/* Trading-only phone layout corrections. Desktop and other workspaces are unchanged. */
+@media (max-width: 767px) {
+  .trading-mobile-layout,
+  .trading-mobile-layout .page-body,
+  .trading-mobile-layout .page-content {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .trading-mobile-header {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 2px;
+    padding-inline: 4px;
+  }
+
+  .trading-mobile-header__left {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .trading-mobile-header__primary {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .trading-mobile-header__back {
+    width: 22px;
+    height: 32px;
+    flex: 0 0 22px;
+    padding: 0 !important;
+  }
+
+  .trading-mobile-header__primary > button,
+  .trading-mobile-header__right > button,
+  .trading-mobile-header__quick-actions > div,
+  .trading-mobile-header__user > div:first-child {
+    width: 28px !important;
+    height: 32px !important;
+    flex: 0 0 28px;
+  }
+
+  .trading-mobile-header__workspace {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .trading-mobile-header__workspace select {
+    width: clamp(52px, 17vw, 72px);
+    max-width: 72px !important;
+    padding-inline: 3px;
+  }
+
+  .trading-mobile-header__right,
+  .trading-mobile-header__quick-actions {
+    flex: 0 0 auto;
+    gap: 1px;
+  }
+
+  .trading-mobile-header__install {
+    max-width: 42px;
+    padding-inline: 3px !important;
+    overflow: hidden;
+    font-size: 9px !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trading-mobile-header__user {
+    flex: 0 0 28px;
+  }
+
+  .trading-mobile-header__user-menu {
+    max-width: calc(100vw - 8px);
+  }
+
+  .trading-mobile-header__user-menu[dir='ltr'] {
+    right: 0 !important;
+    left: auto !important;
+  }
+
+  .trading-mobile-header__user-menu[dir='rtl'] {
+    right: auto !important;
+    left: 0 !important;
+  }
+
+  .trading-product-table,
+  .trading-product-table__toolbar,
+  .trading-product-table__scroll {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .trading-product-table__scroll {
+    overflow-x: auto !important;
+    overflow-y: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .trading-product-table__table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .trading-product-table__table th:first-child,
+  .trading-product-table__table td:first-child {
+    width: 180px !important;
+    min-width: 180px;
+    max-width: 220px;
+  }
+
+  .trading-product-table__table td:first-child span {
+    overflow-wrap: anywhere;
+  }
+}

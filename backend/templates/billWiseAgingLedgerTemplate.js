@@ -281,7 +281,7 @@ const generateBillWiseAgingLedgerHTML = (data, pageSize = "A4") => {
       <br />
 
       <strong>
-        Rs. ${formatAmount(summary.totalOutstanding)}
+        ${formatAmount(summary.totalOutstanding)}
       </strong>
     </div>
 

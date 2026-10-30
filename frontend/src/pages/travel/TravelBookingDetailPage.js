@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { formatDocumentReference, formatReferenceText } from '../../utils/referenceDisplay';
 import {
   FaArrowLeft,
   FaBed,
@@ -1308,7 +1309,7 @@ const renderItemSpecificDetails = (booking, item) => {
           <InfoCard
             icon={FaStickyNote}
             label={t('travel.booking.fields.description')}
-            value={item.description}
+            value={formatReferenceText(item.description)}
           />
         )}
       </div>
@@ -1319,7 +1320,7 @@ const renderItemSpecificDetails = (booking, item) => {
     <InfoCard
       icon={FaStickyNote}
       label={t('travel.booking.fields.description')}
-      value={item.description}
+      value={formatReferenceText(item.description)}
     />
   ) : null;
 };
@@ -1700,12 +1701,12 @@ const TravelBookingDetailPage = () => {
     <div className="space-y-4">
       <DetailGroup title="Invoice Overview" icon={FaReceipt} tone="cyan">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <InfoCard icon={FaReceipt} label="Booking No" value={booking.bookingNumber} tone="cyan" />
+          <InfoCard icon={FaReceipt} label="Booking No" value={formatDocumentReference(booking.bookingNumber)} tone="cyan" />
 
           <InfoCard
             icon={FaFileInvoiceDollar}
             label="Invoice No"
-            value={booking.invoiceNumber}
+            value={formatDocumentReference(booking.invoiceNumber)}
             tone="blue"
           />
 
@@ -2312,7 +2313,7 @@ const TravelBookingDetailPage = () => {
                   </span>
 
                   <h1 className="truncate text-lg font-black text-slate-950 sm:text-xl">
-                    {booking.invoiceNumber || booking.bookingNumber}
+                    {formatDocumentReference(booking.invoiceNumber || booking.bookingNumber)}
                   </h1>
 
                   <BookingStatusBadge status={booking.status} />

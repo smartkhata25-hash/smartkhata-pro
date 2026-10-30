@@ -289,15 +289,15 @@ const BusinessLiabilityList = ({
                       </td>
 
                       <td className="px-4 py-3 text-right font-semibold text-gray-700">
-                        {t('currency.rs')} {formatLiabilityAmount(liability.originalAmount)}
+                        {formatLiabilityAmount(liability.originalAmount)}
                       </td>
 
                       <td className="px-4 py-3 text-right font-bold text-emerald-700">
-                        {t('currency.rs')} {formatLiabilityAmount(paidAmount)}
+                        {formatLiabilityAmount(paidAmount)}
                       </td>
 
                       <td className="px-4 py-3 text-right font-black text-rose-700">
-                        {t('currency.rs')} {formatLiabilityAmount(liability.remainingAmount)}
+                        {formatLiabilityAmount(liability.remainingAmount)}
                       </td>
 
                       <td className="px-4 py-3">
@@ -583,7 +583,7 @@ const MobileValue = ({ label, value, className }) => {
       <div className="truncate text-[9px] font-semibold opacity-70">{label}</div>
 
       <div className="mt-1 truncate text-xs font-black">
-        {t('currency.rs')} {formatLiabilityAmount(value)}
+        {formatLiabilityAmount(value)}
       </div>
     </div>
   );
@@ -613,8 +613,6 @@ const CompactTotal = ({ label, value, icon, currency = false, danger = false }) 
           ${danger ? 'text-rose-700' : 'text-gray-800'}
         `}
       >
-        {currency && `${t('currency.rs')} `}
-
         {currency ? formatLiabilityAmount(value) : Number(value || 0).toLocaleString()}
       </div>
     </div>

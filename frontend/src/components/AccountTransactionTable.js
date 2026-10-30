@@ -6,6 +6,7 @@ import { buildTravelRouteState } from '../utils/travelContext';
 import { buildWeavingRouteState } from '../utils/weavingContext';
 import { formatMoneyDisplay } from '../utils/money';
 import { formatInstallmentsDisplayRef } from '../utils/installmentsDisplay';
+import { formatDocumentReference, formatReferenceText } from '../utils/referenceDisplay';
 import {
   formatBusinessDateForDisplay,
   getBusinessDateInputValue,
@@ -37,8 +38,11 @@ const AccountTransactionTable = ({
   };
 
   const formatMoney = formatMoneyDisplay;
-  const displayMoney = (value) => `${isInstallmentsScoped ? '' : 'Rs. '}${formatMoney(value)}`;
-  const displayBillNo = (value) => isInstallmentsScoped ? formatInstallmentsDisplayRef(value, 'reference') : value;
+  const displayMoney = (value) => `${isTravelScoped || isWeavingScoped ? 'Rs. ' : ''}${formatMoney(value)}`;
+  const displayBillNo = (value) => formatDocumentReference(
+    isInstallmentsScoped ? formatInstallmentsDisplayRef(value, 'reference') : value,
+  );
+  const displayDescription = (value) => formatReferenceText(value) || '-';
   const getAccountDisplayName = (account = {}) => {
     const name = String(account.name || '').trim();
     const code = String(account.code || '').trim();
@@ -447,7 +451,7 @@ const AccountTransactionTable = ({
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="break-words text-sm font-extrabold leading-5 text-slate-950">
-              {displayBillNo(txn.billNo) || txn.description || '-'}
+              {displayBillNo(txn.billNo) || displayDescription(txn.description)}
             </p>
 
             <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
@@ -462,7 +466,7 @@ const AccountTransactionTable = ({
         </div>
 
         <p className="mt-2 break-words text-xs font-medium leading-5 text-slate-600">
-          {txn.description || '-'}
+          {displayDescription(txn.description)}
         </p>
 
         <div className="mt-2 grid min-w-0 grid-cols-2 gap-2">
@@ -864,7 +868,7 @@ const AccountTransactionTable = ({
                           </span>
                         </td>
 
-                        <td className={cellClass}>{txn.description || '-'}</td>
+                        <td className={cellClass}>{displayDescription(txn.description)}</td>
 
                         <td className={`${cellClass} whitespace-nowrap text-right`}>
                           {renderClickableAmount(txn, txn.debit, 'in')}

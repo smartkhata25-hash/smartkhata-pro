@@ -1,5 +1,6 @@
 import React from 'react';
 import { t } from '../../i18n/i18n';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 
 export const contractIsOpen = (contract) => contract.status === 'active' &&
   (!contract.expiryDate || contract.expiryDate >= new Date().toISOString().slice(0, 10));
@@ -50,7 +51,7 @@ export default function WeavingProductionContext({ context, fabrics = [], partie
   const quality = context.qualityName || fabrics.find((row) => String(row._id) === String(context.fabricQualityId))?.name;
   const party = context.customerName || context.ownerName || parties.find((row) => String(row._id) === String(context.customerPartyId || context.ownerPartyId))?.name;
   const values = [
-    [t('weaving.production.contract'), context.contractNo || '-'],
+    [t('weaving.production.contract'), formatDocumentReference(context.contractNo) || '-'],
     [t('weaving.sales.contractType'), context.contractType ? t(context.contractType === 'conversion' ? 'weaving.sales.conversion' : 'weaving.sales.fabricSale') : '-'],
     [t('weaving.production.customer'), party || '-'],
     [t('weaving.folding.quality'), quality || '-'],

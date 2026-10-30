@@ -554,7 +554,7 @@ const PartyLedgerHeader = ({
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {formatMoneyDisplay(totalDebit)}
+              {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -568,7 +568,7 @@ const PartyLedgerHeader = ({
           >
             <div style={{ color: '#dc2626', fontWeight: 600 }}>{t('ledger.totalCredit')}</div>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {formatMoneyDisplay(totalCredit)}
+              {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -585,7 +585,7 @@ const PartyLedgerHeader = ({
             </div>
 
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16 }}>
-              Rs. {formatMoneyDisplay(closingBalance)}
+              {formatMoneyDisplay(closingBalance)}
             </div>
 
             {!isMobile && (

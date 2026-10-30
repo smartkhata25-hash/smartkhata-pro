@@ -4,6 +4,7 @@ import {
   createPurchaseReturn,
   updatePurchaseReturn,
   getPurchaseReturnById,
+  deletePurchaseReturn,
 } from '../services/purchaseReturnService';
 import purchaseInvoiceService from '../services/purchaseInvoiceService';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -27,9 +28,11 @@ const PurchaseReturnForm = ({ token }) => {
   const canViewPurchaseReturns = hasPermission('purchase_returns.view');
   const canCreatePurchaseReturns = hasPermission('purchase_returns.create');
   const canEditPurchaseReturns = hasPermission('purchase_returns.edit');
+  const canDeletePurchaseReturns = hasPermission('purchase_returns.delete');
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
   const didLoadEditRef = useRef(false);
+  const deleteInFlightRef = useRef(false);
 
   const [productList, setProductList] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -56,6 +59,8 @@ const PurchaseReturnForm = ({ token }) => {
   const [originalInvoiceId, setOriginalInvoiceId] = useState('');
   const [isOpeningReturn, setIsOpeningReturn] = useState(false);
   const [openingReturnAmount, setOpeningReturnAmount] = useState(0);
+  const [loadedReturnId, setLoadedReturnId] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // 📊 Purchase History
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -148,6 +153,7 @@ const PurchaseReturnForm = ({ token }) => {
       const data = await getPurchaseReturnById(id, token);
 
       populateForm(data);
+      setLoadedReturnId(data?._id || '');
       didLoadEditRef.current = true;
     };
 
@@ -421,6 +427,35 @@ const PurchaseReturnForm = ({ token }) => {
       shouldSave: shouldSavePurchaseReturnDraft,
     }
   );
+
+  const handleDeletePurchaseReturn = async () => {
+    if (
+      !loadedReturnId ||
+      !canDeletePurchaseReturns ||
+      deleteLoading ||
+      deleteInFlightRef.current
+    ) return;
+    if (!window.confirm(`Delete Purchase Return #${billNo || ''}?`)) return;
+
+    try {
+      deleteInFlightRef.current = true;
+      setDeleteLoading(true);
+      await deletePurchaseReturn(loadedReturnId, token);
+      purchaseInvoiceService.invalidatePurchaseInvoiceFormOptionsCache?.();
+      navigate('/purchase-returns');
+    } catch (error) {
+      alert(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Failed to delete purchase return'
+      );
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeleteLoading(false);
+    }
+  };
 
   const handleRevert = async () => {
     if (!id) {
@@ -1085,6 +1120,18 @@ const PurchaseReturnForm = ({ token }) => {
         </div>
 
         <div className="flex gap-2">
+          {loadedReturnId && canDeletePurchaseReturns && (
+            <button
+              type="button"
+              title="Delete Purchase Return"
+              aria-label="Delete Purchase Return"
+              onClick={handleDeletePurchaseReturn}
+              disabled={deleteLoading}
+              className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              ✕
+            </button>
+          )}
           {((id && canEditPurchaseReturns) || (!id && canCreatePurchaseReturns)) && (
             <>
               <button

@@ -232,9 +232,11 @@ const buildPurchaseInvoicePrint = (invoice, printSetting) => {
   );
 };
 
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+
 module.exports = {
-  buildSaleInvoicePrint,
-  buildQuotationPrint,
-  buildSaleReturnPrint,
-  buildPurchaseInvoicePrint,
+  buildSaleInvoicePrint: (...args) => formatReferencesForDisplay(buildSaleInvoicePrint(...args)),
+  buildQuotationPrint: (...args) => formatReferencesForDisplay(buildQuotationPrint(...args)),
+  buildSaleReturnPrint: (...args) => formatReferencesForDisplay(buildSaleReturnPrint(...args)),
+  buildPurchaseInvoicePrint: (...args) => formatReferencesForDisplay(buildPurchaseInvoicePrint(...args)),
 };

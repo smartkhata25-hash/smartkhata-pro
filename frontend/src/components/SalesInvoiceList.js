@@ -356,7 +356,6 @@ const SalesInvoiceList = () => {
           <span className="sm:hidden text-xs text-gray-600 whitespace-nowrap">Total</span>
 
           <span className="font-bold text-blue-700 truncate">
-            Rs.{' '}
             {formatMoneyDisplay(summary.totalSales)}
           </span>
         </div>
@@ -543,12 +542,12 @@ const SalesInvoiceList = () => {
 
                     <td className="border p-2 break-words">{getPartyOrCustomerName(inv)}</td>
 
-                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(totalAmount)}</td>
+                    <td className="border p-2 text-center">{formatMoneyDisplay(totalAmount)}</td>
 
-                    <td className="border p-2 text-center">Rs. {formatMoneyDisplay(paidAmount)}</td>
+                    <td className="border p-2 text-center">{formatMoneyDisplay(paidAmount)}</td>
 
                     <td className="border p-2 text-center whitespace-nowrap">
-                      Rs. {formatMoneyDisplay(balance)}
+                      {formatMoneyDisplay(balance)}
                     </td>
 
                     <td className="border p-2">

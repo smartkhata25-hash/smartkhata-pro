@@ -4,6 +4,7 @@ import SearchableCreatableSelect from './SearchableCreatableSelect';
 import { requestWeavingConfirmation, useWeavingFeedback } from './WeavingFeedbackModal';
 import { t } from '../../i18n/i18n';
 import { getBusinessDateInputValue } from '../../utils/localDateTime';
+import { formatDocumentReference, formatReferenceText } from '../../utils/referenceDisplay';
 import {
   createFabricTransfer,
   createRewinderRecovery,
@@ -122,6 +123,13 @@ export const RewinderRecoveryModal = ({ meta, onClose, onDone }) => {
 };
 
 export const StockHistoryModal = ({ rows, canReverse, onClose, onChanged }) => {
+  rows = rows.map((row) => ({
+    ...row,
+    adjustmentNo: formatDocumentReference(row.adjustmentNo),
+    sourceReference: formatDocumentReference(row.sourceReference),
+    reason: formatReferenceText(row.reason),
+    thanDetails: row.thanDetails?.map((than) => ({ ...than, thanNo: formatDocumentReference(than.thanNo) })),
+  }));
   const [busy, setBusy] = useState(''); const [error, setError] = useState(''); const [detail, setDetail] = useState(null);
   useWeavingFeedback(error, setError, { type: 'error' });
   const reverse = async (row) => { const reason = await requestWeavingConfirmation({ message: t('weaving.stock.reversalReason'), inputLabel: t('weaving.stock.reversalReason'), inputRequired: true }); if (!reason) return; setBusy(row._id); setError(''); try { await reverseStockAdjustment(row._id, reason); await onChanged(); } catch (requestError) { setError(requestError.response?.data?.message || requestError.message); } finally { setBusy(''); } };

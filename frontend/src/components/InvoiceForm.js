@@ -62,6 +62,7 @@ const InvoiceForm = ({
   const customerInputRef = useRef(null);
   const fileInputRef = useRef();
   const discountPercentRef = useRef(null);
+  const deleteInFlightRef = useRef(false);
   const location = useLocation();
   const canViewSales = hasPermission('sales.view');
   const canCreateSales = hasPermission('sales.create');
@@ -113,6 +114,7 @@ const InvoiceForm = ({
   const [showHistoryPopup, setShowHistoryPopup] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [historyRowIndex, setHistoryRowIndex] = useState(null);
   const [activeQuotationId, setActiveQuotationId] = useState('');
@@ -179,13 +181,15 @@ const InvoiceForm = ({
   };
 
   const handleDeleteInvoice = async () => {
-    if (!editingInvoiceFromAPI?._id) return;
+    if (!editingInvoiceFromAPI?._id || deleteLoading || deleteInFlightRef.current) return;
 
     const confirmed = window.confirm(`Are you sure you want to delete invoice #${billNo}?`);
 
     if (!confirmed) return;
 
     try {
+      deleteInFlightRef.current = true;
+      setDeleteLoading(true);
       await deleteInvoice(editingInvoiceFromAPI._id, token);
 
       sessionStorage.removeItem(`sale_edit_preview_draft_${editingInvoiceFromAPI._id}`);
@@ -208,7 +212,16 @@ const InvoiceForm = ({
     } catch (err) {
       console.error('Invoice delete failed:', err?.response?.data || err.message);
 
-      alert(err?.response?.data?.message || 'Failed to delete invoice');
+      alert(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.response?.data?.detail ||
+          err?.message ||
+          'Failed to delete invoice'
+      );
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeleteLoading(false);
     }
   };
 
@@ -1697,12 +1710,13 @@ const InvoiceForm = ({
                   </label>
                 )}
 
-                {editingInvoiceFromAPI?._id && canEditSales && (
+                {editingInvoiceFromAPI?._id && canDeleteSales && (
                   <button
                     type="button"
                     onClick={handleDeleteInvoice}
+                    disabled={deleteLoading}
                     title="Delete Invoice"
-                    className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600"
+                    className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     ✕
                   </button>
@@ -2398,23 +2412,23 @@ const InvoiceForm = ({
               {/* 🔹 RIGHT SIDE – Totals */}
               <div className="col-span-4 text-right space-y-1">
                 <p>
-                  {t('total')}: Rs. {formatMoneyDisplay(totalAmount)}
+                  {t('total')}: {formatMoneyDisplay(totalAmount)}
                 </p>
                 <p>
-                  {t('discount')}: Rs. {formatMoneyDisplay(finalDiscount)}
+                  {t('discount')}: {formatMoneyDisplay(finalDiscount)}
                 </p>
                 <p className="text-xl font-bold">
-                  {t('netTotal')}: Rs. {formatMoneyDisplay(grandTotal)}
+                  {t('netTotal')}: {formatMoneyDisplay(grandTotal)}
                 </p>
                 <p>
-                  {t('paid')}: Rs. {formatMoneyDisplay(numericPaidAmount)}
+                  {t('paid')}: {formatMoneyDisplay(numericPaidAmount)}
                 </p>
                 <p className="text-red-600 font-semibold">
-                  {t('remaining')}: Rs. {formatMoneyDisplay(grandTotal - numericPaidAmount)}
+                  {t('remaining')}: {formatMoneyDisplay(grandTotal - numericPaidAmount)}
                 </p>
                 {printSettings?.sales?.settings?.showCustomerTotalBalance !== false && (
                   <p className="text-blue-600 font-semibold">
-                    {t('customerTotalBalance')}: Rs.{' '}
+                    {t('customerTotalBalance')}:{' '}
                     {formatMoneyDisplay(editingInvoiceFromAPI
                       ? customerBalance -
                         ((editingInvoiceFromAPI.totalAmount || 0) -
@@ -2456,7 +2470,7 @@ const InvoiceForm = ({
               <p className="text-sm text-gray-700 mb-4">{t('invoice.overpaymentMessage')}</p>
 
               <p className="text-sm font-semibold text-green-600 mb-6">
-                Extra Rs. {formatMoneyDisplay(overpayAmount)} {t('invoice.adjustPrevious')}
+                Extra {formatMoneyDisplay(overpayAmount)} {t('invoice.adjustPrevious')}
               </p>
 
               <div className="flex justify-end gap-3">
@@ -2958,7 +2972,7 @@ const InvoiceForm = ({
                         {safeDate} | Bill #{h.billNo}
                       </div>
 
-                      <div className="font-semibold text-gray-800">Rs. {h.rate}</div>
+                      <div className="font-semibold text-gray-800">{h.rate}</div>
                     </li>
                   );
                 })}

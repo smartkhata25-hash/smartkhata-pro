@@ -34,7 +34,7 @@ const createOne = async (Model, document, session) => {
   const [created] = await Model.create([document], { session });
   return created;
 };
-const runAtomic = async (work) => {
+const runAtomic = async (work, onFallbackFailure = null) => {
   const session = await mongoose.startSession();
   let result;
   try {
@@ -42,7 +42,12 @@ const runAtomic = async (work) => {
     return result;
   } catch (failure) {
     if (!/Transaction numbers are only allowed|replica set member|does not support transactions/i.test(failure.message || "")) throw failure;
-    return work(null);
+    try {
+      return await work(null);
+    } catch (fallbackFailure) {
+      if (onFallbackFailure) await onFallbackFailure(fallbackFailure);
+      throw fallbackFailure;
+    }
   } finally {
     await session.endSession();
   }
@@ -372,7 +377,73 @@ const ensurePaymentAccount = async (userId, id, session = null) => {
   if (!account) throw error("Valid payment account is required"); return account;
 };
 
-const nextNo = async (Model, userId, field, prefix, session = null) => { const latest = await Model.findOne({ userId }).session(session).sort({ createdAt: -1 }).select(field).lean(); const value = latest?.[field] || ""; return `${prefix}-${String((Number(String(value).match(/(\d+)$/)?.[1]) || 0) + 1).padStart(5, "0")}`; };
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const referenceCounterType = (Model, field, prefix) =>
+  `weaving_reference:${Model.collection?.name || Model.modelName}:${field}:${prefix}`;
+const referenceSequence = (value, prefix) => {
+  const match = String(value || "").match(new RegExp(`^${escapeRegex(prefix)}-(\\d+)$`));
+  return match ? Number(match[1]) || 0 : 0;
+};
+const referenceHighWater = async (Model, userId, field, prefix, session = null) => {
+  const rows = await Model.find(
+    { userId, [field]: { $regex: `^${escapeRegex(prefix)}-\\d+$` } },
+    { [field]: 1 },
+    sessionOptions(session),
+  ).lean();
+  return rows.reduce((highest, row) => Math.max(highest, referenceSequence(row[field], prefix)), 0);
+};
+const allocateReferenceBlock = async (Model, userId, field, prefix, count = 1, session = null) => {
+  const size = Math.max(1, Math.floor(Number(count) || 1));
+  const highWater = await referenceHighWater(Model, userId, field, prefix, session);
+  const type = referenceCounterType(Model, field, prefix);
+  const counter = await Counter.findOneAndUpdate(
+    { userId, type },
+    [{
+      $set: {
+        seq: { $add: [{ $max: [{ $ifNull: ["$seq", 0] }, highWater] }, size] },
+      },
+    }],
+    { new: true, upsert: true, setDefaultsOnInsert: false, ...sessionOptions(session) },
+  );
+  const end = Number(counter.seq || size);
+  return Array.from(
+    { length: size },
+    (_, index) => `${prefix}-${String(end - size + index + 1).padStart(5, "0")}`,
+  );
+};
+const reserveNextNo = async (Model, userId, field, prefix, session = null) =>
+  (await allocateReferenceBlock(Model, userId, field, prefix, 1, session))[0];
+const previewNextNo = async (Model, userId, field, prefix, session = null) => {
+  const highWater = await referenceHighWater(Model, userId, field, prefix, session);
+  const counter = await Counter.findOne(
+    { userId, type: referenceCounterType(Model, field, prefix) },
+    { seq: 1 },
+    sessionOptions(session),
+  ).lean();
+  return `${prefix}-${String(Math.max(highWater, Number(counter?.seq || 0)) + 1).padStart(5, "0")}`;
+};
+const nextNo = previewNextNo;
+const recoverPurchaseRetry = async (failure, userId, requestKey) => {
+  if (failure?.code !== 11000 || failure?.keyValue?.requestKey !== requestKey) throw failure;
+  const existing = await WeavingPurchaseInvoice.findOne({ userId, requestKey });
+  if (!existing) throw failure;
+  return existing;
+};
+const cleanupFailedPurchaseAttempt = async ({ userId, purchaseId, journalIds, paymentIds }) => {
+  if (!purchaseId) return;
+  await WeavingMoneyTransaction.deleteMany({
+    _id: { $in: paymentIds },
+    userId,
+    purchaseInvoiceId: purchaseId,
+  });
+  await Promise.all([
+    WeavingYarnMovement.deleteMany({ userId, purchaseInvoiceId: purchaseId }),
+    WeavingFabricMovement.deleteMany({ userId, purchaseInvoiceId: purchaseId }),
+    WeavingSizingIssue.deleteMany({ userId, sourcePurchaseId: purchaseId }),
+    JournalEntry.deleteMany({ _id: { $in: journalIds }, createdBy: userId, referenceId: purchaseId }),
+  ]);
+  await WeavingPurchaseInvoice.deleteOne({ _id: purchaseId, userId });
+};
 
 const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, salesInvoice = null, session = null }) => {
   const requestKey = text(payload.requestKey);
@@ -396,7 +467,7 @@ const postMoneyTransaction = async ({ userId, payload, purchaseInvoice = null, s
   const [partyAccount, paymentAccount] = [await ensurePartyAccount(userId, party, session), await ensurePaymentAccount(userId, payload.paymentAccountId, session)];
   if (purchaseInvoice && amount > purchaseInvoice.balanceDue) throw error("Payment exceeds invoice balance");
   if (salesInvoice && amount > salesInvoice.balanceDue) throw error("Receipt exceeds invoice balance");
-  const transactionNo = await nextNo(WeavingMoneyTransaction, userId, "transactionNo", type === "receive" ? "RCV" : "PAY", session);
+  const transactionNo = await reserveNextNo(WeavingMoneyTransaction, userId, "transactionNo", type === "receive" ? "RCV" : "PAY", session);
   if (payload.paymentMethod === "cheque" && (!text(payload.chequeNo) || !text(payload.chequeDate))) throw error("Cheque Number and Cheque Date are required");
   const transaction = new WeavingMoneyTransaction({ userId, requestKey: requestKey || null, transactionNo, type, date: payload.date, partyId: party._id, purchaseInvoiceId: purchaseInvoice?._id || payload.purchaseInvoiceId || null, salesInvoiceId: salesInvoice?._id || payload.salesInvoiceId || null, sizingBillId: payload.sizingBillId || null, amount, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || paymentAccount.category, description: text(payload.description), attachmentUrl: text(payload.attachmentUrl), attachments: payload.attachments || [], chequeNo: text(payload.chequeNo), chequeBank: text(payload.chequeBank), chequeDate: text(payload.chequeDate), chequeDueDate: text(payload.chequeDueDate), chequeStatus: payload.paymentMethod === "cheque" ? "pending" : "", journalEntryId: partyAccount._id });
   const journal = await createJournal({ session, userId, date: payload.date, description: payload.description || `${type === "receive" ? "Received from" : "Paid to"} ${party.name}`, sourceType: type === "receive" ? "receive_payment" : "pay_bill", originModule: type === "receive" ? "weaving.receive_payment" : "weaving.pay_bill", referenceId: transaction._id, billNo: transactionNo, lines: type === "receive" ? [{ account: paymentAccount._id, type: "debit", amount }, { account: partyAccount._id, type: "credit", amount }] : [{ account: partyAccount._id, type: "debit", amount }, { account: paymentAccount._id, type: "credit", amount }] });
@@ -451,28 +522,38 @@ const createFabricPurchase = async (userId, payload, existingPurchase = null) =>
   const partyAccount = await ensurePartyAccount(userId, party);
   const inventoryAccount = await ensureAccount(userId, "WEAVING_FABRIC_INVENTORY");
   const paymentAccount = paidNow > 0 ? await ensurePaymentAccount(userId, payload.paymentAccountId) : null;
-  const purchaseNo = await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
-  const paymentNo = paidNow > 0 ? await nextNo(WeavingMoneyTransaction, userId, "transactionNo", "PAY") : "";
+  const purchaseNo = await reserveNextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
+  const paymentNo = paidNow > 0 ? await reserveNextNo(WeavingMoneyTransaction, userId, "transactionNo", "PAY") : "";
   const creditDays = Math.max(0, Number(payload.creditDays) || 0);
   const calculatedDue = creditDays && payload.purchaseDate ? new Date(`${payload.purchaseDate}T00:00:00.000Z`) : null;
   if (calculatedDue) calculatedDue.setUTCDate(calculatedDue.getUTCDate() + creditDays);
   const touchedAccountIds = [partyAccount._id, inventoryAccount._id, ...(paymentAccount ? [paymentAccount._id] : [])];
-  const invoice = await runAtomic(async (session) => {
+  const fallbackAttempt = { userId, purchaseId: null, journalIds: [], paymentIds: [] };
+  let invoice;
+  try {
+    invoice = await runAtomic(async (session) => {
     const duplicate = await WeavingPurchaseInvoice.findOne({ userId, requestKey }, null, sessionOptions(session));
     if (duplicate) return duplicate;
     const row = await createOne(WeavingPurchaseInvoice, { userId, requestKey, purchaseNo, purchaseDate: payload.purchaseDate, purchaseType: "fabric", yarnSource: "own", partyId: party._id, partyName: party.name, supplierInvoiceNo: text(payload.supplierInvoiceNo), attachmentUrl: text(payload.attachmentUrl), attachments: payload.attachments || [], notes: text(payload.notes), dueDate: text(payload.dueDate) || (calculatedDue ? calculatedDue.toISOString().slice(0, 10) : ""), creditDays, gatePassNo: text(payload.gatePassNo), entryMode: "detailed", lines, grandTotal, paidAmount: 0, balanceDue: grandTotal, paymentStatus: "unpaid" }, session);
+    if (!session) fallbackAttempt.purchaseId = row._id;
     await WeavingFabricMovement.insertMany(row.lines.map((line) => ({ userId, date: payload.purchaseDate, movementType: "purchase_in", category: line.fabricGrade, direction: "in", fabricQualityId: line.fabricQualityId, godownId: line.godownId, ownershipType: "own", meter: line.quantity, weightKg: line.weightKg, thanCount: line.thanCount, pieceCount: line.pieceCount, purchaseInvoiceId: row._id, purchaseLineId: line._id, notes: `Fabric Purchase ${purchaseNo}` })), sessionOptions(session));
     const purchaseJournal = await createOne(JournalEntry, { date: new Date(`${payload.purchaseDate}T00:00:00.000Z`), description: `Purchase ${purchaseNo} - ${party.name}`, createdBy: userId, sourceType: "purchase_invoice", originModule: "weaving.purchase", moduleScope: "weaving", referenceId: row._id, invoiceId: row._id, invoiceModel: "WeavingPurchaseInvoice", billNo: purchaseNo, lines: [{ account: inventoryAccount._id, type: "debit", amount: grandTotal }, { account: partyAccount._id, type: "credit", amount: grandTotal }] }, session);
+    if (!session) fallbackAttempt.journalIds.push(purchaseJournal._id);
     row.purchaseJournalId = purchaseJournal._id;
     if (paidNow > 0) {
       const paymentRequestKey = `purchase:${requestKey}:payment`;
       const paymentJournal = await createOne(JournalEntry, { date: new Date(`${payload.purchaseDate}T00:00:00.000Z`), description: `Paid against ${purchaseNo}`, createdBy: userId, sourceType: "pay_bill", originModule: "weaving.pay_bill", moduleScope: "weaving", referenceId: row._id, billNo: paymentNo, lines: [{ account: partyAccount._id, type: "debit", amount: paidNow }, { account: paymentAccount._id, type: "credit", amount: paidNow }] }, session);
+      if (!session) fallbackAttempt.journalIds.push(paymentJournal._id);
       const transaction = await createOne(WeavingMoneyTransaction, { userId, requestKey: paymentRequestKey, transactionNo: paymentNo, type: "pay", date: payload.purchaseDate, partyId: party._id, purchaseInvoiceId: row._id, amount: paidNow, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || paymentAccount.category, description: `Paid against ${purchaseNo}`, journalEntryId: paymentJournal._id }, session);
+      if (!session) fallbackAttempt.paymentIds.push(transaction._id);
       row.paidAmount = paidNow; row.balanceDue = round(grandTotal - paidNow); row.paymentStatus = row.balanceDue <= 0 ? "paid" : "partial"; row.paymentTransactionIds = [transaction._id];
     }
     await row.save(sessionOptions(session));
     return row;
-  });
+    }, () => cleanupFailedPurchaseAttempt(fallbackAttempt));
+  } catch (failure) {
+    invoice = await recoverPurchaseRetry(failure, userId, requestKey);
+  }
   await recalculateAccountBalances([...new Set(touchedAccountIds.map(String))]);
   return invoice;
 };
@@ -495,7 +576,7 @@ const createPurchase = async (userId, payload, existingPurchase = null) => {
   const grandTotal = entryMode === "quick" ? quickAmount : round(lines.reduce((s, l) => s + l.amount, 0)); const nonFinancial = purchaseType === "yarn" && yarnSource === "party";
   const paidNow = round(payload.paidNow);
   if (paidNow < 0 || paidNow > grandTotal || (nonFinancial && paidNow > 0)) throw error("Paid Now cannot exceed Bill Total");
-  const purchaseNo = await nextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
+  const purchaseNo = await reserveNextNo(WeavingPurchaseInvoice, userId, "purchaseNo", "WP");
   const creditDays = Math.max(0, Number(payload.creditDays) || 0); const calculatedDue = creditDays && payload.purchaseDate ? new Date(`${payload.purchaseDate}T00:00:00.000Z`) : null; if (calculatedDue) calculatedDue.setUTCDate(calculatedDue.getUTCDate() + creditDays);
   const partyAccount = nonFinancial ? null : await ensurePartyAccount(userId, party);
   const paymentAccount = paidNow > 0 ? await ensurePaymentAccount(userId, payload.paymentAccountId) : null;
@@ -515,14 +596,19 @@ const createPurchase = async (userId, payload, existingPurchase = null) => {
     if (!directGroups.has(groupKey)) directGroups.set(groupKey, []);
     directGroups.get(groupKey).push(line);
   });
-  const firstIssueNo = directGroups.size ? await nextNo(WeavingSizingIssue, userId, "issueNo", "SI") : "";
-  const firstIssueSequence = Number(firstIssueNo.match(/(\d+)$/)?.[1] || 1);
-  const paymentNo = paidNow > 0 ? await nextNo(WeavingMoneyTransaction, userId, "transactionNo", "PAY") : "";
+  const issueNumbers = directGroups.size
+    ? await allocateReferenceBlock(WeavingSizingIssue, userId, "issueNo", "SI", directGroups.size)
+    : [];
+  const paymentNo = paidNow > 0 ? await reserveNextNo(WeavingMoneyTransaction, userId, "transactionNo", "PAY") : "";
   const touchedAccountIds = [...grouped.values().map((line) => line.account), ...(partyAccount ? [partyAccount._id] : []), ...(paymentAccount ? [paymentAccount._id] : [])];
-  const invoice = await runAtomic(async (session) => {
+  const fallbackAttempt = { userId, purchaseId: null, journalIds: [], paymentIds: [] };
+  let invoice;
+  try {
+    invoice = await runAtomic(async (session) => {
     const duplicate = await WeavingPurchaseInvoice.findOne({ userId, requestKey }, null, sessionOptions(session));
     if (duplicate) return duplicate;
     const row = await createOne(WeavingPurchaseInvoice, { userId, requestKey, purchaseNo, purchaseDate: payload.purchaseDate, purchaseType, yarnSource, partyId: party._id, partyName: party.name, supplierInvoiceNo: text(payload.supplierInvoiceNo), attachmentUrl: text(payload.attachmentUrl), attachments: payload.attachments || [], notes: text(payload.notes), dueDate: text(payload.dueDate) || (calculatedDue ? calculatedDue.toISOString().slice(0, 10) : ""), creditDays, gatePassNo: text(payload.gatePassNo), entryMode, quickAmount, quickNature: entryMode === "quick" ? (payload.quickNature === "asset" ? "asset" : "expense") : "", quickDebitAccountId: quickDebit?._id || null, lines, grandTotal, paidAmount: paidNow, balanceDue: nonFinancial ? 0 : round(grandTotal - paidNow), paymentStatus: nonFinancial ? "non_financial" : paidNow >= grandTotal ? "paid" : paidNow > 0 ? "partial" : "unpaid" }, session);
+    if (!session) fallbackAttempt.purchaseId = row._id;
     let yarnMovements = [];
     if (purchaseType === "yarn") yarnMovements = await WeavingYarnMovement.insertMany(row.lines.map((line) => ({ userId, yarnId: line.yarnId, date: payload.purchaseDate, movementType: nonFinancial ? "party_inward" : "purchase_in", ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null, purchaseInvoiceId: row._id, purchaseContractId: line.purchaseContractId || null, contractId: line.productionContractId || null, quantityKg: line.quantity, quantityLbs: line.quantityLbs, sourceEntryUnit: line.sourceEntryUnit || "LBS", brandName: line.brandName, rate: line.rate, destinationType: line.destinationType, godownId: line.godownId, sizingPartyId: line.sizingPartyId, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, notes: payload.notes })), sessionOptions(session));
     if (directGroups.size) {
@@ -536,7 +622,7 @@ const createPurchase = async (userId, payload, existingPurchase = null) => {
       });
       let issueIndex = 0;
       for (const invoiceLines of invoiceGroups.values()) {
-        const issueNo = `SI-${String(firstIssueSequence + issueIndex).padStart(5, "0")}`;
+        const issueNo = issueNumbers[issueIndex];
         issueIndex += 1;
         const issue = await createOne(WeavingSizingIssue, { userId, issueNo, date: payload.purchaseDate, sizingPartyId: invoiceLines[0].sizingPartyId, contractId: invoiceLines[0].productionContractId || null, fabricQualityId: invoiceLines[0].productionFabricQualityId || null, ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null, gatePassNo: text(payload.gatePassNo), notes: `Direct Purchase ${purchaseNo}`, sourceType: "direct_purchase", sourcePurchaseId: row._id, lines: invoiceLines.map((line) => ({ yarnId: line.yarnId, quantityKg: line.quantity, packageType: line.packageType, packageQty: line.packageQty, coneSize: line.coneSize, conesPerPackage: line.conesPerPackage, extraCones: line.extraCones, totalCones: line.totalCones, smallCones: line.smallCones, largeCones: line.largeCones, lotReference: line.lotReference, sourcePurchaseLineId: line._id, ownershipType: nonFinancial ? "party" : "own", ownerPartyId: nonFinancial ? party._id : null })), movementIds: invoiceLines.map((line) => movementByLine.get(String(line._id))?._id).filter(Boolean) }, session);
         await WeavingYarnMovement.updateMany({ _id: { $in: issue.movementIds }, userId }, { $set: { sizingIssueId: issue._id } }, sessionOptions(session));
@@ -545,16 +631,22 @@ const createPurchase = async (userId, payload, existingPurchase = null) => {
     }
     if (!nonFinancial) {
       const purchaseJournal = await createOne(JournalEntry, { date: new Date(`${payload.purchaseDate}T00:00:00.000Z`), description: `Purchase ${purchaseNo} - ${party.name}`, createdBy: userId, sourceType: "purchase_invoice", originModule: "weaving.purchase", moduleScope: "weaving", referenceId: row._id, invoiceId: row._id, invoiceModel: "WeavingPurchaseInvoice", billNo: purchaseNo, lines: [...grouped.values(), { account: partyAccount._id, type: "credit", amount: grandTotal }] }, session);
+      if (!session) fallbackAttempt.journalIds.push(purchaseJournal._id);
       row.purchaseJournalId = purchaseJournal._id;
       if (paidNow > 0) {
         const paymentJournal = await createOne(JournalEntry, { date: new Date(`${payload.purchaseDate}T00:00:00.000Z`), description: `Paid against ${purchaseNo}`, createdBy: userId, sourceType: "pay_bill", originModule: "weaving.pay_bill", moduleScope: "weaving", referenceId: row._id, billNo: paymentNo, lines: [{ account: partyAccount._id, type: "debit", amount: paidNow }, { account: paymentAccount._id, type: "credit", amount: paidNow }] }, session);
+        if (!session) fallbackAttempt.journalIds.push(paymentJournal._id);
         const payment = await createOne(WeavingMoneyTransaction, { userId, requestKey: `purchase:${requestKey}:payment`, transactionNo: paymentNo, type: "pay", date: payload.purchaseDate, partyId: party._id, purchaseInvoiceId: row._id, amount: paidNow, paymentAccountId: paymentAccount._id, paymentMethod: payload.paymentMethod || paymentAccount.category, description: `Paid against ${purchaseNo}`, journalEntryId: paymentJournal._id }, session);
+        if (!session) fallbackAttempt.paymentIds.push(payment._id);
         row.paymentTransactionIds.push(payment._id);
       }
     }
     await row.save(sessionOptions(session));
     return row;
-  });
+    }, () => cleanupFailedPurchaseAttempt(fallbackAttempt));
+  } catch (failure) {
+    invoice = await recoverPurchaseRetry(failure, userId, requestKey);
+  }
   if (touchedAccountIds.length) await recalculateAccountBalances([...new Set(touchedAccountIds.map(String))]);
   return invoice;
 };
@@ -652,4 +744,4 @@ const updatePurchase = async (userId, invoiceId, payload, actorId) => {
   return replacement;
 };
 
-module.exports = { ensureAccount, ensurePartyAccount, createJournal, reverseJournal, reconcileOpeningBalance, resolveEffectiveWeavingPartyLedgerJournals, partyBalance, getPartyLedger, mergeParties: costing.withCostingInvalidation(mergeParties, "party_merge"), postMoneyTransaction, updateMoneyTransaction, voidMoneyTransaction, createPurchase: costing.withCostingInvalidation(createPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), updatePurchase: costing.withCostingInvalidation(updatePurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), voidPurchase: costing.withCostingInvalidation(voidPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), nextNo, round, _test: { buildLedgerSource, calculateEffectivePartyLedger, openingBalanceIsUnchanged, resolveEffectiveWeavingPartyLedgerJournals, createJournal, reverseJournal, normalizePurchaseLines, consolidateJournalLines, mergeRoles, assertPurchaseHasNoDownstreamUse } };
+module.exports = { ensureAccount, ensurePartyAccount, createJournal, reverseJournal, reconcileOpeningBalance, resolveEffectiveWeavingPartyLedgerJournals, partyBalance, getPartyLedger, mergeParties: costing.withCostingInvalidation(mergeParties, "party_merge"), postMoneyTransaction, updateMoneyTransaction, voidMoneyTransaction, createPurchase: costing.withCostingInvalidation(createPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), updatePurchase: costing.withCostingInvalidation(updatePurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), voidPurchase: costing.withCostingInvalidation(voidPurchase, "purchase", (invoice) => ["yarn", "fabric"].includes(invoice?.purchaseType)), nextNo, previewNextNo, round, _test: { buildLedgerSource, calculateEffectivePartyLedger, openingBalanceIsUnchanged, resolveEffectiveWeavingPartyLedgerJournals, createJournal, reverseJournal, normalizePurchaseLines, consolidateJournalLines, mergeRoles, assertPurchaseHasNoDownstreamUse, allocateReferenceBlock, reserveNextNo, referenceCounterType, referenceSequence, recoverPurchaseRetry, cleanupFailedPurchaseAttempt } };

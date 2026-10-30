@@ -252,8 +252,6 @@ const BusinessLiabilityForm = ({
               </select>
 
               <div className="relative">
-                <span className={currencyPrefixClass}>{t('currency.rs')}</span>
-
                 <input
                   type="number"
                   min="0"
@@ -262,13 +260,11 @@ const BusinessLiabilityForm = ({
                   onChange={(event) => handleChange('originalAmount', event.target.value)}
                   placeholder={t('businessValue.originalAmountPlaceholder')}
                   disabled={saving}
-                  className={`${inputClass} pl-12`}
+                  className={inputClass}
                 />
               </div>
 
               <div className="relative">
-                <span className={currencyPrefixClass}>{t('currency.rs')}</span>
-
                 <input
                   type="number"
                   min="0"
@@ -277,7 +273,7 @@ const BusinessLiabilityForm = ({
                   onChange={(event) => handleChange('remainingAmount', event.target.value)}
                   placeholder={t('businessValue.remainingAmountPlaceholder')}
                   disabled={saving}
-                  className={`${inputClass} pl-12`}
+                  className={inputClass}
                 />
               </div>
 
@@ -383,7 +379,7 @@ const ValuePreview = ({ title, value, icon, className }) => {
       </div>
 
       <div className="mt-1 truncate text-sm font-black sm:text-base">
-        {t('currency.rs')} {formatLiabilityAmount(value)}
+        {formatLiabilityAmount(value)}
       </div>
     </div>
   );
@@ -396,11 +392,6 @@ const inputClass = `
   hover:border-rose-300 hover:bg-white
   focus:border-rose-500 focus:bg-white focus:ring-2 focus:ring-rose-100
   disabled:cursor-not-allowed disabled:opacity-60
-`;
-
-const currencyPrefixClass = `
-  pointer-events-none absolute left-3 top-1/2 z-10
-  -translate-y-1/2 text-xs font-bold text-gray-400
 `;
 
 export default BusinessLiabilityForm;

@@ -1380,7 +1380,7 @@ const ChartOfAccountsPage = () => {
                         </td>
 
                         <td className="px-4 py-3 text-right font-extrabold text-slate-900">
-                          {!isInstallmentsScoped && 'Rs. '}{formatMoney(account.balance)}
+                          {(isTravelScoped || isWeavingScoped) && 'Rs. '}{formatMoney(account.balance)}
                         </td>
 
                         <td className="px-4 py-3">
@@ -1484,7 +1484,7 @@ const ChartOfAccountsPage = () => {
                         </p>
 
                         <p className="mt-0.5 truncate font-extrabold text-slate-900">
-                          {!isInstallmentsScoped && 'Rs. '}{formatMoney(account.balance)}
+                          {(isTravelScoped || isWeavingScoped) && 'Rs. '}{formatMoney(account.balance)}
                         </p>
                       </div>
                     </div>

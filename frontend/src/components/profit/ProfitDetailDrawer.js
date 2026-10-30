@@ -134,7 +134,7 @@ const ProfitDetailDrawer = ({
                   isRefund ? 'text-red-600' : 'text-gray-800'
                 }`}
               >
-                {t('currency.rs')} {amount.toFixed(0)}
+                {amount.toFixed(0)}
               </td>
             </tr>
           );
@@ -158,7 +158,7 @@ const ProfitDetailDrawer = ({
               <td className="p-3 border">{accountCode}</td>
 
               <td className="p-3 border font-semibold text-red-500">
-                {t('currency.rs')} {amount.toFixed(0)}
+                {amount.toFixed(0)}
               </td>
             </tr>
           );
@@ -189,13 +189,13 @@ const ProfitDetailDrawer = ({
               </td>
 
               <td className="p-3 border text-blue-600 font-semibold">
-                {t('currency.rs')} {saleCost.toFixed(0)}
+                {saleCost.toFixed(0)}
               </td>
 
               <td className="p-3 border text-red-500 font-semibold">
                 {refundCost > 0
-                  ? `-${t('currency.rs')} ${refundCost.toFixed(0)}`
-                  : `${t('currency.rs')} 0`}
+                  ? `-${refundCost.toFixed(0)}`
+                  : '0'}
               </td>
 
               <td
@@ -203,7 +203,7 @@ const ProfitDetailDrawer = ({
                   netCogs >= 0 ? 'text-orange-600' : 'text-red-600'
                 }`}
               >
-                {t('currency.rs')} {netCogs.toFixed(0)}
+                {netCogs.toFixed(0)}
               </td>
             </tr>
           );
@@ -234,13 +234,13 @@ const ProfitDetailDrawer = ({
               </td>
 
               <td className="p-3 border text-blue-600">
-                {t('currency.rs')} {grossSales.toFixed(0)}
+                {grossSales.toFixed(0)}
               </td>
 
               <td className="p-3 border text-red-500 font-medium">
                 {refundAmount > 0
-                  ? `-${t('currency.rs')} ${refundAmount.toFixed(0)}`
-                  : `${t('currency.rs')} 0`}
+                  ? `-${refundAmount.toFixed(0)}`
+                  : '0'}
               </td>
 
               <td
@@ -248,7 +248,7 @@ const ProfitDetailDrawer = ({
                   profit >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}
               >
-                {t('currency.rs')} {profit.toFixed(0)}
+                {profit.toFixed(0)}
               </td>
 
               <td className="p-3 border font-semibold text-purple-600">{margin.toFixed(1)}%</td>

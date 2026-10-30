@@ -145,7 +145,7 @@ const CashFlowChart = () => {
       tooltip: {
         callbacks: {
           label: function (context) {
-            return `${context.dataset.label}: Rs. ${context.raw}`;
+            return `${context.dataset.label}: ${context.raw}`;
           },
         },
       },
@@ -166,7 +166,7 @@ const CashFlowChart = () => {
 
         ticks: {
           callback: function (value) {
-            return 'Rs. ' + value;
+            return value;
           },
         },
 
@@ -291,7 +291,7 @@ const CashFlowChart = () => {
           }}
         >
           <strong>{t('dashboard.totalInflow')}</strong>
-          <div style={{ fontSize: 20, color: '#16a34a' }}>Rs. {formatMoneyDisplay(totalInflow)}</div>
+          <div style={{ fontSize: 20, color: '#16a34a' }}>{formatMoneyDisplay(totalInflow)}</div>
         </div>
 
         <div
@@ -303,7 +303,7 @@ const CashFlowChart = () => {
           }}
         >
           <strong>{t('dashboard.totalOutflow')}</strong>
-          <div style={{ fontSize: 20, color: '#dc2626' }}>Rs. {formatMoneyDisplay(totalOutflow)}</div>
+          <div style={{ fontSize: 20, color: '#dc2626' }}>{formatMoneyDisplay(totalOutflow)}</div>
         </div>
 
         <div
@@ -321,7 +321,7 @@ const CashFlowChart = () => {
               color: netCash >= 0 ? '#16a34a' : '#dc2626',
             }}
           >
-            Rs. {formatMoneyDisplay(netCash)}
+            {formatMoneyDisplay(netCash)}
           </div>
         </div>
       </div>

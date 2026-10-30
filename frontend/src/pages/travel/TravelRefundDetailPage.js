@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
 useNavigate, useParams } from 'react-router-dom';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   FaArrowLeft,
   FaEye,
@@ -279,7 +280,7 @@ const TravelRefundDetailPage = () => {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <DetailLine
                 labelKey="travel.refund.fields.refundNumber"
-                value={refund.refundNumber}
+                value={formatDocumentReference(refund.refundNumber)}
               />
               <DetailLine
                 labelKey="travel.refund.fields.originalInvoice"

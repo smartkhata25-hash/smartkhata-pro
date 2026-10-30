@@ -2,6 +2,7 @@ const WeavingMoneyTransaction = require("../models/WeavingMoneyTransaction");
 const { generatePdfFromHtml } = require("../services/pdfService");
 const { getLedgerPrintHeader } = require("../services/ledgerPrintHeaderService");
 const { formatMoney } = require("../utils/money");
+const { formatDocumentReference, formatReferenceText } = require("../utils/referenceDisplay");
 const {
   ledgerBusinessHeaderStyles,
   renderLedgerBusinessHeader,
@@ -57,7 +58,7 @@ const renderPaymentReceipt = ({ transaction, header, autoPrint = false }) => {
   const isReceive = transaction.type === "receive";
   const title = isReceive ? "Receive Payment" : "Payment Made";
   const partyLabel = isReceive ? "Customer / Party" : "Supplier / Party";
-  const linkedReference = getLinkedReference(transaction);
+  const linkedReference = formatDocumentReference(getLinkedReference(transaction));
   const createdTime = formatTime(transaction.createdAt);
   const chequeDetails =
     transaction.paymentMethod === "cheque"
@@ -81,7 +82,7 @@ const renderPaymentReceipt = ({ transaction, header, autoPrint = false }) => {
     .footer{border-top:1px solid #dbe3ee;color:#64748b;font-size:10px;margin-top:20px;padding-top:10px;text-align:center}
     @media(max-width:520px){.document-head{display:block}.number{text-align:left;margin-top:12px}.detail{grid-template-columns:1fr;gap:3px}}
   </style></head><body><main class="receipt">${renderLedgerBusinessHeader(header)}
-    <section class="document-head"><div><div class="module">Weaving</div><h1>${title}</h1></div><div class="number">Receipt / Transaction No.<strong>${escapeHtml(transaction.transactionNo)}</strong></div></section>
+    <section class="document-head"><div><div class="module">Weaving</div><h1>${title}</h1></div><div class="number">Receipt / Transaction No.<strong>${escapeHtml(formatDocumentReference(transaction.transactionNo))}</strong></div></section>
     <section class="amount"><span>Amount</span><strong>PKR ${formatMoney(transaction.amount)}</strong></section>
     <section class="details">
       ${detailRow("Date", `${formatDate(transaction.date)}${createdTime ? ` ${createdTime}` : ""}`)}
@@ -90,7 +91,7 @@ const renderPaymentReceipt = ({ transaction, header, autoPrint = false }) => {
       ${detailRow("Payment Account", [transaction.paymentAccountId?.name, transaction.paymentAccountId?.code].filter(Boolean).join(" - ") || "-")}
       ${detailRow("Linked Invoice / Bill", linkedReference)}
       ${chequeDetails}
-      ${transaction.description ? `<div class="detail"><span>Description / Remarks</span><strong class="notes">${escapeHtml(transaction.description)}</strong></div>` : ""}
+      ${transaction.description ? `<div class="detail"><span>Description / Remarks</span><strong class="notes">${escapeHtml(formatReferenceText(transaction.description))}</strong></div>` : ""}
     </section><div class="footer">Generated from the saved Weaving payment transaction.</div>
   </main>${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</script>' : ""}</body></html>`;
 };

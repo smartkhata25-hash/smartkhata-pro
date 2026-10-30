@@ -1,5 +1,6 @@
 import WeavingProductionContext from '../../components/weaving/WeavingProductionContext';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FaEye as Eye,
@@ -410,9 +411,9 @@ export default function WeavingBeamsPage() {
                   className="cursor-pointer hover:bg-cyan-50 focus:bg-cyan-50 focus:outline-none"
                 >
                   <td className="px-4 py-3 font-bold text-slate-900">
-                    {row.setNo || row.receiptNo}
+                    {formatDocumentReference(row.setNo || row.receiptNo)}
                     {row.setNo && (
-                      <div className="text-xs font-normal text-slate-500">{row.receiptNo}</div>
+                      <div className="text-xs font-normal text-slate-500">{formatDocumentReference(row.receiptNo)}</div>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -510,9 +511,9 @@ export default function WeavingBeamsPage() {
                       <div className="lg:col-span-2">
                         <div className="text-xs font-bold uppercase text-slate-500">Sizing Ref</div>
                         <div className="mt-1 text-lg font-black text-slate-900">
-                          {row.setNo || row.receiptNo}
+                          {formatDocumentReference(row.setNo || row.receiptNo)}
                         </div>
-                        {row.setNo && <div className="text-xs text-slate-500">{row.receiptNo}</div>}
+                        {row.setNo && <div className="text-xs text-slate-500">{formatDocumentReference(row.receiptNo)}</div>}
                       </div>
                       {[
                         ['Received', received],
@@ -579,7 +580,7 @@ export default function WeavingBeamsPage() {
                   {tr('formTitle')}
                 </h2>
                 <p className="mt-1 text-xs text-cyan-100">
-                  {selected.setNo || selected.receiptNo} · {selected.sizingPartyId?.name} ·{' '}
+                  {formatDocumentReference(selected.setNo || selected.receiptNo)} · {selected.sizingPartyId?.name} ·{' '}
                   {selected.beamCount} {tr('beams')}
                 </p>
               </div>

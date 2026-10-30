@@ -190,7 +190,7 @@ const AccountDetailPage = () => {
 
               const txns = await getAccountTransactions(acc._id, { moduleScope });
 
-               return buildOperationalTransactions(txns);
+              return buildOperationalTransactions(txns);
             })
           );
 
@@ -315,7 +315,7 @@ const AccountDetailPage = () => {
                 acc._id,
                 { moduleScope }
               );
-             return buildOperationalTransactions(txns);
+              return buildOperationalTransactions(txns);
             })
           );
 

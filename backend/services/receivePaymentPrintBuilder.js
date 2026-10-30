@@ -112,6 +112,8 @@ const buildReceivePaymentPrint = (
   };
 };
 
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+
 module.exports = {
-  buildReceivePaymentPrint,
+  buildReceivePaymentPrint: (...args) => formatReferencesForDisplay(buildReceivePaymentPrint(...args)),
 };

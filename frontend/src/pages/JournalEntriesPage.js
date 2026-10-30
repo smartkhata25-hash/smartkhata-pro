@@ -205,7 +205,7 @@ const JournalEntriesPage = () => {
           entry.description,
           line.type.toUpperCase(),
           line.account?.name || 'Unknown',
-          'Rs. ' + line.amount,
+          line.amount,
         ]);
       });
     });
@@ -217,7 +217,7 @@ const JournalEntriesPage = () => {
     });
 
     doc.text(
-      `Total Debit: Rs. ${grandTotalDebit} | Total Credit: Rs. ${grandTotalCredit}`,
+      `Total Debit: ${grandTotalDebit} | Total Credit: ${grandTotalCredit}`,
       14,
       doc.lastAutoTable.finalY + 10
     );
@@ -235,8 +235,8 @@ const JournalEntriesPage = () => {
       });
     });
 
-    csvContent += `\nTotal Debit:,Rs. ${grandTotalDebit},,,\n`;
-    csvContent += `Total Credit:,Rs. ${grandTotalCredit},,,\n`;
+    csvContent += `\nTotal Debit:,${grandTotalDebit},,,\n`;
+    csvContent += `Total Credit:,${grandTotalCredit},,,\n`;
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -617,7 +617,7 @@ const JournalEntriesPage = () => {
         )}
 
         <div style={{ marginTop: 10, fontWeight: 'bold' }}>
-          Grand Total — Debit: Rs. {grandTotalDebit} | Credit: Rs. {grandTotalCredit}
+          Grand Total — Debit: {grandTotalDebit} | Credit: {grandTotalCredit}
         </div>
       </div>
     </div>

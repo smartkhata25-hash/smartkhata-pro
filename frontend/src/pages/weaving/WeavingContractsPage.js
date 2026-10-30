@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FaEdit, FaFileContract, FaPlus, FaSearch, FaTimes } from 'react-icons/fa';
 
 import { t } from '../../i18n/i18n';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
 import WeightKgLbsInput, { KG_TO_LBS } from '../../components/weaving/WeightKgLbsInput';
@@ -287,7 +288,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
               <input disabled className={input} value={form.entryNo} />
             </Field>}
 
-            {tab === 'sales' && <Field label={`${label('contractNo')} *`}><input disabled className={input} value={form.contractNo} /></Field>}
+            {tab === 'sales' && <Field label={`${label('contractNo')} *`}><input disabled className={input} value={formatDocumentReference(form.contractNo)} /></Field>}
 
             <Field label={`${label('contractDate')} *`}>
               <input
@@ -570,7 +571,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
                   <tr key={row._id} role="button" tabIndex={0} onClick={() => setDetail(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDetail(row); } }} className="cursor-pointer border-t transition hover:bg-teal-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-teal-500">
                     {tab === 'purchase' && <td className="px-4 py-2.5 font-semibold text-slate-900">{row.entryNo || String(row.contractNo || '').match(/^PC-(\d+)$/i)?.[1] || '-'}</td>}
                     <td className="px-4 py-2.5 font-semibold text-slate-900">
-                      {row.contractNo}
+                      {formatDocumentReference(row.contractNo)}
 
                       {row.type === 'purchase' && <div className="text-xs font-normal text-teal-700">{t(row.purchaseItemType === 'fabric' ? 'weaving.production.fabricPurchaseContract' : 'weaving.production.yarnPurchaseContract')}</div>}
                       {row.type === 'sales' && (
@@ -624,7 +625,7 @@ const WeavingContractsPage = ({ initialTab = 'sales', embedded = false, listMode
           <div className="fixed inset-0 z-[300] flex justify-end bg-slate-950/40" onClick={() => setDetail(null)}>
             <aside className="h-full w-full max-w-lg overflow-y-auto bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
               <header className="sticky top-0 flex items-start gap-3 border-b bg-white p-5">
-                <div className="mr-auto"><h2 className="text-xl font-bold text-slate-900">{detail.contractNo}</h2><p className="text-sm text-slate-500">{detail.type === 'sales' ? t('weaving.production.customerContracts') : label('purchaseContract')}</p></div>
+                <div className="mr-auto"><h2 className="text-xl font-bold text-slate-900">{formatDocumentReference(detail.contractNo)}</h2><p className="text-sm text-slate-500">{detail.type === 'sales' ? t('weaving.production.customerContracts') : label('purchaseContract')}</p></div>
                 <button type="button" onClick={() => setDetail(null)} className="grid h-9 w-9 place-items-center rounded-md border text-slate-600 hover:bg-slate-50"><FaTimes /></button>
               </header>
               <ContractProgress contract={detail} />

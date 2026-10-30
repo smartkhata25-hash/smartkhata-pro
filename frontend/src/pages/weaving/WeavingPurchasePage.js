@@ -1,10 +1,11 @@
 import { t } from '../../i18n/i18n';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import WeavingProductionContext, {
   contractIsOpen,
   ContractProgress,
 } from '../../components/weaving/WeavingProductionContext';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   FaChevronDown,
@@ -30,6 +31,11 @@ import {
   stripYarnPackingUiState,
   validateYarnPackingLine,
 } from '../../utils/weaving/yarnPackingEntry';
+import {
+  mergePreparedYarnLines,
+  purchaseLineStarted,
+  validPurchaseLines,
+} from '../../utils/weaving/purchaseFormState';
 import {
   requestWeavingConfirmation,
   showWeavingFeedback,
@@ -149,12 +155,7 @@ const initial = (kind = 'yarn') => ({
   lines: [kind === 'yarn' ? yarnRow() : kind === 'fabric' ? fabricRow() : itemRow()],
 });
 
-const started = (row, kind) =>
-  kind === 'yarn'
-    ? Boolean(row.yarnId || row.kg || row.lbs || row.rate)
-    : kind === 'fabric'
-      ? Boolean(row.fabricQualityId || row.quantity || row.weightKg || row.rate)
-      : Boolean(row.itemId || row.quantity || row.rate);
+const started = purchaseLineStarted;
 
 const dueFrom = (date, days) => {
   if (!date || !Number(days)) return '';
@@ -171,10 +172,28 @@ const recoveryKey = (kind) => `weaving:purchase:unsaved:${kind}`;
 const restorePurchase = (kind) => {
   try {
     const saved = JSON.parse(localStorage.getItem(recoveryKey(kind)) || 'null');
-    if (!saved?.purchaseType) return initial(kind);
-    return kind === 'yarn'
-      ? { ...saved, lines: (saved.lines || []).map(hydrateYarnPackingLine) }
-      : saved;
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return initial(kind);
+
+    const fallback = initial(kind);
+    const savedLines = validPurchaseLines(saved.lines);
+    const lines = savedLines.map((line) => {
+      if (kind === 'yarn') return hydrateYarnPackingLine({ ...yarnRow(), ...line });
+      if (kind === 'fabric') return { ...fabricRow(), ...line };
+      return { ...itemRow(), ...line };
+    });
+
+    return {
+      ...fallback,
+      ...saved,
+      requestKey:
+        typeof saved.requestKey === 'string' && saved.requestKey.trim()
+          ? saved.requestKey
+          : fallback.requestKey,
+      purchaseType: fallback.purchaseType,
+      entryMode: kind === 'general' && saved.entryMode === 'detailed' ? 'detailed' : fallback.entryMode,
+      attachments: [],
+      lines: lines.length ? lines : fallback.lines,
+    };
   } catch {
     return initial(kind);
   }
@@ -216,6 +235,7 @@ export default function WeavingPurchasePage() {
   const [notice, setNotice] = useState('');
   useWeavingFeedback(notice, setNotice, { type: 'error' });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [editingId, setEditingId] = useState(null);
   const canEdit = hasPermission('weaving.purchases.edit');
   const canVoid = hasPermission('weaving.purchases.void');
@@ -427,7 +447,7 @@ export default function WeavingPurchasePage() {
       paymentAccountId: activePayment?.paymentAccountId || '',
       notes: row.notes || '',
       attachments: row.attachments || [],
-      lines: (row.lines || []).map((line) =>
+      lines: validPurchaseLines(row.lines).map((line) =>
         row.purchaseType === 'yarn'
           ? hydrateYarnPackingLine({
               ...yarnRow(),
@@ -919,7 +939,7 @@ export default function WeavingPurchasePage() {
     }));
   };
 
-  const activeLines = form.lines.filter((row) => started(row, kind));
+  const activeLines = validPurchaseLines(form.lines).filter((row) => started(row, kind));
 
   const lineAmount = (row) => {
     if (kind === 'yarn') {
@@ -1198,28 +1218,33 @@ export default function WeavingPurchasePage() {
   };
 
   const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
 
     try {
-      const commonGeneralPosting = form.lines[0] || itemRow();
+      // Capture one immutable render snapshot. The form is disabled while any
+      // asynchronous packing confirmations are open, so preparation and the API
+      // payload cannot drift to different line counts.
+      const formForSave = form;
+      const kindForSave = kind;
+      const editingIdForSave = editingId;
+      const snapshotLines = validPurchaseLines(formForSave.lines);
+      const snapshotActiveLines = snapshotLines.filter((row) => started(row, kindForSave));
+      const commonGeneralPosting = snapshotLines[0] || itemRow();
 
-      const preparedYarnLines = kind === 'yarn' ? await prepareYarnLinesForSave(activeLines) : null;
-      if (kind === 'yarn' && !preparedYarnLines) return;
+      const preparedYarnLines =
+        kindForSave === 'yarn' ? await prepareYarnLinesForSave(snapshotActiveLines) : null;
+      if (kindForSave === 'yarn' && !preparedYarnLines) return;
 
-      if (kind === 'yarn') {
-        let activeIndex = 0;
-        setForm((current) => ({
-          ...current,
-          lines: current.lines.map((row) =>
-            started(row, 'yarn') ? preparedYarnLines[activeIndex++] : row
-          ),
-        }));
-      }
+      const preparedSnapshotLines =
+        kindForSave === 'yarn'
+          ? mergePreparedYarnLines(snapshotLines, preparedYarnLines)
+          : snapshotLines;
+      const linesForSave = preparedSnapshotLines.filter((row) => started(row, kindForSave)).map((row) => ({
+        ...(kindForSave === 'yarn' ? stripYarnPackingUiState(row) : row),
 
-      const linesForSave = (preparedYarnLines || activeLines).map((row) => ({
-        ...(kind === 'yarn' ? stripYarnPackingUiState(row) : row),
-
-        ...(kind === 'general' && form.entryMode === 'detailed'
+        ...(kindForSave === 'general' && formForSave.entryMode === 'detailed'
           ? {
               loomId: commonGeneralPosting.loomId || '',
               nature: commonGeneralPosting.nature || 'expense',
@@ -1231,25 +1256,31 @@ export default function WeavingPurchasePage() {
         quantityLbs: row.lbs,
       }));
 
-      await (editingId
-        ? updatePurchase(editingId, {
-            ...form,
+      await (editingIdForSave
+        ? updatePurchase(editingIdForSave, {
+            ...formForSave,
             lines: linesForSave,
           })
         : createPurchase({
-            ...form,
+            ...formForSave,
             lines: linesForSave,
           }));
 
       setNotice('');
-      localStorage.removeItem(recoveryKey(kind));
+      localStorage.removeItem(recoveryKey(kindForSave));
       setPackingOpen({});
-      setForm(initial(kind));
+      setForm(initial(kindForSave));
       setEditingId(null);
-      const freshMeta = await getCommercialMeta({ force: true });
+      let freshMeta;
+      try {
+        freshMeta = await getCommercialMeta({ force: true });
+      } catch {
+        setNotice('Purchase saved successfully, but purchase options could not be refreshed');
+        return;
+      }
       setMeta(freshMeta);
       const savedContracts = new Set(
-        activeLines.map((line) => line.purchaseContractId).filter(Boolean)
+        snapshotActiveLines.map((line) => line.purchaseContractId).filter(Boolean)
       );
       const reached = freshMeta.contracts.filter(
         (contract) => savedContracts.has(contract._id) && contract.progress?.targetReached
@@ -1265,7 +1296,7 @@ export default function WeavingPurchasePage() {
       setForm((current) => ({ ...current, purchaseNo: freshMeta.nextPurchaseNo || '' }));
 
       listPurchases({
-        type: kind === 'general' ? 'parts' : kind,
+        type: kindForSave === 'general' ? 'parts' : kindForSave,
         includeVoided: true,
       })
         .then(setHistory)
@@ -1273,6 +1304,7 @@ export default function WeavingPurchasePage() {
     } catch (error) {
       setNotice(error.response?.data?.message || 'Could not save purchase');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -1322,6 +1354,7 @@ export default function WeavingPurchasePage() {
       <div className="mx-auto max-w-[1700px] space-y-2">
         {!listMode && (
           <>
+            <fieldset disabled={saving} className="contents">
             {/* PURCHASE DETAILS */}
             <section className="overflow-visible rounded-md border border-slate-200 bg-white shadow-sm">
               <div className="flex min-h-[46px] flex-wrap items-center justify-between gap-2 border-b border-teal-100 bg-gradient-to-r from-teal-100 via-cyan-50 to-emerald-50 px-3 py-1.5">
@@ -1365,7 +1398,7 @@ export default function WeavingPurchasePage() {
                   'PN No. *',
                   <input
                     className={control}
-                    value={form.purchaseNo}
+                    value={formatDocumentReference(form.purchaseNo)}
                     placeholder="WP-00001"
                     disabled
                   />
@@ -2496,7 +2529,7 @@ export default function WeavingPurchasePage() {
 
                             {fabricFulfillmentOptions(row).map((contract) => (
                               <option key={contract._id} value={contract._id}>
-                                {contract.contractNo} | {contract.itemName}
+                                {formatDocumentReference(contract.contractNo)} | {contract.itemName}
                               </option>
                             ))}
                           </select>
@@ -2614,7 +2647,7 @@ export default function WeavingPurchasePage() {
                           {fabricFulfillmentOptions(form.lines[0] || fabricRow()).map(
                             (contract) => (
                               <option key={contract._id} value={contract._id}>
-                                {contract.contractNo} | {contract.itemName}
+                                {formatDocumentReference(contract.contractNo)} | {contract.itemName}
                               </option>
                             )
                           )}
@@ -3313,6 +3346,7 @@ export default function WeavingPurchasePage() {
                 {saving ? 'Saving...' : editingId ? 'Update Purchase' : 'Save & Close'}
               </button>
             </div>
+            </fieldset>
           </>
         )}
 
@@ -3444,7 +3478,7 @@ export default function WeavingPurchasePage() {
                       }}
                       className="cursor-pointer border-t border-slate-100 hover:bg-teal-50"
                     >
-                      <td className="px-4 py-3 font-semibold text-slate-800">{row.purchaseNo}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{formatDocumentReference(row.purchaseNo)}</td>
 
                       {listMode && <td className="px-4 py-3">{row.purchaseDate}</td>}
 
@@ -3518,7 +3552,7 @@ export default function WeavingPurchasePage() {
         {/* ADD YARN DETAILS MODAL */}
         {purchaseDetail && (
           <WeavingRecordDetailModal
-            title={`Purchase ${purchaseDetail.purchaseNo}`}
+            title={`Purchase ${formatDocumentReference(purchaseDetail.purchaseNo)}`}
             fields={[
               ['Date', purchaseDetail.purchaseDate],
               ['Supplier / Party', purchaseDetail.partyId?.name || purchaseDetail.partyName],
@@ -3619,7 +3653,7 @@ export default function WeavingPurchasePage() {
                     }}
                     className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-teal-400 hover:bg-teal-50"
                   >
-                    <div className="font-bold text-teal-800">{contract.contractNo}</div>
+                    <div className="font-bold text-teal-800">{formatDocumentReference(contract.contractNo)}</div>
 
                     <div className="mt-1 text-sm text-slate-700">
                       {contract.itemName || (kind === 'fabric' ? 'Fabric' : 'Yarn')}

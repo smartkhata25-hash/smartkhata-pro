@@ -366,7 +366,7 @@ const BalanceBreakdownModal = ({
                 Total Amount
               </div>
 
-              <div className="mt-1 text-2xl font-bold">Rs. {formatMoney(total)}</div>
+              <div className="mt-1 text-2xl font-bold">{formatMoney(total)}</div>
             </div>
 
             <div className="rounded-xl border border-white/20 bg-white/15 px-4 py-3 backdrop-blur">
@@ -382,7 +382,7 @@ const BalanceBreakdownModal = ({
                 Filtered Amount
               </div>
 
-              <div className="mt-1 text-2xl font-bold">Rs. {formatMoney(filteredTotal)}</div>
+              <div className="mt-1 text-2xl font-bold">{formatMoney(filteredTotal)}</div>
             </div>
           </div>
         </div>
@@ -528,7 +528,7 @@ const BalanceBreakdownModal = ({
                             isReceivable ? 'text-amber-700' : 'text-rose-700'
                           }`}
                         >
-                          Rs. {formatMoney(item.amount)}
+                          {formatMoney(item.amount)}
                         </span>
                       </td>
 
@@ -601,7 +601,7 @@ const BalanceBreakdownModal = ({
                         isReceivable ? 'text-amber-700' : 'text-rose-700'
                       }`}
                     >
-                      Rs. {formatMoney(item.amount)}
+                      {formatMoney(item.amount)}
                     </div>
                   </div>
 
@@ -625,7 +625,7 @@ const BalanceBreakdownModal = ({
               <div
                 className={`text-lg font-bold ${isReceivable ? 'text-amber-700' : 'text-rose-700'}`}
               >
-                Rs. {formatMoney(filteredTotal)}
+                {formatMoney(filteredTotal)}
               </div>
             </div>
 

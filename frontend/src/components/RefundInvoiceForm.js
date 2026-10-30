@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { formatMoneyDisplay } from '../utils/money';
-import { createRefund, updateRefund, getRefundById } from '../services/refundService';
+import { createRefund, updateRefund, getRefundById, deleteRefund } from '../services/refundService';
 import { getInvoiceById } from '../services/salesService';
 import { getCustomerBalance } from '../services/customerLedgerService';
 import { getPartyBalance } from '../services/partyLedgerService';
@@ -137,6 +137,8 @@ const RefundInvoiceForm = ({
   const canViewRefunds = hasPermission('refunds.view');
   const canCreateRefunds = hasPermission('refunds.create');
   const canEditRefunds = hasPermission('refunds.edit');
+  const canDeleteRefunds = hasPermission('refunds.delete');
+  const [loadedRefundId, setLoadedRefundId] = useState('');
 
   const [items, setItems] = useState([]);
   const [billNo, setBillNo] = useState('');
@@ -165,6 +167,7 @@ const RefundInvoiceForm = ({
 
   const scrollRef = useRef();
   const fileInputRef = useRef(null);
+  const deleteInFlightRef = useRef(false);
   // 🔵 Print Settings States
   const [showPrintSettings, setShowPrintSettings] = useState(false);
   const [printSettings, setPrintSettings] = useState(null);
@@ -173,6 +176,7 @@ const RefundInvoiceForm = ({
 
   const [pdfLoading, setPdfLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
 
   const loadPrintSettings = async () => {
@@ -248,6 +252,7 @@ const RefundInvoiceForm = ({
         if (cancelled) return;
 
         populateForm(data);
+        setLoadedRefundId(data?._id || '');
       } catch (err) {
         if (cancelled) return;
 
@@ -597,6 +602,29 @@ const RefundInvoiceForm = ({
       shouldSave: shouldSaveRefundDraft,
     }
   );
+
+  const handleDeleteRefund = async () => {
+    if (!loadedRefundId || !canDeleteRefunds || deleteLoading || deleteInFlightRef.current) return;
+    if (!window.confirm(`Delete Sale Refund #${billNo || ''}?`)) return;
+
+    try {
+      deleteInFlightRef.current = true;
+      setDeleteLoading(true);
+      await deleteRefund(loadedRefundId, token);
+      navigate('/refunds');
+    } catch (error) {
+      alert(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Failed to delete sale refund'
+      );
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeleteLoading(false);
+    }
+  };
 
   const handleSubmit = async (action) => {
     if (saveLoading) return false;
@@ -1435,6 +1463,18 @@ text-white transition-all duration-300 text-xs md:text-sm font-semibold shadow-m
 
           {/* RIGHT SIDE — Save Buttons */}
           <div className="flex flex-wrap gap-2 justify-end order-3 md:order-none">
+            {loadedRefundId && canDeleteRefunds && (
+              <button
+                type="button"
+                title="Delete Sale Refund"
+                aria-label="Delete Sale Refund"
+                onClick={handleDeleteRefund}
+                disabled={deleteLoading}
+                className="w-8 h-8 flex items-center justify-center rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                ✕
+              </button>
+            )}
             {((id && canEditRefunds) || (!id && canCreateRefunds)) && (
               <>
                 <button
@@ -1492,7 +1532,7 @@ disabled:opacity-60 disabled:cursor-not-allowed"
             {/* 💰 Total Amount */}
             <div className="flex items-center gap-2 text-xs md:text-sm font-semibold text-gray-700 order-1 md:order-none">
               <span>{t('total')}:</span>
-              <span className="bg-gray-100 px-2 py-1 rounded">Rs. {formatMoneyDisplay(totalAmount)}</span>
+              <span className="bg-gray-100 px-2 py-1 rounded">{formatMoneyDisplay(totalAmount)}</span>
             </div>
           </div>
         </div>
@@ -1800,7 +1840,7 @@ disabled:opacity-60 disabled:cursor-not-allowed"
                           {safeDate} | Bill #{h.billNo}
                         </div>
 
-                        <div className="font-semibold text-gray-800">Rs. {h.rate}</div>
+                        <div className="font-semibold text-gray-800">{h.rate}</div>
                       </li>
                     );
                   })}

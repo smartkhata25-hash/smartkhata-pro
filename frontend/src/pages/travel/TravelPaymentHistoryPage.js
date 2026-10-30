@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   FaBookOpen,
   FaEye,
@@ -643,7 +644,7 @@ setPageError(
             className: 'w-[12%]',
 
             render: (record) => (
-              <span className="font-semibold text-slate-700">{record.invoiceNo || '-'}</span>
+              <span className="font-semibold text-slate-700">{formatDocumentReference(record.invoiceNo) || '-'}</span>
             ),
           },
     [isVendorMode]
@@ -683,7 +684,7 @@ setPageError(
             }}
             className="font-extrabold text-cyan-700 transition hover:text-cyan-900 hover:underline"
           >
-            {record.referenceNo || '-'}
+            {formatDocumentReference(record.referenceNo) || '-'}
           </button>
         ),
       },
@@ -863,7 +864,7 @@ setPageError(
                 </p>
 
                 <p className="truncate text-xs font-semibold text-cyan-700">
-                  {record.referenceNo || '-'}
+                  {formatDocumentReference(record.referenceNo) || '-'}
                 </p>
               </div>
 
@@ -895,7 +896,7 @@ setPageError(
                 labelKey={
                   isVendorMode ? 'travel.fields.reference' : 'travel.booking.fields.invoiceNumber'
                 }
-                value={isVendorMode ? record.notes || '-' : record.invoiceNo || '-'}
+                value={isVendorMode ? record.notes || '-' : formatDocumentReference(record.invoiceNo) || '-'}
               />
 
               {!isVendorMode && (

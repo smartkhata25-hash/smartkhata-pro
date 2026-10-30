@@ -540,7 +540,6 @@ const BusinessLiabilityPaymentForm = ({
                 </span>
 
                 <span className="text-sm font-black text-indigo-700">
-                  {t('currency.rs')}{' '}
                   {formatLiabilityAmount(Math.max(remainingAmount - Number(form.amount || 0), 0))}
                 </span>
               </div>
@@ -622,7 +621,7 @@ const AmountStat = ({ label, value, styleType = 'neutral' }) => {
       </div>
 
       <div className="mt-0.5 truncate text-xs font-black sm:text-sm">
-        {t('currency.rs')} {formatLiabilityAmount(value)}
+        {formatLiabilityAmount(value)}
       </div>
     </div>
   );

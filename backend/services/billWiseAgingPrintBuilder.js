@@ -67,4 +67,5 @@ const buildBillWiseAgingPrintData = ({ agingData, lang = "en" }) => {
   };
 };
 
-module.exports = buildBillWiseAgingPrintData;
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+module.exports = (...args) => formatReferencesForDisplay(buildBillWiseAgingPrintData(...args));

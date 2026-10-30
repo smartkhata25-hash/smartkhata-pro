@@ -6,6 +6,7 @@ import { FaCalendarAlt, FaEye, FaPlus, FaSyncAlt, FaTimes, FaTrash, FaUndoAlt } 
 import { t } from '../../i18n/i18n';
 import { deleteTravelRefund, fetchTravelRefunds } from '../../services/travelMasterService';
 import { formatDateWithOptionalTime } from '../../utils/localDateTime';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import { hasPermission } from '../../utils/permissionHelper';
 import {
     TravelErrorModal,
@@ -317,7 +318,7 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
             }}
             className="text-left font-extrabold text-cyan-700 transition hover:text-cyan-900 hover:underline"
           >
-            {refund.refundNumber || '-'}
+            {formatDocumentReference(refund.refundNumber) || '-'}
           </button>
         ),
       },
@@ -438,7 +439,7 @@ setPageError(error?.response?.data?.message || t('travel.refund.alerts.deleteFai
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-base font-extrabold text-cyan-700">
-                {refund.refundNumber || '-'}
+                {formatDocumentReference(refund.refundNumber) || '-'}
               </p>
 
               <p className="truncate text-xs font-semibold text-slate-500">

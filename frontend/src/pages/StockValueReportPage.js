@@ -193,19 +193,19 @@ const StockValueReportPage = () => {
 
       <SummaryCard
         title="Cost Value"
-        value={`Rs. ${formatMoneyDisplay(summary.totalCostValue)}`}
+        value={formatMoneyDisplay(summary.totalCostValue)}
         gradient="linear-gradient(135deg, #059669, #047857)"
       />
 
       <SummaryCard
         title="Sale Value"
-        value={`Rs. ${formatMoneyDisplay(summary.totalSaleValue)}`}
+        value={formatMoneyDisplay(summary.totalSaleValue)}
         gradient="linear-gradient(135deg, #ea580c, #c2410c)"
       />
 
       <SummaryCard
         title="Negative Stock"
-        value={`Rs. ${formatMoneyDisplay(summary.negativeStockValue)}`}
+        value={formatMoneyDisplay(summary.negativeStockValue)}
         gradient="linear-gradient(135deg, #dc2626, #991b1b)"
       />
     </div>
@@ -514,7 +514,7 @@ const StockValueReportPage = () => {
                       {Number(row.stockQty || 0).toLocaleString()}
                     </td>
 
-                    <td style={tdStyle}>Rs. {formatMoneyDisplay(row.unitCost)}</td>
+                    <td style={tdStyle}>{formatMoneyDisplay(row.unitCost)}</td>
 
                     <td
                       style={{
@@ -523,10 +523,10 @@ const StockValueReportPage = () => {
                         color: '#047857',
                       }}
                     >
-                      Rs. {formatMoneyDisplay(row.costValue)}
+                      {formatMoneyDisplay(row.costValue)}
                     </td>
 
-                    <td style={tdStyle}>Rs. {formatMoneyDisplay(row.salePrice)}</td>
+                    <td style={tdStyle}>{formatMoneyDisplay(row.salePrice)}</td>
 
                     <td
                       style={{
@@ -535,7 +535,7 @@ const StockValueReportPage = () => {
                         color: '#c2410c',
                       }}
                     >
-                      Rs. {formatMoneyDisplay(row.saleValue)}
+                      {formatMoneyDisplay(row.saleValue)}
                     </td>
                   </tr>
                 ))}
@@ -558,13 +558,13 @@ const StockValueReportPage = () => {
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {formatMoneyDisplay(summary.totalCostValue)}
+                    {formatMoneyDisplay(summary.totalCostValue)}
                   </td>
 
                   <td style={footerStyle}>-</td>
 
                   <td style={footerStyle}>
-                    Rs. {formatMoneyDisplay(summary.totalSaleValue)}
+                    {formatMoneyDisplay(summary.totalSaleValue)}
                   </td>
                 </tr>
               </tfoot>

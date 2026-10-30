@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { formatDocumentReference } from '../../../utils/referenceDisplay';
 import {
   FaChevronDown,
   FaChevronUp,
@@ -217,7 +218,7 @@ const TravelPanelSection = ({ section, summary, onOpen }) => {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-xs font-extrabold text-slate-950">
-                  {booking.invoiceNumber || booking.bookingNumber || '-'}
+                  {formatDocumentReference(booking.invoiceNumber || booking.bookingNumber) || '-'}
                 </p>
 
                 <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">

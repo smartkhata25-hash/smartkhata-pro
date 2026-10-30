@@ -1,6 +1,7 @@
 const chromium = require("@sparticuz/chromium");
 const puppeteerCore = require("puppeteer-core");
 const puppeteer = require("puppeteer");
+const { formatReferenceText } = require("../utils/referenceDisplay");
 
 let browserInstance = null;
 
@@ -50,7 +51,7 @@ const generatePdfFromHtml = async (html, options = {}) => {
   const page = await browser.newPage();
 
   try {
-    await page.setContent(html, {
+    await page.setContent(formatReferenceText(html), {
       waitUntil: "domcontentloaded",
     });
 

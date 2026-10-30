@@ -208,7 +208,7 @@ const numberFormatter = new Intl.NumberFormat();
 const formatNumber = (value) => numberFormatter.format(getSafeNumber(value));
 
 const formatCurrency = (value) =>
-  `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
+  formatMoneyDisplay(value);
 
 const getCardValue = (card, summary) => {
   if (!summary) {

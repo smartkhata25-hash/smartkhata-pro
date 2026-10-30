@@ -568,7 +568,6 @@ const BusinessReceivableLoanPaymentForm = ({
                 </span>
 
                 <span className="text-sm font-black text-emerald-700">
-                  {t('currency.rs')}{' '}
                   {formatReceivableLoanAmount(
                     Math.max(remainingAmount - Number(form.amount || 0), 0)
                   )}
@@ -661,7 +660,7 @@ const AmountStat = ({ label, value, variant = 'neutral' }) => {
       </div>
 
       <div className="mt-0.5 truncate text-xs font-black sm:text-sm">
-        {t('currency.rs')} {formatReceivableLoanAmount(value)}
+        {formatReceivableLoanAmount(value)}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference, formatReferenceText } from '../../utils/referenceDisplay';
 import { useSearchParams } from 'react-router-dom';
 import { FaFilePdf, FaHistory, FaMoneyBillWave, FaPrint, FaReceipt, FaWallet } from 'react-icons/fa';
 import WeavingCounterpartySelect from '../../components/weaving/WeavingCounterpartySelect';
@@ -307,7 +308,7 @@ export default function WeavingPaymentsPage() {
 
             <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
               <Field label={tab === 'receive' ? 'Receipt No.' : 'Payment No.'}>
-                <input className={input} value={form.transactionNo} disabled />
+                <input className={input} value={formatDocumentReference(form.transactionNo)} disabled />
               </Field>
 
               <Field label="Date *">
@@ -503,7 +504,7 @@ export default function WeavingPaymentsPage() {
                 <tbody>
                   {historyRows.map((row) => (
                     <tr key={row._id} onClick={async () => { const detail = await getPaymentById(row._id); setForm({ ...fresh(detail.type, detail.transactionNo), ...detail, partyId: detail.partyId?._id || detail.partyId, paymentAccountId: detail.paymentAccountId?._id || detail.paymentAccountId }); setSavedReceipt(detail); setEditingId(detail._id); setTab(detail.type); setParams({ tab: detail.type }); }} className="cursor-pointer border-t hover:bg-emerald-50">
-                      <td className="px-4 py-3 font-semibold">{row.transactionNo}</td>
+                      <td className="px-4 py-3 font-semibold">{formatDocumentReference(row.transactionNo)}</td>
 
                       <td className="px-4 py-3">{row.date}</td>
 
@@ -539,7 +540,7 @@ export default function WeavingPaymentsPage() {
           <WeavingRecordDetailModal
             title={`${
               transactionDetail.type === 'receive' ? 'Receipt' : 'Payment'
-            } ${transactionDetail.transactionNo}`}
+            } ${formatDocumentReference(transactionDetail.transactionNo)}`}
             fields={[
               ['Date', transactionDetail.date],
               ['Type', transactionDetail.type],
@@ -547,15 +548,15 @@ export default function WeavingPaymentsPage() {
               ['Amount', `Rs. ${money(transactionDetail.amount)}`],
               ['Payment Account', transactionDetail.paymentAccountId?.name],
               ['Method', transactionDetail.paymentMethod],
-              ['Linked Purchase', transactionDetail.purchaseInvoiceId?.purchaseNo],
-              ['Linked Sales Invoice', transactionDetail.salesInvoiceId?.invoiceNo],
-              ['Linked Sizing Bill', transactionDetail.sizingBillId?.billNo],
+              ['Linked Purchase', formatDocumentReference(transactionDetail.purchaseInvoiceId?.purchaseNo)],
+              ['Linked Sales Invoice', formatDocumentReference(transactionDetail.salesInvoiceId?.invoiceNo)],
+              ['Linked Sizing Bill', formatDocumentReference(transactionDetail.sizingBillId?.billNo)],
               ['Cheque Number', transactionDetail.chequeNo],
               ['Cheque Bank', transactionDetail.chequeBank],
               ['Cheque Date', transactionDetail.chequeDate],
               ['Cheque Due Date', transactionDetail.chequeDueDate],
               ['Cheque Status', transactionDetail.chequeStatus],
-              ['Description', transactionDetail.description],
+              ['Description', formatReferenceText(transactionDetail.description)],
               ['Status', transactionDetail.status],
               [
                 'Attachments',

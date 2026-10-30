@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 useNavigate, useSearchParams } from 'react-router-dom';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   FaCheckCircle,
   FaEdit,
@@ -595,7 +596,7 @@ setPageError(t('pdf.shareFailed'));
               navigate(`/travel/bookings/${booking._id}`);
             }}
           >
-            {booking.invoiceNumber || booking.bookingNumber || '-'}
+            {formatDocumentReference(booking.invoiceNumber || booking.bookingNumber) || '-'}
           </button>
         ),
       },
@@ -774,7 +775,7 @@ setPageError(t('pdf.shareFailed'));
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-base font-extrabold text-cyan-700">
-                  {booking.invoiceNumber || booking.bookingNumber || '-'}
+                  {formatDocumentReference(booking.invoiceNumber || booking.bookingNumber) || '-'}
                 </p>
 
                 <p className="truncate text-xs font-semibold text-slate-600">

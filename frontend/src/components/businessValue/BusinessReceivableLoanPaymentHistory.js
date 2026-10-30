@@ -342,7 +342,7 @@ const PaymentItem = ({ payment, reversing, onReverse }) => {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-sm font-black text-slate-800">
-                {t('currency.rs')} {formatReceivableLoanAmount(payment.amount)}
+                {formatReceivableLoanAmount(payment.amount)}
               </div>
 
               <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
@@ -380,12 +380,12 @@ const PaymentItem = ({ payment, reversing, onReverse }) => {
 
             <DetailLine
               label={t('businessValue.remainingBefore')}
-              value={`${t('currency.rs')} ${formatReceivableLoanAmount(payment.remainingBefore)}`}
+              value={formatReceivableLoanAmount(payment.remainingBefore)}
             />
 
             <DetailLine
               label={t('businessValue.remainingAfter')}
-              value={`${t('currency.rs')} ${formatReceivableLoanAmount(payment.remainingAfter)}`}
+              value={formatReceivableLoanAmount(payment.remainingAfter)}
             />
           </div>
 
@@ -459,7 +459,7 @@ const SummaryCard = ({ label, value, type = 'currency', variant = 'neutral' }) =
   let displayValue = value;
 
   if (type === 'currency') {
-    displayValue = `${t('currency.rs')} ${formatReceivableLoanAmount(value)}`;
+    displayValue = formatReceivableLoanAmount(value);
   }
 
   if (type === 'number') {

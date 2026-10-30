@@ -20,6 +20,7 @@ import { t } from '../i18n/i18n';
 import { hasPermission } from '../utils/permissionHelper';
 import { useNavigate } from 'react-router-dom';
 import usePageMemory from '../hooks/usePageMemory';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 
 const PARTY_PAGE_DEFAULTS = {
   searchTerm: '',
@@ -189,6 +190,14 @@ const PartiesPage = () => {
     },
     [ledgerStartDate, ledgerEndDate, canViewPartyLedger]
   );
+
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      loadPartyLedger(selectedPartyId, ledgerStartDate, ledgerEndDate),
+      loadParties(),
+    ]);
+  }, [selectedPartyId, ledgerStartDate, ledgerEndDate, loadPartyLedger, loadParties]);
+  const ledgerDelete = useTradingLedgerDelete({ onDeleted: handleLedgerDeleted });
 
   useEffect(() => {
     if (ledgerRestoreRef.current) return;
@@ -759,7 +768,7 @@ const PartiesPage = () => {
                         marginTop: 3,
                       }}
                     >
-                      Rs. {formatMoneyDisplay(balance)}
+                      {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 
@@ -917,7 +926,9 @@ const PartiesPage = () => {
                   ledgerData={ledgerData.ledger || []}
                   search={ledgerSearch}
                   openingBalance={ledgerData.openingBalance || 0}
-                  onDelete={null}
+                  onDeleteEntry={ledgerDelete.deleteEntry}
+                  canDeleteEntry={ledgerDelete.canDeleteEntry}
+                  deletingEntryId={ledgerDelete.deletingEntryId}
                   onEdit={(entry) => {
                     const type = entry.sourceType?.toLowerCase();
 

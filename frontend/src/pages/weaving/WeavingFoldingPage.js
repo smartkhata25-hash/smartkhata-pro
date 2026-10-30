@@ -5,6 +5,7 @@ import { FaEdit, FaPrint, FaSpinner } from 'react-icons/fa';
 import { requestWeavingConfirmation, showWeavingError, showWeavingSuccess, showWeavingWarning } from '../../components/weaving/WeavingFeedbackModal';
 import SearchableCreatableSelect from '../../components/weaving/SearchableCreatableSelect';
 import { t } from '../../i18n/i18n';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   createFoldingEntry,
   updateFoldingEntry,
@@ -214,7 +215,7 @@ export default function WeavingFoldingPage() {
         window.setTimeout(() => meterRef.current?.focus(), 0);
       }
 
-      showWeavingSuccess(`${t('weaving.folding.saved')} ${savedEntry?.thanNo || ''}`.trim());
+      showWeavingSuccess(`${t('weaving.folding.saved')} ${formatDocumentReference(savedEntry?.thanNo)}`.trim());
 
       // Keep the screen current without making a successful save appear stuck if the
       // independent refresh is slow or unavailable.
@@ -257,7 +258,7 @@ export default function WeavingFoldingPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm font-bold">
               {t('weaving.folding.thanNo')}
-              <input readOnly className={`${inputClass} cursor-not-allowed bg-slate-100 font-bold text-slate-700`} value={editing?.thanNo || meta.nextThanNo || '-'} />
+              <input readOnly className={`${inputClass} cursor-not-allowed bg-slate-100 font-bold text-slate-700`} value={formatDocumentReference(editing?.thanNo || meta.nextThanNo) || '-'} />
             </label>
             <label className="text-sm font-bold">
               {t('weaving.folding.date')}
@@ -326,7 +327,7 @@ export default function WeavingFoldingPage() {
                 <Detail label={t('weaving.folding.count')} value={[selectedQuality?.warpCount, selectedQuality?.weftCount].filter(Boolean).join(' / ')} />
                 <Detail label={t('weaving.folding.construction')} value={selectedQuality?.construction} />
                 <Detail label={t('weaving.folding.width')} value={selectedQuality?.width} />
-                <Detail label={t('weaving.folding.contractSet')} value={[resolved?.contract?.contractNo, resolved?.beamSet?.setNo].filter(Boolean).join(' / ')} />
+                <Detail label={t('weaving.folding.contractSet')} value={[formatDocumentReference(resolved?.contract?.contractNo), formatDocumentReference(resolved?.beamSet?.setNo)].filter(Boolean).join(' / ')} />
               </div>
             )}
 
@@ -399,7 +400,7 @@ export default function WeavingFoldingPage() {
               <thead className="bg-slate-900 text-left text-xs text-white"><tr><th className="p-3">Than</th><th className="p-3">Loom</th><th className="p-3">{t('weaving.production.contract')}</th><th className="p-3">{t('weaving.production.customer')}</th><th className="p-3">Quality</th><th className="p-3">Meter</th><th className="p-3">KG</th><th className="p-3">Grade</th><th className="p-3" /></tr></thead>
               <tbody className="divide-y">
                 {rows.map((row) => <tr key={row._id}>
-                  <td className="p-3 font-bold">{row.thanNo}</td><td className="p-3">{row.loomId?.loomNumber}</td>
+                  <td className="p-3 font-bold">{formatDocumentReference(row.thanNo)}</td><td className="p-3">{row.loomId?.loomNumber}</td>
                   <td className="p-3">{row.contractId?.type === 'purchase' ? '-' : row.contractNoSnapshot || row.contractId?.contractNo || '-'}</td><td className="p-3">{row.contractId?.type === 'sales' ? row.contractId.partyName : ownerLabel(row)}</td>
                   <td className="p-3">{row.qualitySnapshot?.name}</td><td className="p-3">{row.meter}</td>
                   <td className="p-3">{row.weightKg}</td><td className="p-3 uppercase">{row.grade}</td>

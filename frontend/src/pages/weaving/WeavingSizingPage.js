@@ -1,5 +1,6 @@
 import { t } from '../../i18n/i18n';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -1265,7 +1266,7 @@ const WeavingSizingPage = () => {
               <Field label="Issue No.">
                 <input
                   className={control}
-                  value={issue.issueNo}
+                  value={formatDocumentReference(issue.issueNo)}
                   placeholder="e.g. SI-00001"
                   disabled
                 />
@@ -1760,7 +1761,7 @@ const WeavingSizingPage = () => {
                                 {shortCombinedDate(row.date)}
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 text-center font-bold text-slate-800">
-                                {row.receiptNo || '-'}
+                                {formatDocumentReference(row.receiptNo) || '-'}
                               </td>
                               <td className="px-3 py-3 text-center font-semibold text-slate-800">
                                 {combinedYarnName(row)}
@@ -1769,7 +1770,7 @@ const WeavingSizingPage = () => {
                                 {row.sizingPartyId?.name || '-'}
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 text-center text-slate-600">
-                                {row.issueId?.issueNo || '-'}
+                                {formatDocumentReference(row.issueId?.issueNo) || '-'}
                               </td>
                               <td className="whitespace-nowrap px-3 py-3 text-center font-bold text-slate-800">
                                 {row.netWeightKg == null ? '-' : `${row.netWeightKg} KG`}
@@ -1802,7 +1803,7 @@ const WeavingSizingPage = () => {
                           >
                             <td className="whitespace-nowrap px-3 py-3">
                               <div className="font-bold text-slate-800">
-                                {row.issueNo || row.receiptNo || row.returnNo || row.billNo}
+                                {formatDocumentReference(row.issueNo || row.receiptNo || row.returnNo || row.billNo)}
                               </div>
 
                               {externalNo && (
@@ -1830,8 +1831,7 @@ const WeavingSizingPage = () => {
                                     ),
                                   ].join(', ') || '-'
                                 : row.yarnId?.name ||
-                                  row.issueId?.issueNo ||
-                                  row.receiptId?.receiptNo ||
+                                  formatDocumentReference(row.issueId?.issueNo || row.receiptId?.receiptNo) ||
                                   '-'}
                             </td>
 
@@ -1906,7 +1906,7 @@ const WeavingSizingPage = () => {
 
               <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Receipt No.">
-                  <input className={control} value={receipt.receiptNo} disabled />
+                  <input className={control} value={formatDocumentReference(receipt.receiptNo)} disabled />
                 </Field>
 
                 <Field label="Date *">
@@ -2181,7 +2181,7 @@ const WeavingSizingPage = () => {
                     <Field label="Return No.">
                       <input
                         className={control}
-                        value={yarnReturn.returnNo}
+                        value={formatDocumentReference(yarnReturn.returnNo)}
                         placeholder="e.g. SRN-00001"
                         disabled
                       />
@@ -2414,7 +2414,7 @@ const WeavingSizingPage = () => {
 
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <Field label="Bill No. *">
-                      <input className={control} value={bill.billNo} disabled />
+                      <input className={control} value={formatDocumentReference(bill.billNo)} disabled />
                     </Field>
 
                     <Field label="Bill Date *">
@@ -3208,7 +3208,7 @@ const WeavingSizingPage = () => {
                           {row.balanceKg ?? '-'}
                         </td>
 
-                        <td className="px-3 py-3">{row.contractId?.contractNo || '-'}</td>
+                        <td className="px-3 py-3">{formatDocumentReference(row.contractId?.contractNo) || '-'}</td>
                       </tr>
                     ))}
                 </tbody>
@@ -3224,11 +3224,11 @@ const WeavingSizingPage = () => {
         )}
         {billDetail && (
           <WeavingRecordDetailModal
-            title={`Sizing Bill ${billDetail.billNo}`}
+            title={`Sizing Bill ${formatDocumentReference(billDetail.billNo)}`}
             fields={[
               ['Bill Date', billDetail.billDate],
               ['Sizing Party', billDetail.sizingPartyId?.name],
-              ['Linked Receipt', billDetail.receiptId?.receiptNo],
+              ['Linked Receipt', formatDocumentReference(billDetail.receiptId?.receiptNo)],
               ['Billable KG', billDetail.billableWeightKg],
               ['Rate / KG', money(billDetail.ratePerKg)],
               ['Gross Amount', money(billDetail.grossAmount)],

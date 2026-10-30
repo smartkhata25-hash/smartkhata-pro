@@ -265,8 +265,6 @@ const BusinessAssetForm = ({
               />
 
               <div className="relative">
-                <span className={currencyPrefixClass}>{t('currency.rs')}</span>
-
                 <input
                   type="number"
                   min="0"
@@ -275,13 +273,11 @@ const BusinessAssetForm = ({
                   onChange={(event) => handleChange('purchaseCost', event.target.value)}
                   placeholder={t('businessValue.purchaseCostPlaceholder')}
                   disabled={saving}
-                  className={`${inputClass} pl-12`}
+                  className={inputClass}
                 />
               </div>
 
               <div className="relative">
-                <span className={currencyPrefixClass}>{t('currency.rs')}</span>
-
                 <input
                   type="number"
                   min="0"
@@ -290,7 +286,7 @@ const BusinessAssetForm = ({
                   onChange={(event) => handleChange('currentValue', event.target.value)}
                   placeholder={t('businessValue.currentValuePlaceholder')}
                   disabled={saving}
-                  className={`${inputClass} pl-12`}
+                  className={inputClass}
                 />
               </div>
 
@@ -370,7 +366,7 @@ const ValuePreview = ({ title, value, icon, className }) => {
       </div>
 
       <div className="mt-1 truncate text-sm font-black sm:text-base">
-        {t('currency.rs')} {formatAssetAmount(value)}
+        {formatAssetAmount(value)}
       </div>
     </div>
   );
@@ -383,11 +379,6 @@ const inputClass = `
   hover:border-indigo-300 hover:bg-white
   focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100
   disabled:cursor-not-allowed disabled:opacity-60
-`;
-
-const currencyPrefixClass = `
-  pointer-events-none absolute left-3 top-1/2 z-10
-  -translate-y-1/2 text-xs font-bold text-gray-400
 `;
 
 export default BusinessAssetForm;

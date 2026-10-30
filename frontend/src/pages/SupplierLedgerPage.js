@@ -15,6 +15,7 @@ import usePageMemory from '../hooks/usePageMemory';
 import { fetchSuppliers, fetchSupplierLedger } from '../services/supplierService';
 import { fetchTravelVendors } from '../services/travelMasterService';
 import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 
 const SUPPLIER_LEDGER_DEFAULTS = {
   sid: '',
@@ -185,6 +186,17 @@ export default function SupplierLedgerPage() {
     [sid, start, end, suppliers, isTravelLedger, setSid, setSupplierName]
   );
 
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      load(sid, start, end),
+      fetchSuppliers().then((rows) => setSuppliers(Array.isArray(rows) ? rows : [])),
+    ]);
+  }, [sid, start, end, load]);
+  const ledgerDelete = useTradingLedgerDelete({
+    enabled: !isTravelLedger,
+    onDeleted: handleLedgerDeleted,
+  });
+
   useEffect(() => {
     if (!supplierId) return;
     if (suppliers.length === 0) return;
@@ -344,7 +356,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(totalDebit)}
+              {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -368,7 +380,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.totalCredit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(totalCredit)}
+              {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -392,7 +404,7 @@ export default function SupplierLedgerPage() {
               {t('ledger.closingBalance')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(closingBalance)}
+              {formatMoneyDisplay(closingBalance)}
             </div>
             <div
               style={{
@@ -729,6 +741,9 @@ export default function SupplierLedgerPage() {
           openingBalance={opening}
           onRowClick={handleRowClick}
           onEdit={handleRowClick}
+          onDeleteEntry={ledgerDelete.deleteEntry}
+          canDeleteEntry={ledgerDelete.canDeleteEntry}
+          deletingEntryId={ledgerDelete.deletingEntryId}
         />
       </div>
 

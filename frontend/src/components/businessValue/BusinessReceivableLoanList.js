@@ -570,7 +570,7 @@ const AmountCell = ({ value, className = '' }) => {
         ${className}
       `}
     >
-      {t('currency.rs')} {formatReceivableLoanAmount(value)}
+      {formatReceivableLoanAmount(value)}
     </td>
   );
 };
@@ -686,7 +686,7 @@ const MobileValue = ({ label, value, className }) => {
       </div>
 
       <div className="mt-0.5 truncate text-xs font-black">
-        {t('currency.rs')} {formatReceivableLoanAmount(value)}
+        {formatReceivableLoanAmount(value)}
       </div>
     </div>
   );
@@ -708,7 +708,7 @@ const SummaryCard = ({ label, value, type = 'currency', variant = 'neutral' }) =
   const displayValue =
     type === 'number'
       ? Number(value || 0).toLocaleString('en-PK')
-      : `${t('currency.rs')} ${formatReceivableLoanAmount(value)}`;
+      : formatReceivableLoanAmount(value);
 
   return (
     <div

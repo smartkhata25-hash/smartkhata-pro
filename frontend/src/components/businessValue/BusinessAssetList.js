@@ -257,11 +257,11 @@ const BusinessAssetList = ({
 
                       <td className="px-4 py-3 text-right">
                         <div className="font-semibold text-gray-700">
-                          {t('currency.rs')} {formatAssetAmount(totalPurchaseValue)}
+                          {formatAssetAmount(totalPurchaseValue)}
                         </div>
 
                         <div className="text-xs text-gray-400">
-                          {t('currency.rs')} {formatAssetAmount(asset.purchaseCost)}
+                          {formatAssetAmount(asset.purchaseCost)}
                           {' / '}
                           {t('businessValue.unit')}
                         </div>
@@ -269,11 +269,11 @@ const BusinessAssetList = ({
 
                       <td className="px-4 py-3 text-right">
                         <div className="font-black text-emerald-700">
-                          {t('currency.rs')} {formatAssetAmount(totalCurrentValue)}
+                          {formatAssetAmount(totalCurrentValue)}
                         </div>
 
                         <div className="text-xs text-gray-400">
-                          {t('currency.rs')} {formatAssetAmount(asset.currentValue)}
+                          {formatAssetAmount(asset.currentValue)}
                           {' / '}
                           {t('businessValue.unit')}
                         </div>
@@ -423,7 +423,7 @@ const MobileValue = ({ label, value, className }) => {
       <div className="truncate text-[10px] font-semibold opacity-70">{label}</div>
 
       <div className="mt-1 truncate text-sm font-black">
-        {t('currency.rs')} {formatAssetAmount(value)}
+        {formatAssetAmount(value)}
       </div>
     </div>
   );
@@ -462,7 +462,6 @@ const CompactTotal = ({ label, value, icon, currency = false }) => {
       </div>
 
       <div className="mt-1 truncate text-sm font-black text-gray-800">
-        {currency && `${t('currency.rs')} `}
         {currency ? formatAssetAmount(value) : Number(value || 0).toLocaleString()}
       </div>
     </div>

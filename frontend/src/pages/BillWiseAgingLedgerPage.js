@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { getCurrentLanguage, t } from '../i18n/i18n';
 import { formatMoneyDisplay } from '../utils/money';
+import { formatDocumentReference } from '../utils/referenceDisplay';
 import {
   getCustomerBillWiseAging,
   getPartyBillWiseAging,
@@ -312,7 +313,7 @@ const BillWiseAgingLedgerPage = ({ entityType }) => {
                 ) : (
                   rows.map((row) => (
                     <tr key={row.invoiceId || row.billNo}>
-                      <td style={{ fontWeight: 700, color: '#1d4ed8' }}>{row.billNo || '-'}</td>
+                      <td style={{ fontWeight: 700, color: '#1d4ed8' }}>{formatDocumentReference(row.billNo) || '-'}</td>
                       <td>{row.isReconciliation ? '-' : formatDateKey(row.invoiceDateKey)}</td>
                       <td>{row.isReconciliation || !row.dueDateKey ? '-' : formatDateKey(row.dueDateKey)}</td>
                       <td>
@@ -372,7 +373,7 @@ const SummaryCard = ({ label, value }) => (
   <div className="card" style={{ minWidth: 118, padding: '8px 10px' }}>
     <div style={{ fontSize: 12, color: '#4b5563', fontWeight: 700 }}>{label}</div>
     <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>
-      Rs. {formatAmount(value)}
+      {formatAmount(value)}
     </div>
   </div>
 );

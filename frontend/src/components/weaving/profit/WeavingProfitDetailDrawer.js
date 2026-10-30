@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { formatMoneyDisplay } from '../../../utils/money';
+import { formatDocumentReference } from '../../../utils/referenceDisplay';
 import { FaChevronLeft, FaChevronRight, FaSpinner, FaTimes } from 'react-icons/fa';
 
 import { t } from '../../../i18n/i18n';
@@ -64,7 +65,7 @@ const InvoiceTable = ({ rows }) => (
       <tbody className="divide-y divide-slate-100">
         {rows.map((row) => (
           <tr key={row.invoiceId} className="hover:bg-indigo-50/50">
-            <td className="whitespace-nowrap px-3 py-3 font-black text-indigo-700">{row.invoiceNo}</td>
+            <td className="whitespace-nowrap px-3 py-3 font-black text-indigo-700">{formatDocumentReference(row.invoiceNo)}</td>
             <td className="whitespace-nowrap px-3 py-3">{row.date}</td>
             <td className="px-3 py-3 font-bold">{row.party}</td>
             <td className="px-3 py-3">{row.item}</td>

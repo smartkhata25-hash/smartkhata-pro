@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { FaEdit, FaTrash } from 'react-icons/fa';
 import { formatMoneyDisplay } from '../utils/money';
 import { t } from '../i18n/i18n';
 import './LedgerTable.css';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
+import { formatDocumentReference, formatReferenceText } from '../utils/referenceDisplay';
 
 const FILE_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
@@ -57,6 +59,9 @@ const LedgerTable = ({
   openingBalance = 0,
   onEdit,
   onDelete,
+  onDeleteEntry,
+  canDeleteEntry,
+  deletingEntryId = '',
   onRowClick,
   visibleColumns = ALL_COLUMNS,
 }) => {
@@ -64,6 +69,7 @@ const LedgerTable = ({
 
   const tableEndRef = useRef(null);
   const bodyScrollRef = useRef(null);
+  const usesCompactRowActions = (entry) => Boolean(onDeleteEntry && canDeleteEntry?.(entry));
   /* 👁️ Visible Columns State */
   const [columns, setColumns] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -252,7 +258,7 @@ const LedgerTable = ({
                           {e.time || '-'}
                         </td>
                       );
-                    if (col === 'billNo') return <td key={col}>{e.billNo || '-'}</td>;
+                    if (col === 'billNo') return <td key={col}>{formatDocumentReference(e.billNo) || '-'}</td>;
                     if (col === 'source')
                       return (
                         <td key={col}>
@@ -270,7 +276,7 @@ const LedgerTable = ({
                         <td
                           key={col}
                           className="no-print max-w-[220px]"
-                          title={e.description || '-'}
+                          title={formatReferenceText(e.description) || '-'}
                         >
                           <div
                             className="overflow-x-auto whitespace-nowrap"
@@ -279,7 +285,7 @@ const LedgerTable = ({
                               msOverflowStyle: 'none',
                             }}
                           >
-                            {e.description || '-'}
+                            {formatReferenceText(e.description) || '-'}
                           </div>
                         </td>
                       );
@@ -318,6 +324,8 @@ const LedgerTable = ({
                           ) && (
                             <button
                               className="btn btn-primary"
+                              title={usesCompactRowActions(e) ? 'Edit' : undefined}
+                              aria-label={usesCompactRowActions(e) ? 'Edit' : undefined}
                               onClick={(event) => {
                                 event.stopPropagation();
 
@@ -327,11 +335,36 @@ const LedgerTable = ({
                                   onEdit(e);
                                 }
                               }}
+                              style={
+                                usesCompactRowActions(e)
+                                  ? { padding: '6px 8px', minWidth: 0 }
+                                  : undefined
+                              }
                             >
-                              ✏️ {t('common.edit')}
+                              {usesCompactRowActions(e) ? (
+                                <FaEdit aria-hidden="true" />
+                              ) : (
+                                <>✏️ {t('common.edit')}</>
+                              )}
                             </button>
                           )}{' '}
-                          {onDelete && (
+                          {onDeleteEntry && canDeleteEntry?.(e) && (
+                            <button
+                              type="button"
+                              className="btn btn-danger"
+                              title={t('common.delete')}
+                              aria-label={`${t('common.delete')} ${e.billNo || e.sourceLabel || ''}`}
+                              disabled={String(deletingEntryId) === String(e._id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onDeleteEntry(e);
+                              }}
+                              style={{ padding: '6px 8px', minWidth: 0 }}
+                            >
+                              <FaTrash aria-hidden="true" />
+                            </button>
+                          )}{' '}
+                          {onDelete && !onDeleteEntry && (
                             <button className="btn btn-danger" onClick={() => onDelete(e._id)}>
                               🗑 {t('common.delete')}
                             </button>

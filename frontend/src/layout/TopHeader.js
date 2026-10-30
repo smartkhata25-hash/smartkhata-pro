@@ -23,6 +23,7 @@ import { t } from '../i18n/i18n';
 import axios from 'axios';
 import { FaBars, FaBell, FaCalculator, FaChevronDown, FaEllipsisV, FaSyncAlt, FaUserCircle } from 'react-icons/fa';
 import UniversalCalculator from '../components/shared/UniversalCalculator';
+import './TradingMobile.css';
 
 const travelTopMenuConfig = [
   {
@@ -341,6 +342,7 @@ const TopHeader = ({
   const isTravelWorkspace = isTravelContext(location);
   const isWeavingWorkspace = isWeavingContext(location);
   const isInstallmentsWorkspace = isInstallmentsContext(location);
+  const isTradingWorkspace = !isTravelWorkspace && !isWeavingWorkspace && !isInstallmentsWorkspace;
   const calculatorModule = isInstallmentsWorkspace
     ? 'installments'
     : isTravelWorkspace
@@ -649,14 +651,15 @@ const TopHeader = ({
   };
 
   return (
-    <div className="relative bg-white border-b shadow-sm px-3 sm:px-6 h-14 flex items-center justify-between">
+    <div className={`relative bg-white border-b shadow-sm px-3 sm:px-6 h-14 flex items-center justify-between ${isTradingWorkspace ? 'trading-mobile-header' : ''}`}>
       {/* LEFT SIDE */}
-      <div className="flex items-center gap-3 md:gap-6">
+      <div className="trading-mobile-header__left flex items-center gap-3 md:gap-6">
         {!['/dashboard', '/weaving/dashboard', '/travel/dashboard', '/installments/dashboard', '/login', '/', '/personal-info', '/business-info'].includes(
           location.pathname
         ) && (
           <button
             onClick={handleBack}
+            className="trading-mobile-header__back"
             style={{
               fontSize: 13,
               cursor: 'pointer',
@@ -674,7 +677,7 @@ const TopHeader = ({
           </button>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="trading-mobile-header__primary flex items-center gap-3">
           {/* Sidebar button */}
           <button
             className={`inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-700 transition hover:bg-slate-100 hover:text-blue-700 ${isInstallmentsWorkspace ? 'lg:hidden' : 'md:hidden'}`}
@@ -719,7 +722,7 @@ const TopHeader = ({
           </div>
 
           {workspaceOptions.length > 0 && (
-            <label className="relative min-w-0">
+            <label className="trading-mobile-header__workspace relative min-w-0">
               <span className="sr-only">{t('business.modules.switchWorkspace')}</span>
               <select
                 value={activeWorkspace}
@@ -853,7 +856,7 @@ const TopHeader = ({
       </div>
 
       {/* RIGHT SIDE */}
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="trading-mobile-header__right flex items-center gap-2 sm:gap-4">
         <button
           type="button"
           onClick={() => setCalculatorOpen(true)}
@@ -867,14 +870,14 @@ const TopHeader = ({
         {deferredPrompt && !isInstalled && (
           <button
             onClick={handleInstallClick}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3 py-1.5 rounded text-sm shadow hover:scale-105 transition"
+            className="trading-mobile-header__install bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3 py-1.5 rounded text-sm shadow hover:scale-105 transition"
           >
             {t('common.installApp')}
           </button>
         )}
 
         {/* Notification + Refresh */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="trading-mobile-header__quick-actions flex items-center gap-2 sm:gap-3">
           {/* Refresh */}
           <div
             onClick={() => window.location.reload()}
@@ -963,7 +966,7 @@ const TopHeader = ({
         )}
 
         {/* USER MENU */}
-        <div className="relative" ref={userMenuRef}>
+        <div className="trading-mobile-header__user relative" ref={userMenuRef}>
           <div
             onClick={() => setShowUserMenu(!showUserMenu)}
             className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-slate-700 transition hover:bg-slate-100 hover:text-blue-600"
@@ -974,7 +977,7 @@ const TopHeader = ({
           {showUserMenu && (
             <div
               dir={lang === 'ur' ? 'rtl' : 'ltr'}
-              className={`absolute mt-2 w-52 bg-white border rounded shadow-lg z-50 ${
+              className={`trading-mobile-header__user-menu absolute mt-2 w-52 bg-white border rounded shadow-lg z-50 ${
                 lang === 'ur' ? 'left-0 text-right' : 'right-0 text-left'
               }`}
             >

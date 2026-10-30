@@ -135,6 +135,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
 
   return (
     <div
+      className="trading-product-table"
       style={{
         flex: 1,
         display: 'flex',
@@ -145,6 +146,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
     >
       {/* 🚀 Unified Toolbar */}
       <div
+        className="trading-product-table__toolbar"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -374,6 +376,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
       {/* 📊 Table */}
       <div
         id="print-section"
+        className="trading-product-table__scroll"
         style={{
           outline: 'none',
           flex: 1,
@@ -381,7 +384,7 @@ const ProductTable = ({ products, onDelete, onEdit, onAddClick, onLowStockClick,
           minHeight: 0,
         }}
       >
-        <table className="w-full border text-sm">
+        <table className="trading-product-table__table w-full border text-sm">
           <thead
             style={{
               position: 'sticky',

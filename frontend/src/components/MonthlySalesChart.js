@@ -143,7 +143,7 @@ const MonthlySalesChart = () => {
 
         callbacks: {
           label: function (context) {
-            return `${t('sales')}: Rs. ${formatMoneyDisplay(context.raw)}`;
+            return `${t('sales')}: ${formatMoneyDisplay(context.raw)}`;
           },
         },
       },
@@ -164,7 +164,7 @@ const MonthlySalesChart = () => {
 
         ticks: {
           callback: function (value) {
-            return 'Rs. ' + formatMoneyDisplay(value);
+            return formatMoneyDisplay(value);
           },
         },
 
@@ -281,7 +281,7 @@ const MonthlySalesChart = () => {
               color: '#2563eb',
             }}
           >
-            Rs. {formatMoneyDisplay(totalSales)}
+            {formatMoneyDisplay(totalSales)}
           </div>
         </div>
 
@@ -301,7 +301,7 @@ const MonthlySalesChart = () => {
               color: '#16a34a',
             }}
           >
-            Rs. {formatMoneyDisplay(avgSales)}
+            {formatMoneyDisplay(avgSales)}
           </div>
         </div>
       </div>

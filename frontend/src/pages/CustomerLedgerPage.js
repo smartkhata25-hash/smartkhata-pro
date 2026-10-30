@@ -17,6 +17,7 @@ import { FaRegClock, FaWhatsapp } from 'react-icons/fa';
 import usePageMemory from '../hooks/usePageMemory';
 import { fetchTravelCustomers } from '../services/travelMasterService';
 import { buildTravelRouteState, isTravelContext } from '../utils/travelContext';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 
 const CUSTOMER_LEDGER_DEFAULTS = {
   search: '',
@@ -190,6 +191,21 @@ export default function CustomerLedgerPage() {
     [cid, start, end, customers, isTravelLedger, setCid, setCustomerName]
   );
 
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      load(cid, start, end),
+      axios
+        .get(`${process.env.REACT_APP_API_BASE_URL}/api/customers`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((response) => setCustomers(Array.isArray(response.data) ? response.data : [])),
+    ]);
+  }, [cid, start, end, load, token]);
+  const ledgerDelete = useTradingLedgerDelete({
+    enabled: !isTravelLedger,
+    onDeleted: handleLedgerDeleted,
+  });
+
   useEffect(() => {
     if (!customerId) return;
     if (customers.length === 0) return;
@@ -339,7 +355,7 @@ export default function CustomerLedgerPage() {
               {t('ledger.totalDebit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(totalCredit)}
+              {formatMoneyDisplay(totalCredit)}
             </div>
           </div>
 
@@ -363,7 +379,7 @@ export default function CustomerLedgerPage() {
               {t('ledger.totalCredit')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(totalDebit)}
+              {formatMoneyDisplay(totalDebit)}
             </div>
           </div>
 
@@ -387,7 +403,7 @@ export default function CustomerLedgerPage() {
               {t('ledger.closing')}
             </div>
             <div style={{ fontSize: window.innerWidth < 768 ? 14 : 18, fontWeight: 800 }}>
-              Rs. {formatMoneyDisplay(closingBalance)}
+              {formatMoneyDisplay(closingBalance)}
             </div>
             <div
               style={{
@@ -782,7 +798,9 @@ export default function CustomerLedgerPage() {
             ledgerData={dateFilteredLedger}
             search={search}
             openingBalance={opening}
-            onDelete={null}
+            onDeleteEntry={ledgerDelete.deleteEntry}
+            canDeleteEntry={ledgerDelete.canDeleteEntry}
+            deletingEntryId={ledgerDelete.deletingEntryId}
             onEdit={(entry) => {
               const type = entry.sourceType?.toLowerCase();
 

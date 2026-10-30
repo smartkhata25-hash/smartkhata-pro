@@ -3,6 +3,7 @@ const {
   formatBusinessDate,
 } = require("../../utils/businessDate");
 const { formatMoney: formatMoneyValue } = require("../../utils/money");
+const { formatReferencesForDisplay } = require("../../utils/referenceDisplay");
 const {
   formatStayNights,
   resolveUmrahCityNights,
@@ -1033,8 +1034,8 @@ const buildTravelVendorReturnPrint = (vendorReturn, printSetting) => {
 };
 
 module.exports = {
-  buildTravelInvoicePrint,
-  buildTravelPaymentReceiptPrint,
-  buildTravelRefundPrint,
-  buildTravelVendorReturnPrint,
+  buildTravelInvoicePrint: (...args) => formatReferencesForDisplay(buildTravelInvoicePrint(...args)),
+  buildTravelPaymentReceiptPrint: (...args) => formatReferencesForDisplay(buildTravelPaymentReceiptPrint(...args)),
+  buildTravelRefundPrint: (...args) => formatReferencesForDisplay(buildTravelRefundPrint(...args)),
+  buildTravelVendorReturnPrint: (...args) => formatReferencesForDisplay(buildTravelVendorReturnPrint(...args)),
 };

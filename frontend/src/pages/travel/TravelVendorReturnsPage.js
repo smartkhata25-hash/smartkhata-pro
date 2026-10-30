@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   FaArrowLeft,
   FaCalendarAlt,
@@ -152,7 +153,7 @@ const getVendorMeta = (vendor) =>
     .filter(Boolean)
     .join(' | ');
 
-const getInvoiceLabel = (invoice) => invoice?.invoiceNumber || invoice?.bookingNumber || '-';
+const getInvoiceLabel = (invoice) => formatDocumentReference(invoice?.invoiceNumber || invoice?.bookingNumber) || '-';
 
 const getAccountLabel = (account) => [account?.name, account?.code].filter(Boolean).join(' - ');
 
@@ -811,7 +812,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
             }}
             className="text-left font-extrabold text-cyan-700 transition hover:text-cyan-900 hover:underline"
           >
-            {record.returnNumber || '-'}
+            {formatDocumentReference(record.returnNumber) || '-'}
           </button>
         ),
       },
@@ -927,7 +928,7 @@ setPageError(error?.response?.data?.message || t('travel.vendorReturns.deleteFai
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-base font-extrabold text-cyan-700">
-                {record.returnNumber || '-'}
+                {formatDocumentReference(record.returnNumber) || '-'}
               </p>
 
               <p className="truncate text-xs font-semibold text-slate-500">

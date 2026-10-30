@@ -54,7 +54,7 @@ const formatNumber = (value, maximumFractionDigits = 2) => {
 };
 
 const formatCurrency = (value) => {
-  return `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
+  return formatMoneyDisplay(value);
 };
 
 const formatDate = (value, includeTime = false) => {

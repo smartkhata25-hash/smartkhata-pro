@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
 useNavigate, useParams } from 'react-router-dom';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import {
   FaArrowLeft,
   FaEye,
@@ -266,7 +267,7 @@ const TravelVendorReturnDetailPage = () => {
         <section className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-3">
           <DetailLine
             labelKey="travel.vendorReturns.fields.returnNumber"
-            value={record.returnNumber}
+            value={formatDocumentReference(record.returnNumber)}
           />
           <DetailLine
             labelKey="travel.vendorReturns.fields.returnDate"

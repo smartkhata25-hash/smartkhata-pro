@@ -1,6 +1,8 @@
 const express=require("express"); const ctrl=require("../controllers/weavingFoldingController"); const protect=require("../middleware/authMiddleware"); const {requireModule}=require("../middleware/moduleMiddleware"); const {requirePermission}=require("../middleware/permissionMiddleware"); const {MODULE_KEYS}=require("../utils/moduleConfig");
+const {formatReferenceText}=require("../utils/referenceDisplay");
+const compactPrintReferences=(req,res,next)=>{const send=res.send.bind(res);res.send=(body)=>send(typeof body==="string"?formatReferenceText(body):body);next();};
 const router=express.Router();
-router.get("/parchi",(req,res,next)=>{if(req.query.token&&!req.headers.authorization)req.headers.authorization=`Bearer ${req.query.token}`;return next();},protect,requireModule(MODULE_KEYS.WEAVING),requirePermission("weaving.folding.print"),ctrl.parchi);
+router.get("/parchi",(req,res,next)=>{if(req.query.token&&!req.headers.authorization)req.headers.authorization=`Bearer ${req.query.token}`;return next();},protect,requireModule(MODULE_KEYS.WEAVING),requirePermission("weaving.folding.print"),compactPrintReferences,ctrl.parchi);
 router.use(protect,requireModule(MODULE_KEYS.WEAVING));
 router.get("/meta",requirePermission("weaving.folding.view"),ctrl.meta);
 router.get("/resolve-loom/:loomId",requirePermission("weaving.folding.view"),ctrl.resolveLoom);

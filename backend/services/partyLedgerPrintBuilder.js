@@ -94,4 +94,5 @@ const buildPartyLedgerPrint = ({
   };
 };
 
-module.exports = buildPartyLedgerPrint;
+const { formatReferencesForDisplay } = require("../utils/referenceDisplay");
+module.exports = (...args) => formatReferencesForDisplay(buildPartyLedgerPrint(...args));

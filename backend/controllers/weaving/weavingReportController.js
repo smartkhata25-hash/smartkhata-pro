@@ -1,4 +1,5 @@
 const { generatePdfFromHtml } = require("../../services/pdfService");
+const { formatReferencesForDisplay } = require("../../utils/referenceDisplay");
 const {
   assertOfficialPrintable,
   getSalaryClosingReport,
@@ -154,7 +155,7 @@ const printCss = "body{font-family:Arial,sans-serif;color:#0f172a;margin:24px}h1
 exports.outputOperationalReport = async (req, res) => {
   try {
     const report = await operational.getReport(req.params.kind, getUserId(req), req.query);
-    const html = reportHtml(req.params.kind, report);
+    const html = reportHtml(req.params.kind, formatReferencesForDisplay(report));
     if (req.params.format === "pdf") {
       const pdf = await generatePdfFromHtml(html); const filename = `Weaving-${req.params.kind}-Report.pdf`;
       res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename=${filename}`, "Content-Length": pdf.length }); return res.send(pdf);

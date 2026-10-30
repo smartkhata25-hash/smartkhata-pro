@@ -11,6 +11,7 @@ import { getPartyLedger } from '../services/partyLedgerService';
 
 import { t } from '../i18n/i18n';
 import usePageMemory from '../hooks/usePageMemory';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 const currentYear = new Date().getFullYear();
 
 const PARTY_LEDGER_DEFAULTS = {
@@ -147,6 +148,17 @@ const PartyLedgerPage = () => {
     },
     [moduleScope, startDate, endDate, setSelectedPartyId, setPartyName]
   );
+
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      loadLedger(selectedPartyId, startDate, endDate),
+      fetchParties().then((rows) => setParties(Array.isArray(rows) ? rows : [])),
+    ]);
+  }, [selectedPartyId, startDate, endDate, loadLedger]);
+  const ledgerDelete = useTradingLedgerDelete({
+    enabled: !isTravelLedger,
+    onDeleted: handleLedgerDeleted,
+  });
 
   useEffect(() => {
     if (!partyId) return;
@@ -351,7 +363,9 @@ const PartyLedgerPage = () => {
               ledgerData={ledger}
               search={search}
               openingBalance={opening}
-              onDelete={null}
+              onDeleteEntry={ledgerDelete.deleteEntry}
+              canDeleteEntry={ledgerDelete.canDeleteEntry}
+              deletingEntryId={ledgerDelete.deletingEntryId}
               onEdit={handleRowEdit}
               onRowClick={handleRowEdit}
             />

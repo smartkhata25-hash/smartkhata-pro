@@ -255,7 +255,9 @@ const sumAccountLines = (entries, accountObjectId) => {
         attachmentUrl: entry.attachmentUrl || "",
         attachmentType: entry.attachmentType || "",
         invoiceId: entry.invoiceId || null,
+        invoiceModel: entry.invoiceModel || null,
         referenceId: entry.referenceId || null,
+        moduleScope: entry.moduleScope || "trading",
       });
     }
   }
@@ -385,7 +387,9 @@ const getCustomerLedgerCore = async ({
           "attachmentUrl",
           "attachmentType",
           "invoiceId",
+          "invoiceModel",
           "referenceId",
+          "moduleScope",
         ].join(" "),
       )
       .sort({

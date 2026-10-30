@@ -804,7 +804,7 @@ const AccessDeniedState = () => (
 );
 
 const formatCurrency = (value) => {
-  return `${t('currency.rs')} ${formatMoneyDisplay(value)}`;
+  return formatMoneyDisplay(value);
 };
 
 const formatNumber = (value, fractionDigits = 0) => {

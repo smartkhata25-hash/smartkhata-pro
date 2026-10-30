@@ -184,6 +184,7 @@ const MainLayout = () => {
   const isTravelWorkspace = isTravelContext(location);
   const isWeavingWorkspace = isWeavingContext(location);
   const isInstallmentsWorkspace = isInstallmentsContext(location);
+  const isTradingWorkspace = !isTravelWorkspace && !isWeavingWorkspace && !isInstallmentsWorkspace;
   const isWeavingPayrollWorkspace = location.pathname === '/weaving/payroll';
   const [isPayrollSidebarRevealed, setIsPayrollSidebarRevealed] = useState(false);
 
@@ -647,7 +648,7 @@ const MainLayout = () => {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-gray-100">
+    <div className={`flex h-screen flex-col bg-gray-100 ${isTradingWorkspace ? 'trading-mobile-layout' : ''}`}>
       {/* ================= TOP HEADER ================= */}
       <div className="z-50 flex-shrink-0">
         <TopHeader

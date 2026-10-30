@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoneyDisplay } from '../utils/money';
+import { formatDocumentReference, formatReferenceText } from '../utils/referenceDisplay';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import PageLayout from '../components/PageLayout';
@@ -693,7 +694,7 @@ const PartyDetailLedgerPage = () => {
                 fontWeight: 800,
               }}
             >
-              {t('currency.rs')} {renderAmount(summary.opening)}
+              {renderAmount(summary.opening)}
             </div>
           </div>
 
@@ -712,7 +713,7 @@ const PartyDetailLedgerPage = () => {
                 fontWeight: 800,
               }}
             >
-              {t('currency.rs')} {renderAmount(summary.debit)}
+              {renderAmount(summary.debit)}
             </div>
           </div>
 
@@ -731,7 +732,7 @@ const PartyDetailLedgerPage = () => {
                 fontWeight: 800,
               }}
             >
-              {t('currency.rs')} {renderAmount(summary.credit)}
+              {renderAmount(summary.credit)}
             </div>
           </div>
 
@@ -750,7 +751,7 @@ const PartyDetailLedgerPage = () => {
                 fontWeight: 800,
               }}
             >
-              {t('currency.rs')} {renderAmount(summary.closing)}
+              {renderAmount(summary.closing)}
             </div>
 
             <div
@@ -844,7 +845,7 @@ const PartyDetailLedgerPage = () => {
                 }}
               >
                 <div>
-                  {block.sourceLabel || '-'} #{block.billNo || '-'}
+                  {block.sourceLabel || '-'} #{formatDocumentReference(block.billNo) || '-'}
                 </div>
 
                 <div
@@ -866,7 +867,7 @@ const PartyDetailLedgerPage = () => {
                     marginBottom: 6,
                   }}
                 >
-                  {block.description}
+                  {formatReferenceText(block.description)}
                 </div>
               )}
 

@@ -147,7 +147,7 @@ const getPartyLedger = async (req, res) => {
 
     const entries = await JournalEntry.find(matchFilter)
       .select(
-        "date time billNo description sourceType originModule lines paymentType attachmentUrl attachmentType invoiceId invoiceModel referenceId partyId customerId supplierId",
+        "date time billNo description sourceType originModule moduleScope lines paymentType attachmentUrl attachmentType invoiceId invoiceModel referenceId partyId customerId supplierId",
       )
       .sort({ date: 1, time: 1, createdAt: 1 })
       .lean();
@@ -188,6 +188,7 @@ const getPartyLedger = async (req, res) => {
           invoiceId: entry.invoiceId || null,
           invoiceModel: entry.invoiceModel || null,
           referenceId: entry.referenceId || null,
+          moduleScope: entry.moduleScope || moduleScope,
           partyId: entry.partyId || party._id,
           customerId: entry.customerId || null,
           supplierId: entry.supplierId || null,

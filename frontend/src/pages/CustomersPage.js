@@ -29,6 +29,7 @@ import { getCurrentLanguage } from '../i18n/i18n';
 import usePageMemory from '../hooks/usePageMemory';
 import { hasPermission } from '../utils/permissionHelper';
 import { getCachedCustomers } from '../utils/customerCache';
+import useTradingLedgerDelete from '../hooks/useTradingLedgerDelete';
 
 const CUSTOMER_PAGE_DEFAULTS = {
   searchTerm: '',
@@ -262,6 +263,20 @@ const CustomersPage = () => {
     },
     [customers, ledgerStartDate, ledgerEndDate, canViewCustomerLedger]
   );
+
+  const handleLedgerDeleted = useCallback(async () => {
+    await Promise.all([
+      loadCustomerLedger(selectedCustomerId, ledgerStartDate, ledgerEndDate),
+      loadCustomers(),
+    ]);
+  }, [
+    selectedCustomerId,
+    ledgerStartDate,
+    ledgerEndDate,
+    loadCustomerLedger,
+    loadCustomers,
+  ]);
+  const ledgerDelete = useTradingLedgerDelete({ onDeleted: handleLedgerDeleted });
 
   useEffect(() => {
     if (!isPageMemoryReady) return;
@@ -943,7 +958,7 @@ const CustomersPage = () => {
                         marginTop: 2,
                       }}
                     >
-                      Rs. {formatMoneyDisplay(balance)}
+                      {formatMoneyDisplay(balance)}
                     </div>
                   </div>
 
@@ -1163,7 +1178,9 @@ const CustomersPage = () => {
                   ledgerData={ledgerData.ledger || []}
                   search={ledgerSearch}
                   openingBalance={ledgerData.openingBalance || 0}
-                  onDelete={null}
+                  onDeleteEntry={ledgerDelete.deleteEntry}
+                  canDeleteEntry={ledgerDelete.canDeleteEntry}
+                  deletingEntryId={ledgerDelete.deletingEntryId}
                   onEdit={(entry) => {
                     const type = entry.sourceType?.toLowerCase();
 

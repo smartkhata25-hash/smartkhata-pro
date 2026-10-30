@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference, formatReferenceText } from '../../utils/referenceDisplay';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from '../../components/weaving/WeavingSaleSaveOutput';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -613,7 +614,7 @@ export default function WeavingSalesSettlementPage() {
               <tr key={row._id}>
                 <td className="px-3 py-3">{row.dispatchDate}</td>
 
-                <td className="px-3 py-3 font-bold text-slate-900">{row.kacchiNo}</td>
+                <td className="px-3 py-3 font-bold text-slate-900">{formatDocumentReference(row.kacchiNo)}</td>
 
                 <td className="px-3 py-3">{row.partyId?.name}</td>
 
@@ -746,7 +747,7 @@ export default function WeavingSalesSettlementPage() {
                     <td className="px-3 py-3">{row.pakkiDate}</td>
 
                     <td className="px-3 py-3">
-                      <b className="text-slate-900">{row.pakkiNo}</b>
+                      <b className="text-slate-900">{formatDocumentReference(row.pakkiNo)}</b>
 
                       <div className="text-xs text-slate-500">{row.kacchiReference}</div>
                     </td>
@@ -967,7 +968,7 @@ export default function WeavingSalesSettlementPage() {
                   className="cursor-pointer"
                 >
                   <td className="whitespace-nowrap px-3 py-2 font-bold text-slate-900">
-                    {pakkiFor(row)?.pakkiNo || row.invoiceNo}
+                    {formatDocumentReference(pakkiFor(row)?.pakkiNo || row.invoiceNo)}
                   </td>
 
                   <td className="whitespace-nowrap px-3 py-2 text-center">{shortDate}</td>
@@ -1421,7 +1422,7 @@ const KacchiOutputOptions = ({ row, onOpen }) => {
       </Button>
 
       {open && (
-        <Modal title={`Kacchi Output - ${row.kacchiNo}`} onClose={() => setOpen(false)}>
+        <Modal title={`Kacchi Output - ${formatDocumentReference(row.kacchiNo)}`} onClose={() => setOpen(false)}>
           <div className="space-y-2 p-4">
             {[
               ['quick', t('weaving.salesPro.quick')],
@@ -1731,7 +1732,7 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
 
             {meta.contracts.map((row) => (
               <option key={row._id} value={row._id}>
-                {row.contractNo}
+                {formatDocumentReference(row.contractNo)}
               </option>
             ))}
           </select>
@@ -1873,7 +1874,7 @@ const KacchiModal = ({ meta, current, saving, onClose, onSave, onReset }) => {
                         />
                       </td>
 
-                      <td className="p-3 font-bold">{row.thanNo}</td>
+                      <td className="p-3 font-bold">{formatDocumentReference(row.thanNo)}</td>
 
                       <td className="p-3 text-center">{money(row.meter)}</td>
 
@@ -2152,7 +2153,7 @@ const PakkiModal = ({
 
                 [t('weaving.sales.party'), kacchi.partyId?.name],
 
-                [t('weaving.sales.contract'), contract?.contractNo],
+                [t('weaving.sales.contract'), formatDocumentReference(contract?.contractNo)],
 
                 [t('weaving.sales.quality'), kacchi.qualitySnapshot?.name],
               ].map(([label, value]) => (
@@ -2324,11 +2325,11 @@ const InvoiceModal = ({ invoice, accounts, onClose, onEdit, onPrint, onVoid, pak
   const details = invoice.paymentDetails || {};
 
   return (
-    <Modal title={pakki?.pakkiNo || invoice.invoiceNo} onClose={onClose}>
+    <Modal title={formatDocumentReference(pakki?.pakkiNo || invoice.invoiceNo)} onClose={onClose}>
       <div className="space-y-3 p-4">
         <DetailGrid
           values={[
-            [t('weaving.sales.invoiceNo'), invoice.invoiceNo],
+            [t('weaving.sales.invoiceNo'), formatDocumentReference(invoice.invoiceNo)],
 
             [t('weaving.sales.date'), invoice.invoiceDate],
 
@@ -2370,9 +2371,9 @@ const InvoiceModal = ({ invoice, accounts, onClose, onEdit, onPrint, onVoid, pak
 
             ...(pakki
               ? [
-                  [t('weaving.salesPro.pakkiFinal'), pakki.pakkiNo],
+                  [t('weaving.salesPro.pakkiFinal'), formatDocumentReference(pakki.pakkiNo)],
 
-                  [t('weaving.sales.kacchiNo'), pakki.kacchiReference],
+                  [t('weaving.sales.kacchiNo'), formatDocumentReference(pakki.kacchiReference)],
 
                   [t('weaving.salesPro.rejection'), money(pakki.rejectionMeter)],
                 ]
@@ -2394,7 +2395,7 @@ const InvoiceModal = ({ invoice, accounts, onClose, onEdit, onPrint, onVoid, pak
               <tbody>
                 {invoice.lines.map((line, index) => (
                   <tr key={line._id || index} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-2">{line.description}</td>
+                    <td className="px-3 py-2">{formatReferenceText(line.description)}</td>
 
                     <td className="px-3 py-2 text-center">
                       {money(line.quantity)} {line.uom}
@@ -2452,7 +2453,7 @@ const InvoiceModal = ({ invoice, accounts, onClose, onEdit, onPrint, onVoid, pak
 };
 
 const RecordView = ({ kind, row, onClose, onEdit, onPrint }) => (
-  <Modal title={row.kacchiNo || row.pakkiNo || row.receiptNo} onClose={onClose}>
+  <Modal title={formatDocumentReference(row.kacchiNo || row.pakkiNo || row.receiptNo)} onClose={onClose}>
     <div className="space-y-3 p-4">
       <DetailGrid
         values={[
@@ -2485,7 +2486,7 @@ const RecordView = ({ kind, row, onClose, onEdit, onPrint }) => (
               className="flex justify-between border-b border-slate-100 px-3 py-2 last:border-0"
               key={line._id || line.foldingEntryId || index}
             >
-              <b>{line.thanNo || line.description}</b>
+              <b>{formatDocumentReference(line.thanNo) || formatReferenceText(line.description)}</b>
 
               <span className="text-sm text-slate-600">
                 {money(line.meter)} M · {money(line.weightKg)} KG

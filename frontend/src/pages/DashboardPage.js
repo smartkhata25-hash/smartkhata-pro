@@ -381,7 +381,7 @@ const DashboardCard = ({ title, value, onClick, accent }) => {
         <h4 className="text-sm text-gray-500 font-medium">{title}</h4>
 
         <p className="mt-2 text-2xl font-bold text-gray-800">
-          {t('currency.rs')} {Number(value || 0).toFixed(0)}
+          {Number(value || 0).toFixed(0)}
         </p>
       </div>
     </div>

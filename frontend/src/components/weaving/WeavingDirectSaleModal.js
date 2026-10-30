@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatMoneyDisplay } from '../../utils/money';
+import { formatDocumentReference } from '../../utils/referenceDisplay';
 import { FaTimes } from 'react-icons/fa';
 import WeavingSaleSaveOutput, { useSaleSaveOutput, savedSaleOutputUrl } from './WeavingSaleSaveOutput';
 
@@ -261,7 +262,7 @@ function LegacyDirectSaleModal({ meta, current, saving, onClose, onSave, onParty
       <section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <header className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5 py-3">
           <h2 className="text-lg font-black text-slate-900">
-            {current ? `Edit ${current.invoiceNo}` : t('weaving.sales.newDirect')}
+            {current ? `Edit ${formatDocumentReference(current.invoiceNo)}` : t('weaving.sales.newDirect')}
           </h2>
 
           <button
@@ -898,7 +899,7 @@ function NewDirectSaleModal({
   const save = useSaleSaveOutput(performSave, savedSaleOutputUrl, saving);
 
   const saleTitle =
-    current?.invoiceNo || t(`weaving.sales.${kind === 'other' ? 'other' : kind}Sale`);
+    formatDocumentReference(current?.invoiceNo) || t(`weaving.sales.${kind === 'other' ? 'other' : kind}Sale`);
 
   return (
     <div
@@ -1411,7 +1412,7 @@ function NewDirectSaleModal({
                       />
 
                       <div className="min-w-0">
-                        <b className="block truncate text-sm">{row.thanNo}</b>
+                        <b className="block truncate text-sm">{formatDocumentReference(row.thanNo)}</b>
 
                         <span className="text-xs text-slate-500">
                           {money(row.meter)} M · {money(row.weightKg)} KG

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { t } from '../i18n/i18n';
 import { formatBusinessDateForDisplay } from '../utils/localDateTime';
 import { buildPrintQuery, downloadBackendPdf } from '../utils/backendPrintDocument';
+import { formatDocumentReference } from '../utils/referenceDisplay';
 
 const API = process.env.REACT_APP_API_BASE_URL;
 
@@ -391,7 +392,7 @@ const ProductLedger = ({ productId }) => {
                   }}
                 >
                   <td className="border p-2">{formatBusinessDateForDisplay(entry.date)}</td>
-                  <td className="border p-2">{entry.billNo}</td>
+                  <td className="border p-2">{formatDocumentReference(entry.billNo)}</td>
                   <td className="border p-2">{entry.type}</td>
                   <td className="border p-2">{entry.party}</td>
                   <td className="border p-2">

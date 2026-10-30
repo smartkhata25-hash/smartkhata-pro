@@ -2,6 +2,7 @@
 // بسم اللہ الرحمن الرحیم
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { formatMoneyDisplay } from '../utils/money';
+import { formatDocumentReference } from '../utils/referenceDisplay';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 
@@ -702,22 +703,22 @@ export default function SupplierDetailLedgerPage() {
         <>
           <div className="card">
             <div style={{ fontSize: 12 }}>{t('ledger.opening')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.opening)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.opening)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#16a34a' }}>{t('debit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.debit)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.debit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#dc2626' }}>{t('credit')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.credit)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.credit)}</div>
           </div>
 
           <div className="card">
             <div style={{ fontSize: 12, color: '#7c2d12' }}>{t('ledger.closing')}</div>
-            <div style={{ fontWeight: 800 }}>Rs. {formatMoneyDisplay(summary.closing)}</div>
+            <div style={{ fontWeight: 800 }}>{formatMoneyDisplay(summary.closing)}</div>
           </div>
         </>
       }
@@ -748,7 +749,7 @@ export default function SupplierDetailLedgerPage() {
                 }}
               >
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  {blk.sourceLabel} #{blk.billNo} — {new Date(blk.date).toLocaleDateString()}
+                  {blk.sourceLabel} #{formatDocumentReference(blk.billNo)} — {new Date(blk.date).toLocaleDateString()}
                 </div>
 
                 {blk.items.length > 0 && (

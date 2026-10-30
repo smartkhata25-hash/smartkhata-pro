@@ -233,7 +233,7 @@ const ProfitSummaryModal = ({ isOpen, onClose, data }) => {
       <span className="text-sm font-medium text-gray-600">{label}</span>
 
       <span className={`text-sm font-bold ${color}`}>
-        {t('currency.rs')} {Number(value || 0).toFixed(0)}
+        {Number(value || 0).toFixed(0)}
       </span>
     </button>
   );

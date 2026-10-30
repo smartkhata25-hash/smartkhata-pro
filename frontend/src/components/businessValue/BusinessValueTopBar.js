@@ -724,7 +724,7 @@ const ValueCard = ({ icon, label, value, variant = 'primary', approximate = fals
 
         <div className={`mt-0.5 truncate text-base font-black ${theme.value}`}>
           {approximate ? '~ ' : ''}
-          {t('currency.rs')} {formatBusinessValueAmount(value)}
+          {formatBusinessValueAmount(value)}
         </div>
       </div>
     </div>

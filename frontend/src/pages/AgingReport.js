@@ -367,22 +367,22 @@ const AgingReport = () => {
         >
           <div className="card" style={{ minWidth: 150 }}>
             <div style={{ color: '#2563eb', fontWeight: 600 }}>{t('reports.totalReceivable')}</div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Rs {formatAmount(totals.total)}</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{formatAmount(totals.total)}</div>
           </div>
 
           <div className="card" style={{ minWidth: 150 }}>
             <div style={{ color: '#16a34a', fontWeight: 600 }}>{t('reports.days0_30')}</div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Rs {formatAmount(totals.recent)}</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{formatAmount(totals.recent)}</div>
           </div>
 
           <div className="card" style={{ minWidth: 150 }}>
             <div style={{ color: '#d97706', fontWeight: 600 }}>{t('reports.days31_60')}</div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Rs {formatAmount(totals.mid1)}</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{formatAmount(totals.mid1)}</div>
           </div>
 
           <div className="card" style={{ minWidth: 150 }}>
             <div style={{ color: '#dc2626', fontWeight: 600 }}>{t('reports.days90plus')}</div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Rs {formatAmount(totals.oldest)}</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>{formatAmount(totals.oldest)}</div>
           </div>
         </div>
       </div>

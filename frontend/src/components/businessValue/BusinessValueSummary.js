@@ -172,7 +172,7 @@ const SummaryCard = ({
           <div className="mt-1 text-base sm:text-lg md:text-xl font-extrabold truncate">
             {isNegative ? '− ' : ''}
             {!isExact ? '~ ' : ''}
-            {t('currency.rs')} {formatBusinessValueAmount(value)}
+            {formatBusinessValueAmount(value)}
           </div>
 
           {detailText && (

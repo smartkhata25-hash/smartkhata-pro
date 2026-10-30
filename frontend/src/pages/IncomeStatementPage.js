@@ -306,13 +306,13 @@ const IncomeStatementPage = () => {
                     <tr key={m.month}>
                       <td className="border p-2 text-center">{m.month}</td>
                       <td className="border p-2 text-center">
-                        {t('currency.rs')} {formatMoneyDisplay(m.sales)}
+                        {formatMoneyDisplay(m.sales)}
                       </td>
                       <td className="border p-2 text-center text-red-600">
-                        {t('currency.rs')} {formatMoneyDisplay(m.cogs)}
+                        {formatMoneyDisplay(m.cogs)}
                       </td>
                       <td className="border p-2 text-center font-semibold">
-                        {t('currency.rs')} {formatMoneyDisplay(m.profit)}
+                        {formatMoneyDisplay(m.profit)}
                       </td>
                     </tr>
                   ))}
@@ -340,7 +340,7 @@ const Row = ({ label, value, negative }) => (
     <span>{label}</span>
     <span className={negative ? 'text-red-600' : ''}>
       {negative && value > 0 ? '-' : ''}
-      {t('currency.rs')} {formatMoneyDisplay(value)}
+      {formatMoneyDisplay(value)}
     </span>
   </div>
 );
@@ -350,7 +350,7 @@ const TotalRow = ({ label, value, negative }) => (
     <span>{label}</span>
     <span className={negative ? 'text-red-700' : ''}>
       {negative && value > 0 ? '-' : ''}
-      {t('currency.rs')} {formatMoneyDisplay(value)}
+      {formatMoneyDisplay(value)}
     </span>
   </div>
 );
@@ -363,7 +363,7 @@ const HighlightRow = ({ label, value, danger }) => (
   >
     <span>{label}</span>
     <span>
-      {t('currency.rs')} {formatMoneyDisplay(value)}
+      {formatMoneyDisplay(value)}
     </span>
   </div>
 );
@@ -380,7 +380,7 @@ const KpiCard = ({ title, value, color }) => {
     <div className={`${colors[color]} text-white p-4 rounded shadow text-center`}>
       <p className="text-sm">{title}</p>
       <h2 className="text-xl font-bold">
-        {t('currency.rs')} {formatMoneyDisplay(value)}
+        {formatMoneyDisplay(value)}
       </h2>
     </div>
   );
